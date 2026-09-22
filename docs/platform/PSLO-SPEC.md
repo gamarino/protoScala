@@ -99,11 +99,11 @@ remains distinguishable (the PROTO_NONE-ambiguity lesson).
 
 protoCore encodes the type of a `ProtoObject*` word in a **6-bit pointer tag**
 (64 values) and, for embedded values, in a **4-bit embedded type** (16
-values). Current usage (`headers/proto_internal.h:222-254`):
+values). Usage in protoCore 1.3.0 (`headers/proto_internal.h`):
 
 | Space | Used | Free |
 |---|---|---|
-| Pointer tags | 0–26 (27 values) | 27–63 (37 values) |
+| Pointer tags | 0–26, plus 27 = `ProtoSparseListObject` (28 values) | 28–63 (36 values) |
 | Embedded types | 0, 2, 3, 4, 5 (5 values) | 1, 6–15 (11 values) |
 
 Every language added to the platform will want new types, so tags are a
