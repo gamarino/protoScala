@@ -175,7 +175,7 @@ TEST(Compiler, SemanticErrors) {
     EXPECT_TRUE(has(compileError("val b = zz"), "Not found: zz"));
     EXPECT_TRUE(has(compileError("val f = () => return 1"), "return inside a lambda"));
     EXPECT_TRUE(has(compileError("return 1"), "return outside"));
-    EXPECT_TRUE(has(compileError("val t = (1, 2)"), "tuples are not implemented yet"));
+    EXPECT_TRUE(has(listing("val t = (1, 2)"), "MAKE_TUPLE 2"));
     EXPECT_TRUE(has(compileError("val s = s\"x\""), "string interpolation is not implemented yet"));
     EXPECT_TRUE(has(compileError("def f(x: Int) = x\nval y = f(x = 1)"), "named arguments"));
     EXPECT_TRUE(has(compileError("def f(x: Int = 1) = x"), "default parameter values"));

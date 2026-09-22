@@ -16,6 +16,10 @@ namespace protoScala {
 
 void installPrimitives(proto::ProtoContext* ctx, const RuntimeLayout& layout);
 
+// The synthesised members of case classes and tuples, on the Product and
+// TupleN prototypes (ProductPrimitives.cpp); installPrimitives calls it last.
+void installProductPrimitives(proto::ProtoContext* ctx, const RuntimeLayout& layout);
+
 // Global functions installed by installPrimitives ({"println", "print"}).
 const std::vector<std::string>& builtinGlobalNames();
 

@@ -191,3 +191,11 @@ TEST(Primitives, ArgumentCountErrorsNameTheCalledMethod) {
     EXPECT_EQ(h.eval("def l(xs: Int*) = xs"), "");
     EXPECT_EQ(h.eval("l(1).size(2)"), prefix + "size takes 0 argument(s), got 1");
 }
+
+TEST(Primitives, TuplesAreCaseClassesNeverProtoTuples) {
+    EvalHarness h;
+    EXPECT_EQ(h.eval("(1, \"a\")"), "(1,a)");
+    EXPECT_EQ(h.eval("new Tuple2(1, 2) == (1, 2)"), "true");
+    EXPECT_EQ(h.eval("(1, 2).copy(_2 = 5)"), "(1,5)");
+    EXPECT_EQ(h.eval("(1, 2).hashCode"), "1316541600");
+}

@@ -709,9 +709,14 @@ void Compiler::compileNewOf(const ClassInfo& info, const std::vector<NodePtr>& a
         emit(Op::NEW, fn_->mod->addSendSite(ctorKeyFor(info, n, pos), n), pos, -static_cast<int>(n));
 }
 
-// Tuples are Task 8's; the node reaches here from compileExpr.
+// (a, b, ...): the case class TupleN of its arity (DESIGN §4.6); protoCore
+// tuples are never used for it (they are interned and perennial).
 void Compiler::compileTuple(const Tuple& t) {
-    throw CompileError("tuples are not implemented yet", t.pos);
+    const std::size_t n = t.elems.size();
+    if (n > kMaxTupleArity)
+        throw CompileError("tuples of more than 22 elements are not supported (D32)", t.pos);
+    for (const auto& e : t.elems) compileExpr(*e);
+    emit(Op::MAKE_TUPLE, n, t.pos, 1 - static_cast<int>(n));
 }
 
 void Compiler::compileSuperSend(const std::string& name, const std::vector<NodePtr>& args,
