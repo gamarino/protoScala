@@ -15,6 +15,11 @@ struct Region {
     bool widthKnown = true;
     TokenKind opener = TokenKind::EndOfFile;  // Indented: the token that opened it
     bool condition = false;                   // Parens/Braces right after if/while/for
+    // Braces opened with a token after `{` on the same line: `width` is that
+    // line's width until the first line break inside, which widens it when
+    // the next line is indented deeper and no region opener precedes it
+    // (`{ val a = 1\n  val b = 2\n  b }`, as scalac accepts).
+    bool provisional = false;
     // Constructs begun in this region that still wait for a partner keyword,
     // innermost last: KwIf (awaits then), KwThen (else), KwTry (catch or
     // finally), KwCatch (finally), KwWhile (do), KwFor (do or yield), and
@@ -162,6 +167,7 @@ public:
                     regions_.push_back(Region{RegionKind::Braces, sameLine ? t.lineIndent : 0,
                                               sameLine, TokenKind::EndOfFile,
                                               prevKind_ == TokenKind::KwFor});
+                    regions_.back().provisional = sameLine;
                     break;
                 }
                 case TokenKind::RParen: case TokenKind::RBracket: case TokenKind::RBrace:
@@ -237,13 +243,17 @@ private:
             regions_.back().kind == RegionKind::Brackets)
             return;  // DESIGN §3.2: no layout tokens inside (...) and [...]
         const int w = t.lineIndent;
-        if (regions_.back().kind == RegionKind::Braces && !regions_.back().widthKnown) {
-            regions_.back().width = w;
-            regions_.back().widthKnown = true;
-        }
         const bool conditionOpener =
             prevClosesCondition_ && t.kind != TokenKind::KwThen &&
             t.kind != TokenKind::KwDo && t.kind != TokenKind::KwYield;
+        if (regions_.back().kind == RegionKind::Braces && !regions_.back().widthKnown) {
+            regions_.back().width = w;
+            regions_.back().widthKnown = true;
+        } else if (regions_.back().provisional) {
+            Region& r = regions_.back();
+            r.provisional = false;
+            if (w > r.width && !opensRegion(prevKind_) && !conditionOpener) r.width = w;
+        }
         if ((opensRegion(prevKind_) || conditionOpener) && w > regions_.back().width) {
             // An old-style condition is recorded as RParen whether it closed
             // with `)` or (for `for {...}`) with `}`: closesRegionOpenedBy

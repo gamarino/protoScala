@@ -147,6 +147,16 @@ TEST(Layout, BracesRegionIgnoresDeeperContinuation) {
               "LBrace Identifier Dot Identifier Newline Identifier RBrace EOF");
 }
 
+TEST(Layout, SameLineBraceTakesTheWidthOfTheNextLine) {
+    EXPECT_EQ(lay("{ val a = 1\n  val b = 2\n  b }"),
+              "LBrace KwVal Identifier Equals IntLit Newline KwVal Identifier Equals IntLit "
+              "Newline Identifier RBrace EOF");
+    // A region opener at the end of the first line still opens an indented region.
+    EXPECT_EQ(lay("xs.foreach { x =>\n  a\n  b }"),
+              "Identifier Dot Identifier LBrace Identifier Arrow Indent Identifier Newline "
+              "Identifier Outdent RBrace EOF");
+}
+
 TEST(Layout, BadUnindentIsAnError) {
     EXPECT_THROW(tokenize("def f =\n    a\n  b"), LexError);
 }
