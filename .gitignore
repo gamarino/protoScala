@@ -9,3 +9,5 @@ build-dbg/
 *~
 .DS_Store
 .superpowers/
+build_bench/
+build_jvm/

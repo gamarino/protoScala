@@ -48,3 +48,20 @@ foreach(conf_file ${PROTOSCALA_CONFORMANCE_FILES})
                     "${CMAKE_CURRENT_SOURCE_DIR}/conformance/${conf_file}")
     endif()
 endforeach()
+
+# --- Benchmark smoke checks -----------------------------------------------------
+# Each benchmarks/comparable/*.scala runs once and must print the result stated
+# in its `// EXPECT:` first line (same runner as the conformance fixtures), so a
+# broken benchmark cannot go unnoticed. Timings are not checked here; see
+# benchmarks/README.md.
+file(GLOB PROTOSCALA_BENCHMARK_FILES
+    RELATIVE "${CMAKE_SOURCE_DIR}/benchmarks/comparable"
+    CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/benchmarks/comparable/*.scala")
+
+foreach(bench_file ${PROTOSCALA_BENCHMARK_FILES})
+    add_test(NAME "benchmarks/${bench_file}"
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/conformance/run.sh"
+                "$<TARGET_FILE:protoscala>"
+                "${CMAKE_SOURCE_DIR}/benchmarks/comparable/${bench_file}")
+endforeach()
