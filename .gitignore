@@ -8,3 +8,4 @@ build-dbg/
 *.swp
 *~
 .DS_Store
+.superpowers/

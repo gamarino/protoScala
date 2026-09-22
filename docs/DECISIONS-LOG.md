@@ -15,3 +15,4 @@ it tomorrow"); the maintainer reviews them and may reverse any of them.
 | 2026-09-22 | Actor model on protoClojure's design; mailboxes on a new protoCore type `ProtoMPSCQueue` | maintainer | DESIGN §8, PMQ-SPEC |
 | 2026-09-22 | P1: iterator option (a); hashed-collection helper in protoCore | maintainer (accepted recommendation) | PSLO-SPEC §3.3, §4 |
 | 2026-09-22 | Overnight scope: Phases 1+2 on protoScala `main`; P1 on a protoCore branch, not merged, embedders not rebuilt | maintainer | — |
+| 2026-09-22 | P1 D2a–D7 (bucket encoding, hashed key word, keep key, nullptr keys, isEqual identity, own prototype, CellType discrimination, SOVERSION 1) | agent, pending review | PSLO-SPEC §7 |
