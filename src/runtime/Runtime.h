@@ -56,6 +56,7 @@ struct RuntimeLayout {
     proto::ProtoObject* withFilterProto = nullptr;    // the lazy result of List.withFilter
     proto::ProtoObject* listCompanion = nullptr;      // the value of the global `List`
     proto::ProtoObject* tupleProto[kMaxTupleArity + 1] = {};  // [2..22]: Tuple2..Tuple22
+    proto::ProtoObject* tupleCompanion[kMaxTupleArity + 1] = {};  // [2..22]: the TupleN companions
     const proto::ProtoString* nameKey = nullptr;      // "__name__": a class's display name
     const proto::ProtoString* prefixKey = nullptr;    // "__prefix__": a case class's productPrefix
     const proto::ProtoString* fieldsKey = nullptr;    // "__fields__": ProtoList of element keys
@@ -68,6 +69,7 @@ struct RuntimeLayout {
     const proto::ProtoString* toStringName = nullptr; // "toString"
     const proto::ProtoString* equalsName = nullptr;   // "equals"
     const proto::ProtoString* hashCodeName = nullptr; // "hashCode"
+    const proto::ProtoString* canEqualName = nullptr; // "canEqual"
     const proto::ProtoString* tupleFieldKey[kMaxTupleArity + 1] = {};  // [1..22]: "_1".."_22"
 
     const proto::ProtoObject* functionProtoFor(unsigned arity) const {

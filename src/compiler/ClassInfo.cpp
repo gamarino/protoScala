@@ -28,6 +28,7 @@ std::vector<ClassInfo> builtinTypes() {
     member(product, "productArity", MemberKind::ParamlessDef);
     member(product, "productPrefix", MemberKind::ParamlessDef);
     member(product, "productElement", MemberKind::Def);
+    member(product, "canEqual", MemberKind::Def);
     ClassInfo serializable = anyRef;
     serializable.name = "Serializable";
     serializable.key = kSerializableKey;

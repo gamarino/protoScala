@@ -10,7 +10,7 @@ namespace {
 enum RootSlot : unsigned {
     kGlobals, kAny, kInt, kDouble, kBoolean, kChar, kString, kList, kUnitProto,
     kFunction, kFunctionArities, kCell, kLazy, kUnit,
-    kAnyRef, kProduct, kSerializable, kWithFilter, kListCompanion, kTuples,
+    kAnyRef, kProduct, kSerializable, kWithFilter, kListCompanion, kTuples, kTupleCompanions,
     kRootSlotCount
 };
 } // namespace
@@ -60,11 +60,18 @@ Runtime::Runtime(proto::ProtoSpace& space) : space_(space) {
     L.withFilterProto   = pin(kWithFilter, L.anyRefProto->newChild(ctx, true));
     L.listCompanion     = pin(kListCompanion, L.anyRefProto->newChild(ctx, true));
     const proto::ProtoObject* tuples[kMaxTupleArity + 1];
-    for (unsigned n = 2; n <= kMaxTupleArity; ++n)
+    const proto::ProtoObject* companions[kMaxTupleArity + 1];
+    for (unsigned n = 2; n <= kMaxTupleArity; ++n) {
         tuples[n] = L.productProto->newChild(ctx, true);
+        companions[n] = L.anyRefProto->newChild(ctx, true);  // the TupleN companion object
+    }
     ctx->setAutomaticLocal(kTuples, ctx->newList(kMaxTupleArity - 1, tuples + 2)->asObject(ctx));
-    for (unsigned n = 2; n <= kMaxTupleArity; ++n)
+    ctx->setAutomaticLocal(kTupleCompanions,
+                           ctx->newList(kMaxTupleArity - 1, companions + 2)->asObject(ctx));
+    for (unsigned n = 2; n <= kMaxTupleArity; ++n) {
         L.tupleProto[n] = const_cast<proto::ProtoObject*>(tuples[n]);
+        L.tupleCompanion[n] = const_cast<proto::ProtoObject*>(companions[n]);
+    }
 
     auto key = [&](const char* s) { return proto::ProtoString::createSymbol(ctx, s); };
     L.nameKey = key("__name__");
@@ -79,6 +86,7 @@ Runtime::Runtime(proto::ProtoSpace& space) : space_(space) {
     L.toStringName = key("toString");
     L.equalsName = key("equals");
     L.hashCodeName = key("hashCode");
+    L.canEqualName = key("canEqual");
     for (unsigned k = 1; k <= kMaxTupleArity; ++k)
         L.tupleFieldKey[k] = key(("_" + std::to_string(k)).c_str());
 
@@ -105,7 +113,13 @@ Runtime::Runtime(proto::ProtoSpace& space) : space_(space) {
         t->setAttribute(ctx, L.tupleKey, PROTO_TRUE);
         const proto::ProtoObject* keys[kMaxTupleArity];
         for (unsigned k = 1; k <= n; ++k) keys[k - 1] = L.tupleFieldKey[k]->asObject(ctx);
-        t->setAttribute(ctx, L.fieldsKey, ctx->newList(n, keys)->asObject(ctx));
+        const proto::ProtoObject* fields = ctx->newList(n, keys)->asObject(ctx);
+        t->setAttribute(ctx, L.fieldsKey, fields);
+        // The companion carries the same element keys: its native `apply`
+        // reads its arity from them (ProductPrimitives.cpp).
+        proto::ProtoObject* companion = L.tupleCompanion[n];
+        companion->setAttribute(ctx, L.nameKey, makeString(ctx, name));
+        companion->setAttribute(ctx, L.fieldsKey, fields);
     }
     L.withFilterProto->setAttribute(ctx, L.nameKey, makeString(ctx, "WithFilter"));
     L.listCompanion->setAttribute(ctx, L.nameKey, makeString(ctx, "List"));

@@ -661,7 +661,12 @@ void installAll(ProtoContext* ctx, proto::ProtoObject* target, const MethodEntry
 } // namespace
 
 const std::vector<std::string>& builtinGlobalNames() {
-    static const std::vector<std::string> names = {"println", "print"};
+    // The TupleN companions are globals too: `Tuple2(1, 2)` is `(1, 2)`.
+    static const std::vector<std::string> names = [] {
+        std::vector<std::string> v = {"println", "print"};
+        for (unsigned n = 2; n <= kMaxTupleArity; ++n) v.push_back("Tuple" + std::to_string(n));
+        return v;
+    }();
     return names;
 }
 

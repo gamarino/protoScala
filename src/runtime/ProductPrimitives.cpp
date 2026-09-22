@@ -10,6 +10,8 @@
 #include "runtime/PrimitiveSupport.h"
 #include "runtime/Primitives.h"
 
+#include <iterator>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -44,6 +46,37 @@ std::string prefixOf(ProtoContext* ctx, const ProtoObject* self) {
     return ProtoObject::isStringTagFast(p) ? asStr(p)->toStdString(ctx) : std::string();
 }
 
+// The case class (or tuple class) whose members `self` answers: the first
+// prototype of its chain that declares a __prefix__ of its own. For a plain
+// class extending a case class it is that case class, exactly as scalac's
+// synthesised equals and canEqual belong to the case class, not the subclass.
+const ProtoObject* caseClassOf(ProtoContext* ctx, const ProtoObject* self) {
+    const RuntimeLayout& L = layoutOf();
+    const ProtoObject* cls = isObjectCellFast(self) ? self->getPrototype(ctx) : nullptr;
+    if (!cls) return nullptr;
+    if (cls->hasOwnAttribute(ctx, L.prefixKey) == PROTO_TRUE) return cls;
+    // A class prototype's parents are its whole linearization (makeClass).
+    const proto::ProtoList* chain = cls->getParents(ctx);
+    for (unsigned long i = 0, n = chain ? chain->getSize(ctx) : 0; i < n; ++i) {
+        const ProtoObject* p = chain->getAt(ctx, static_cast<int>(i));
+        if (p->hasOwnAttribute(ctx, L.prefixKey) == PROTO_TRUE) return p;
+    }
+    return nullptr;
+}
+
+// `v.isInstanceOf[cls]`: cls is v's class or one of its linearization (D29:
+// the class only, type arguments are erased).
+bool isInstanceOf(ProtoContext* ctx, const ProtoObject* v, const ProtoObject* cls) {
+    if (!isObjectCellFast(v) || v == PROTO_NONE) return false;
+    const ProtoObject* c = v->getPrototype(ctx);
+    if (!c) return false;
+    if (c == cls) return true;
+    const proto::ProtoList* chain = c->getParents(ctx);
+    for (unsigned long i = 0, n = chain ? chain->getSize(ctx) : 0; i < n; ++i)
+        if (chain->getAt(ctx, static_cast<int>(i)) == cls) return true;
+    return false;
+}
+
 // Point(1,2), (1,a), Unique: elements shown with Scala's toString, no blanks.
 PRIM(product_toString) {
     expectArgs(ctx, args, "toString", 0);
@@ -60,16 +93,31 @@ PRIM(product_toString) {
     return str(ctx, out + ")");
 }
 
-// Structural equality: the same class and == elements (a case object: identity).
+// canEqual(that): scalac's synthesised form, `that.isInstanceOf[C]` — the
+// comparison partner agrees to be compared as a C. A user definition of
+// canEqual replaces this one (it is an ordinary member of the class).
+PRIM(product_canEqual) {
+    const ProtoObject* that = arg(ctx, args, 0, "canEqual", 1);
+    const ProtoObject* cls = caseClassOf(ctx, self);
+    return boolean(cls && isInstanceOf(ctx, that, cls));
+}
+
+// Structural equality, as scalac synthesises it:
+//   this.eq(that) || (that.isInstanceOf[C] && that.canEqual(this) && <fields ==>)
+// canEqual is sent, not called, so a class that overrides it is honoured and a
+// subclass of a case class compares equal in both directions. A case object
+// has no elements: identity only.
 PRIM(product_equals) {
     const ProtoObject* other = arg(ctx, args, 0, "equals", 1);
     if (other == self) return PROTO_TRUE;
-    if (other == PROTO_NONE || !isObjectCellFast(other) ||
-        other->getPrototype(ctx) != self->getPrototype(ctx))
-        return PROTO_FALSE;
+    const RuntimeLayout& L = layoutOf();
+    const ProtoObject* cls = caseClassOf(ctx, self);
+    if (!cls || !isInstanceOf(ctx, other, cls)) return PROTO_FALSE;
     const ProtoList* fields = fieldsOf(ctx, self);
     if (!fields) return PROTO_FALSE;
-    const RuntimeLayout& L = layoutOf();
+    const ProtoObject* argv[1] = {self};
+    if (activeCallContext()->engine->send(ctx, other, L.canEqualName, argv, 1) != PROTO_TRUE)
+        return PROTO_FALSE;
     for (unsigned long i = 0, n = fields->getSize(ctx); i < n; ++i)
         if (!valuesEqual(ctx, L, element(ctx, self, fields, i), element(ctx, other, fields, i)))
             return PROTO_FALSE;
@@ -190,6 +238,14 @@ const ProtoObject* product_copy(ProtoContext* ctx, const ProtoObject* self, cons
     return r;
 }
 
+// The elements of `t` from the arguments: _1 .. _n.
+const ProtoObject* fillTuple(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* t,
+                             const ProtoList* args, unsigned long n) {
+    for (unsigned long k = 0; k < n; ++k)
+        t = t->setAttribute(ctx, L.tupleFieldKey[k + 1], args->getAt(ctx, static_cast<int>(k)));
+    return t;
+}
+
 // TupleN.<init>(this, a1..an): the fields _1.._n (tuples have no Scala body).
 PRIM(tuple_init) {
     const RuntimeLayout& L = layoutOf();
@@ -197,10 +253,18 @@ PRIM(tuple_init) {
     const ProtoList* fields = fieldsOf(ctx, self);
     if (!fields || fields->getSize(ctx) != n)
         wrongArgCount("the tuple constructor", std::to_string(fields ? fields->getSize(ctx) : 0), n);
-    const ProtoObject* t = self;
-    for (unsigned long k = 0; k < n; ++k)
-        t = t->setAttribute(ctx, L.tupleFieldKey[k + 1], args->getAt(ctx, static_cast<int>(k)));
-    return t;
+    return fillTuple(ctx, L, self, args, n);
+}
+
+// TupleN.apply(a1..an) on the companion object: the same tuple the literal
+// `(a1, ..., an)` builds. The companion's own __fields__ give its arity.
+PRIM(tuple_apply) {
+    const RuntimeLayout& L = layoutOf();
+    const ProtoList* fields = fieldsOf(ctx, self);
+    const unsigned long n = fields ? fields->getSize(ctx) : 0;
+    if (n < 2 || n > kMaxTupleArity) throw std::logic_error("tuple companion without an arity");
+    expectArgs(ctx, args, "apply", n);
+    return fillTuple(ctx, L, L.tupleProto[n]->newChild(ctx, false), args, n);
 }
 
 } // namespace
@@ -215,15 +279,24 @@ void installProductPrimitives(ProtoContext* ctx, const RuntimeLayout& L) {
     put(L.productProto, "productArity", &product_productArity);
     put(L.productProto, "productPrefix", &product_productPrefix);
     put(L.productProto, "productElement", &product_productElement);
+    put(L.productProto, "canEqual", &product_canEqual);
     put(L.productProto, "copy", &product_copy);
     static constexpr proto::ProtoMethod elements[] = {
         &product_1, &product_2, &product_3, &product_4, &product_5, &product_6, &product_7,
         &product_8, &product_9, &product_10, &product_11, &product_12, &product_13, &product_14,
         &product_15, &product_16, &product_17, &product_18, &product_19, &product_20, &product_21,
         &product_22};
+    static_assert(std::size(elements) == kMaxTupleArity, "one _N primitive per tuple element");
     for (unsigned k = 1; k <= kMaxTupleArity; ++k)
         put(L.productProto, ("_" + std::to_string(k)).c_str(), elements[k - 1]);
-    for (unsigned n = 2; n <= kMaxTupleArity; ++n) put(L.tupleProto[n], "<init>", &tuple_init);
+    for (unsigned n = 2; n <= kMaxTupleArity; ++n) {
+        put(L.tupleProto[n], "<init>", &tuple_init);
+        // The companion object, and the global the compiler resolves `TupleN`
+        // to (builtinGlobalNames): TupleN(a1, ..., an) is (a1, ..., an).
+        put(L.tupleCompanion[n], "apply", &tuple_apply);
+        L.globals->setAttribute(ctx, ProtoString::createSymbol(ctx, ("Tuple" + std::to_string(n)).c_str()),
+                                L.tupleCompanion[n]);
+    }
 }
 
 } // namespace protoScala

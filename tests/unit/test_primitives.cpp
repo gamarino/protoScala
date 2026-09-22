@@ -198,4 +198,7 @@ TEST(Primitives, TuplesAreCaseClassesNeverProtoTuples) {
     EXPECT_EQ(h.eval("new Tuple2(1, 2) == (1, 2)"), "true");
     EXPECT_EQ(h.eval("(1, 2).copy(_2 = 5)"), "(1,5)");
     EXPECT_EQ(h.eval("(1, 2).hashCode"), "1316541600");
+    EXPECT_EQ(h.eval("Tuple2(1, \"a\")"), "(1,a)");          // the companion's apply
+    EXPECT_EQ(h.eval("Tuple3(1, 2, 3).productArity"), "3");
+    EXPECT_EQ(h.eval("Tuple2(1, 2, 3)"), "error: IllegalArgumentException: apply takes 2 argument(s), got 3");
 }
