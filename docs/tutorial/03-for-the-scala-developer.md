@@ -134,7 +134,7 @@ The following behaviours were chosen while implementing Phase 1. They are
 provisional — each is recorded in STATUS.md and may change after review —
 so do not rely on them in code you intend to run on the JVM.
 
-**Script mode (provisional, see STATUS.md).** Scala 3 `.scala` files may
+**Script mode (D9, provisional — see STATUS.md).** Scala 3 `.scala` files may
 contain only definitions at the top level. protoScala also accepts top-level
 statements and runs them in order, like a `.sc` script:
 
@@ -152,7 +152,7 @@ Prints:
 script mode works
 ```
 
-**Eager top-level initialisation (provisional, see STATUS.md).** Scala 3
+**Eager top-level initialisation (D9, provisional — see STATUS.md).** Scala 3
 initialises a file's top-level `val`s on first access. protoScala initialises
 them eagerly, in source order, before calling `@main`:
 
@@ -173,28 +173,28 @@ main
 
 The program prints `init` and then `main`; Scala 3 prints only `main`.
 
-**Bare reference to a method (provisional, see STATUS.md).** A reference to a
+**Bare reference to a method (D10, provisional — see STATUS.md).** A reference to a
 `def` with a parameter list and no arguments is its function value, as with
 Scala 3 eta-expansion. For `def f()` (an empty parameter list) Scala 3 would
 insist on `f()`; protoScala yields the function value.
 
-**Varargs arrive as a `List` (provisional, see STATUS.md).** Inside
+**Varargs arrive as a `List` (D12, provisional — see STATUS.md).** Inside
 `def f(xs: Int*)`, `xs` is a protoScala `List`, so `xs.toString` prints
 `List(1, 2)` where the JVM prints `ArraySeq(1, 2)`.
 
-**Strings count code points; case mapping is ASCII (provisional, see
+**Strings count code points; case mapping is ASCII (D13, provisional — see
 STATUS.md).** `length`, `charAt`, `substring` and `indexOf` count Unicode code
 points; the JVM counts UTF-16 units. The two agree except outside the Basic
 Multilingual Plane (emoji, for instance). `toUpperCase`, `toLowerCase` and
 `Char.toUpper`/`toLower` map ASCII letters only, so `"héllo".toUpperCase` is
 `HéLLO`.
 
-**No non-local `return` (provisional, see STATUS.md).** `return` inside a
+**No non-local `return` (D11, provisional — see STATUS.md).** `return` inside a
 `def` works; `return` inside a lambda is a compile error
 (`return inside a lambda is not supported`). Scala 3 deprecates non-local
 returns.
 
-**Error names without `java.lang.` (provisional, see STATUS.md).** Run-time
+**Error names without `java.lang.` (D14, provisional — see STATUS.md).** Run-time
 errors use unqualified class names — `ArithmeticException`,
 `ClassCastException`, `NoSuchMethodError` for a missing member,
 `IllegalArgumentException` for a wrong argument count,
@@ -203,23 +203,23 @@ errors use unqualified class names — `ArithmeticException`,
 `file:line:col: error: message` and run-time errors as
 `file:line: error: Class: message`; the exit code is 1.
 
-**`>>>` is unsupported (provisional, see STATUS.md).** With no fixed integer
+**`>>>` is unsupported (D15, provisional — see STATUS.md).** With no fixed integer
 width there is no meaningful unsigned shift; `>>>` raises
 `UnsupportedOperationException`.
 
-**Tabs and spaces may not be mixed (provisional, see STATUS.md).** A file
+**Tabs and spaces may not be mixed (D16, provisional — see STATUS.md).** A file
 whose indentation mixes tabs and spaces is rejected
 (`indentation mixes tabs and spaces`). Scala 3 compares indentation prefixes
 instead.
 
-**Multi-line lambda bodies inside parentheses need braces (provisional, see
-STATUS.md).** Scala 3 accepts `xs.foreach(x =>` followed by indented
+**Multi-line lambda bodies inside parentheses need braces (D17, provisional —
+see STATUS.md).** Scala 3 accepts `xs.foreach(x =>` followed by indented
 statements. protoScala does not track indentation inside `(...)`, so a
 multi-statement body there must be written `xs.foreach { x => ... }` or
 `xs.foreach(x => { ... })`. A single expression spanning lines works.
 
-**`:` at the end of a line always opens an indented region (provisional, see
-STATUS.md).** `val x:` followed by `Int = 1` on the next line is rejected;
+**`:` at the end of a line always opens an indented region (D18, provisional —
+see STATUS.md).** `val x:` followed by `Int = 1` on the next line is rejected;
 keep a type ascription on the same line as its `:`.
 
 By-name parameters (`x: => Int`) are parsed and rejected with

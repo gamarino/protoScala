@@ -35,18 +35,14 @@ println(List.range(1, 101).map(BigInt(_)).product.toString.length)  // 158 — n
 
 ## Project status
 
-**Pre-alpha — design complete, implementation starting (version 0.0.1).**
-The repository builds against protoCore and runs its test harnesses; the
-binary does not run Scala programs yet. See:
-
-- [docs/DESIGN.md](docs/DESIGN.md) — the approved design specification
-- [docs/LANGUAGE.md](docs/LANGUAGE.md) — supported language and departures from Scala
-- [docs/ROADMAP.md](docs/ROADMAP.md) — phases with verifiable done-when criteria
-- [docs/STATUS.md](docs/STATUS.md) — living implementation tracker
-- [docs/TUTORIAL.md](docs/TUTORIAL.md) — dual-audience tutorial (Scala programmers; Python/JavaScript developers)
-- [docs/INTEROP.md](docs/INTEROP.md) — UMD polyglot interop
-- [docs/platform/](docs/platform/) — protoCore extensions specified by this project
-- [docs/plans/](docs/plans/) — task-level implementation plans
+**Phase 1 complete (version 0.1.0) — not production ready, open for community
+review.** The binary runs Scala 3 scripts and offers a REPL: `val`/`var`/
+`lazy val`/`def`, `if`/`while`, lambdas and closures, recursion (with
+`StackOverflowError` instead of a crash), `println`, in both brace and
+significant-indentation syntax. Classes, pattern matching, collections,
+exceptions and actors are not implemented yet — see
+[docs/STATUS.md](docs/STATUS.md) for the exact boundary and
+[docs/ROADMAP.md](docs/ROADMAP.md) for what each later phase brings.
 
 ## Building
 
@@ -65,6 +61,28 @@ cmake --build build_release
 ctest --test-dir build_release
 ./build_release/protoscala --version
 ```
+
+## Usage
+
+```bash
+# Run a script
+protoscala examples/hello.scala
+protoscala examples/fib.scala 10
+
+# Start the REPL
+protoscala
+```
+
+## Learn more
+
+- [docs/TUTORIAL.md](docs/TUTORIAL.md) — dual-audience tutorial (Scala programmers; Python/JavaScript developers)
+- [docs/LANGUAGE.md](docs/LANGUAGE.md) — supported language and departures from Scala
+- [docs/STATUS.md](docs/STATUS.md) — living implementation tracker
+- [docs/DESIGN.md](docs/DESIGN.md) — the approved design specification
+- [docs/ROADMAP.md](docs/ROADMAP.md) — phases with verifiable done-when criteria
+- [docs/INTEROP.md](docs/INTEROP.md) — UMD polyglot interop
+- [docs/platform/](docs/platform/) — protoCore extensions specified by this project
+- [docs/plans/](docs/plans/) — task-level implementation plans
 
 ## License
 

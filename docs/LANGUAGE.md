@@ -12,8 +12,8 @@
   (`+`, `::`, `<=`, `!`), mixed (`unary_-`, `x_+`), backquoted (`` `type` ``).
 - Hard keywords: `abstract case catch class def do else enum export extends
   false final finally for given if implicit import lazy match new null object
-  override package private protected return sealed super then throw trait true
-  try type val var while with yield`.
+  override package private protected return sealed super then this throw trait
+  true try type val var while with yield`.
 - Soft keywords: `as derives end extension infix inline opaque open transparent
   using`, plus `|`, `*`, `+`, `-` in their special positions.
 - Literals: integers (decimal, hex, binary, `_` separators, `L` suffix

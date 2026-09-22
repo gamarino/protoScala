@@ -19,7 +19,7 @@ version; a unit test creates a `ProtoSpace` and exercises SmallInteger
 promotion, proving protoCore links and runs; the conformance runner registers fixtures,
 including one `XFAIL` that pins the first Phase 1 program.
 
-## Phase P1 — `ProtoSparseListObject` in protoCore *(platform)*
+## Phase P1 — `ProtoSparseListObject` in protoCore *(platform)* — implemented on protoCore branch `feature/pslo-p1`, pending maintainer merge
 
 **Goal:** a persistent map whose keys are GC-traced objects
 ([platform/PSLO-SPEC.md](platform/PSLO-SPEC.md)).
@@ -45,7 +45,7 @@ its suite.
 **Prerequisite for:** Phase 5, and the mailbox part of tracks C and S.
 **Plan:** written when P2 starts (after P1).
 
-## Phase 1 — Lexer, parser, core evaluator, REPL
+## Phase 1 — Lexer, parser, core evaluator, REPL ✅ (2026-09-22)
 
 **Goal:** run straight-line and functional Scala 3 programs.
 **Done when:**

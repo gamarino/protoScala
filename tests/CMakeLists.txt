@@ -24,6 +24,10 @@ foreach(cli_test disassemble gc-pressure)
                 "${CMAKE_CURRENT_SOURCE_DIR}")
 endforeach()
 
+add_test(NAME cli/examples
+    COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/cli/examples.sh" "$<TARGET_FILE:protoscala>"
+            "${CMAKE_SOURCE_DIR}")
+
 # --- Conformance fixtures (glob-discovered) -------------------------------------
 # Each tests/conformance/**/*.scala file is one CTest case. The first line is a
 # directive (see conformance/run.sh). Files whose name starts with `_` are
