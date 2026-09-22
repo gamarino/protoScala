@@ -13,6 +13,7 @@ add_executable(protoscala_unit_tests
     test_values.cpp
     test_stackguard.cpp
     test_engine.cpp
+    test_primitives.cpp
 )
 
 target_link_libraries(protoscala_unit_tests

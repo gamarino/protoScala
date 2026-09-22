@@ -7,6 +7,7 @@
 #include "frontend/Parser.h"
 #include "runtime/Errors.h"
 #include "runtime/ExecutionEngine.h"
+#include "runtime/Primitives.h"
 #include "runtime/Runtime.h"
 #include "runtime/Values.h"
 #include "protoCore.h"
@@ -19,7 +20,10 @@ namespace protoScala::test {
 
 class EvalHarness {
 public:
-    EvalHarness() : runtime_(space_), engine_(runtime_.layout()) {}
+    EvalHarness() : runtime_(space_), engine_(runtime_.layout()) {
+        installPrimitives(runtime_.rootContext(), runtime_.layout());
+        for (const auto& n : builtinGlobalNames()) globals_.declare(n, BindingKind::Builtin);
+    }
 
     Runtime& runtime() { return runtime_; }
     proto::ProtoSpace& space() { return space_; }

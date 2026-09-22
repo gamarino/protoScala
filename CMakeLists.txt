@@ -87,6 +87,7 @@ add_library(protoscala_runtime STATIC
     src/runtime/Runtime.cpp
     src/runtime/Values.cpp
     src/runtime/ExecutionEngine.cpp
+    src/runtime/Primitives.cpp
 )
 target_link_libraries(protoscala_runtime PUBLIC protoscala_compiler protoscala_support
     ${PROTOCORE_LIBRARY} pthread)
