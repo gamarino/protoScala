@@ -237,3 +237,19 @@ TEST(Lexer, Punctuation) {
     EXPECT_EQ(kinds(rawTokens("( ) [ ] { } , ; .")),
               "LParen RParen LBracket RBracket LBrace RBrace Comma Semicolon Dot EOF");
 }
+
+TEST(Lexer, LeadingUnderscoreDoesNotTakeOperatorCharacters) {
+    // As in scalac: a lone leading `_` is the wildcard; only an `_` inside an
+    // identifier lets operator characters follow (`unary_-`, `x_+`, `__+`).
+    EXPECT_EQ(kinds(rawTokens("_:")), "Underscore Colon EOF");
+    EXPECT_EQ(kinds(rawTokens("_*")), "Underscore Identifier EOF");
+    EXPECT_EQ(kinds(rawTokens("_+")), "Underscore Identifier EOF");
+    EXPECT_EQ(rawTokens("_*")[1].text, "*");
+    EXPECT_EQ(rawTokens("_+")[1].text, "+");
+    for (const char* id : {"__+", "unary_-", "x_+"}) {
+        auto t = rawTokens(id);
+        EXPECT_EQ(t.size(), 2u) << id;
+        EXPECT_EQ(t[0].kind, TokenKind::Identifier) << id;
+        EXPECT_EQ(t[0].text, id);
+    }
+}

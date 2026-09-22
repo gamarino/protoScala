@@ -657,3 +657,31 @@ TEST(ParserPatterns, EndMarkersAndSeparators) {
     EXPECT_NE(parseErrorOf("for x <- xs\ny <- ys do println(x)").find("'do' or 'yield'"),
               std::string::npos);
 }
+
+TEST(ParserPatterns, TypedPatternTypes) {
+    auto p = [](const std::string& pat) {
+        const std::string d = e("v match { case " + pat + " => 0 }");
+        return d.substr(15, d.size() - 15 - 10);
+    };
+    // A parenthesised type ends at `)`: the case arrow is not a function type.
+    EXPECT_EQ(p("t: (Int, Int)"), "(: t (Int, Int))");
+    EXPECT_EQ(p("x: (A | B)"), "(: x A | B)");
+    EXPECT_EQ(p("f: (Int => Int)"), "(: f (Int) => Int)");
+    // `&` binds inside the typed pattern; a top-level `|` separates alternatives.
+    EXPECT_EQ(p("x: A & B"), "(: x A & B)");
+    EXPECT_EQ(p("_: A | _: B"), "(| (: _ A) (: _ B))");
+    EXPECT_EQ(e("v match { case t: (Int, Int) => t }"), "(match v (case (: t (Int, Int)) t))");
+}
+
+TEST(ParserPatterns, ParenthesisedBarePlaceholders) {
+    EXPECT_EQ(e("k((_: Int))"), "(lambda (_$1) (apply k (parens (typed _$1 Int))))");
+    EXPECT_EQ(e("f((_))"), "(lambda (_$1) (apply f (parens _$1)))");
+}
+
+TEST(ParserPatterns, BraceCasesAtTheBodyIndentation) {
+    EXPECT_EQ(e("x match { case 1 =>\n  2\n  case 3 => 4 }"),
+              "(match x (case (int 1) (block (int 2))) (case (int 3) (int 4)))");
+    EXPECT_EQ(e("xs.map { case 1 =>\n    val y = 2\n    y\n  case n =>\n    n }"),
+              "(apply (. xs map) (lambda (x$1) (match x$1 (case (int 1) (block (val y (int 2)) y)) "
+              "(case n (block n)))))");
+}

@@ -111,11 +111,16 @@ private:
 
     // Pattern matching and for-comprehensions (Phase 2)
     NodePtr parseMatch(NodePtr scrutinee);                // at `match`
-    CaseDef parseCaseClause(TokenKind terminator);
-    NodePtr parseCaseBody(TokenKind terminator);
+    // The cases of a match or `{ case ... }` literal up to (not including)
+    // `terminator`. `openRegions` counts the indented regions of case bodies
+    // that later cases continue in (`{ case 1 =>\n  2\n  case 3 => 4 }`).
+    void parseCases(Match& m, TokenKind terminator);
+    CaseDef parseCaseClause(TokenKind terminator, int* openRegions);
+    NodePtr parseCaseBody(TokenKind terminator, int* openRegions);
     NodePtr parseCaseLambda(SourcePos pos, TokenKind terminator);  // at the first `case`
     PatternPtr parsePattern();                            // p1 | p2 | ...
     PatternPtr parsePattern1();                           // typed patterns
+    TypePtr parsePatternType();                           // the type of a typed pattern
     PatternPtr parsePattern2();                           // x @ p
     PatternPtr parseInfixPattern(int minPrec, int assocPrec = -1);
     PatternPtr parseSimplePattern();

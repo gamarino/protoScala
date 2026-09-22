@@ -200,7 +200,7 @@ NodePtr Parser::parseExprOrIndented() {
 
 // Expr, with placeholder sections (SLS 6.23.2): a `_` that this Expr
 // properly contains (and no inner Expr does) becomes a parameter of a lambda
-// wrapping it; a bare `_` (or `_: T`) belongs to the enclosing Expr, so
+// wrapping it; a bare `_` (also `_: T`, `(_)`) belongs to the enclosing Expr, so
 // `f(_)` is `x => f(x)`.
 NodePtr Parser::parseExpr() {
     placeholderFrames_.emplace_back();
@@ -211,8 +211,11 @@ NodePtr Parser::parseExpr() {
     NodePtr e = parseExprNoPlaceholders();
     std::vector<std::string> names = std::move(placeholderFrames_.back());
     if (names.empty()) return e;
+    // `_`, `_: T`, `(_)`, `(_: T)`: the placeholder itself (scalac's isWildcard).
     const Node* bare = e.get();
-    if (bare->kind == NodeKind::Typed) bare = as<Typed>(*bare).expr.get();
+    while (bare->kind == NodeKind::Typed || bare->kind == NodeKind::Parens)
+        bare = bare->kind == NodeKind::Typed ? as<Typed>(*bare).expr.get()
+                                             : as<Parens>(*bare).expr.get();
     if (bare->kind == NodeKind::Ident && names.size() == 1 && as<Ident>(*bare).name == names[0]) {
         if (placeholderFrames_.size() < 2)
             fail("unbound placeholder '_': write an explicit function literal", peek());
@@ -1351,16 +1354,28 @@ NodePtr Parser::parseMatch(NodePtr scrutinee) {
     }
     while (skipOneNewline()) {}
     if (!at(TokenKind::KwCase)) fail("'case' expected", peek());
-    while (at(TokenKind::KwCase)) {
-        m->cases.push_back(parseCaseClause(terminator));
-        while (skipOneNewline()) {}
-    }
+    parseCases(*m, terminator);
     expect(terminator, terminator == TokenKind::RBrace ? "'}'" : "end of the cases");
     return m;
 }
 
+void Parser::parseCases(Match& m, TokenKind terminator) {
+    int openRegions = 0;
+    for (;;) {
+        if (at(TokenKind::KwCase)) {
+            m.cases.push_back(parseCaseClause(terminator, &openRegions));
+        } else if (openRegions > 0 && at(TokenKind::Outdent)) {
+            advance();  // the end of a case body region later cases continued in
+            --openRegions;
+        } else {
+            break;
+        }
+        while (skipOneNewline()) {}
+    }
+}
+
 // case Pattern [if Guard] => Block
-CaseDef Parser::parseCaseClause(TokenKind terminator) {
+CaseDef Parser::parseCaseClause(TokenKind terminator, int* openRegions) {
     CaseDef c;
     c.pos = expect(TokenKind::KwCase, "'case'").pos;
     c.pattern = parsePattern();
@@ -1369,21 +1384,55 @@ CaseDef Parser::parseCaseClause(TokenKind terminator) {
         c.guard = parseInfix(0);
     }
     expect(TokenKind::Arrow, "'=>'");
-    c.body = parseCaseBody(terminator);
+    c.body = parseCaseBody(terminator, openRegions);
     return c;
 }
 
 // The statements after `=>`, up to the next `case` or the end of the cases.
-// A single expression is the body itself; several statements are a block.
-NodePtr Parser::parseCaseBody(TokenKind terminator) {
-    if (at(TokenKind::Indent)) return parseIndentedBlock();
-    auto block = std::make_unique<Block>(peek().pos);
+// An indented body is a block; it also ends at a `case` at its own
+// indentation, which Layout leaves inside the region (a brace match whose
+// first case shares the `{` line): the region then stays open and
+// `*openRegions` counts it. On one line, a single expression is the body
+// itself; several statements are a block.
+NodePtr Parser::parseCaseBody(TokenKind terminator, int* openRegions) {
     const bool saved = inTemplateBody_;
     inTemplateBody_ = false;
+    if (at(TokenKind::Indent)) {
+        auto block = std::make_unique<Block>(advance().pos);
+        for (;;) {
+            while (skipOneNewline()) {}
+            if (at(TokenKind::Outdent)) {
+                advance();
+                break;
+            }
+            if (at(TokenKind::KwCase)) {
+                ++*openRegions;
+                break;
+            }
+            if (at(TokenKind::EndOfFile)) fail("", peek());
+            if (at(TokenKind::EndMarker)) {
+                if (block->stats.empty())
+                    fail("misaligned end marker: 'end " + peek().text +
+                         "' does not close a preceding construct", peek());
+                checkEndMarker(*block->stats.back(), peek());
+                advance();
+                continue;
+            }
+            block->stats.push_back(parseBlockStat(TokenKind::Outdent));
+            const TokenKind k = peek().kind;
+            if (k != TokenKind::Newline && k != TokenKind::Semicolon && k != TokenKind::Outdent)
+                fail("';' or newline expected but '" + spelling(peek()) + "' found", peek());
+        }
+        inTemplateBody_ = saved;
+        return block;
+    }
+    auto block = std::make_unique<Block>(peek().pos);
     for (;;) {
         const TokenKind k = peek().kind;
+        // An Outdent ends the body too: the region of an earlier case body
+        // that this case continued in (parseCases consumes it).
         if (k == TokenKind::KwCase || k == terminator || k == TokenKind::EndOfFile ||
-            k == TokenKind::EndMarker)
+            k == TokenKind::EndMarker || (*openRegions > 0 && k == TokenKind::Outdent))
             break;
         if (k == TokenKind::Newline || k == TokenKind::Semicolon) {
             const TokenKind next = peek(1).kind;
@@ -1395,6 +1444,7 @@ NodePtr Parser::parseCaseBody(TokenKind terminator) {
         const TokenKind after = peek().kind;
         if (after != TokenKind::Newline && after != TokenKind::Semicolon &&
             after != TokenKind::KwCase && after != terminator &&
+            !(*openRegions > 0 && after == TokenKind::Outdent) &&
             after != TokenKind::EndOfFile && after != TokenKind::EndMarker)
             fail("';' or newline expected but '" + spelling(peek()) + "' found", peek());
     }
@@ -1411,10 +1461,7 @@ NodePtr Parser::parseCaseLambda(SourcePos pos, TokenKind terminator) {
     const std::string param = "x$" + std::to_string(++caseLambdaCounter_);
     auto m = std::make_unique<Match>(pos);
     m->scrutinee = std::make_unique<Ident>(pos, param);
-    while (at(TokenKind::KwCase)) {
-        m->cases.push_back(parseCaseClause(terminator));
-        while (skipOneNewline()) {}
-    }
+    parseCases(*m, terminator);
     auto lambda = std::make_unique<Lambda>(pos);
     Param p;
     p.name = param;
@@ -1469,10 +1516,45 @@ PatternPtr Parser::parsePattern1() {
         auto inner = makePattern(wildcard ? Pattern::Kind::Wildcard : Pattern::Kind::Var, t.pos);
         if (!wildcard) inner->name = t.text;
         typed->args.push_back(std::move(inner));
-        typed->type = at(TokenKind::LParen) ? parseType() : parseSimpleType();
+        typed->type = parsePatternType();
         return typed;
     }
     return parsePattern2();
+}
+
+// The type of `x: T` in a pattern: a simple or parenthesised type, possibly
+// joined by `&`. A top-level `|` separates pattern alternatives, and `=>`
+// after a parenthesised type is the case arrow, not a function type.
+TypePtr Parser::parsePatternType() {
+    TypePtr ty;
+    const Token& t = peek();
+    if (at(TokenKind::LParen)) {
+        advance();
+        std::vector<TypePtr> elems;
+        elems.push_back(parseType());
+        while (at(TokenKind::Comma)) {
+            advance();
+            elems.push_back(parseType());
+        }
+        expect(TokenKind::RParen, "')'");
+        if (elems.size() == 1) {
+            ty = std::move(elems.front());
+        } else {
+            ty = makeType(TypeTree::Kind::Tuple, t.pos);
+            ty->args = std::move(elems);
+        }
+    } else {
+        ty = parseSimpleType();
+    }
+    while (atIdent("&")) {
+        advance();
+        const SourcePos p = ty->pos;
+        auto infix = makeType(TypeTree::Kind::Infix, p, "&");
+        infix->args.push_back(std::move(ty));
+        infix->args.push_back(parseSimpleType());
+        ty = std::move(infix);
+    }
+    return ty;
 }
 
 // Pattern2 ::= id `@` InfixPattern | InfixPattern
