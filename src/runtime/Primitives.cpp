@@ -83,9 +83,7 @@ std::string stringArg(ProtoContext* ctx, const ProtoObject* v, const char* metho
 
 const ProtoObject* boolean(bool b) { return b ? PROTO_TRUE : PROTO_FALSE; }
 
-const ProtoObject* str(ProtoContext* ctx, const std::string& s) {
-    return ctx->fromUTF8String(s.c_str());
-}
+const ProtoObject* str(ProtoContext* ctx, const std::string& s) { return makeString(ctx, s); }
 
 // A numeric operand (Int, Double, or Char widened to Int).
 const ProtoObject* numberArg(ProtoContext* ctx, const ProtoObject* v, const char* method) {
@@ -258,7 +256,12 @@ const ProtoObject* maxMin(ProtoContext* ctx, bool isMax, const char* method,
         return ctx->fromDouble(r);
     }
     const auto c = x->partialCompare(ctx, y);
-    return isMax ? (c >= 0 ? x : y) : (c <= 0 ? x : y);
+    // Char max Char is a Char (RichChar); any other mix is an Int.
+    const ProtoObject* rhs = arg(ctx, args, 0, method, 1);
+    const bool chars = isCharFast(self) && isCharFast(rhs);
+    const bool pickSelf = isMax ? c >= 0 : c <= 0;
+    if (chars) return pickSelf ? self : rhs;
+    return pickSelf ? x : y;
 }
 
 #define NUMERIC_BINARY(prefix)                                                              \
@@ -277,8 +280,10 @@ PRIM(num_mod) { return arith(ctx, Arith::Mod, "%", self, args); }
 PRIM(num_max) { return maxMin(ctx, true, "max", self, args); }
 PRIM(num_min) { return maxMin(ctx, false, "min", self, args); }
 PRIM(num_abs) { expectArgs(ctx, args, "abs", 0); return self->abs(ctx); }
-PRIM(num_neg) { expectArgs(ctx, args, "unary_-", 0); return self->negate(ctx); }
-PRIM(num_pos) { expectArgs(ctx, args, "unary_+", 0); return self; }
+// A Char operand of unary and bitwise operators widens to its code point, as
+// in Scala (`-'a'` is -97, `'a' & 0x60` is 96).
+PRIM(num_neg) { expectArgs(ctx, args, "unary_-", 0); return widenChar(self)->negate(ctx); }
+PRIM(num_pos) { expectArgs(ctx, args, "unary_+", 0); return widenChar(self); }
 
 // Conversions installed under several names: one thin wrapper per name, so
 // an argument-count error names the method that was called.
@@ -314,10 +319,10 @@ const ProtoObject* integerArg(ProtoContext* ctx, const ProtoObject* v, const cha
     return w;
 }
 
-PRIM(int_and) { return self->bitwiseAnd(ctx, integerArg(ctx, arg(ctx, args, 0, "&", 1), "&")); }
-PRIM(int_or)  { return self->bitwiseOr(ctx, integerArg(ctx, arg(ctx, args, 0, "|", 1), "|")); }
-PRIM(int_xor) { return self->bitwiseXor(ctx, integerArg(ctx, arg(ctx, args, 0, "^", 1), "^")); }
-PRIM(int_not) { expectArgs(ctx, args, "unary_~", 0); return self->bitwiseNot(ctx); }
+PRIM(int_and) { return widenChar(self)->bitwiseAnd(ctx, integerArg(ctx, arg(ctx, args, 0, "&", 1), "&")); }
+PRIM(int_or)  { return widenChar(self)->bitwiseOr(ctx, integerArg(ctx, arg(ctx, args, 0, "|", 1), "|")); }
+PRIM(int_xor) { return widenChar(self)->bitwiseXor(ctx, integerArg(ctx, arg(ctx, args, 0, "^", 1), "^")); }
+PRIM(int_not) { expectArgs(ctx, args, "unary_~", 0); return widenChar(self)->bitwiseNot(ctx); }
 
 // Shift amounts are not masked to a word width (D1): a negative amount is
 // an error rather than a wrap-around.
@@ -329,8 +334,8 @@ int shiftAmount(ProtoContext* ctx, const ProtoList* args, const char* method) {
     return static_cast<int>(n);
 }
 
-PRIM(int_shl) { return self->shiftLeft(ctx, shiftAmount(ctx, args, "<<")); }
-PRIM(int_shr) { return self->shiftRight(ctx, shiftAmount(ctx, args, ">>")); }
+PRIM(int_shl) { return widenChar(self)->shiftLeft(ctx, shiftAmount(ctx, args, "<<")); }
+PRIM(int_shr) { return widenChar(self)->shiftRight(ctx, shiftAmount(ctx, args, ">>")); }
 
 PRIM(int_ushr) {
     throw ScalaError("UnsupportedOperationException",
@@ -733,8 +738,11 @@ void installPrimitives(ProtoContext* ctx, const RuntimeLayout& L) {
     static constexpr MethodEntry booleans[] = {
         {"&", &bool_and}, {"|", &bool_or}, {"^", &bool_xor}, {"unary_!", &bool_not}};
     static constexpr MethodEntry chars[] = {
-        {"+", &num_add}, {"-", &num_sub}, {"<", &num_lt}, {"<=", &num_le}, {">", &num_gt},
-        {">=", &num_ge}, {"toInt", &char_toInt}, {"toLong", &char_toLong},
+        {"+", &num_add}, {"-", &num_sub}, {"*", &num_mul}, {"/", &num_div}, {"%", &num_mod},
+        {"<", &num_lt}, {"<=", &num_le}, {">", &num_gt}, {">=", &num_ge},
+        {"unary_-", &num_neg}, {"unary_+", &num_pos}, {"unary_~", &int_not},
+        {"&", &int_and}, {"|", &int_or}, {"^", &int_xor}, {"<<", &int_shl}, {">>", &int_shr},
+        {">>>", &int_ushr}, {"max", &num_max}, {"min", &num_min}, {"toInt", &char_toInt}, {"toLong", &char_toLong},
         {"toDouble", &num_toDouble}, {"toChar", &char_toChar}, {"isDigit", &char_isDigit},
         {"isLetter", &char_isLetter}, {"isWhitespace", &char_isWhitespace},
         {"isUpper", &char_isUpper}, {"isLower", &char_isLower}, {"toUpper", &char_toUpper},

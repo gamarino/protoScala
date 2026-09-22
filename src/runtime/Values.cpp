@@ -192,10 +192,18 @@ std::string typeName(proto::ProtoContext* ctx, const RuntimeLayout& L, const pro
     return "Object";
 }
 
+const proto::ProtoObject* makeString(proto::ProtoContext* ctx, const std::string& utf8) {
+    std::uint8_t rest[4];  // an incomplete trailing sequence (never in our strings)
+    std::uint8_t restCount = 0;
+    return proto::ProtoString::fromUTF8Buffer(ctx, reinterpret_cast<const std::uint8_t*>(utf8.data()),
+                                              utf8.size(), nullptr, 0, rest, &restCount)
+        ->asObject(ctx);
+}
+
 const proto::ProtoObject* toScalaString(proto::ProtoContext* ctx, const RuntimeLayout& L,
                                         const proto::ProtoObject* v) {
     if (proto::ProtoObject::isStringTagFast(v)) return v;
-    return ctx->fromUTF8String(show(ctx, L, v).c_str());
+    return makeString(ctx, show(ctx, L, v));
 }
 
 } // namespace protoScala

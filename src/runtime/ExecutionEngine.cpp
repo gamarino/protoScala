@@ -169,7 +169,7 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                         case K::Int:    *sp++ = frame.fromInteger(c.ival); break;
                         case K::BigInt: *sp++ = frame.fromString(c.sval.c_str(), c.base); break;
                         case K::Double: *sp++ = frame.fromDouble(c.dval); break;
-                        case K::String: *sp++ = frame.fromUTF8String(c.sval.c_str()); break;
+                        case K::String: *sp++ = makeString(&frame, c.sval); break;  // may hold NUL
                         case K::Char:   *sp++ = frame.fromUnicodeChar(static_cast<unsigned>(c.ival)); break;
                         case K::Symbol: case K::SendSite:
                             throw std::logic_error("PUSH_CONST of a name constant");

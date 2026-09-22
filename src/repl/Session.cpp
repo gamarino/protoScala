@@ -137,7 +137,7 @@ void Session::callMain(proto::ProtoContext* ctx, const std::string& mainKey, boo
     scope.resizeAutomaticLocals(n + 1);
     scope.setAutomaticLocal(n, runtime_.layout().globals->getOwnAttributeDirect(&scope, key));
     for (unsigned k = 0; k < n; ++k)
-        scope.setAutomaticLocal(k, scope.fromUTF8String(args[k].c_str()));
+        scope.setAutomaticLocal(k, makeString(&scope, args[k]));
     engine_.callTopLevel(&scope, scope.getAutomaticLocal(n), scope.getAutomaticLocals(), n);
 }
 
