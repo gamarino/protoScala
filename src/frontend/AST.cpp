@@ -648,8 +648,6 @@ void releaseChildren(Node& n, std::vector<NodePtr>& out) {
 
 } // namespace
 
-namespace {
-
 TypePtr cloneType(const TypeTree& t) {
     auto c = std::make_unique<TypeTree>();
     c->kind = t.kind;
@@ -658,8 +656,6 @@ TypePtr cloneType(const TypeTree& t) {
     for (const TypePtr& a : t.args) c->args.push_back(cloneType(*a));
     return c;
 }
-
-} // namespace
 
 NodePtr cloneSimpleExpr(const Node& n) {
     switch (n.kind) {

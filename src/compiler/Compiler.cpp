@@ -221,9 +221,21 @@ private:
             case NodeKind::NamedArg: walk(as<NamedArg>(n).value.get(), depth); return;
             case NodeKind::ValDef: definitionBody(n, depth); return;
             case NodeKind::DefDef: definitionBody(n, depth); return;
-            case NodeKind::TemplateDef: case NodeKind::New: case NodeKind::Match:
+            case NodeKind::New:
+                for (const auto& a : as<New>(n).args) walk(a.get(), depth);
+                return;
+            case NodeKind::Match: {
+                const auto& m = as<Match>(n);
+                walk(m.scrutinee.get(), depth);
+                for (const CaseDef& c : m.cases) {
+                    walk(c.guard.get(), depth);
+                    walk(c.body.get(), depth);
+                }
+                return;
+            }
+            case NodeKind::TemplateDef:
             case NodeKind::For:
-                return;  // rejected by compileExpr until they are compiled
+                return;  // templates are compiled on their own; For never survives Desugar
         }
     }
 
@@ -402,13 +414,12 @@ void Compiler::compileExpr(const Node& n) {
         case NodeKind::ValDef:
         case NodeKind::DefDef:
         case NodeKind::Import:
-        case NodeKind::TemplateDef:
             throw CompileError("definition used as an expression", n.pos);
-        case NodeKind::New:
-            throw CompileError("object creation with 'new' is not implemented yet", n.pos);
-        case NodeKind::Match:
-        case NodeKind::For:
-            throw std::logic_error("compiler: node kind not produced by the parser yet");
+        case NodeKind::TemplateDef:
+            throw CompileError("classes, traits and objects are not implemented yet", n.pos);
+        case NodeKind::New: throw CompileError("'new' is not implemented yet", n.pos);
+        case NodeKind::Match: throw CompileError("match is not implemented yet", n.pos);
+        case NodeKind::For: throw std::logic_error("compiler: for-comprehension not desugared");
         case NodeKind::Infix:
         case NodeKind::Prefix:
         case NodeKind::Parens:
@@ -500,9 +511,9 @@ void Compiler::compileShortCircuit(const Node& lhs, const Node& rhs, bool isAnd,
 }
 
 void Compiler::compileAssign(const Assign& a) {
+    // Desugar rewrote `o.x = v` and `f(i) = v` into sends (DESIGN 3.4).
     if (a.target->kind != NodeKind::Ident)
-        throw CompileError("assignment to fields and indexed elements is not implemented yet",
-                           a.pos);
+        throw std::logic_error("compiler: assignment target not desugared");
     const auto& id = as<Ident>(*a.target);
     const Resolution r = resolve(id.name, id.pos);
     if (r.kind != BindingKind::Var) throw CompileError("Reassignment to val " + id.name, a.pos);

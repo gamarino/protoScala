@@ -208,12 +208,17 @@ TEST(Compiler, ReturnInsideLambdaInsideDefIsRejected) {
 }
 
 TEST(Compiler, AssignmentTargetsAndVarWrites) {
-    EXPECT_TRUE(has(compileError("val o = 1\no.x = 2"),
-                    "assignment to fields and indexed elements is not implemented yet"));
+    EXPECT_TRUE(has(listing("val o = 1\no.x = 2"), "; x_=/1"));  // o.x_=(2)
     EXPECT_TRUE(has(compileError("def f(x: Int) = { x = 1 }"), "Reassignment to val x"));
     const auto l = listing("def f() = { var i = 0; i = i + 1; i }");
     EXPECT_TRUE(has(l, "STORE_LOCAL"));
     EXPECT_FALSE(has(l, "MAKE_CELL"));
+}
+
+TEST(Compiler, Phase2NodesAreRejectedUntilImplemented) {
+    EXPECT_TRUE(has(compileError("val r = 1 match { case 1 => 2 }"), "match is not implemented yet"));
+    EXPECT_TRUE(has(compileError("class A"), "classes, traits and objects are not implemented yet"));
+    EXPECT_TRUE(has(compileError("val a = new A"), "'new' is not implemented yet"));
 }
 
 TEST(Compiler, SpliceOutsideAFunctionCallIsRejected) {

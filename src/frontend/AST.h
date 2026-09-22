@@ -293,6 +293,7 @@ std::string dump(const Pattern& p);
 // std::logic_error for anything else.
 NodePtr cloneSimpleExpr(const Node& n);
 PatternPtr clonePattern(const Pattern& p);
+TypePtr cloneType(const TypeTree& t);
 
 // Destroys a tree without recursion: an expression nested deeper than the
 // native stack (a 200 000-term `a + b + ...` chain, which the parser builds
