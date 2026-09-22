@@ -153,3 +153,190 @@ TEST(Engine, UnknownOpcodeIsALogicErrorNotSkipped) {
         EXPECT_NE(std::string(e.what()).find("unknown opcode 200"), std::string::npos) << e.what();
     }
 }
+
+#include "compiler/BytecodeModule.h"
+
+namespace {
+using protoScala::BytecodeModule;
+using protoScala::Op;
+
+// class Box(v) { def twice = v * 2 }, assembled by hand.
+std::unique_ptr<BytecodeModule> boxProgram(const char* member, bool mutableInstances) {
+    auto init = std::make_unique<BytecodeModule>();  // <init>(this, v): this.v = v; this
+    init->setName("<init>");
+    init->setMethod(true);
+    init->setArity(2);
+    init->setMaxStack(1);
+    init->emit(Op::PUSH_LOCAL, 1, 1);
+    init->emit(Op::STORE_FIELD, init->addSymbol("v"), 1);
+    init->emit(Op::PUSH_LOCAL, 0, 1);
+    init->emit(Op::RETURN, 0, 1);
+    auto twice = std::make_unique<BytecodeModule>();  // twice(this) = this.v * 2
+    twice->setName("twice");
+    twice->setMethod(true);
+    twice->setArity(1);
+    twice->setMaxStack(2);
+    twice->emit(Op::PUSH_LOCAL, 0, 2);
+    twice->emit(Op::SEND, twice->addSendSite("v", 0), 2);
+    twice->emit(Op::PUSH_CONST, twice->addInt(2), 2);
+    twice->emit(Op::MUL, 0, 2);
+    twice->emit(Op::RETURN, 0, 2);
+    auto top = std::make_unique<BytecodeModule>();
+    top->emit(Op::PUSH_GLOBAL, top->addSymbol("@AnyRef"), 3);
+    top->emit(Op::PUSH_GLOBAL, top->addSymbol("@Any"), 3);
+    top->emit(Op::MAKE_FN, top->addBlock(std::move(twice)), 3);
+    top->emit(Op::MAKE_FN, top->addBlock(std::move(init)), 3);
+    BytecodeModule::ClassSpecData spec{"Box", "@Box", 2, {"twice", "<init>"}, {},
+                                       mutableInstances ? BytecodeModule::kClassMutableInstances : 0u};
+    top->emit(Op::MAKE_CLASS, top->addClassSpec(spec), 3);
+    top->emit(Op::STORE_GLOBAL, top->addSymbol("@Box"), 3);
+    top->emit(Op::PUSH_GLOBAL, top->addSymbol("@Box"), 4);
+    top->emit(Op::PUSH_CONST, top->addInt(21), 4);
+    top->emit(Op::NEW, top->addSendSite("<init>", 1), 4);
+    top->emit(Op::SEND, top->addSendSite(member, 0), 4);
+    top->emit(Op::RETURN, 0, 4);
+    top->setMaxStack(4);
+    return top;
+}
+// class Base { def name = 1 }; class Derived extends Base { override def name = super.name + 10 }
+// SEND_SUPER relies on protoCore flattening an instance's getParents() into the
+// whole linearization ([Derived, Base, AnyRef, Any]); if that ever changes,
+// this test fails before the compiler-level ones in later tasks do.
+std::unique_ptr<BytecodeModule> superProgram() {
+    auto baseName = std::make_unique<BytecodeModule>();  // Base.name(this) = 1
+    baseName->setName("name");
+    baseName->setMethod(true);
+    baseName->setArity(1);
+    baseName->setMaxStack(1);
+    baseName->emit(Op::PUSH_CONST, baseName->addInt(1), 1);
+    baseName->emit(Op::RETURN, 0, 1);
+    auto derivedName = std::make_unique<BytecodeModule>();  // Derived.name(this) = super.name + 10
+    derivedName->setName("name");
+    derivedName->setMethod(true);
+    derivedName->setArity(1);
+    derivedName->setMaxStack(2);
+    derivedName->emit(Op::PUSH_LOCAL, 0, 2);
+    derivedName->emit(Op::SEND_SUPER, derivedName->addSuperSite("name", 0, "@Derived"), 2);
+    derivedName->emit(Op::PUSH_CONST, derivedName->addInt(10), 2);
+    derivedName->emit(Op::ADD, 0, 2);
+    derivedName->emit(Op::RETURN, 0, 2);
+    auto derivedInit = std::make_unique<BytecodeModule>();  // <init>(this) = this
+    derivedInit->setName("<init>");
+    derivedInit->setMethod(true);
+    derivedInit->setArity(1);
+    derivedInit->setMaxStack(1);
+    derivedInit->emit(Op::PUSH_LOCAL, 0, 2);
+    derivedInit->emit(Op::RETURN, 0, 2);
+
+    auto top = std::make_unique<BytecodeModule>();
+    top->emit(Op::PUSH_GLOBAL, top->addSymbol("@AnyRef"), 3);
+    top->emit(Op::PUSH_GLOBAL, top->addSymbol("@Any"), 3);
+    top->emit(Op::MAKE_FN, top->addBlock(std::move(baseName)), 3);
+    BytecodeModule::ClassSpecData base{"Base", "@Base", 2, {"name"}, {}, 0u};
+    top->emit(Op::MAKE_CLASS, top->addClassSpec(base), 3);
+    top->emit(Op::STORE_GLOBAL, top->addSymbol("@Base"), 3);
+    // Derived's parents are its linearization without itself: [Base, AnyRef, Any].
+    top->emit(Op::PUSH_GLOBAL, top->addSymbol("@Base"), 4);
+    top->emit(Op::PUSH_GLOBAL, top->addSymbol("@AnyRef"), 4);
+    top->emit(Op::PUSH_GLOBAL, top->addSymbol("@Any"), 4);
+    top->emit(Op::MAKE_FN, top->addBlock(std::move(derivedName)), 4);
+    top->emit(Op::MAKE_FN, top->addBlock(std::move(derivedInit)), 4);
+    BytecodeModule::ClassSpecData derived{"Derived", "@Derived", 3, {"name", "<init>"}, {}, 0u};
+    top->emit(Op::MAKE_CLASS, top->addClassSpec(derived), 4);
+    top->emit(Op::STORE_GLOBAL, top->addSymbol("@Derived"), 4);
+    top->emit(Op::PUSH_GLOBAL, top->addSymbol("@Derived"), 5);
+    top->emit(Op::NEW, top->addSendSite("<init>", 0), 5);
+    top->emit(Op::SEND, top->addSendSite("name", 0), 5);
+    top->emit(Op::RETURN, 0, 5);
+    top->setMaxStack(6);
+    return top;
+}
+
+// A bound method (eta-expansion) stored in a field of another object: calling
+// it through that field must run it on the receiver it was bound to, not on
+// the object holding the field.
+//   class Box(v) { def plus(n) = v + n }
+//   class Holder(g)
+//   new Holder(new Box(21).plus).g(1)
+std::unique_ptr<BytecodeModule> boundMethodInFieldProgram() {
+    auto boxInit = std::make_unique<BytecodeModule>();  // <init>(this, v): this.v = v; this
+    boxInit->setName("<init>");
+    boxInit->setMethod(true);
+    boxInit->setArity(2);
+    boxInit->setMaxStack(1);
+    boxInit->emit(Op::PUSH_LOCAL, 1, 1);
+    boxInit->emit(Op::STORE_FIELD, boxInit->addSymbol("v"), 1);
+    boxInit->emit(Op::PUSH_LOCAL, 0, 1);
+    boxInit->emit(Op::RETURN, 0, 1);
+    auto plus = std::make_unique<BytecodeModule>();  // plus(this, n) = this.v + n
+    plus->setName("plus");
+    plus->setMethod(true);
+    plus->setArity(2);
+    plus->setMaxStack(2);
+    plus->emit(Op::PUSH_LOCAL, 0, 2);
+    plus->emit(Op::SEND, plus->addSendSite("v", 0), 2);
+    plus->emit(Op::PUSH_LOCAL, 1, 2);
+    plus->emit(Op::ADD, 0, 2);
+    plus->emit(Op::RETURN, 0, 2);
+    auto holderInit = std::make_unique<BytecodeModule>();  // <init>(this, g): this.g = g; this
+    holderInit->setName("<init>");
+    holderInit->setMethod(true);
+    holderInit->setArity(2);
+    holderInit->setMaxStack(1);
+    holderInit->emit(Op::PUSH_LOCAL, 1, 3);
+    holderInit->emit(Op::STORE_FIELD, holderInit->addSymbol("g"), 3);
+    holderInit->emit(Op::PUSH_LOCAL, 0, 3);
+    holderInit->emit(Op::RETURN, 0, 3);
+
+    auto top = std::make_unique<BytecodeModule>();
+    auto declare = [&top](const char* name, const char* key,
+                          std::vector<std::string> members,
+                          std::vector<std::unique_ptr<BytecodeModule>> bodies) {
+        top->emit(Op::PUSH_GLOBAL, top->addSymbol("@AnyRef"), 4);
+        top->emit(Op::PUSH_GLOBAL, top->addSymbol("@Any"), 4);
+        for (auto& b : bodies) top->emit(Op::MAKE_FN, top->addBlock(std::move(b)), 4);
+        BytecodeModule::ClassSpecData spec{name, key, 2, std::move(members), {}, 0u};
+        top->emit(Op::MAKE_CLASS, top->addClassSpec(spec), 4);
+        top->emit(Op::STORE_GLOBAL, top->addSymbol(key), 4);
+    };
+    std::vector<std::unique_ptr<BytecodeModule>> boxBodies;
+    boxBodies.push_back(std::move(plus));
+    boxBodies.push_back(std::move(boxInit));
+    declare("Box", "@Box", {"plus", "<init>"}, std::move(boxBodies));
+    std::vector<std::unique_ptr<BytecodeModule>> holderBodies;
+    holderBodies.push_back(std::move(holderInit));
+    declare("Holder", "@Holder", {"<init>"}, std::move(holderBodies));
+
+    top->emit(Op::PUSH_GLOBAL, top->addSymbol("@Holder"), 5);
+    top->emit(Op::PUSH_GLOBAL, top->addSymbol("@Box"), 5);
+    top->emit(Op::PUSH_CONST, top->addInt(21), 5);
+    top->emit(Op::NEW, top->addSendSite("<init>", 1), 5);       // new Box(21)
+    top->emit(Op::SEND, top->addSendSite("plus", 0), 5);        // .plus (eta-expansion)
+    top->emit(Op::NEW, top->addSendSite("<init>", 1), 5);       // new Holder(bound)
+    top->emit(Op::PUSH_CONST, top->addInt(1), 5);
+    top->emit(Op::SEND, top->addSendSite("g", 1), 5);           // holder.g(1)
+    top->emit(Op::RETURN, 0, 5);
+    top->setMaxStack(5);
+    return top;
+}
+} // namespace
+
+TEST(EngineObjectModel, ABoundMethodStoredInAFieldKeepsItsOwnReceiver) {
+    EvalHarness h;
+    EXPECT_EQ(h.runModule(boundMethodInFieldProgram()), "22");
+}
+
+TEST(EngineObjectModel, SuperSendFindsTheNextDefinitionInTheLinearization) {
+    EvalHarness h;
+    EXPECT_EQ(h.runModule(superProgram()), "11");
+}
+
+TEST(EngineObjectModel, HandAssembledClassDispatchesMethodsAndFields) {
+    EvalHarness h;
+    EXPECT_EQ(h.runModule(boxProgram("twice", false)), "42");
+    EXPECT_EQ(h.runModule(boxProgram("v", true)), "21");
+    EXPECT_EQ(h.runModule(boxProgram("nope", false)),
+              "error: NoSuchMethodError: value nope is not a member of Box");
+    const std::string shown = h.runModule(boxProgram("toString", false));
+    EXPECT_EQ(shown.rfind("Box@", 0), 0u) << shown;  // default toString: Name@hex
+}

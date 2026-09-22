@@ -1,6 +1,7 @@
 #include "runtime/Primitives.h"
 #include "runtime/Errors.h"
 #include "runtime/ExecutionEngine.h"
+#include "runtime/Hashing.h"
 #include "runtime/Values.h"
 #include "protoCore.h"
 
@@ -179,9 +180,23 @@ PRIM(prim_print) {
 PRIM(any_toString) {
     expectArgs(ctx, args, "toString", 0);
     if (proto::ProtoObject::isStringTagFast(self)) return self;
-    return str(ctx, show(ctx, layoutOf(), self));
+    const RuntimeLayout& L = layoutOf();
+    if (isScalaInstance(ctx, L, self)) return str(ctx, defaultToString(ctx, L, self));  // AnyRef.toString
+    return str(ctx, show(ctx, L, self));
 }
-PRIM(any_equals) { return boolean(valuesEqual(ctx, layoutOf(), self, arg(ctx, args, 0, "equals", 1))); }
+PRIM(any_equals) {  // AnyRef.equals is identity; values compare as Scala ==
+    const ProtoObject* other = arg(ctx, args, 0, "equals", 1);
+    if (isScalaInstance(ctx, layoutOf(), self)) return boolean(self == other);
+    return boolean(valuesEqual(ctx, layoutOf(), self, other));
+}
+PRIM(any_hashCode) {
+    expectArgs(ctx, args, "hashCode", 0);
+    const RuntimeLayout& L = layoutOf();
+    if (isScalaInstance(ctx, L, self)) return ctx->fromInteger(identityHash(ctx, self));
+    if (isDoubleFast(self)) return ctx->fromInteger(hashing::javaDoubleHash(self->asDouble(ctx)));
+    return ctx->fromInteger(scalaHash(ctx, L, self));
+}
+PRIM(any_hashHash) { expectArgs(ctx, args, "##", 0); return ctx->fromInteger(scalaHash(ctx, layoutOf(), self)); }
 PRIM(any_eqeq)   { return boolean(valuesEqual(ctx, layoutOf(), self, arg(ctx, args, 0, "==", 1))); }
 PRIM(any_noteq)  { return boolean(!valuesEqual(ctx, layoutOf(), self, arg(ctx, args, 0, "!=", 1))); }
 PRIM(any_eq)     { return boolean(self == arg(ctx, args, 0, "eq", 1)); }
@@ -718,7 +733,8 @@ void installPrimitives(ProtoContext* ctx, const RuntimeLayout& L) {
     static constexpr MethodEntry globals[] = {{"println", &prim_println}, {"print", &prim_print}};
     static constexpr MethodEntry any[] = {
         {"toString", &any_toString}, {"equals", &any_equals}, {"==", &any_eqeq},
-        {"!=", &any_noteq}, {"eq", &any_eq}, {"ne", &any_ne}};
+        {"!=", &any_noteq}, {"eq", &any_eq}, {"ne", &any_ne},
+        {"hashCode", &any_hashCode}, {"##", &any_hashHash}};
     static constexpr MethodEntry ints[] = {
         {"+", &num_add}, {"-", &num_sub}, {"*", &num_mul}, {"/", &num_div}, {"%", &num_mod},
         {"<", &num_lt}, {"<=", &num_le}, {">", &num_gt}, {">=", &num_ge},

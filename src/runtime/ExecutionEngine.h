@@ -9,9 +9,12 @@
  * and restores on every exit path (protoClojure src/runtime/Primitives.h:109-170).
  */
 #pragma once
+#include "compiler/BytecodeModule.h"
 #include "compiler/Opcodes.h"
 #include "runtime/Runtime.h"
 #include "protoCore.h"
+
+#include <string>
 
 namespace proto {
 class ProtoContext;
@@ -55,8 +58,42 @@ public:
                                    const proto::ProtoString* name,
                                    const proto::ProtoObject* const* args, unsigned argc);
 
+    // new cls(args) through the class's primary constructor (Product.copy).
+    // `args` must be rooted.
+    const proto::ProtoObject* construct(proto::ProtoContext* ctx, const proto::ProtoObject* cls,
+                                        const proto::ProtoObject* const* args, unsigned argc);
+    // show() with this engine active, so Scala toString methods run (REPL
+    // echo, unit tests). Throws ScalaError.
+    std::string showTopLevel(proto::ProtoContext* ctx, const proto::ProtoObject* v);
+
 private:
     const RuntimeLayout& layout_;
+
+    // base[0] is the receiver, base[1..argc] the arguments; all rooted.
+    const proto::ProtoObject* dispatch(proto::ProtoContext* ctx, const proto::ProtoObject** base,
+                                       const proto::ProtoString* name, unsigned argc);
+    const proto::ProtoObject* callMember(proto::ProtoContext* ctx, const proto::ProtoObject* member,
+                                         const proto::ProtoObject** base, unsigned argc);
+    const proto::ProtoObject* callWithReceiver(proto::ProtoContext* ctx, const proto::ProtoObject* method,
+                                               const proto::ProtoObject** base, unsigned argc);
+    const proto::ProtoObject* bindMethod(proto::ProtoContext* ctx, const proto::ProtoObject* method,
+                                         const proto::ProtoObject* receiver);
+    const proto::ProtoObject* forceMember(proto::ProtoContext* ctx, const proto::ProtoObject* holder,
+                                          const proto::ProtoObject* receiver);
+    const proto::ProtoObject* instantiate(proto::ProtoContext* ctx, const proto::ProtoObject** base,
+                                          const proto::ProtoString* ctorKey, unsigned argc);
+    [[gnu::noinline]] const proto::ProtoObject* makeClass(proto::ProtoContext* ctx,
+                                                          const BytecodeModule::Const& spec,
+                                                          const proto::ProtoObject* const* base);
+    const proto::ProtoObject* makeTuple(proto::ProtoContext* ctx, const proto::ProtoObject* const* elems,
+                                        unsigned n);
+    const proto::ProtoObject* superSend(proto::ProtoContext* ctx, const proto::ProtoObject** base,
+                                        const BytecodeModule::Const& site);
+    const proto::ProtoObject* sendKeywords(proto::ProtoContext* ctx, const proto::ProtoObject** base,
+                                           const BytecodeModule::Const& site);
+    bool testType(proto::ProtoContext* ctx, TypeCode code, const proto::ProtoObject* v) const;
+    [[noreturn]] void throwMissingMember(proto::ProtoContext* ctx, const proto::ProtoObject* receiver,
+                                         const proto::ProtoString* name) const;
 
     const proto::ProtoObject* execute(proto::ProtoContext* parent, const BytecodeModule& mod,
                                       const proto::ProtoObject* const* args, unsigned argc,

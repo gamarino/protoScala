@@ -49,6 +49,11 @@ const proto::ProtoObject* ExecutionEngine::run(proto::ProtoContext* parent, cons
     return execute(parent, mod, nullptr, 0, nullptr);
 }
 
+std::string ExecutionEngine::showTopLevel(proto::ProtoContext* ctx, const proto::ProtoObject* v) {
+    ActiveGuard guard(this, &layout_);
+    return show(ctx, layout_, v);
+}
+
 const proto::ProtoObject* ExecutionEngine::callTopLevel(proto::ProtoContext* ctx,
                                                         const proto::ProtoObject* callable,
                                                         const proto::ProtoObject* const* args,
@@ -75,6 +80,18 @@ const proto::ProtoObject* ExecutionEngine::invoke(proto::ProtoContext* ctx,
                                                   unsigned argc) {
     if (callee == PROTO_NONE) throw ScalaError("NullPointerException", "cannot call null");
     if (const BytecodeModule* m = compiledModuleOf(ctx, layout_, callee)) {
+        if (m->isMethod()) {  // a bound method: its receiver travels in slot 0
+            const proto::ProtoObject* self = callee->getOwnAttributeDirect(ctx, layout_.selfKey);
+            if (!self) throw std::logic_error("invoke: unbound method");
+            proto::ProtoContext scope(ctx->space, ctx);
+            scope.resizeAutomaticLocals(argc + 1);
+            const proto::ProtoObject** a = scope.getAutomaticLocals();
+            a[0] = self;
+            for (unsigned k = 0; k < argc; ++k) a[k + 1] = args[k];
+            const proto::ProtoObject* r = execute(&scope, *m, a, argc + 1, nullptr);
+            scope.returnValue = r;
+            return r;
+        }
         const proto::ProtoObject* caps =
             m->captureCount() ? callee->getOwnAttributeDirect(ctx, layout_.capturesKey) : nullptr;
         return execute(ctx, *m, args, argc, caps);
@@ -89,22 +106,262 @@ const proto::ProtoObject* ExecutionEngine::send(proto::ProtoContext* ctx,
                                                 const proto::ProtoString* name,
                                                 const proto::ProtoObject* const* args,
                                                 unsigned argc) {
+    proto::ProtoContext scope(ctx->space, ctx);
+    scope.resizeAutomaticLocals(argc + 1);
+    const proto::ProtoObject** base = scope.getAutomaticLocals();
+    base[0] = receiver;
+    for (unsigned k = 0; k < argc; ++k) base[k + 1] = args[k];
+    const proto::ProtoObject* r = dispatch(&scope, base, name, argc);
+    scope.returnValue = r;
+    return r;
+}
+
+const proto::ProtoObject* ExecutionEngine::dispatch(proto::ProtoContext* ctx,
+                                                    const proto::ProtoObject** base,
+                                                    const proto::ProtoString* name, unsigned argc) {
+    const proto::ProtoObject* receiver = base[0];
     if (receiver == PROTO_NONE)
         throw ScalaError("NullPointerException",
                          "cannot invoke '" + name->toStdString(ctx) + "' on null");
     const proto::ProtoObject* m = receiver->getAttribute(ctx, name);
     if (!m || m == PROTO_NONE) {
         // PROTO_NONE is also a stored null: probe presence (DESIGN §4.1).
-        if (receiver->hasAttribute(ctx, name) != PROTO_TRUE)
-            throw ScalaError("NoSuchMethodError", "value " + name->toStdString(ctx) +
-                             " is not a member of " + typeName(ctx, layout_, receiver));
+        if (receiver->hasAttribute(ctx, name) != PROTO_TRUE) throwMissingMember(ctx, receiver, name);
         if (argc == 0) return PROTO_NONE;
         throw ScalaError("NullPointerException", "cannot call null");
     }
-    if (m->isMethod(ctx)) return callNative(ctx, m->asMethod(ctx), receiver, args, argc);
-    if (argc == 0 && !compiledModuleOf(ctx, layout_, m)) return m;  // a plain attribute (field read)
+    return callMember(ctx, m, base, argc);
+}
+
+// Calls the value `m` found for a member of the receiver base[0]: a native
+// method, a Scala method (receiver in slot 0), a lazy val holder, a
+// function-valued field, a plain field, or an object with `apply`.
+const proto::ProtoObject* ExecutionEngine::callMember(proto::ProtoContext* ctx,
+                                                      const proto::ProtoObject* m,
+                                                      const proto::ProtoObject** base, unsigned argc) {
+    const RuntimeLayout& L = layout_;
+    if (m->isMethod(ctx)) return callNative(ctx, m->asMethod(ctx), base[0], base + 1, argc);
+    if (const BytecodeModule* mod = compiledModuleOf(ctx, L, m)) {
+        // A member method runs on this receiver; a bound method (the result of
+        // an eta-expansion) stored in a field is an ordinary function value
+        // carrying its own receiver in __self__, and falls through to invoke.
+        if (mod->isMethod() && !m->getOwnAttributeDirect(ctx, L.selfKey)) {
+            // `obj.m` for a method with parameters: eta-expansion (D10).
+            if (argc == 0 && mod->arity() > 1 && !mod->isVariadic()) return bindMethod(ctx, m, base[0]);
+            return execute(ctx, *mod, base, argc + 1, nullptr);
+        }
+        if (argc == 0) return m;                     // a function-valued field
+        return invoke(ctx, m, base + 1, argc);       // obj.f(args) = obj.f.apply(args)
+    }
+    if (isObjectCellFast(m) && m->getPrototype(ctx) == L.lazyProto) {  // a lazy val member
+        const proto::ProtoObject* v = forceMember(ctx, m, base[0]);
+        if (argc == 0) return v;
+        base[0] = v;  // the receiver is no longer needed; keep v rooted
+        return invoke(ctx, v, base + 1, argc);
+    }
+    if (argc == 0) return m;                         // a field
+    return send(ctx, m, L.applyName, base + 1, argc);  // obj.x(args) with x an object: x.apply(args)
+}
+
+const proto::ProtoObject* ExecutionEngine::callWithReceiver(proto::ProtoContext* ctx,
+                                                            const proto::ProtoObject* m,
+                                                            const proto::ProtoObject** base,
+                                                            unsigned argc) {
+    if (m->isMethod(ctx)) return callNative(ctx, m->asMethod(ctx), base[0], base + 1, argc);
+    const BytecodeModule* mod = compiledModuleOf(ctx, layout_, m);
+    if (!mod || !mod->isMethod()) throw std::logic_error("callWithReceiver: not a method");
+    return execute(ctx, *mod, base, argc + 1, nullptr);
+}
+
+// A function value for `receiver.m` (eta-expansion): a Function<N> object
+// sharing the method's code, with the receiver in __self__.
+const proto::ProtoObject* ExecutionEngine::bindMethod(proto::ProtoContext* ctx,
+                                                      const proto::ProtoObject* method,
+                                                      const proto::ProtoObject* receiver) {
+    const RuntimeLayout& L = layout_;
+    const BytecodeModule* mod = compiledModuleOf(ctx, L, method);
+    return L.functionProtoFor(static_cast<unsigned>(mod->arity() - 1))
+        ->newChild(ctx)
+        ->setAttribute(ctx, L.codeKey, method->getOwnAttributeDirect(ctx, L.codeKey))
+        ->setAttribute(ctx, L.selfKey, receiver);
+}
+
+// A lazy val member: the holder's thunk is a method, run once with the
+// receiver of the access (Open question Q12); the holder is mutable.
+const proto::ProtoObject* ExecutionEngine::forceMember(proto::ProtoContext* ctx,
+                                                       const proto::ProtoObject* holder,
+                                                       const proto::ProtoObject* receiver) {
+    const RuntimeLayout& L = layout_;
+    if (holder->hasOwnAttribute(ctx, L.valueKey) == PROTO_TRUE)
+        return holder->getOwnAttributeDirect(ctx, L.valueKey);
+    const BytecodeModule* mod =
+        compiledModuleOf(ctx, L, holder->getOwnAttributeDirect(ctx, L.thunkKey));
+    proto::ProtoContext scope(ctx->space, ctx);
+    scope.resizeAutomaticLocals(1);
+    scope.setAutomaticLocal(0, receiver);
+    const proto::ProtoObject* v = execute(&scope, *mod, scope.getAutomaticLocals(), 1, nullptr);
+    holder->setAttribute(&scope, L.valueKey, v);  // mutable holder: in place
+    scope.returnValue = v;
+    return v;
+}
+
+// new cls(args): base[0] = cls, base[1..argc] the arguments.
+const proto::ProtoObject* ExecutionEngine::instantiate(proto::ProtoContext* ctx,
+                                                       const proto::ProtoObject** base,
+                                                       const proto::ProtoString* ctorKey,
+                                                       unsigned argc) {
+    const RuntimeLayout& L = layout_;
+    const proto::ProtoObject* cls = base[0];
+    const bool mutableInstances = cls->getOwnAttributeDirect(ctx, L.mutableKey) == PROTO_TRUE;
+    const proto::ProtoObject* init = cls->getOwnAttributeDirect(ctx, ctorKey);
+    base[0] = cls->newChild(ctx, mutableInstances);  // the instance's chain keeps cls alive
+    if (!init)
+        throw ScalaError("IllegalArgumentException",
+                         typeName(ctx, L, base[0]) + " has no constructor taking " +
+                             std::to_string(argc) + " arguments");
+    return callWithReceiver(ctx, init, base, argc);
+}
+
+const proto::ProtoObject* ExecutionEngine::construct(proto::ProtoContext* ctx,
+                                                     const proto::ProtoObject* cls,
+                                                     const proto::ProtoObject* const* args,
+                                                     unsigned argc) {
+    proto::ProtoContext scope(ctx->space, ctx);
+    scope.resizeAutomaticLocals(argc + 1);
+    const proto::ProtoObject** a = scope.getAutomaticLocals();
+    a[0] = cls;
+    for (unsigned k = 0; k < argc; ++k) a[k + 1] = args[k];
+    const proto::ProtoObject* r = instantiate(&scope, a, layout_.initKey, argc);
+    scope.returnValue = r;
+    return r;
+}
+
+// MAKE_CLASS: an immutable prototype whose chain is exactly the pushed
+// parents (the linearization without the class, Design notes 1-2), carrying
+// the members, the class metadata and its membership marker.
+const proto::ProtoObject* ExecutionEngine::makeClass(proto::ProtoContext* ctx,
+                                                     const BytecodeModule::Const& spec,
+                                                     const proto::ProtoObject* const* base) {
+    const RuntimeLayout& L = layout_;
+    proto::ProtoContext scope(ctx->space, ctx);  // every intermediate shape is young in `scope`
+    const proto::ProtoList* chain = scope.newList(spec.argc, base);
+    const proto::ProtoObject* shape = L.anyProto->newChild(&scope, false)->setParents(&scope, chain);
+    for (std::size_t k = 0; k < spec.nameSymbols.size(); ++k)
+        shape = shape->setAttribute(&scope, spec.nameSymbols[k], base[spec.argc + k]);
+    shape = shape->setAttribute(&scope, spec.keySymbol, PROTO_TRUE);
+    shape = shape->setAttribute(&scope, L.nameKey, makeString(&scope, spec.sval));
+    if (spec.flags & BytecodeModule::kClassMutableInstances)
+        shape = shape->setAttribute(&scope, L.mutableKey, PROTO_TRUE);
+    if (spec.flags & BytecodeModule::kClassCase) {
+        shape = shape->setAttribute(&scope, L.prefixKey, makeString(&scope, spec.sval));
+        if (!(spec.flags & BytecodeModule::kClassCaseObject)) {
+            const proto::ProtoList* fields = scope.newList();
+            for (const proto::ProtoString* f : spec.fieldSymbols)
+                fields = fields->appendLast(&scope, f->asObject(&scope));
+            shape = shape->setAttribute(&scope, L.fieldsKey, fields->asObject(&scope));
+        }
+    }
+    scope.returnValue = shape;
+    return shape;
+}
+
+const proto::ProtoObject* ExecutionEngine::makeTuple(proto::ProtoContext* ctx,
+                                                     const proto::ProtoObject* const* elems,
+                                                     unsigned n) {
+    const RuntimeLayout& L = layout_;
+    proto::ProtoContext scope(ctx->space, ctx);
+    const proto::ProtoObject* t = L.tupleProto[n]->newChild(&scope, false);
+    for (unsigned k = 0; k < n; ++k) t = t->setAttribute(&scope, L.tupleFieldKey[k + 1], elems[k]);
+    scope.returnValue = t;
+    return t;
+}
+
+// super.m(args) in a method defined by the template site.key (DESIGN §4.4):
+// the first definition of m after that template in the receiver's
+// linearization, found by pointer identity (O(n), R6).
+const proto::ProtoObject* ExecutionEngine::superSend(proto::ProtoContext* ctx,
+                                                     const proto::ProtoObject** base,
+                                                     const BytecodeModule::Const& site) {
+    const RuntimeLayout& L = layout_;
+    const proto::ProtoObject* owner = L.globals->getOwnAttributeDirect(ctx, site.keySymbol);
+    const proto::ProtoList* chain = base[0]->getParents(ctx);  // young in ctx
+    const unsigned long n = chain->getSize(ctx);
+    unsigned long k = 0;
+    while (k < n && chain->getAt(ctx, static_cast<int>(k)) != owner) ++k;
+    for (++k; k < n; ++k) {
+        const proto::ProtoObject* m =
+            chain->getAt(ctx, static_cast<int>(k))->getOwnAttributeDirect(ctx, site.symbol);
+        if (m) return callMember(ctx, m, base, site.argc);
+    }
+    throw ScalaError("NoSuchMethodError", "super." + site.sval + " has no implementation after " +
+                                              GlobalTable::nameOfKey(site.key.substr(1)));
+}
+
+// Named arguments reach native methods (Product.copy) through protoCore's
+// keyword ProtoSparseList, keyed by the interned name (DESIGN §5.2); Scala
+// methods take them in a later phase (Open question Q9).
+const proto::ProtoObject* ExecutionEngine::sendKeywords(proto::ProtoContext* ctx,
+                                                        const proto::ProtoObject** base,
+                                                        const BytecodeModule::Const& site) {
+    const proto::ProtoObject* receiver = base[0];
+    if (receiver == PROTO_NONE)
+        throw ScalaError("NullPointerException", "cannot invoke '" + site.sval + "' on null");
+    const proto::ProtoObject* m = receiver->getAttribute(ctx, site.symbol);
+    if (!m || m == PROTO_NONE) throwMissingMember(ctx, receiver, site.symbol);
+    if (!m->isMethod(ctx))
+        throw ScalaError("UnsupportedOperationException",
+                         "named arguments are not supported yet for methods written in Scala (" +
+                             site.sval + ")");
+    proto::ProtoContext scope(ctx->space, ctx);
+    const proto::ProtoList* positional = scope.newList(site.argc, base + 1);
+    const proto::ProtoSparseList* keywords = scope.newSparseList();
+    for (std::size_t k = 0; k < site.nameSymbols.size(); ++k)
+        keywords = keywords->setAt(&scope, reinterpret_cast<unsigned long>(site.nameSymbols[k]),
+                                   base[1 + site.argc + k]);
+    const proto::ProtoObject* r = m->asMethod(ctx)(&scope, receiver, nullptr, positional, keywords);
+    if (!r) r = PROTO_NONE;
+    scope.returnValue = r;
+    return r;
+}
+
+bool ExecutionEngine::testType(proto::ProtoContext* ctx, TypeCode code,
+                               const proto::ProtoObject* v) const {
+    const RuntimeLayout& L = layout_;
+    const bool isBool = v == PROTO_TRUE || v == PROTO_FALSE;
+    const bool anyVal = isNumberFast(v) || isCharFast(v) || isBool || v == L.unit;
+    switch (code) {
+        case TypeCode::Integer:  return isIntegerFast(v);
+        case TypeCode::Double:   return isDoubleFast(v);
+        case TypeCode::Boolean:  return isBool;
+        case TypeCode::Char:     return isCharFast(v);
+        case TypeCode::String:   return proto::ProtoObject::isStringTagFast(v);
+        case TypeCode::Unit:     return v == L.unit;
+        case TypeCode::List:     return isListFast(v);
+        case TypeCode::ConsList: return isListFast(v) && v->asList(ctx)->getSize(ctx) > 0;
+        case TypeCode::Function: return v != PROTO_NONE && (compiledModuleOf(ctx, L, v) || v->isMethod(ctx));
+        case TypeCode::AnyRef:   return v != PROTO_NONE && !anyVal;
+        case TypeCode::AnyVal:   return anyVal;
+        case TypeCode::Null:     return v == PROTO_NONE;
+        case TypeCode::NonNull:  return v != PROTO_NONE;
+        case TypeCode::Nothing:  return false;
+    }
+    return false;
+}
+
+void ExecutionEngine::throwMissingMember(proto::ProtoContext* ctx, const proto::ProtoObject* receiver,
+                                         const proto::ProtoString* name) const {
+    std::string n = name->toStdString(ctx);
+    // A private member's key is "<Class>::<name>": report the name.
+    const auto sep = n.rfind("::");
+    if (sep != std::string::npos && sep > 0 && sep + 2 < n.size()) n = n.substr(sep + 2);
+    // `x_=` on an object that has `x`: an assignment to a val.
+    if (n.size() > 2 && n.compare(n.size() - 2, 2, "_=") == 0) {
+        const std::string field = n.substr(0, n.size() - 2);
+        if (receiver->hasAttribute(ctx, proto::ProtoString::createSymbol(ctx, field.c_str())) == PROTO_TRUE)
+            throw ScalaError("NoSuchMethodError", "Reassignment to val " + field);
+    }
     throw ScalaError("NoSuchMethodError",
-                     "methods written in Scala on objects are not implemented yet");
+                     "value " + n + " is not a member of " + typeName(ctx, layout_, receiver));
 }
 
 const proto::ProtoObject* ExecutionEngine::force(proto::ProtoContext* ctx,
@@ -126,11 +383,13 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
     checkNativeStack();
     const unsigned arity = static_cast<unsigned>(mod.arity());
     const unsigned fixed = mod.isVariadic() ? arity - 1 : arity;
-    if (mod.isVariadic() ? argc < fixed : argc != arity)
+    if (mod.isVariadic() ? argc < fixed : argc != arity) {
+        const unsigned self = mod.isMethod() ? 1 : 0;
         throw ScalaError("IllegalArgumentException",
                          "wrong number of arguments for " + mod.name() + ": expected " +
-                         std::to_string(fixed) + (mod.isVariadic() ? " or more" : "") +
-                         ", got " + std::to_string(argc));
+                         std::to_string(fixed - self) + (mod.isVariadic() ? " or more" : "") +
+                         ", got " + std::to_string(argc - self));
+    }
     const unsigned stackBase = arity + static_cast<unsigned>(mod.localCount());
 
     proto::ProtoContext frame(parent->space, parent);
@@ -261,8 +520,7 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                 case Op::SEND: {
                     const auto& site = mod.constAt(operand);
                     const proto::ProtoObject** base = sp - site.argc - 1;  // receiver
-                    const proto::ProtoObject* r = send(&frame, base[0], site.symbol, base + 1, site.argc);
-                    base[0] = r;
+                    base[0] = dispatch(&frame, base, site.symbol, site.argc);
                     sp = base + 1;
                     continue;
                 }
@@ -355,16 +613,96 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                                        proto::ProtoString::createSymbol(&frame, "unary_!"), nullptr, 0);
                     continue;
                 }
-                // The Phase 2 object-model opcodes are declared but not yet
-                // executable; they fall through to the rejection below until
-                // their handlers land. Listing them keeps this switch
-                // exhaustive over Op (-Wswitch).
-                case Op::MAKE_CLASS: case Op::NEW: case Op::INVOKE_INIT:
-                case Op::STORE_FIELD: case Op::SET_FIELD: case Op::SEND_SUPER:
-                case Op::TEST_TYPE: case Op::TEST_PROTO: case Op::UNAPPLY_FIELDS:
-                case Op::UNCONS: case Op::MATCH_ERROR: case Op::CAST_FAIL:
-                case Op::MAKE_TUPLE: case Op::SEND_KW:
-                    break;
+                case Op::MAKE_CLASS: {
+                    const auto& spec = mod.constAt(operand);
+                    const proto::ProtoObject** base =
+                        sp - spec.argc - static_cast<unsigned>(spec.nameSymbols.size());
+                    base[0] = makeClass(&frame, spec, base);
+                    sp = base + 1;
+                    continue;
+                }
+                case Op::NEW: {
+                    const auto& site = mod.constAt(operand);
+                    const proto::ProtoObject** base = sp - site.argc - 1;  // [cls a1..an]
+                    base[0] = instantiate(&frame, base, site.symbol, site.argc);
+                    sp = base + 1;
+                    continue;
+                }
+                case Op::INVOKE_INIT: {
+                    const auto& site = mod.constAt(operand);
+                    const proto::ProtoObject** base = sp - site.argc - 2;  // [cls this a1..an]
+                    const proto::ProtoObject* init = base[0]->getOwnAttributeDirect(&frame, site.symbol);
+                    if (!init) throw std::logic_error("INVOKE_INIT: no initialiser " + site.sval);
+                    base[0] = callWithReceiver(&frame, init, base + 1, site.argc);
+                    sp = base + 1;
+                    continue;
+                }
+                case Op::STORE_FIELD:  // constructors: `this` is slot 0 (Design note 10)
+                    slots[0] = slots[0]->setAttribute(&frame, mod.constAt(operand).symbol, sp[-1]);
+                    --sp;
+                    continue;
+                case Op::SET_FIELD: {  // setters of var fields: the instance is mutable
+                    const proto::ProtoObject* obj = sp[-2];
+                    if (obj->setAttribute(&frame, mod.constAt(operand).symbol, sp[-1]) != obj)
+                        throw ScalaError("UnsupportedOperationException",
+                                         "cannot assign a field of an immutable object");
+                    sp -= 2;
+                    continue;
+                }
+                case Op::SEND_SUPER: {
+                    const auto& site = mod.constAt(operand);
+                    const proto::ProtoObject** base = sp - site.argc - 1;  // [this a1..an]
+                    base[0] = superSend(&frame, base, site);
+                    sp = base + 1;
+                    continue;
+                }
+                case Op::TEST_TYPE:
+                    sp[-1] = testType(&frame, static_cast<TypeCode>(operand), sp[-1]) ? PROTO_TRUE : PROTO_FALSE;
+                    continue;
+                case Op::TEST_PROTO: {  // class membership by marker (Design note 5)
+                    const proto::ProtoObject* v = sp[-1];
+                    sp[-1] = v != PROTO_NONE &&
+                                     v->getAttribute(&frame, mod.constAt(operand).symbol) == PROTO_TRUE
+                                 ? PROTO_TRUE : PROTO_FALSE;
+                    continue;
+                }
+                case Op::UNAPPLY_FIELDS: {
+                    const auto& names = mod.constAt(operand);
+                    const proto::ProtoObject* v = *--sp;  // also held by the match's scrutinee slot
+                    for (const proto::ProtoString* key : names.nameSymbols) {
+                        const proto::ProtoObject* f = v->getOwnAttributeDirect(&frame, key);
+                        *sp++ = f ? f : PROTO_NONE;
+                    }
+                    continue;
+                }
+                case Op::UNCONS: {
+                    const proto::ProtoList* list = sp[-1]->asList(&frame);
+                    sp[-1] = list->getAt(&frame, 0);
+                    *sp++ = list->removeFirst(&frame)->asObject(&frame);
+                    continue;
+                }
+                case Op::MATCH_ERROR: {
+                    const proto::ProtoObject* v = sp[-1];
+                    throw ScalaError("MatchError", show(&frame, L, v) + " (of class " + typeName(&frame, L, v) + ")");
+                }
+                case Op::CAST_FAIL:
+                    throw ScalaError("ClassCastException", typeName(&frame, L, sp[-1]) +
+                                                               " cannot be cast to " + mod.constAt(operand).sval);
+                case Op::MAKE_TUPLE: {
+                    const unsigned n = static_cast<unsigned>(operand);
+                    const proto::ProtoObject** base = sp - n;
+                    base[0] = makeTuple(&frame, base, n);
+                    sp = base + 1;
+                    continue;
+                }
+                case Op::SEND_KW: {
+                    const auto& site = mod.constAt(operand);
+                    const proto::ProtoObject** base =
+                        sp - site.argc - static_cast<unsigned>(site.nameSymbols.size()) - 1;
+                    base[0] = sendKeywords(&frame, base, site);
+                    sp = base + 1;
+                    continue;
+                }
             }
             // Every handled opcode continues the loop or returns; reaching this
             // point means the module holds an opcode value the VM does not know

@@ -1,11 +1,16 @@
 #include "runtime/Values.h"
 #include "compiler/BytecodeModule.h"
+#include "runtime/Errors.h"
+#include "runtime/ExecutionEngine.h"
+#include "runtime/Hashing.h"
 #include "runtime/StackGuard.h"
 
 #include <charconv>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <vector>
 
 namespace protoScala {
 
@@ -45,6 +50,31 @@ const BytecodeModule* compiledModuleOf(proto::ProtoContext* ctx, const RuntimeLa
     const proto::ProtoObject* code = v->getOwnAttributeDirect(ctx, L.codeKey);
     if (!code || !proto::isSmallInt(code)) return nullptr;
     return reinterpret_cast<const BytecodeModule*>(proto::asSmallInt(code));
+}
+
+bool isScalaInstance(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v) {
+    if (!isObjectCellFast(v) || v == PROTO_NONE) return false;
+    if (compiledModuleOf(ctx, L, v)) return false;  // function objects
+    return v->getAttribute(ctx, L.nameKey) != PROTO_NONE;
+}
+
+namespace {
+std::string classNameOf(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v) {
+    const proto::ProtoObject* n = v->getAttribute(ctx, L.nameKey);
+    return proto::ProtoObject::isStringTagFast(n)
+               ? reinterpret_cast<const proto::ProtoString*>(n)->toStdString(ctx) : "Object";
+}
+} // namespace
+
+std::int32_t identityHash(proto::ProtoContext* ctx, const proto::ProtoObject* v) {
+    const unsigned long h = v->getHash(ctx);
+    return static_cast<std::int32_t>((h ^ (h >> 32)) & 0x7FFFFFFFUL);
+}
+
+std::string defaultToString(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v) {
+    char hex[16];
+    std::snprintf(hex, sizeof hex, "%x", static_cast<unsigned>(identityHash(ctx, v)));
+    return classNameOf(ctx, L, v) + "@" + hex;
 }
 
 void appendUtf8(std::string& out, char32_t c) {
@@ -145,8 +175,18 @@ std::string show(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::
         return out + ")";
     }
     if (const BytecodeModule* m = compiledModuleOf(ctx, L, v))
-        return "<function" + std::to_string(m->arity()) + ">";
+        return "<function" + std::to_string(m->isMethod() ? m->arity() - 1 : m->arity()) + ">";
     if (v->isMethod(ctx)) return "<function>";
+    if (isScalaInstance(ctx, L, v)) {
+        const ActiveCallContext* active = activeCallContext();
+        if (!active) return defaultToString(ctx, L, v);
+        checkNativeStack();  // a toString may print nested instances
+        const proto::ProtoObject* s = active->engine->send(ctx, v, L.toStringName, nullptr, 0);
+        if (!proto::ProtoObject::isStringTagFast(s))
+            throw ScalaError("ClassCastException",
+                             "toString returned " + typeName(ctx, L, s) + ", not String");
+        return reinterpret_cast<const proto::ProtoString*>(s)->toStdString(ctx);
+    }
     return "<object>";
 }
 
@@ -176,6 +216,13 @@ bool valuesEqual(proto::ProtoContext* ctx, const RuntimeLayout& L,
                 return false;
         return true;
     }
+    if (isScalaInstance(ctx, L, a)) {  // a == b is a.equals(b) (null was handled above)
+        const ActiveCallContext* active = activeCallContext();
+        if (!active) return false;
+        checkNativeStack();
+        const proto::ProtoObject* argv[1] = {b};
+        return active->engine->send(ctx, a, L.equalsName, argv, 1) == PROTO_TRUE;
+    }
     return false;
 }
 
@@ -188,8 +235,39 @@ std::string typeName(proto::ProtoContext* ctx, const RuntimeLayout& L, const pro
     if (isCharFast(v)) return "Char";
     if (proto::ProtoObject::isStringTagFast(v)) return "String";
     if (isListFast(v)) return "List";
+    if (isScalaInstance(ctx, L, v)) return classNameOf(ctx, L, v);
     if (compiledModuleOf(ctx, L, v) || v->isMethod(ctx)) return "Function";
     return "Object";
+}
+
+std::int32_t scalaHash(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v) {
+    if (!v || v == PROTO_NONE || v == L.unit) return 0;
+    if (v == PROTO_TRUE) return 1231;
+    if (v == PROTO_FALSE) return 1237;
+    if (proto::isSmallInt(v)) return hashing::longHash(proto::asSmallInt(v));
+    if (isLargeIntFast(v)) return hashing::javaStringHash(show(ctx, L, v));  // provisional (BigInt)
+    if (isDoubleFast(v)) return hashing::doubleHash(v->asDouble(ctx));
+    if (isCharFast(v)) return static_cast<std::int32_t>(charValueFast(v));
+    if (proto::ProtoObject::isStringTagFast(v))
+        return hashing::javaStringHash(reinterpret_cast<const proto::ProtoString*>(v)->toStdString(ctx));
+    if (isListFast(v)) {
+        checkNativeStack();
+        const proto::ProtoList* list = v->asList(ctx);
+        std::vector<std::int32_t> hs;
+        for (unsigned long k = 0, n = list->getSize(ctx); k < n; ++k)
+            hs.push_back(scalaHash(ctx, L, list->getAt(ctx, static_cast<int>(k))));
+        return hashing::seqHash(hs);
+    }
+    if (isScalaInstance(ctx, L, v)) {
+        const ActiveCallContext* active = activeCallContext();
+        if (!active) return identityHash(ctx, v);
+        checkNativeStack();
+        const proto::ProtoObject* h = active->engine->send(ctx, v, L.hashCodeName, nullptr, 0);
+        if (!proto::isSmallInt(h))
+            throw ScalaError("ClassCastException", "hashCode returned " + typeName(ctx, L, h) + ", not Int");
+        return static_cast<std::int32_t>(proto::asSmallInt(h));
+    }
+    return identityHash(ctx, v);
 }
 
 const proto::ProtoObject* makeString(proto::ProtoContext* ctx, const std::string& utf8) {

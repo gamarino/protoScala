@@ -46,7 +46,22 @@ public:
         if (cu.resultName.empty()) return "";
         const auto* key = proto::ProtoString::createSymbol(&ctx, cu.resultKey.c_str());
         const proto::ProtoObject* v = runtime_.layout().globals->getOwnAttributeDirect(&ctx, key);
-        return show(&ctx, runtime_.layout(), v ? v : PROTO_NONE);
+        return engine_.showTopLevel(&ctx, v ? v : PROTO_NONE);
+    }
+
+    // Runs a hand-assembled top-level module (engine tests of opcodes the
+    // compiler does not emit yet). The value of its RETURN is shown.
+    std::string runModule(std::unique_ptr<BytecodeModule> mod) {
+        proto::ProtoContext ctx(&space_, runtime_.rootContext());
+        mod->linkSymbols(&ctx);
+        const BytecodeModule& m = *mod;
+        modules_.push_back(std::move(mod));
+        try {
+            const proto::ProtoObject* v = engine_.run(&ctx, m);
+            return engine_.showTopLevel(&ctx, v);
+        } catch (const ScalaError& e) {
+            return std::string("error: ") + e.what();
+        }
     }
 
 private:

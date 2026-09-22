@@ -6,6 +6,7 @@
 #include "runtime/Runtime.h"
 #include "protoCore.h"
 
+#include <cstdint>
 #include <string>
 
 namespace protoScala {
@@ -45,6 +46,11 @@ inline bool isListFast(const proto::ProtoObject* v) {
     return v && (t == 2 || t == 25);
 }
 
+// POINTER_TAG_OBJECT is 0 (protoCore core/ProtoObject.cpp:560-575): an object cell.
+inline bool isObjectCellFast(const proto::ProtoObject* v) {
+    return v && (reinterpret_cast<unsigned long>(v) & 0x3FUL) == 0;
+}
+
 // Appends the UTF-8 encoding of code point `c` to `out`.
 void appendUtf8(std::string& out, char32_t c);
 
@@ -58,9 +64,27 @@ const BytecodeModule* compiledModuleOf(proto::ProtoContext* ctx, const RuntimeLa
 // "Infinity", "-Infinity".
 std::string formatDouble(double d);
 
+// An instance of a Scala class (or a runtime object with a class name, e.g.
+// WithFilter): an object cell whose chain has a __name__. Function objects,
+// Cells and lazy holders have none.
+bool isScalaInstance(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v);
+
+// AnyRef.toString: "<class name>@<identity hash in hex>".
+std::string defaultToString(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v);
+
+// System.identityHashCode: stable for the object's lifetime (cells never move).
+std::int32_t identityHash(proto::ProtoContext* ctx, const proto::ProtoObject* v);
+
 // Scala toString of `v` (null, (), Int, Double, Boolean, Char, String,
-// List(...), <functionN>, <object>).
+// List(...), <functionN>, <object>). An instance answers through its own
+// toString method, which needs an active engine (showTopLevel).
 std::string show(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v);
+
+// Scala's `##`: numbers by Statics (an Int-range integer hashes to itself, a
+// whole Double as the integer), Char: its code point, Boolean: 1231/1237,
+// String: String.hashCode, () and null: 0, List: seqHash of the elements'
+// `##` (provisional), instances: their hashCode method.
+std::int32_t scalaHash(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v);
 
 // Scala `==`: cooperative numeric equality across Int/Double/Char (NaN is
 // equal to nothing), strings by content, lists element-wise, identity
