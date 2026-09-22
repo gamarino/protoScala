@@ -31,3 +31,12 @@ it tomorrow"); the maintainer reviews them and may reverse any of them.
 | `@main` accepts only no parameters or `args: String*` (typed parameters recorded as a deviation) | missing Scala 3 feature |
 | P1: perf gate parked (retired instructions flat, cycles noisy under host load) and ASan pre-existing findings (3 timing/limit tests, ProtoSpace teardown leaks) not fixed | a real slowdown could slip; re-run `perf stat -r 3` on a quiet host before merge |
 | P1: Task 12 (rebuild of every embedder) not run; branch `feature/pslo-p1` not merged, not pushed | embedder validation pending |
+
+## Phase 2 open questions (2026-09-22)
+
+| Decision | Taken by |
+|---|---|
+| Q2: class/trait membership needs a new protoCore API (allocation-free walk of the flattened parent chain, no arbitrary step limit), shared by the family; protoScala uses a per-class marker attribute until it lands | maintainer |
+| Q1: instances under construction are rebuilt field by field; an early-escaped `this` sees an older version — accepted as deviation D28 | maintainer |
+| Q14: Phase 2 writes tutorial chapters 6, 7 and 9 (index numbering kept; 8 = collections in Phase 3) | maintainer |
+| Q3–Q13: plan recommendations accepted (immutable class prototypes, compile-time companion links, class-qualified private keys, plain `super` in Phase 2 / `super[T]` in Phase 4, top-level classes only, embedded Scala `Option` prelude, minimal `List` moved up from Phase 3, `SEND_KW` for native named args, representation-based type tests D29, D30/D31, lazy members D34, REPL class shadowing) | maintainer (accepted recommendations) |
