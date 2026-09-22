@@ -198,7 +198,46 @@ NodePtr Parser::parseExprOrIndented() {
     return parseExpr();
 }
 
+// Expr, with placeholder sections (SLS 6.23.2): a `_` that this Expr
+// properly contains (and no inner Expr does) becomes a parameter of a lambda
+// wrapping it; a bare `_` (or `_: T`) belongs to the enclosing Expr, so
+// `f(_)` is `x => f(x)`.
 NodePtr Parser::parseExpr() {
+    placeholderFrames_.emplace_back();
+    struct Pop {
+        std::vector<std::vector<std::string>>& frames;
+        ~Pop() { frames.pop_back(); }
+    } pop{placeholderFrames_};
+    NodePtr e = parseExprNoPlaceholders();
+    std::vector<std::string> names = std::move(placeholderFrames_.back());
+    if (names.empty()) return e;
+    const Node* bare = e.get();
+    if (bare->kind == NodeKind::Typed) bare = as<Typed>(*bare).expr.get();
+    if (bare->kind == NodeKind::Ident && names.size() == 1 && as<Ident>(*bare).name == names[0]) {
+        if (placeholderFrames_.size() < 2)
+            fail("unbound placeholder '_': write an explicit function literal", peek());
+        placeholderFrames_[placeholderFrames_.size() - 2].push_back(names[0]);
+        return e;
+    }
+    auto lambda = std::make_unique<Lambda>(e->pos);
+    for (std::string& n : names) {
+        Param p;
+        p.name = std::move(n);
+        p.pos = e->pos;
+        lambda->params.push_back(std::move(p));
+    }
+    lambda->body = std::move(e);
+    return lambda;
+}
+
+NodePtr Parser::placeholder(SourcePos pos) {
+    if (placeholderFrames_.empty()) fail("unbound placeholder '_'", peek());
+    std::string name = "_$" + std::to_string(++placeholderCounter_);
+    placeholderFrames_.back().push_back(name);
+    return std::make_unique<Ident>(pos, std::move(name));
+}
+
+NodePtr Parser::parseExprNoPlaceholders() {
     checkNativeStack(StackUse::Source);
     const Token& t = peek();
     switch (t.kind) {
@@ -209,12 +248,12 @@ NodePtr Parser::parseExpr() {
             fail("do-while loops are not part of Scala 3; use while ... do", t);
         case TokenKind::KwThrow:  unsupported("throw", t);
         case TokenKind::KwTry:    unsupported("try", t);
-        case TokenKind::KwFor:    unsupported("for comprehension", t);
+        case TokenKind::KwFor:    return parseFor();
         default: break;
     }
     if (lambdaAhead()) return parseLambda();
     NodePtr e = parseInfix(0);
-    if (at(TokenKind::KwMatch)) unsupported("match", peek());
+    while (at(TokenKind::KwMatch)) e = parseMatch(std::move(e));
     if (at(TokenKind::Equals)) {
         const NodeKind k = e->kind;
         if (k != NodeKind::Ident && k != NodeKind::Select && k != NodeKind::Apply)
@@ -528,8 +567,10 @@ NodePtr Parser::parseSimple() {
             if (!at(TokenKind::Dot)) fail("'.' expected after 'super'", peek());
             base = std::make_unique<Ident>(t.pos, "super");  // the compiler checks the context
             break;
-        case TokenKind::Underscore: unsupported("placeholder syntax '_'", t);
-        case TokenKind::KwMatch:    unsupported("match", t);
+        case TokenKind::Underscore:
+            base = placeholder(t.pos);
+            advance();
+            break;
         default:
             fail("expression expected but '" + spelling(t) + "' found", t);
     }
@@ -645,6 +686,12 @@ std::vector<NodePtr> Parser::parseArgs() {
 
 NodePtr Parser::parseBlockExpr() {
     const SourcePos pos = expect(TokenKind::LBrace, "'{'").pos;
+    while (at(TokenKind::Newline)) advance();
+    if (at(TokenKind::KwCase)) {
+        NodePtr lambda = parseCaseLambda(pos, TokenKind::RBrace);
+        expect(TokenKind::RBrace, "'}'");
+        return lambda;
+    }
     NodePtr block = parseBlockBody(TokenKind::RBrace, pos);
     expect(TokenKind::RBrace, "'}'");
     return block;
@@ -708,6 +755,8 @@ void Parser::checkEndMarker(const Node& previous, const Token& marker) const {
     switch (previous.kind) {
         case NodeKind::If:    ok = d == "if"; break;
         case NodeKind::While: ok = d == "while"; break;
+        case NodeKind::Match: ok = d == "match"; break;
+        case NodeKind::For:   ok = d == "for"; break;
         case NodeKind::DefDef: ok = d == as<DefDef>(previous).name; break;
         case NodeKind::ValDef: ok = d == "val" || d == as<ValDef>(previous).name; break;
         case NodeKind::TemplateDef: ok = d == as<TemplateDef>(previous).name; break;
@@ -924,9 +973,26 @@ NodePtr Parser::parseValDef(SourcePos pos, bool isVar, bool isLazy) {
     node->isVar = isVar;
     node->isLazy = isLazy;
     if (at(TokenKind::EndOfFile)) fail("value name expected", peek());
-    if (!at(TokenKind::Identifier) || peek().isOperator || peek(1).kind == TokenKind::Comma ||
-        peek(1).kind == TokenKind::At || peek(1).kind == TokenKind::LParen)
-        notImplemented("patterns in val definitions", peek());
+    const TokenKind next = peek(1).kind;
+    // A lone name, upper-case or back-quoted too, is defined, not matched
+    // (`val X = 1`); anything else is a pattern definition.
+    const bool simpleName = at(TokenKind::Identifier) && !peek().isOperator &&
+                            (next == TokenKind::Colon || next == TokenKind::Equals ||
+                             next == TokenKind::Newline || next == TokenKind::EndOfFile ||
+                             next == TokenKind::Semicolon);
+    if (!simpleName) {
+        if (at(TokenKind::Identifier) && next == TokenKind::Comma)
+            notImplemented("several names in one value definition", peek());
+        if (isLazy) notImplemented("lazy pattern definitions", peek());
+        node->pattern = parsePattern2();
+        if (at(TokenKind::Colon)) {  // val (a, b): (Int, Int) = ...: the type is erased
+            advance();
+            parseType();
+        }
+        expect(TokenKind::Equals, "'='");
+        node->rhs = parseExprOrIndented();
+        return node;
+    }
     node->name = advance().text;
     if (at(TokenKind::Colon)) {
         advance();
@@ -1255,10 +1321,420 @@ NodePtr Parser::parseNew() {
     }
     if (at(TokenKind::LParen) && !peek().firstOnLine)
         unsupported("multiple constructor argument lists", peek(), true);
+    // A body on the next line is still a class body, as for a template
+    // definition (parseTemplateDef).
+    if (at(TokenKind::Newline) && peek(1).kind == TokenKind::LBrace)
+        unsupported("anonymous classes", peek(1), true);
     if ((at(TokenKind::LBrace) && !peek().firstOnLine) || at(TokenKind::ColonEol) ||
         at(TokenKind::KwWith))
         unsupported("anonymous classes", peek(), true);
     return node;
+}
+
+// ---------------------------------------------------------------------------
+// Pattern matching
+
+// e match { cases } | e match <Indent> cases <Outdent>. A case at the same
+// indentation as `match` is not supported (D23).
+NodePtr Parser::parseMatch(NodePtr scrutinee) {
+    auto m = std::make_unique<Match>(scrutinee->pos);
+    m->scrutinee = std::move(scrutinee);
+    advance();  // match
+    TokenKind terminator = TokenKind::RBrace;
+    if (at(TokenKind::LBrace)) {
+        advance();
+    } else if (at(TokenKind::Indent)) {
+        advance();
+        terminator = TokenKind::Outdent;
+    } else {
+        fail("'{' or an indented block of cases expected after 'match'", peek());
+    }
+    while (skipOneNewline()) {}
+    if (!at(TokenKind::KwCase)) fail("'case' expected", peek());
+    while (at(TokenKind::KwCase)) {
+        m->cases.push_back(parseCaseClause(terminator));
+        while (skipOneNewline()) {}
+    }
+    expect(terminator, terminator == TokenKind::RBrace ? "'}'" : "end of the cases");
+    return m;
+}
+
+// case Pattern [if Guard] => Block
+CaseDef Parser::parseCaseClause(TokenKind terminator) {
+    CaseDef c;
+    c.pos = expect(TokenKind::KwCase, "'case'").pos;
+    c.pattern = parsePattern();
+    if (at(TokenKind::KwIf)) {
+        advance();
+        c.guard = parseInfix(0);
+    }
+    expect(TokenKind::Arrow, "'=>'");
+    c.body = parseCaseBody(terminator);
+    return c;
+}
+
+// The statements after `=>`, up to the next `case` or the end of the cases.
+// A single expression is the body itself; several statements are a block.
+NodePtr Parser::parseCaseBody(TokenKind terminator) {
+    if (at(TokenKind::Indent)) return parseIndentedBlock();
+    auto block = std::make_unique<Block>(peek().pos);
+    const bool saved = inTemplateBody_;
+    inTemplateBody_ = false;
+    for (;;) {
+        const TokenKind k = peek().kind;
+        if (k == TokenKind::KwCase || k == terminator || k == TokenKind::EndOfFile ||
+            k == TokenKind::EndMarker)
+            break;
+        if (k == TokenKind::Newline || k == TokenKind::Semicolon) {
+            const TokenKind next = peek(1).kind;
+            advance();
+            if (next == TokenKind::KwCase || next == terminator) break;
+            continue;
+        }
+        block->stats.push_back(parseBlockStat(terminator));
+        const TokenKind after = peek().kind;
+        if (after != TokenKind::Newline && after != TokenKind::Semicolon &&
+            after != TokenKind::KwCase && after != terminator &&
+            after != TokenKind::EndOfFile && after != TokenKind::EndMarker)
+            fail("';' or newline expected but '" + spelling(peek()) + "' found", peek());
+    }
+    inTemplateBody_ = saved;
+    if (block->stats.size() == 1 && block->stats[0]->kind != NodeKind::ValDef &&
+        block->stats[0]->kind != NodeKind::DefDef)
+        return std::move(block->stats[0]);
+    return block;
+}
+
+// `{ case p => e ... }`: a one-parameter function whose body matches its
+// argument (D34). Stops before the closing `terminator`.
+NodePtr Parser::parseCaseLambda(SourcePos pos, TokenKind terminator) {
+    const std::string param = "x$" + std::to_string(++caseLambdaCounter_);
+    auto m = std::make_unique<Match>(pos);
+    m->scrutinee = std::make_unique<Ident>(pos, param);
+    while (at(TokenKind::KwCase)) {
+        m->cases.push_back(parseCaseClause(terminator));
+        while (skipOneNewline()) {}
+    }
+    auto lambda = std::make_unique<Lambda>(pos);
+    Param p;
+    p.name = param;
+    p.pos = pos;
+    lambda->params.push_back(std::move(p));
+    lambda->body = std::move(m);
+    return lambda;
+}
+
+namespace {
+
+// A variable pattern is a simple identifier starting with a lower-case
+// letter or `_` (SLS 8.1.1); a back-quoted or upper-case identifier is a
+// stable identifier.
+bool isVarId(const Token& t) {
+    if (t.kind != TokenKind::Identifier || t.backquoted || t.isOperator || t.text.empty())
+        return false;
+    const unsigned char c = static_cast<unsigned char>(t.text[0]);
+    return c == '_' || (c >= 'a' && c <= 'z') || c >= 0x80;
+}
+
+PatternPtr makePattern(Pattern::Kind k, SourcePos pos) {
+    auto p = std::make_unique<Pattern>();
+    p->kind = k;
+    p->pos = pos;
+    return p;
+}
+
+} // namespace
+
+// Pattern ::= Pattern1 {`|` Pattern1}
+PatternPtr Parser::parsePattern() {
+    PatternPtr first = parsePattern1();
+    if (!atIdent("|")) return first;
+    auto alt = makePattern(Pattern::Kind::Alt, first->pos);
+    alt->args.push_back(std::move(first));
+    while (atIdent("|")) {
+        advance();
+        alt->args.push_back(parsePattern1());
+    }
+    return alt;
+}
+
+// x: T | _: T | Pattern2. The type is a simple or a parenthesised type, so
+// that `|` still separates alternatives.
+PatternPtr Parser::parsePattern1() {
+    if ((isVarId(peek()) || at(TokenKind::Underscore)) && peek(1).kind == TokenKind::Colon) {
+        const Token& t = advance();
+        advance();  // :
+        auto typed = makePattern(Pattern::Kind::Typed, t.pos);
+        const bool wildcard = t.kind == TokenKind::Underscore;
+        auto inner = makePattern(wildcard ? Pattern::Kind::Wildcard : Pattern::Kind::Var, t.pos);
+        if (!wildcard) inner->name = t.text;
+        typed->args.push_back(std::move(inner));
+        typed->type = at(TokenKind::LParen) ? parseType() : parseSimpleType();
+        return typed;
+    }
+    return parsePattern2();
+}
+
+// Pattern2 ::= id `@` InfixPattern | InfixPattern
+PatternPtr Parser::parsePattern2() {
+    if (isVarId(peek()) && peek(1).kind == TokenKind::At) {
+        const Token& t = advance();
+        advance();  // @
+        auto bind = makePattern(Pattern::Kind::Bind, t.pos);
+        bind->name = t.text;
+        bind->args.push_back(parseInfixPattern(0));
+        return bind;
+    }
+    return parseInfixPattern(0);
+}
+
+// SimplePattern {op SimplePattern}: `h :: t` is `::(h, t)`; operators ending
+// in ':' are right-associative. `|` and a final `*` are not operators here.
+PatternPtr Parser::parseInfixPattern(int minPrec, int assocPrec) {
+    PatternPtr lhs = parseSimplePattern();
+    while (at(TokenKind::Identifier) && peek().isOperator && !peek().backquoted &&
+           peek().text != "|" && !(peek().text == "*" && peek(1).kind == TokenKind::RParen)) {
+        const Token& opTok = peek();
+        const std::string op = opTok.text;
+        const int p = precedence(op);
+        if (p < minPrec) break;
+        const bool right = isRightAssociative(op);
+        if (assocPrec == p && !right) break;
+        advance();
+        PatternPtr rhs = right ? parseInfixPattern(p, p) : parseInfixPattern(p + 1);
+        auto ex = makePattern(Pattern::Kind::Extractor, lhs->pos);
+        ex->name = op;
+        ex->expr = std::make_unique<Ident>(opTok.pos, op);
+        ex->args.push_back(std::move(lhs));
+        ex->args.push_back(std::move(rhs));
+        lhs = std::move(ex);
+    }
+    return lhs;
+}
+
+PatternPtr Parser::parseSimplePattern() {
+    checkNativeStack(StackUse::Source);
+    const Token& t = peek();
+    switch (t.kind) {
+        case TokenKind::Underscore:
+            advance();
+            // `_*` (two tokens): a sequence wildcard; parsePatternArgs checks
+            // that it is the last argument.
+            if (atIdent("*") &&
+                (peek(1).kind == TokenKind::RParen || peek(1).kind == TokenKind::Comma)) {
+                advance();
+                return makePattern(Pattern::Kind::SeqWildcard, t.pos);
+            }
+            return makePattern(Pattern::Kind::Wildcard, t.pos);
+        case TokenKind::IntLit: case TokenKind::FloatLit: case TokenKind::StringLit:
+        case TokenKind::CharLit: case TokenKind::KwTrue: case TokenKind::KwFalse:
+        case TokenKind::KwNull: {
+            auto lit = makePattern(Pattern::Kind::Literal, t.pos);
+            lit->expr = parseSimple();
+            if (lit->expr->kind != NodeKind::IntLit && lit->expr->kind != NodeKind::FloatLit &&
+                lit->expr->kind != NodeKind::StringLit && lit->expr->kind != NodeKind::CharLit &&
+                lit->expr->kind != NodeKind::BoolLit && lit->expr->kind != NodeKind::NullLit)
+                fail("a literal pattern cannot be selected or applied", t);
+            return lit;
+        }
+        case TokenKind::LParen: {
+            advance();
+            if (at(TokenKind::RParen)) {
+                advance();
+                auto unit = makePattern(Pattern::Kind::Literal, t.pos);
+                unit->expr = std::make_unique<UnitLit>(t.pos);
+                return unit;
+            }
+            PatternPtr first = parsePattern();
+            if (at(TokenKind::RParen)) {
+                advance();
+                return first;
+            }
+            auto tuple = makePattern(Pattern::Kind::Tuple, t.pos);
+            tuple->args.push_back(std::move(first));
+            while (at(TokenKind::Comma)) {
+                advance();
+                tuple->args.push_back(parsePattern());
+            }
+            expect(TokenKind::RParen, "')'");
+            return tuple;
+        }
+        case TokenKind::Identifier: {
+            if (t.text == "-" && !t.backquoted &&
+                (peek(1).kind == TokenKind::IntLit || peek(1).kind == TokenKind::FloatLit)) {
+                auto lit = makePattern(Pattern::Kind::Literal, t.pos);
+                lit->expr = parsePrefix();  // folds the sign into the literal
+                if (lit->expr->kind != NodeKind::IntLit && lit->expr->kind != NodeKind::FloatLit)
+                    fail("a literal pattern cannot be selected or applied", t);
+                return lit;
+            }
+            if (isVarId(t) && peek(1).kind != TokenKind::Dot &&
+                !(peek(1).kind == TokenKind::LParen && !peek(1).firstOnLine)) {
+                advance();
+                auto var = makePattern(Pattern::Kind::Var, t.pos);
+                var->name = t.text;
+                return var;
+            }
+            if (t.isOperator && !t.backquoted)
+                fail("pattern expected but '" + t.text + "' found", t);
+            // A stable path, possibly an extractor: A, a.B, A.B(p...), A[T](p...)
+            NodePtr path = std::make_unique<Ident>(t.pos, t.text);
+            std::string text = t.text;
+            advance();
+            while (at(TokenKind::Dot) && peek(1).kind == TokenKind::Identifier) {
+                advance();
+                const Token& name = advance();
+                text += "." + name.text;
+                const SourcePos pp = path->pos;
+                path = std::make_unique<Select>(pp, std::move(path), name.text);
+            }
+            if (at(TokenKind::LBracket)) {  // type arguments of an extractor: erased
+                advance();
+                parseType();
+                while (at(TokenKind::Comma)) {
+                    advance();
+                    parseType();
+                }
+                expect(TokenKind::RBracket, "']'");
+            }
+            if (at(TokenKind::LParen) && !peek().firstOnLine) {
+                advance();
+                auto ex = makePattern(Pattern::Kind::Extractor, t.pos);
+                ex->name = text;
+                ex->expr = std::move(path);
+                ex->args = parsePatternArgs();
+                return ex;
+            }
+            auto stable = makePattern(Pattern::Kind::Stable, t.pos);
+            stable->expr = std::move(path);
+            return stable;
+        }
+        default:
+            fail("pattern expected but '" + spelling(t) + "' found", t);
+    }
+}
+
+// After `(`: patterns, the last one possibly a sequence wildcard
+// (`_*`, `rest*`, `rest @ _*`); up to and including `)`.
+std::vector<PatternPtr> Parser::parsePatternArgs() {
+    std::vector<PatternPtr> args;
+    while (!at(TokenKind::RParen)) {
+        if (isVarId(peek()) && peek(1).kind == TokenKind::Identifier &&
+            !peek(1).backquoted && peek(1).text == "*" && peek(2).kind == TokenKind::RParen) {
+            auto seq = makePattern(Pattern::Kind::SeqWildcard, peek().pos);
+            seq->name = advance().text;
+            advance();  // *
+            args.push_back(std::move(seq));
+            break;
+        }
+        if (isVarId(peek()) && peek(1).kind == TokenKind::At &&
+            peek(2).kind == TokenKind::Underscore && peek(3).kind == TokenKind::Identifier &&
+            !peek(3).backquoted && peek(3).text == "*" && peek(4).kind == TokenKind::RParen) {
+            auto seq = makePattern(Pattern::Kind::SeqWildcard, peek().pos);
+            seq->name = advance().text;
+            advance();  // @
+            advance();  // _
+            advance();  // *
+            args.push_back(std::move(seq));
+            break;
+        }
+        args.push_back(parsePattern());
+        if (!at(TokenKind::Comma)) break;
+        advance();
+    }
+    expect(TokenKind::RParen, "')'");
+    for (std::size_t k = 0; k + 1 < args.size(); ++k)
+        if (args[k]->kind == Pattern::Kind::SeqWildcard)
+            fail("a sequence wildcard must be the last pattern argument", peek());
+    return args;
+}
+
+// ---------------------------------------------------------------------------
+// For-comprehensions
+
+// for (enums) [yield|do] body | for { enums } [yield|do] body |
+// for <Indent> enums <Outdent> (yield|do) body | for enums (yield|do) body
+NodePtr Parser::parseFor() {
+    auto node = std::make_unique<For>(advance().pos);
+    bool delimited = true;
+    if (at(TokenKind::LParen)) {
+        advance();
+        parseEnumerators(*node, TokenKind::RParen);
+        expect(TokenKind::RParen, "')'");
+    } else if (at(TokenKind::LBrace)) {
+        advance();
+        parseEnumerators(*node, TokenKind::RBrace);
+        expect(TokenKind::RBrace, "'}'");
+    } else if (at(TokenKind::Indent)) {
+        advance();
+        parseEnumerators(*node, TokenKind::Outdent);
+        expect(TokenKind::Outdent, "end of the enumerators");
+    } else {
+        delimited = false;
+        parseEnumerators(*node, TokenKind::EndOfFile);
+    }
+    if (at(TokenKind::Newline) &&
+        (peek(1).kind == TokenKind::KwYield || peek(1).kind == TokenKind::KwDo))
+        advance();
+    if (at(TokenKind::KwYield)) {
+        advance();
+        node->isYield = true;
+    } else if (at(TokenKind::KwDo)) {
+        advance();
+    } else if (!delimited) {
+        fail("'do' or 'yield' expected", peek());
+    }
+    node->body = parseExprOrIndented();
+    return node;
+}
+
+// Generator {(`;` | nl) Enumerator | Guard}: guards may follow a generator
+// or another guard without a separator. Without delimiters (`terminator` is
+// EndOfFile) the enumerators end at the end of the line.
+void Parser::parseEnumerators(For& f, TokenKind terminator) {
+    while (at(TokenKind::Newline)) advance();
+    f.enums.push_back(parseGeneratorOrValue());
+    if (f.enums.back().kind != Enumerator::Kind::Generator)
+        fail("a for-comprehension must start with a generator `p <- e`", peek());
+    for (;;) {
+        if (at(TokenKind::KwIf)) {
+            Enumerator g;
+            g.kind = Enumerator::Kind::Guard;
+            g.pos = advance().pos;
+            g.expr = parseInfix(0);
+            f.enums.push_back(std::move(g));
+            continue;
+        }
+        if (at(TokenKind::Semicolon) ||
+            (at(TokenKind::Newline) && terminator != TokenKind::EndOfFile)) {
+            advance();
+            while (at(TokenKind::Newline) || at(TokenKind::Semicolon)) advance();
+            if (at(terminator)) return;
+            if (at(TokenKind::KwIf)) continue;
+            f.enums.push_back(parseGeneratorOrValue());
+            continue;
+        }
+        return;
+    }
+}
+
+// [case] Pattern1 `<-` Expr | Pattern1 `=` Expr
+Enumerator Parser::parseGeneratorOrValue() {
+    Enumerator en;
+    en.pos = peek().pos;
+    if (at(TokenKind::KwCase)) advance();
+    en.pattern = parsePattern1();
+    if (at(TokenKind::LeftArrow)) {
+        advance();
+        en.kind = Enumerator::Kind::Generator;
+    } else if (at(TokenKind::Equals)) {
+        advance();
+        en.kind = Enumerator::Kind::Value;
+    } else {
+        fail("'<-' or '=' expected in a for-comprehension", peek());
+    }
+    en.expr = parseExprOrIndented();
+    return en;
 }
 
 // ---------------------------------------------------------------------------
@@ -1325,12 +1801,6 @@ TypePtr Parser::parseSimpleType() {
     checkNativeStack(StackUse::Source);
     const Token& t = peek();
     TypePtr ty;
-    if (atIdent("_*")) {  // `xs: _*`, which the lexer reads as one mixed identifier
-        advance();
-        auto rep = makeType(TypeTree::Kind::Repeated, t.pos);
-        rep->args.push_back(makeType(TypeTree::Kind::Wildcard, t.pos));
-        return rep;
-    }
     if (t.kind == TokenKind::Underscore || (t.kind == TokenKind::Identifier && atIdent("?"))) {
         advance();
         ty = makeType(TypeTree::Kind::Wildcard, t.pos);

@@ -133,8 +133,7 @@ TEST(Parser, TypesAreParsedIntoTypeTrees) {
 }
 
 TEST(Parser, LaterPhaseConstructsAreReportedClearly) {
-    for (const char* src : {"x match { case 1 => 2 }", "throw e", "try a finally b",
-                            "for (x <- xs) yield x", "new A { }", "super[T].f", "_ + 1"}) {
+    for (const char* src : {"throw e", "try a finally b", "new A { }", "super[T].f"}) {
         try {
             parseExpressionSource(src);
             FAIL() << "expected ParseError for " << src;
@@ -340,7 +339,7 @@ TEST(ParserDefs, Imports) {
 TEST(ParserDefs, UnsupportedDefinitionsAreReportedClearly) {
     EXPECT_NE(unitError("enum Color { case Red }").find("not implemented yet"), std::string::npos);
     EXPECT_NE(unitError("type T = Int").find("not implemented yet"), std::string::npos);
-    EXPECT_NE(unitError("val (a, b) = p").find("patterns in val definitions"), std::string::npos);
+    EXPECT_NE(unitError("lazy val (a, b) = p").find("lazy pattern definitions"), std::string::npos);
     EXPECT_NE(unitError("given x: Int = 1").find("(D3)"), std::string::npos);
     EXPECT_NE(unitError("def f(using x: Int) = x").find("(D3)"), std::string::npos);
     EXPECT_NE(unitError("def f() { 1 }").find("procedure syntax"), std::string::npos);
@@ -383,7 +382,8 @@ TEST(ParserDefs, MoreUnsupportedAndInvalidDefinitions) {
               std::string::npos);
     EXPECT_NE(unitError("implicit val x: Int = 1").find("(D3)"), std::string::npos);
     EXPECT_NE(unitError("def f(implicit x: Int) = x").find("(D3)"), std::string::npos);
-    EXPECT_NE(unitError("val a, b = 1").find("patterns in val definitions are not implemented yet"),
+    EXPECT_NE(unitError("val a, b = 1")
+                  .find("several names in one value definition are not implemented yet"),
               std::string::npos);
     EXPECT_NE(unitError("lazy var x = 1").find("lazy"), std::string::npos);
     EXPECT_NE(unitError("def f: Int").find("'=' expected"), std::string::npos);
@@ -501,4 +501,159 @@ TEST(ParserTemplates, IncompleteTemplatesAskForMoreInput) {
     EXPECT_TRUE(parseErrorOf("class A {").find("unexpected end of input") == 0 ||
                 parseErrorOf("class A {").find("unclosed") != std::string::npos);
     EXPECT_NE(parseErrorOf("class A:\n").find("indented template body"), std::string::npos);
+}
+TEST(ParserPatterns, MatchBothSyntaxes) {
+    const std::string expected =
+        "(match x (case (int 1) (str \"one\")) (case n (if (infix > n (int 1))) (str \"many\")) "
+        "(case _ (str \"none\")))";
+    EXPECT_EQ(e("x match {\n  case 1 => \"one\"\n  case n if n > 1 => \"many\"\n"
+                "  case _ => \"none\"\n}"),
+              expected);
+    EXPECT_EQ(e("x match { case 1 => \"one\" case n if n > 1 => \"many\" case _ => \"none\" }"),
+              expected);
+    EXPECT_EQ(dump(*protoScala::parseSource(
+                  "val r = x match\n  case 1 => \"one\"\n  case n if n > 1 => \"many\"\n"
+                  "  case _ => \"none\"\nprintln(r)\n")),
+              "(unit (val r " + expected + ") (apply println r))");
+    // A multi-line case body is an indented block.
+    EXPECT_EQ(e("x match\n  case 1 =>\n    val y = 2\n    y\n  case _ => 0"),
+              "(match x (case (int 1) (block (val y (int 2)) y)) (case _ (int 0)))");
+}
+
+TEST(ParserPatterns, EveryPatternKind) {
+    auto p = [](const std::string& pat) {
+        const std::string d = e("v match { case " + pat + " => 0 }");
+        // "(match v (case <pat> (int 0)))": 15 characters before <pat>, 10 after it
+        return d.substr(15, d.size() - 15 - 10);
+    };
+    EXPECT_EQ(p("-1"), "(int -1)");
+    EXPECT_EQ(p("\"s\""), "(str \"s\")");
+    EXPECT_EQ(p("'c'"), "(char 'c')");
+    EXPECT_EQ(p("true"), "true");
+    EXPECT_EQ(p("null"), "null");
+    EXPECT_EQ(p("()"), "()");
+    EXPECT_EQ(p("_"), "_");
+    EXPECT_EQ(p("x"), "x");
+    EXPECT_EQ(p("Nil"), "(stable Nil)");
+    EXPECT_EQ(p("`x`"), "(stable x)");
+    EXPECT_EQ(p("Color.Red"), "(stable (. Color Red))");
+    EXPECT_EQ(p("i: Int"), "(: i Int)");
+    EXPECT_EQ(p("_: List[Int]"), "(: _ List[Int])");
+    EXPECT_EQ(p("p @ Point(x, _)"), "(@ p (unapply Point x _))");
+    EXPECT_EQ(p("1 | 2 | 3"), "(| (int 1) (int 2) (int 3))");
+    EXPECT_EQ(p("(a, b)"), "(tuple-pat a b)");
+    EXPECT_EQ(p("(a)"), "a");
+    EXPECT_EQ(p("h :: t"), "(unapply :: h t)");
+    EXPECT_EQ(p("a :: b :: rest"), "(unapply :: a (unapply :: b rest))");
+    EXPECT_EQ(p("List(a, _*)"), "(unapply List a _*)");
+    EXPECT_EQ(p("List(a, rest*)"), "(unapply List a (_* rest))");
+    EXPECT_EQ(p("List(a, rest @ _*)"), "(unapply List a (_* rest))");
+    EXPECT_EQ(p("Some(Point(1, y))"), "(unapply Some (unapply Point (int 1) y))");
+    EXPECT_EQ(p("Empty()"), "(unapply Empty)");
+}
+
+TEST(ParserPatterns, CaseLambdasAndPatternVals) {
+    EXPECT_EQ(e("xs.map { case (a, b) => a + b }"),
+              "(apply (. xs map) (lambda (x$1) (match x$1 (case (tuple-pat a b) "
+              "(infix + a b)))))");
+    EXPECT_EQ(dump(*protoScala::parseSource("val (a, b) = pair\nvar h :: t = xs")),
+              "(unit (val-pat (tuple-pat a b) pair) (var-pat (unapply :: h t) xs))");
+    EXPECT_EQ(dump(*protoScala::parseSource("val Point(x, y) = p")),
+              "(unit (val-pat (unapply Point x y) p))");
+}
+
+TEST(ParserPatterns, ForComprehensions) {
+    const std::string yield =
+        "(for-yield (<- x xs) (if (infix > x (int 1))) (<- y ys) (= z (infix * x y)) "
+        "(infix + z (int 1)))";
+    EXPECT_EQ(e("for (x <- xs if x > 1; y <- ys; z = x * y) yield z + 1"), yield);
+    EXPECT_EQ(e("for { x <- xs if x > 1\n y <- ys\n z = x * y } yield z + 1"), yield);
+    EXPECT_EQ(e("for\n  x <- xs if x > 1\n  y <- ys\n  z = x * y\nyield z + 1"), yield);
+    EXPECT_EQ(e("for x <- xs do println(x)"), "(for-do (<- x xs) (apply println x))");
+    EXPECT_EQ(e("for (x <- xs) println(x)"), "(for-do (<- x xs) (apply println x))");
+    EXPECT_EQ(e("for ((a, b) <- ps) yield a"), "(for-yield (<- (tuple-pat a b) ps) a)");
+    EXPECT_EQ(e("for (Some(v) <- os) yield v"), "(for-yield (<- (unapply Some v) os) v)");
+}
+
+TEST(ParserPatterns, PlaceholderSyntax) {
+    EXPECT_EQ(e("_ + 1"), "(lambda (_$1) (infix + _$1 (int 1)))");
+    EXPECT_EQ(e("xs.map(_ * 2)"), "(apply (. xs map) (lambda (_$1) (infix * _$1 (int 2))))");
+    EXPECT_EQ(e("xs.map(_.toString)"), "(apply (. xs map) (lambda (_$1) (. _$1 toString)))");
+    EXPECT_EQ(e("f(_)"), "(lambda (_$1) (apply f _$1))");
+    EXPECT_EQ(e("_ + _"), "(lambda (_$1 _$2) (infix + _$1 _$2))");
+    EXPECT_EQ(e("xs.foreach(println(_))"),
+              "(apply (. xs foreach) (lambda (_$1) (apply println _$1)))");
+}
+
+TEST(ParserPatterns, PatternErrors) {
+    EXPECT_NE(parseErrorOf("x match { }").find("'case' expected"), std::string::npos);
+    EXPECT_NE(parseErrorOf("x match\n1").find("'{' or an indented block of cases"),
+              std::string::npos);
+    EXPECT_NE(parseErrorOf("for (x <- xs)").find("unexpected end of input"), std::string::npos);
+    EXPECT_NE(parseErrorOf("for x <- xs println(x)").find("'do' or 'yield' expected"),
+              std::string::npos);
+    EXPECT_NE(parseErrorOf("lazy val (a, b) = p").find("lazy pattern definitions"),
+              std::string::npos);
+}
+
+TEST(ParserPatterns, CasePrefixedGenerators) {
+    // Scala 3 `case p <- e`: the pattern is filtered (Desugar); the tree is the same.
+    EXPECT_EQ(e("for (case (a, b) <- ps) yield a"), "(for-yield (<- (tuple-pat a b) ps) a)");
+    EXPECT_EQ(e("for\n  case Some(v) <- os\n  case w: Int <- ws\ndo println(v)"),
+              "(for-do (<- (unapply Some v) os) (<- (: w Int) ws) (apply println v))");
+}
+
+TEST(ParserTemplates, AnonymousClassBodyOnTheNextLine) {
+    EXPECT_NE(parseErrorOf("new T\n{ def f = 1 }").find("anonymous classes are not implemented yet"),
+              std::string::npos);
+}
+
+TEST(ParserPatterns, MoreMatchAndPlaceholderForms) {
+    // A typed placeholder `(_: T)` is still a bare placeholder of its argument.
+    EXPECT_EQ(e("(_: Int) + 1"), "(lambda (_$1) (infix + (parens (typed _$1 Int)) (int 1)))");
+    // match binds looser than infix operators and chains.
+    EXPECT_EQ(e("a + b match { case _ => 0 } match { case n => n }"),
+              "(match (match (infix + a b) (case _ (int 0))) (case n n))");
+    // An indented match inside a def body, followed by another statement.
+    EXPECT_EQ(dump(*protoScala::parseSource("def f(x: Int) =\n  x match\n    case 0 => \"z\"\n"
+                                            "    case _ => \"nz\"\nf(1)\n")),
+              "(unit (def f ((x:Int)) (block (match x (case (int 0) (str \"z\")) "
+              "(case _ (str \"nz\"))))) (apply f (int 1)))");
+    // Several statements in a brace-syntax case body form a block.
+    EXPECT_EQ(e("x match { case 1 => val y = 2; y case _ => 0 }"),
+              "(match x (case (int 1) (block (val y (int 2)) y)) (case _ (int 0)))");
+    EXPECT_EQ(e("v match { case Color.Red | Color.Green => 1 case `x` :: _ => 2 }"),
+              "(match v (case (| (stable (. Color Red)) (stable (. Color Green))) (int 1)) "
+              "(case (unapply :: (stable x) _) (int 2)))");
+}
+
+TEST(ParserPatterns, MorePatternErrors) {
+    EXPECT_NE(parseErrorOf("val x = _").find("unbound placeholder"), std::string::npos);
+    EXPECT_NE(parseErrorOf("v match { case List(_*, a) => 0 }").find("sequence wildcard"),
+              std::string::npos);
+    EXPECT_NE(parseErrorOf("v match { case 1.abs => 0 }").find("literal pattern"),
+              std::string::npos);
+    EXPECT_NE(parseErrorOf("for (x = 1) yield x").find("must start with a generator"),
+              std::string::npos);
+    EXPECT_NE(parseErrorOf("for (x in xs) yield x").find("'<-' or '=' expected"),
+              std::string::npos);
+}
+
+TEST(ParserPatterns, ClonePatternIsDeep) {
+    auto unit = protoScala::parseSource("val p @ Some((a: Int, Color.Red, -1)) = v");
+    const auto& vd = static_cast<const protoScala::ValDef&>(*unit->stats[0]);
+    auto copy = protoScala::clonePattern(*vd.pattern);
+    EXPECT_EQ(dump(*copy), dump(*vd.pattern));
+    EXPECT_EQ(dump(*copy), "(@ p (unapply Some (tuple-pat (: a Int) (stable (. Color Red)) (int -1))))");
+    EXPECT_NE(copy->args[0].get(), vd.pattern->args[0].get());
+}
+
+TEST(ParserPatterns, EndMarkersAndSeparators) {
+    EXPECT_EQ(dump(*protoScala::parseSource("x match\n  case _ => 1\nend match\nfor\n  a <- as\n"
+                                            "do\n  println(a)\nend for\n")),
+              "(unit (match x (case _ (int 1))) (for-do (<- a as) (block (apply println a))))");
+    EXPECT_NE(parseErrorOf("x match { case 1 => 2 3 }").find("';' or newline expected"),
+              std::string::npos);
+    EXPECT_NE(parseErrorOf("for x <- xs\ny <- ys do println(x)").find("'do' or 'yield'"),
+              std::string::npos);
 }

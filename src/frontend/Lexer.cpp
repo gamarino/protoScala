@@ -364,7 +364,9 @@ std::size_t Lexer::identCharLength(std::size_t at) const {
 }
 
 // Alphanumeric identifiers: a letter, `_` or `$`, then letters, digits, `_`,
-// `$`; after an `_`, the rest may be operator characters (`unary_-`, `x_+`).
+// `$`; after an `_` that is not the first character, the rest may be operator
+// characters (`unary_-`, `x_+`). A leading `_` never takes them, as in
+// scalac: `_: T` and `_*` are the wildcard followed by `:` / `*`.
 Token Lexer::lexIdentifierOrKeyword() {
     const SourcePos start{line_, column_};
     std::string text;
@@ -376,7 +378,7 @@ Token Lexer::lexIdentifierOrKeyword() {
         }
         const std::size_t len = identCharLength(pos_);
         if (len == 0) break;
-        lastWasUnderscore = (cur() == '_');
+        lastWasUnderscore = cur() == '_' && !text.empty();
         text.append(source_, pos_, len);
         for (std::size_t i = 0; i < len; ++i) advance();
     }

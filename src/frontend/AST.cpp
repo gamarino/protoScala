@@ -36,17 +36,22 @@
  *                     or `x:Int`, with ` = <default>` appended;
  *                     <parent>: `T`, or `(T <arg>...)` with an argument list
  *   New               (new T <arg>...)
+ *   Match             (match <scrutinee> (case <pat> [(if <guard>)] <body>)...)
+ *   For               (for-yield|for-do <enum>... <body>), <enum> one of
+ *                     (<- <pat> <expr>), (if <expr>), (= <pat> <expr>)
+ *   pattern ValDef    (val-pat [mods] <pat> <rhs>), (var-pat ...)
+ *   Pattern           _, x, a literal as its expression, (stable <path>),
+ *                     (: <pat> <type>), (@ x <pat>), (| <pat>...),
+ *                     (unapply <path> <pat>...), (tuple-pat <pat>...),
+ *                     _* or (_* rest)
  *   CompilationUnit   (unit <stat>...)
  *   TypeTree          Name, a.b.C, C[A, B], (A, B) => R, (A, B), => T, T*, ?, A | B
  */
 #include "frontend/AST.h"
 
-namespace protoScala {
+#include <stdexcept>
 
-// Placeholder until the pattern tree is defined together with pattern
-// matching: no ValDef carries a pattern yet, but its destructor needs a
-// complete type. The real definition replaces this one.
-struct Pattern {};
+namespace protoScala {
 
 ValDef::ValDef(SourcePos p) : Node(NodeKind::ValDef, p) {}
 ValDef::~ValDef() = default;
@@ -136,6 +141,44 @@ void renderType(std::string& out, const TypeTree& t) {
 }
 
 void render(std::string& out, const Node& n);
+
+void renderPattern(std::string& out, const Pattern& p) {
+    using K = Pattern::Kind;
+    switch (p.kind) {
+        case K::Wildcard: out += '_'; return;
+        case K::Var: out += p.name; return;
+        case K::Literal: render(out, *p.expr); return;
+        case K::Stable:
+            out += "(stable ";
+            render(out, *p.expr);
+            out += ')';
+            return;
+        case K::Typed:
+            out += "(: ";
+            renderPattern(out, *p.args[0]);
+            out += ' ';
+            renderType(out, *p.type);
+            out += ')';
+            return;
+        case K::Bind:
+            out += "(@ " + p.name + ' ';
+            renderPattern(out, *p.args[0]);
+            out += ')';
+            return;
+        case K::Alt: case K::Extractor: case K::Tuple:
+            out += p.kind == K::Alt ? "(|" : p.kind == K::Tuple ? "(tuple-pat" : "(unapply ";
+            if (p.kind == K::Extractor) render(out, *p.expr);
+            for (const PatternPtr& a : p.args) {
+                out += ' ';
+                renderPattern(out, *a);
+            }
+            out += ')';
+            return;
+        case K::SeqWildcard:
+            out += p.name.empty() ? "_*" : "(_* " + p.name + ")";
+            return;
+    }
+}
 
 void renderChildren(std::string& out, const std::vector<NodePtr>& nodes) {
     for (const NodePtr& c : nodes) {
@@ -363,6 +406,16 @@ void render(std::string& out, const Node& n) {
         }
         case NodeKind::ValDef: {
             const auto& x = as<ValDef>(n);
+            if (x.pattern) {
+                out += x.isVar ? "(var-pat" : "(val-pat";
+                renderMods(out, x.mods);
+                out += ' ';
+                renderPattern(out, *x.pattern);
+                out += ' ';
+                render(out, *x.rhs);
+                out += ')';
+                break;
+            }
             out += x.isLazy ? "(lazy-val" : x.isVar ? "(var" : "(val";
             renderMods(out, x.mods);
             out += ' ' + x.name;
@@ -463,9 +516,43 @@ void render(std::string& out, const Node& n) {
             out += ')';
             break;
         }
-        case NodeKind::Match:
-        case NodeKind::For:
-            break;  // declared by Task 2; never created before it
+        case NodeKind::Match: {
+            const auto& x = as<Match>(n);
+            out += "(match ";
+            render(out, *x.scrutinee);
+            for (const CaseDef& c : x.cases) {
+                out += " (case ";
+                renderPattern(out, *c.pattern);
+                if (c.guard) {
+                    out += " (if ";
+                    render(out, *c.guard);
+                    out += ')';
+                }
+                out += ' ';
+                render(out, *c.body);
+                out += ')';
+            }
+            out += ')';
+            break;
+        }
+        case NodeKind::For: {
+            const auto& x = as<For>(n);
+            out += x.isYield ? "(for-yield" : "(for-do";
+            for (const Enumerator& en : x.enums) {
+                using EK = Enumerator::Kind;
+                out += en.kind == EK::Generator ? " (<- " : en.kind == EK::Guard ? " (if " : " (= ";
+                if (en.pattern) {
+                    renderPattern(out, *en.pattern);
+                    out += ' ';
+                }
+                render(out, *en.expr);
+                out += ')';
+            }
+            out += ' ';
+            render(out, *x.body);
+            out += ')';
+            break;
+        }
     }
 }
 
@@ -480,6 +567,12 @@ std::string dump(const Node& n) {
 std::string dump(const TypeTree& t) {
     std::string out;
     renderType(out, t);
+    return out;
+}
+
+std::string dump(const Pattern& p) {
+    std::string out;
+    renderPattern(out, p);
     return out;
 }
 
@@ -537,11 +630,87 @@ void releaseChildren(Node& n, std::vector<NodePtr>& out) {
             return;
         }
         case NodeKind::New: for (auto& a : as<New>(n).args) take(a); return;
+        case NodeKind::Match: {  // patterns hold only literals and paths: freed normally
+            auto& m = as<Match>(n);
+            take(m.scrutinee);
+            for (auto& c : m.cases) { take(c.guard); take(c.body); }
+            return;
+        }
+        case NodeKind::For: {
+            auto& f = as<For>(n);
+            for (auto& en : f.enums) take(en.expr);
+            take(f.body);
+            return;
+        }
         default: return;  // leaves
     }
 }
 
 } // namespace
+
+namespace {
+
+TypePtr cloneType(const TypeTree& t) {
+    auto c = std::make_unique<TypeTree>();
+    c->kind = t.kind;
+    c->name = t.name;
+    c->pos = t.pos;
+    for (const TypePtr& a : t.args) c->args.push_back(cloneType(*a));
+    return c;
+}
+
+} // namespace
+
+NodePtr cloneSimpleExpr(const Node& n) {
+    switch (n.kind) {
+        case NodeKind::IntLit: {
+            const auto& x = as<IntLit>(n);
+            auto c = std::make_unique<IntLit>(x.pos);
+            c->value = x.value;
+            c->fitsLong = x.fitsLong;
+            c->digits = x.digits;
+            c->base = x.base;
+            return c;
+        }
+        case NodeKind::FloatLit: {
+            auto c = std::make_unique<FloatLit>(n.pos);
+            c->value = as<FloatLit>(n).value;
+            c->text = as<FloatLit>(n).text;
+            return c;
+        }
+        case NodeKind::StringLit: {
+            auto c = std::make_unique<StringLit>(n.pos);
+            c->value = as<StringLit>(n).value;
+            return c;
+        }
+        case NodeKind::CharLit: {
+            auto c = std::make_unique<CharLit>(n.pos);
+            c->value = as<CharLit>(n).value;
+            return c;
+        }
+        case NodeKind::BoolLit: return std::make_unique<BoolLit>(n.pos, as<BoolLit>(n).value);
+        case NodeKind::NullLit: return std::make_unique<NullLit>(n.pos);
+        case NodeKind::UnitLit: return std::make_unique<UnitLit>(n.pos);
+        case NodeKind::Ident: return std::make_unique<Ident>(n.pos, as<Ident>(n).name);
+        case NodeKind::Select: {
+            const auto& s = as<Select>(n);
+            return std::make_unique<Select>(s.pos, cloneSimpleExpr(*s.qualifier), s.name);
+        }
+        default:
+            throw std::logic_error("cloneSimpleExpr: not a literal or a path");
+    }
+}
+
+PatternPtr clonePattern(const Pattern& p) {
+    auto c = std::make_unique<Pattern>();
+    c->kind = p.kind;
+    c->pos = p.pos;
+    c->name = p.name;
+    if (p.expr) c->expr = cloneSimpleExpr(*p.expr);
+    if (p.type) c->type = cloneType(*p.type);
+    for (const PatternPtr& a : p.args) c->args.push_back(clonePattern(*a));
+    return c;
+}
 
 void destroyTree(NodePtr root) {
     std::vector<NodePtr> work;

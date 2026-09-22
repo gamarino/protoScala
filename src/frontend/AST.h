@@ -233,6 +233,67 @@ struct New : Node {
     bool hasArgs = false;
 };
 
+// A pattern (SLS 8). `expr` holds the literal of a Literal pattern and the
+// path (Ident / Select) of a Stable or Extractor pattern; `args` the
+// sub-patterns (Typed and Bind: exactly one).
+struct Pattern {
+    enum class Kind : uint8_t {
+        Wildcard,     // _
+        Var,          // x
+        Literal,      // 1, "s", 'c', true, null, ()
+        Stable,       // Nil, `x`, Color.Red: matched with ==
+        Typed,        // x: T, _: T
+        Bind,         // x @ p
+        Alt,          // p1 | p2
+        Extractor,    // C(p1, ...), h :: t
+        Tuple,        // (p1, p2, ...)
+        SeqWildcard,  // _*, rest*, rest @ _* (last argument of a sequence extractor)
+    };
+    Kind kind = Kind::Wildcard;
+    SourcePos pos;
+    std::string name;              // Var, Bind, SeqWildcard binder ("" for `_*`); Extractor: the path as written
+    NodePtr expr;
+    TypePtr type;                  // Typed
+    std::vector<PatternPtr> args;
+};
+
+struct CaseDef {
+    PatternPtr pattern;
+    NodePtr guard;   // may be null
+    NodePtr body;
+    SourcePos pos;
+};
+
+struct Match : Node {
+    Match(SourcePos p) : Node(NodeKind::Match, p) {}
+    NodePtr scrutinee;
+    std::vector<CaseDef> cases;
+};
+
+struct Enumerator {
+    enum class Kind : uint8_t { Generator, Guard, Value };  // p <- e | if c | p = e
+    Kind kind = Kind::Generator;
+    PatternPtr pattern;   // null for a guard
+    NodePtr expr;
+    SourcePos pos;
+};
+
+struct For : Node {
+    For(SourcePos p) : Node(NodeKind::For, p) {}
+    std::vector<Enumerator> enums;
+    NodePtr body;
+    bool isYield = false;
+};
+
+std::string dump(const Pattern& p);
+
+// Deep copies used by Desugar (a for-comprehension pattern appears in the
+// withFilter lambda and in the map lambda). cloneSimpleExpr copies literal,
+// Ident and Select trees only (what a pattern contains) and throws
+// std::logic_error for anything else.
+NodePtr cloneSimpleExpr(const Node& n);
+PatternPtr clonePattern(const Pattern& p);
+
 // Destroys a tree without recursion: an expression nested deeper than the
 // native stack (a 200 000-term `a + b + ...` chain, which the parser builds
 // iteratively) must not overflow it when it is freed. Owners of trees that

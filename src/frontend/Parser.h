@@ -101,6 +101,28 @@ private:
     NodePtr parseTemplateStat();
     std::vector<std::string> parseTypeParams();         // `[` ... `]`, variance and bounds erased
     NodePtr parseNew();                                 // at `new`
+
+    // Placeholder syntax: one frame per Expr being parsed (SLS 6.23.2).
+    std::vector<std::vector<std::string>> placeholderFrames_;
+    int placeholderCounter_ = 0;
+    int caseLambdaCounter_ = 0;
+    NodePtr parseExprNoPlaceholders();   // an Expr without placeholder handling
+    NodePtr placeholder(SourcePos pos);  // at `_`
+
+    // Pattern matching and for-comprehensions (Phase 2)
+    NodePtr parseMatch(NodePtr scrutinee);                // at `match`
+    CaseDef parseCaseClause(TokenKind terminator);
+    NodePtr parseCaseBody(TokenKind terminator);
+    NodePtr parseCaseLambda(SourcePos pos, TokenKind terminator);  // at the first `case`
+    PatternPtr parsePattern();                            // p1 | p2 | ...
+    PatternPtr parsePattern1();                           // typed patterns
+    PatternPtr parsePattern2();                           // x @ p
+    PatternPtr parseInfixPattern(int minPrec, int assocPrec = -1);
+    PatternPtr parseSimplePattern();
+    std::vector<PatternPtr> parsePatternArgs();           // after `(`, up to and including `)`
+    NodePtr parseFor();                                   // at `for`
+    void parseEnumerators(For& f, TokenKind terminator);
+    Enumerator parseGeneratorOrValue();
 };
 
 int precedence(const std::string& op);
