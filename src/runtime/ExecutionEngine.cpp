@@ -118,9 +118,21 @@ const proto::ProtoObject* ExecutionEngine::send(proto::ProtoContext* ctx,
     return r;
 }
 
+// A private member is addressed by its class-qualified key (D5). A receiver
+// that does not carry that key is not an instance of the class the site was
+// compiled in, so the send retries under the plain name - the resolution
+// Scala's static types would have made.
+const proto::ProtoString* ExecutionEngine::siteName(proto::ProtoContext* ctx,
+                                                    const proto::ProtoObject* receiver,
+                                                    const BytecodeModule::Const& site) const {
+    if (!site.keySymbol || receiver == PROTO_NONE) return site.symbol;
+    return receiver->hasAttribute(ctx, site.symbol) == PROTO_TRUE ? site.symbol : site.keySymbol;
+}
+
 const proto::ProtoObject* ExecutionEngine::dispatch(proto::ProtoContext* ctx,
                                                     const proto::ProtoObject** base,
-                                                    const proto::ProtoString* name, unsigned argc) {
+                                                    const proto::ProtoString* name, unsigned argc,
+                                                    bool applied) {
     const proto::ProtoObject* receiver = base[0];
     if (receiver == PROTO_NONE)
         throw ScalaError("NullPointerException",
@@ -129,10 +141,10 @@ const proto::ProtoObject* ExecutionEngine::dispatch(proto::ProtoContext* ctx,
     if (!m || m == PROTO_NONE) {
         // PROTO_NONE is also a stored null: probe presence (DESIGN §4.1).
         if (receiver->hasAttribute(ctx, name) != PROTO_TRUE) throwMissingMember(ctx, receiver, name);
-        if (argc == 0) return PROTO_NONE;
+        if (argc == 0 && !applied) return PROTO_NONE;
         throw ScalaError("NullPointerException", "cannot call null");
     }
-    return callMember(ctx, m, base, argc);
+    return callMember(ctx, m, base, argc, applied);
 }
 
 // Calls the value `m` found for a member of the receiver base[0]: a native
@@ -140,8 +152,12 @@ const proto::ProtoObject* ExecutionEngine::dispatch(proto::ProtoContext* ctx,
 // function-valued field, a plain field, or an object with `apply`.
 const proto::ProtoObject* ExecutionEngine::callMember(proto::ProtoContext* ctx,
                                                       const proto::ProtoObject* m,
-                                                      const proto::ProtoObject** base, unsigned argc) {
+                                                      const proto::ProtoObject** base, unsigned argc,
+                                                      bool applied) {
     const RuntimeLayout& L = layout_;
+    // `select`: the site wrote no argument list, so a member that is not a
+    // method yields its value instead of being applied (`c.f` vs `c.f()`).
+    const bool select = argc == 0 && !applied;
     if (m->isMethod(ctx)) return callNative(ctx, m->asMethod(ctx), base[0], base + 1, argc);
     if (const BytecodeModule* mod = compiledModuleOf(ctx, L, m)) {
         // A member method runs on this receiver; a bound method (the result of
@@ -149,19 +165,19 @@ const proto::ProtoObject* ExecutionEngine::callMember(proto::ProtoContext* ctx,
         // carrying its own receiver in __self__, and falls through to invoke.
         if (mod->isMethod() && !m->getOwnAttributeDirect(ctx, L.selfKey)) {
             // `obj.m` for a method with parameters: eta-expansion (D10).
-            if (argc == 0 && mod->arity() > 1 && !mod->isVariadic()) return bindMethod(ctx, m, base[0]);
+            if (select && mod->arity() > 1 && !mod->isVariadic()) return bindMethod(ctx, m, base[0]);
             return execute(ctx, *mod, base, argc + 1, nullptr);
         }
-        if (argc == 0) return m;                     // a function-valued field
+        if (select) return m;                        // a function-valued field
         return invoke(ctx, m, base + 1, argc);       // obj.f(args) = obj.f.apply(args)
     }
     if (isObjectCellFast(m) && m->getPrototype(ctx) == L.lazyProto) {  // a lazy val member
         const proto::ProtoObject* v = forceMember(ctx, m, base[0]);
-        if (argc == 0) return v;
+        if (select) return v;
         base[0] = v;  // the receiver is no longer needed; keep v rooted
         return invoke(ctx, v, base + 1, argc);
     }
-    if (argc == 0) return m;                         // a field
+    if (select) return m;                            // a field
     return send(ctx, m, L.applyName, base + 1, argc);  // obj.x(args) with x an object: x.apply(args)
 }
 
@@ -322,8 +338,9 @@ const proto::ProtoObject* ExecutionEngine::sendKeywords(proto::ProtoContext* ctx
     const proto::ProtoObject* receiver = base[0];
     if (receiver == PROTO_NONE)
         throw ScalaError("NullPointerException", "cannot invoke '" + site.sval + "' on null");
-    const proto::ProtoObject* m = receiver->getAttribute(ctx, site.symbol);
-    if (!m || m == PROTO_NONE) throwMissingMember(ctx, receiver, site.symbol);
+    const proto::ProtoString* name = siteName(ctx, receiver, site);
+    const proto::ProtoObject* m = receiver->getAttribute(ctx, name);
+    if (!m || m == PROTO_NONE) throwMissingMember(ctx, receiver, name);
     if (!m->isMethod(ctx))
         throw ScalaError("UnsupportedOperationException",
                          "named arguments are not supported yet for methods written in Scala (" +
@@ -541,10 +558,12 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                     sp = base + 1;
                     continue;
                 }
-                case Op::SEND: {
+                case Op::SEND:
+                case Op::SEND_APPLY: {
                     const auto& site = mod.constAt(operand);
                     const proto::ProtoObject** base = sp - site.argc - 1;  // receiver
-                    base[0] = dispatch(&frame, base, site.symbol, site.argc);
+                    base[0] = dispatch(&frame, base, siteName(&frame, base[0], site), site.argc,
+                                       op == Op::SEND_APPLY);
                     sp = base + 1;
                     continue;
                 }

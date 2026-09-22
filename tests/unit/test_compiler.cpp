@@ -235,6 +235,24 @@ TEST(CompilerTemplates, ClassesCompileToMakeClassNewAndMethods) {
     EXPECT_TRUE(has(t, "MAKE_LAZY"));                   // the singleton holder
 }
 
+// `c.f()` (an explicit argument list) applies a function-valued member;
+// `c.f` selects it. The two send sites must differ (SEND_APPLY vs SEND).
+TEST(CompilerTemplates, ExplicitApplicationHasItsOwnSendSite) {
+    const auto l = listing("class H(val f: () => Int)\nval h = new H(() => 1)\n"
+                           "val a = h.f()\nval b = h.f");
+    EXPECT_TRUE(has(l, "SEND_APPLY"));   // h.f()
+    EXPECT_TRUE(has(l, "  SEND "));      // h.f  (two spaces: not SEND_APPLY)
+    EXPECT_TRUE(has(l, "; f/0"));
+}
+
+// D5: a private member is addressed by its class-qualified key, with the plain
+// name as the site's fallback, so a foreign receiver still finds its own member.
+TEST(CompilerTemplates, PrivateMemberSendCarriesAPlainFallback) {
+    const auto l = listing("class C(val value: Int)\n"
+                           "class B(private val value: Int) { def r(c: C) = c.value }");
+    EXPECT_TRUE(has(l, "B::value/0 or value"));
+}
+
 TEST(CompilerTemplates, StaticErrors) {
     EXPECT_TRUE(has(compileError("trait T\nval t = new T"), "T is a trait; it cannot be instantiated"));
     EXPECT_TRUE(has(compileError("abstract class A\nval a = new A"), "A is abstract; it cannot be instantiated"));
@@ -243,8 +261,18 @@ TEST(CompilerTemplates, StaticErrors) {
     EXPECT_TRUE(has(compileError("final class F\nclass G extends F"), "cannot extend final class F"));
     EXPECT_TRUE(has(compileError("class A\nclass B\nclass C extends A with B"), "class B is not a trait"));
     EXPECT_TRUE(has(compileError("class A\nclass B\ntrait T extends A\nclass C extends B with T"),
-                    "illegal inheritance: superclass B is not a subclass of the superclass A "
-                    "of the mixin trait T"));
+                    "illegal trait inheritance: superclass B does not derive from "
+                    "trait T's superclass A"));
+    // A trait's superclass may come from the traits alone (dotty ensureFirstIsClass).
+    EXPECT_EQ(compileError("class A\ntrait U\ntrait T extends A\nclass C extends U with T"), "");
+    EXPECT_TRUE(has(compileError("class A(x: Int) { def this(y: Int, z: Int) = this(y, z) }"),
+                    "must call a preceding constructor, not itself"));
+    EXPECT_TRUE(has(compileError("trait S { def area: Double }\nclass C extends S "
+                                 "{ private def area = 1.0 }"),
+                    "weaker access privileges"));
+    EXPECT_TRUE(has(compileError("class B(val a: Int, val xs: Int*)\ndef f(ys: Int*) = "
+                                 "new B(1, 2, ys*)"),
+                    "before the splice, expected 1"));
     EXPECT_TRUE(has(compileError("class A extends B\nclass B extends A"), "cyclic inheritance"));
     EXPECT_TRUE(has(compileError("case class A(x: Int)\ncase class B(y: Int) extends A(y)"),
                     "case-to-case inheritance is prohibited"));

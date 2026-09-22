@@ -134,6 +134,9 @@ private:
     // --- Templates (CompileTemplates.cpp) ---------------------------------
     const MemberInfo* memberOf(const std::string& name) const;
     std::string selectKey(const std::string& name) const;
+    // A SendSite constant for `recv.name(...)`: the private key when `name` is a
+    // private member here, with the plain name as the runtime fallback (D5).
+    std::size_t sendSite(const std::string& name, std::uint32_t argc);
     void loadThis(SourcePos pos);
     std::vector<const TemplateDef*> sortTemplates(const std::vector<const TemplateDef*>& ts) const;
     ClassInfo buildClassInfo(const TemplateDef& t, const std::string& typeKey) const;
@@ -145,7 +148,7 @@ private:
     void compileTemplate(const TemplateDef& t, const ClassInfo& info);
     void compileConstructor(const TemplateDef& t, const ClassInfo& info);
     void compileAuxConstructor(const DefDef& d, const ClassInfo& info);
-    void compileSetter(const std::string& fieldKey, SourcePos pos);
+    void compileSetter(const std::string& fieldKey, const std::string& name, SourcePos pos);
     void compileObjectHolder(const ClassInfo& info, const std::string& termKey, SourcePos pos);
     void compileInitCall(const ClassInfo& target, const std::vector<NodePtr>& args, SourcePos pos);
     void compileNew(const New& n);

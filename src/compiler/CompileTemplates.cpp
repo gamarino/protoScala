@@ -49,6 +49,11 @@ std::string Compiler::selectKey(const std::string& name) const {
     return name;
 }
 
+std::size_t Compiler::sendSite(const std::string& name, std::uint32_t argc) {
+    const std::string key = selectKey(name);
+    return fn_->mod->addSendSite(key, argc, key == name ? std::string() : name);
+}
+
 void Compiler::loadThis(SourcePos pos) {
     bool found = false;
     const LocalInfo info = captureInto(fn_, "this", pos, &found);
@@ -137,16 +142,39 @@ ClassInfo Compiler::buildClassInfo(const TemplateDef& t, const std::string& type
     if (lins.empty()) lins.push_back({kAnyRefKey, kAnyKey});
     c.linearization = linearize(c.key, lins);
 
-    // A trait that extends a class may only be mixed into its subclasses (SLS 5.1.2).
+    // SLS 5.1.2: the classes among the base classes must form a single chain, so
+    // the template has one superclass. That superclass is the first parent when
+    // it is a class, and otherwise the most derived class the traits bring in
+    // (dotty's ensureFirstIsClass); every other inherited class must be one of
+    // its ancestors. `class C extends U with T` with `trait T extends A` is
+    // legal and gets A as its superclass; `class C extends B with T` is not,
+    // because B does not derive from A.
     if (!parents.empty()) {
-        const std::vector<std::string>& firstLin = parents[0]->linearization;
-        for (std::size_t k = 1; k < parents.size(); ++k) {
-            const ClassInfo* s = superclassOf(*parents[k]);
-            if (s && std::find(firstLin.begin(), firstLin.end(), s->key) == firstLin.end())
-                throw CompileError("illegal inheritance: superclass " + parents[0]->name +
-                                       " is not a subclass of the superclass " + s->name +
-                                       " of the mixin trait " + parents[k]->name,
-                                   t.parents[k].pos);
+        const ClassInfo* base =
+            parents[0]->kind == ClassKind::Class ? parents[0] : superclassOf(c);
+        for (const std::string& k : c.linearization) {
+            if (k == c.key) continue;
+            const ClassInfo* a = globals_.findTypeByKey(k);
+            if (!a || a->kind != ClassKind::Class || a->builtin) continue;
+            if (base && std::find(base->linearization.begin(), base->linearization.end(), k) !=
+                            base->linearization.end())
+                continue;
+            // Name the parent that brings the unrelated class in.
+            const ClassInfo* owner = nullptr;
+            SourcePos where = t.pos;
+            for (std::size_t j = 0; j < parents.size(); ++j)
+                if (owner == nullptr &&
+                    std::find(parents[j]->linearization.begin(), parents[j]->linearization.end(),
+                              k) != parents[j]->linearization.end()) {
+                    owner = parents[j];
+                    where = t.parents[j].pos;
+                }
+            throw CompileError(
+                std::string("illegal trait inheritance: superclass ") +
+                    (base ? base->name : std::string("AnyRef")) + " does not derive from " +
+                    (owner ? std::string(kindWord(owner->kind)) + " " + owner->name + "'s " : "") +
+                    "superclass " + a->name,
+                where);
         }
     }
 
@@ -168,13 +196,25 @@ ClassInfo Compiler::buildClassInfo(const TemplateDef& t, const std::string& type
 
     // Own members.
     std::unordered_set<std::string> own;
+    // `declaredPrivate`: written `private`. A plain constructor parameter is not
+    // declared private - Scala makes it a private[this] local that is not a
+    // member at all - so it may shadow an inherited public member (scalac
+    // accepts `class T(v: Int) extends Node(v)` over `class Node(val v: Int)`),
+    // and only a member the user marked private is checked below.
     auto addOwn = [&](const std::string& name, MemberKind kind, bool isPublic, bool concrete,
-                      SourcePos pos) {
+                      bool declaredPrivate, SourcePos pos) {
         if (!own.insert(name).second)
             throw CompileError(name + " is already defined in " + t.name, pos);
         auto inherited = c.members.find(name);
         const bool inheritedConcrete =
             inherited != c.members.end() && inherited->second.concrete && inherited->second.key == name;
+        // scalac: "private X cannot override X in ...": a private member may not
+        // take the place of an inherited public one (weaker access privileges).
+        if (declaredPrivate && inherited != c.members.end() && inherited->second.key == name)
+            throw CompileError("private " + name + " cannot override " + name +
+                                   " inherited by " + t.name +
+                                   ": it has weaker access privileges",
+                               pos);
         c.members[name] =
             MemberInfo{kind, isPublic ? name : privateKey(c.key, name), concrete || inheritedConcrete};
     };
@@ -186,9 +226,10 @@ ClassInfo Compiler::buildClassInfo(const TemplateDef& t, const std::string& type
             throw CompileError("default parameter values are not implemented yet", p.pos);
         // Plain parameters are private fields (reachable from the methods).
         const bool isPublic = (p.isVal || p.isVar || c.isCase) && !p.mods.isPrivate;
-        addOwn(p.name, p.isVar ? MemberKind::Var : MemberKind::Val, isPublic, true, p.pos);
+        addOwn(p.name, p.isVar ? MemberKind::Var : MemberKind::Val, isPublic, true,
+               p.mods.isPrivate, p.pos);
         if (p.isVar) {
-            addOwn(setterName(p.name), MemberKind::Def, isPublic, true, p.pos);
+            addOwn(setterName(p.name), MemberKind::Def, isPublic, true, p.mods.isPrivate, p.pos);
             ownVar = true;
         }
         c.ctorParams.push_back(p.name);
@@ -208,9 +249,10 @@ ClassInfo Compiler::buildClassInfo(const TemplateDef& t, const std::string& type
                        v.isLazy  ? MemberKind::LazyVal
                        : v.isVar ? MemberKind::Var
                                  : MemberKind::Val,
-                       !v.mods.isPrivate, v.rhs != nullptr, v.pos);
+                       !v.mods.isPrivate, v.rhs != nullptr, v.mods.isPrivate, v.pos);
                 if (v.isVar) {
-                    addOwn(setterName(v.name), MemberKind::Def, !v.mods.isPrivate, true, v.pos);
+                    addOwn(setterName(v.name), MemberKind::Def, !v.mods.isPrivate, true,
+                           v.mods.isPrivate, v.pos);
                     ownVar = true;
                 }
                 if (v.rhs) hasStatements = true;
@@ -235,7 +277,7 @@ ClassInfo Compiler::buildClassInfo(const TemplateDef& t, const std::string& type
                     break;
                 }
                 addOwn(d.name, d.paramLists.empty() ? MemberKind::ParamlessDef : MemberKind::Def,
-                       !d.mods.isPrivate, d.body != nullptr, d.pos);
+                       !d.mods.isPrivate, d.body != nullptr, d.mods.isPrivate, d.pos);
                 break;
             }
             case NodeKind::TemplateDef:
@@ -336,7 +378,7 @@ void Compiler::compileTemplate(const TemplateDef& t, const ClassInfo& info) {
     }
     auto setterFor = [&](const std::string& name, SourcePos pos) {
         keys.push_back(info.members.at(setterName(name)).key);
-        compileSetter(info.members.at(name).key, pos);
+        compileSetter(info.members.at(name).key, name, pos);
     };
     for (const Param& p : t.ctorParams)
         if (p.isVar) setterFor(p.name, p.pos);
@@ -417,6 +459,15 @@ void Compiler::compileConstructor(const TemplateDef& t, const ClassInfo& info) {
                  s->kind != NodeKind::Import)
             analyseCaptures(t.ctorParams, *s);
     }
+    // Parameter fields first, as scalac assigns them: a superclass constructor
+    // that calls an overridden method must already see them. compileInitCall
+    // stores the `this` the callee returns back into slot 0, so the fields
+    // survive the initialiser chain.
+    for (std::size_t k = 0; k < t.ctorParams.size(); ++k) {  // parameter fields
+        emit(Op::PUSH_LOCAL, 1 + k, t.pos, +1);
+        emit(Op::STORE_FIELD, fn_->mod->addSymbol(info.members.at(t.ctorParams[k].name).key), t.pos,
+             -1);
+    }
     if (info.kind != ClassKind::Trait) {  // a trait's initialiser runs only its own body
         const ClassInfo* super = superclassOf(info);
         if (super) {
@@ -441,11 +492,6 @@ void Compiler::compileConstructor(const TemplateDef& t, const ClassInfo& info) {
                                    t.pos);
             compileInitCall(*tr, ref && ref->hasArgs ? ref->args : noArgs, t.pos);
         }
-    }
-    for (std::size_t k = 0; k < t.ctorParams.size(); ++k) {  // parameter fields
-        emit(Op::PUSH_LOCAL, 1 + k, t.pos, +1);
-        emit(Op::STORE_FIELD, fn_->mod->addSymbol(info.members.at(t.ctorParams[k].name).key), t.pos,
-             -1);
     }
     for (const NodePtr& s : t.body) {  // lazy holders: a thunk method per member (Q12)
         if (s->kind != NodeKind::ValDef || !as<ValDef>(*s).isLazy) continue;
@@ -504,6 +550,10 @@ void Compiler::compileAuxConstructor(const DefDef& d, const ClassInfo& info) {
     const int arity = 1 + static_cast<int>(params.size());
     mod->setArity(arity);
     analyseCaptures(params, body);
+    if (as<Apply>(*first).args.size() == params.size())
+        throw CompileError("an auxiliary constructor of " + info.name +
+                               " must call a preceding constructor, not itself",
+                           d.pos);
     compileInitCall(info, as<Apply>(*first).args, d.pos);
     if (block) {
         compileStats(as<Block>(body).stats, 1, body.pos);
@@ -518,9 +568,9 @@ void Compiler::compileAuxConstructor(const DefDef& d, const ClassInfo& info) {
 }
 
 // x_=(this, v): the instance of a class with var fields is mutable.
-void Compiler::compileSetter(const std::string& fieldKey, SourcePos pos) {
+void Compiler::compileSetter(const std::string& fieldKey, const std::string& name, SourcePos pos) {
     auto mod = std::make_unique<BytecodeModule>();
-    mod->setName(setterName(fieldKey));
+    mod->setName(setterName(name));
     mod->setMethod(true);
     mod->setArity(2);
     mod->setMaxStack(2);
@@ -581,10 +631,17 @@ void Compiler::compileNewOf(const ClassInfo& info, const std::vector<NodePtr>& a
         }
     }
     const auto n = static_cast<std::uint32_t>(args.size());
-    if (spread)
-        emit(Op::NEW_SPREAD, fn_->mod->addSendSite(kPrimaryCtorKey, n - 1), pos,
+    if (spread) {
+        // The splice supplies the repeated parameter; the fixed ones must match.
+        if (n - 1 != info.primaryArity - 1)
+            throw CompileError("wrong number of arguments for the constructor of " + info.name +
+                                   ": " + std::to_string(n - 1) + " before the splice, expected " +
+                                   std::to_string(info.primaryArity - 1),
+                               pos);
+        emit(Op::NEW_SPREAD,
+             fn_->mod->addSendSite(ctorKeyFor(info, info.primaryArity, pos), n - 1), pos,
              -static_cast<int>(n));
-    else
+    } else
         emit(Op::NEW, fn_->mod->addSendSite(ctorKeyFor(info, n, pos), n), pos, -static_cast<int>(n));
 }
 

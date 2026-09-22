@@ -490,7 +490,7 @@ void Compiler::compileApply(const Apply& a) {
             compileExpr(*arg);
         }
         const auto n = static_cast<std::uint32_t>(a.args.size());
-        emit(Op::SEND, fn_->mod->addSendSite(selectKey(sel.name), n), a.pos, -static_cast<int>(n));
+        emit(Op::SEND_APPLY, sendSite(sel.name, n), a.pos, -static_cast<int>(n));
         return;
     }
     if (fn->kind == NodeKind::Ident) {
@@ -504,7 +504,7 @@ void Compiler::compileApply(const Apply& a) {
                 compileExpr(*arg);
             }
             const auto n = static_cast<std::uint32_t>(a.args.size());
-            emit(Op::SEND, fn_->mod->addSendSite(r.key, n), a.pos, -static_cast<int>(n));
+            emit(Op::SEND_APPLY, fn_->mod->addSendSite(r.key, n), a.pos, -static_cast<int>(n));
             return;
         }
         if (r.ref == RefKind::Global && r.kind == BindingKind::Object) {
@@ -547,7 +547,7 @@ void Compiler::compileSelect(const Select& s) {
     compileExpr(*s.qualifier);
     if (s.name == "unary_-") { emit(Op::NEG, 0, s.pos, 0); return; }
     if (s.name == "unary_!") { emit(Op::NOT, 0, s.pos, 0); return; }
-    emit(Op::SEND, fn_->mod->addSendSite(selectKey(s.name), 0), s.pos, 0);
+    emit(Op::SEND, sendSite(s.name, 0), s.pos, 0);
 }
 
 // a && b  ==>  a; JUMP_IF_FALSE Lf; b; JUMP Lend; Lf: PUSH_FALSE; Lend:
@@ -572,9 +572,12 @@ void Compiler::compileAssign(const Assign& a) {
     if (r.ref == RefKind::Member) {  // a var field: this.x_=(v), which yields ()
         if (r.member->kind != MemberKind::Var)
             throw CompileError("Reassignment to val " + id.name, a.pos);
+        const MemberInfo* setter = memberOf(setterName(id.name));
+        if (!setter)
+            throw CompileError(id.name + " cannot be assigned here: it has no setter", a.pos);
         loadThis(a.pos);
         compileExpr(*a.value);
-        emit(Op::SEND, fn_->mod->addSendSite(memberOf(setterName(id.name))->key, 1), a.pos, -1);
+        emit(Op::SEND, fn_->mod->addSendSite(setter->key, 1), a.pos, -1);
         return;
     }
     if (r.kind != BindingKind::Var) throw CompileError("Reassignment to val " + id.name, a.pos);

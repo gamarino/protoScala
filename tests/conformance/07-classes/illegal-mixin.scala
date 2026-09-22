@@ -1,4 +1,4 @@
-// EXPECT-ERROR: illegal inheritance
+// EXPECT-ERROR: illegal trait inheritance
 class A
 class B
 trait T extends A

@@ -70,7 +70,10 @@ enum class Op : uint8_t {
     MAKE_TUPLE     = 76,  // [a1..an] -> [tuple]          operand: n (2..22)
     SEND_KW        = 77,  // [recv a1..an v1..vm] -> [r]  operand: KwSendSite constant
     NEW_SPREAD     = 78,  // [cls a1..an list] -> [obj]   operand: SendSite (constructor key, n)
-    // 79..95   reserved (object model)
+    SEND_APPLY     = 79,  // [recv a1..an] -> [r]         operand: SendSite (name, n)
+                          // `recv.m(args)` written with an argument list: calls the
+                          // member when it is a method, else applies its value.
+    // 80..95   reserved (object model)
     // 96..127  exceptions, Phase 4: THROW (+ per-module handler table)
     // 128..159 actors, Phase 5: SEND_ASYNC, ASK, AWAIT
 };

@@ -59,7 +59,8 @@ public:
         std::vector<std::string> fields{};           // ClassSpec: product element keys
         std::vector<const proto::ProtoString*> fieldSymbols{}; // after linkSymbols
         std::string key{};                           // ClassSpec: type key; SuperSite: the
-                                                     // type key of the defining template
+                                                     // type key of the defining template;
+                                                     // SendSite: the fallback name (D5)
         const proto::ProtoString* keySymbol = nullptr;        // after linkSymbols
         std::uint32_t flags = 0;                     // ClassSpec: ClassFlag bits
     };
@@ -84,7 +85,10 @@ public:
     std::size_t addString(const std::string& s);
     std::size_t addChar(char32_t c);
     std::size_t addSymbol(const std::string& name);
-    std::size_t addSendSite(const std::string& name, std::uint32_t argc);
+    // `fallback` (D5): the plain name a send retries when the receiver does not
+    // carry the class-qualified key of a private member.
+    std::size_t addSendSite(const std::string& name, std::uint32_t argc,
+                            const std::string& fallback = {});
     std::size_t addNames(const std::vector<std::string>& names);      // de-duplicated by content
     std::size_t addClassSpec(const ClassSpecData& spec);              // never de-duplicated
     std::size_t addSuperSite(const std::string& name, std::uint32_t argc, const std::string& ownerKey);

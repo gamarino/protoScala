@@ -64,6 +64,7 @@ const char* opName(Op op) {
         case Op::MAKE_TUPLE:     return "MAKE_TUPLE";
         case Op::SEND_KW:        return "SEND_KW";
         case Op::NEW_SPREAD:     return "NEW_SPREAD";
+        case Op::SEND_APPLY:     return "SEND_APPLY";
     }
     return "?";
 }
@@ -134,10 +135,12 @@ std::size_t BytecodeModule::addSymbol(const std::string& name) {
     return findOrAdd(symbolIndex_, name, consts_, Const{ConstKind::Symbol, 0, 0.0, name});
 }
 
-std::size_t BytecodeModule::addSendSite(const std::string& name, std::uint32_t argc) {
-    const std::string key = name + "/" + std::to_string(argc);
+std::size_t BytecodeModule::addSendSite(const std::string& name, std::uint32_t argc,
+                                        const std::string& fallback) {
+    const std::string key = name + "/" + std::to_string(argc) + "/" + fallback;
     Const c{ConstKind::SendSite, 0, 0.0, name};
     c.argc = argc;
+    c.key = fallback;
     return findOrAdd(sendIndex_, key, consts_, std::move(c));
 }
 
@@ -331,9 +334,11 @@ std::string commentFor(const BytecodeModule& m, Op op, std::uint64_t operand, st
         case Op::PUSH_GLOBAL:
         case Op::STORE_GLOBAL:
             return " ; " + m.constAt(operand).sval;
-        case Op::SEND: {
+        case Op::SEND:
+        case Op::SEND_APPLY: {
             const auto& c = m.constAt(operand);
-            return " ; " + c.sval + "/" + std::to_string(c.argc);
+            return " ; " + c.sval + "/" + std::to_string(c.argc) +
+                   (c.key.empty() ? "" : " or " + c.key);
         }
         case Op::MAKE_CLASS:
         case Op::NEW:

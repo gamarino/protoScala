@@ -70,10 +70,18 @@ private:
     const RuntimeLayout& layout_;
 
     // base[0] is the receiver, base[1..argc] the arguments; all rooted.
+    // `applied`: the call site wrote an argument list (SEND_APPLY), so a member
+    // that is not a method is applied instead of selected.
     const proto::ProtoObject* dispatch(proto::ProtoContext* ctx, const proto::ProtoObject** base,
-                                       const proto::ProtoString* name, unsigned argc);
+                                       const proto::ProtoString* name, unsigned argc,
+                                       bool applied = false);
     const proto::ProtoObject* callMember(proto::ProtoContext* ctx, const proto::ProtoObject* member,
-                                         const proto::ProtoObject** base, unsigned argc);
+                                         const proto::ProtoObject** base, unsigned argc,
+                                         bool applied = false);
+    // The name a send site uses on this receiver: a private member's
+    // class-qualified key, or the site's plain fallback name (D5).
+    const proto::ProtoString* siteName(proto::ProtoContext* ctx, const proto::ProtoObject* receiver,
+                                       const BytecodeModule::Const& site) const;
     const proto::ProtoObject* callWithReceiver(proto::ProtoContext* ctx, const proto::ProtoObject* method,
                                                const proto::ProtoObject** base, unsigned argc);
     const proto::ProtoObject* bindMethod(proto::ProtoContext* ctx, const proto::ProtoObject* method,
