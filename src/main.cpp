@@ -6,6 +6,7 @@
  * registers it as the space's main thread (as tests/unit/EvalHarness.h does).
  */
 #include "protoScala/Version.h"
+#include "repl/Repl.h"
 #include "repl/Session.h"
 #include "runtime/StackGuard.h"
 
@@ -74,9 +75,9 @@ int main(int argc, char** argv) {
             job.args.assign(argv + 2, argv + argc);
             return protoScala::runOnEvaluatorThread(&runJob, &job);
         }
-        // No arguments: the interactive REPL is not available yet; print usage.
-        printHelp();
-        return 2;
+        // No arguments: start the interactive REPL.
+        return protoScala::runOnEvaluatorThread([](void*) { return protoScala::runRepl(); },
+                                                nullptr);
     } catch (const std::exception& e) {
         std::fflush(stdout);
         std::fprintf(stderr, "protoscala: internal error: %s\n", e.what());

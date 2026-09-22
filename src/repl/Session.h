@@ -37,8 +37,12 @@ public:
 
     // Runs a script file; returns the process exit code (0 or 1).
     int runScript(const std::string& path, const std::vector<std::string>& args);
-    // Evaluates one REPL input. Incomplete: the input ended inside a construct.
-    EvalOutcome evalReplInput(const std::string& source);
+    // Evaluates one REPL input. Incomplete: the input ended inside a
+    // construct (only possible when forceComplete is false). With
+    // forceComplete, an input that would otherwise be Incomplete is reported
+    // as a parse error instead (the REPL uses this to force evaluation on a
+    // blank continuation line).
+    EvalOutcome evalReplInput(const std::string& source, bool forceComplete = false);
     // :load — runs a file in this session (its definitions stay visible).
     bool loadFile(const std::string& path);
     // --disassemble: prints the compiled bytecode of a file; exit code.
@@ -53,9 +57,12 @@ private:
     int resultCounter_ = 0;
 
     // Parses, compiles and runs one unit. Reports errors on stderr.
+    // allowIncomplete: a parse error at end-of-input in Repl mode is
+    // reported as EvalStatus::Incomplete instead of an error (the REPL asks
+    // for more input); runScript and loadFile always pass false.
     EvalStatus evaluate(const std::string& source, const std::string& sourceName,
                         UnitMode mode, const std::vector<std::string>* mainArgs,
-                        EvalOutcome* outcome);
+                        EvalOutcome* outcome, bool allowIncomplete);
     void callMain(proto::ProtoContext* ctx, const std::string& name, bool takesArgs,
                   const std::vector<std::string>& args);
 };

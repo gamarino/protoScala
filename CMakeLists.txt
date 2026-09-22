@@ -48,6 +48,15 @@ endif()
 
 include_directories(${PROTOCORE_INCLUDE_DIRS} src ${CMAKE_CURRENT_BINARY_DIR}/generated)
 
+# --- readline (interactive REPL) -------------------------------------------------
+find_library(READLINE_LIBRARY NAMES readline)
+find_path(READLINE_INCLUDE_DIR NAMES readline/readline.h)
+if(NOT READLINE_LIBRARY OR NOT READLINE_INCLUDE_DIR)
+    message(FATAL_ERROR
+        "libreadline not found. Install it (Debian/Ubuntu: libreadline-dev; "
+        "Fedora/RHEL: readline-devel; macOS: brew install readline).")
+endif()
+
 # --- Version header -------------------------------------------------------------
 configure_file(src/support/Version.h.in
     ${CMAKE_CURRENT_BINARY_DIR}/generated/protoScala/Version.h @ONLY)
@@ -96,9 +105,12 @@ target_compile_options(protoscala_runtime PRIVATE -Wall -Wextra -Wpedantic)
 # --- REPL and session (script runner + interactive loop share Session) -----------
 add_library(protoscala_repl STATIC
     src/repl/Session.cpp
+    src/repl/Repl.cpp
 )
 target_link_libraries(protoscala_repl PUBLIC protoscala_runtime protoscala_compiler
     protoscala_frontend protoscala_support)
+target_include_directories(protoscala_repl PRIVATE "${READLINE_INCLUDE_DIR}")
+target_link_libraries(protoscala_repl PRIVATE "${READLINE_LIBRARY}")
 target_compile_options(protoscala_repl PRIVATE -Wall -Wextra -Wpedantic)
 
 # --- protoscala binary ----------------------------------------------------------

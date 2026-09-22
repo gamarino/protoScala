@@ -43,12 +43,12 @@ Session::~Session() { std::fflush(stdout); }
 
 EvalStatus Session::evaluate(const std::string& source, const std::string& sourceName,
                              UnitMode mode, const std::vector<std::string>* mainArgs,
-                             EvalOutcome* outcome) {
+                             EvalOutcome* outcome, bool allowIncomplete) {
     std::unique_ptr<CompilationUnit> unit;
     try {
         unit = parseSource(source);
     } catch (const ParseError& e) {
-        if (mode == UnitMode::Repl && e.atEof) return EvalStatus::Incomplete;
+        if (mode == UnitMode::Repl && e.atEof && allowIncomplete) return EvalStatus::Incomplete;
         reportAt(sourceName, e.pos, e.what());
         return EvalStatus::Error;
     }
@@ -122,14 +122,14 @@ int Session::runScript(const std::string& path, const std::vector<std::string>& 
         std::fprintf(stderr, "protoscala: cannot open '%s'\n", path.c_str());
         return 1;
     }
-    const EvalStatus s = evaluate(source, path, UnitMode::Script, &args, nullptr);
+    const EvalStatus s = evaluate(source, path, UnitMode::Script, &args, nullptr, false);
     std::fflush(stdout);
     return s == EvalStatus::Ok ? 0 : 1;
 }
 
-EvalOutcome Session::evalReplInput(const std::string& source) {
+EvalOutcome Session::evalReplInput(const std::string& source, bool forceComplete) {
     EvalOutcome out;
-    out.status = evaluate(source, "<console>", UnitMode::Repl, nullptr, &out);
+    out.status = evaluate(source, "<console>", UnitMode::Repl, nullptr, &out, !forceComplete);
     return out;
 }
 
@@ -140,7 +140,7 @@ bool Session::loadFile(const std::string& path) {
         return false;
     }
     static const std::vector<std::string> noArgs;
-    return evaluate(source, path, UnitMode::Script, &noArgs, nullptr) == EvalStatus::Ok;
+    return evaluate(source, path, UnitMode::Script, &noArgs, nullptr, false) == EvalStatus::Ok;
 }
 
 int Session::disassemble(const std::string& path) {

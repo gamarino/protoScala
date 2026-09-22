@@ -12,7 +12,8 @@ FetchContent_MakeAvailable(googletest)
 add_subdirectory(unit)
 
 # --- CLI checks -----------------------------------------------------------------
-foreach(cli_test help version unknown-option script-errors main-args)
+foreach(cli_test help version unknown-option script-errors main-args
+                 repl-basic repl-multiline repl-errors repl-load repl-history-hygiene)
     add_test(NAME cli/${cli_test}
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/cli/${cli_test}.sh" "$<TARGET_FILE:protoscala>")
 endforeach()
