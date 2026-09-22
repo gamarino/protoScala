@@ -224,13 +224,36 @@ ClassInfo Compiler::buildClassInfo(const TemplateDef& t, const std::string& type
                                    " inherited by " + t.name +
                                    ": it has weaker access privileges",
                                pos);
-        // Redefining a member an ancestor already implements needs `override`
-        // (implementing an abstract one does not). scalac: "error overriding
-        // value v in class A ...; value v needs `override` modifier".
-        if (declaredMember && !isOverride && inheritedConcrete)
-            throw CompileError("error overriding " + name + " inherited by " + t.name + ": " +
-                                   name + " needs an `override` modifier",
-                               pos);
+        const MemberKind inheritedKind =
+            inherited != c.members.end() ? inherited->second.kind : MemberKind::Def;
+        const bool redefines = inherited != c.members.end() && inherited->second.key == name;
+        const bool inheritedStable = inheritedKind == MemberKind::Val ||
+                                     inheritedKind == MemberKind::Var ||
+                                     inheritedKind == MemberKind::LazyVal;
+        const bool ownIsDef = kind == MemberKind::Def || kind == MemberKind::ParamlessDef;
+        if (declaredMember && redefines) {
+            // The rules below follow scalac 3.9.0, checked case by case:
+            //  - only a stable member may take the place of a val, a var or a
+            //    lazy val ("needs to be a stable, immutable value");
+            //  - a var may implement an abstract var, but never override
+            //    another var, and `override` is never written on one;
+            //  - `override` is required for a member an ancestor implements and
+            //    optional for an abstract one.
+            if ((ownIsDef || kind == MemberKind::Var) && inheritedStable &&
+                !(kind == MemberKind::Var && inheritedKind == MemberKind::Var))
+                throw CompileError(std::string(ownIsDef ? "method " : "variable ") + name +
+                                       " overriding " + name + " inherited by " + t.name +
+                                       " needs to be a stable, immutable value",
+                                   pos);
+            if (kind == MemberKind::Var && (isOverride || inheritedConcrete))
+                throw CompileError("variable " + name + " inherited by " + t.name +
+                                       " cannot override a mutable variable",
+                                   pos);
+            if (!isOverride && inheritedConcrete)
+                throw CompileError("error overriding " + name + " inherited by " + t.name + ": " +
+                                       name + " needs an `override` modifier",
+                                   pos);
+        }
         c.members[name] =
             MemberInfo{kind, isPublic ? name : privateKey(c.key, name), concrete || inheritedConcrete};
     };
@@ -246,8 +269,8 @@ ClassInfo Compiler::buildClassInfo(const TemplateDef& t, const std::string& type
         addOwn(p.name, p.isVar ? MemberKind::Var : MemberKind::Val, isPublic, true,
                p.mods.isPrivate, p.mods.isOverride, paramIsMember, p.pos);
         if (p.isVar) {
-            addOwn(setterName(p.name), MemberKind::Def, isPublic, true, p.mods.isPrivate,
-                   p.mods.isOverride, paramIsMember, p.pos);
+            addOwn(setterName(p.name), MemberKind::Def, isPublic, /*concrete=*/true,
+                   p.mods.isPrivate, p.mods.isOverride, /*declaredMember=*/false, p.pos);
             ownVar = true;
         }
         c.ctorParams.push_back(p.name);
@@ -270,8 +293,10 @@ ClassInfo Compiler::buildClassInfo(const TemplateDef& t, const std::string& type
                        !v.mods.isPrivate, v.rhs != nullptr, v.mods.isPrivate, v.mods.isOverride,
                        true, v.pos);
                 if (v.isVar) {
-                    addOwn(setterName(v.name), MemberKind::Def, !v.mods.isPrivate, true,
-                           v.mods.isPrivate, v.mods.isOverride, true, v.pos);
+                    // An abstract `var v: Int` declares an abstract setter too.
+                    addOwn(setterName(v.name), MemberKind::Def, !v.mods.isPrivate,
+                           /*concrete=*/v.rhs != nullptr, v.mods.isPrivate, v.mods.isOverride,
+                           /*declaredMember=*/false, v.pos);
                     ownVar = true;
                 }
                 if (v.rhs) hasStatements = true;

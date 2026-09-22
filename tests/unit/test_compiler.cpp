@@ -314,6 +314,37 @@ TEST(CompilerTemplates, StaticErrors) {
                     "parameterized trait G"));
 }
 
+// The override rules, each checked against scalac 3.9.0.
+TEST(CompilerTemplates, OverrideRules) {
+    // Implementing an abstract member needs no `override`, whatever its kind.
+    EXPECT_EQ(compileError("trait T { var v: Int }\nclass B extends T { var v = 5 }"), "");
+    EXPECT_EQ(compileError("abstract class A { var v: Int }\nclass B extends A { var v = 5 }"), "");
+    EXPECT_EQ(compileError("trait T { var v: Int }\nclass B(var v: Int) extends T"), "");
+    EXPECT_EQ(compileError("trait T { def d: Int }\nclass B extends T { val d = 5 }"), "");
+    EXPECT_EQ(compileError("trait T { def d: Int }\nclass B extends T { var d = 5 }"), "");
+    // Redefining a concrete member needs `override`; val over def is allowed.
+    EXPECT_EQ(compileError("class A { def d = 1 }\nclass B extends A { override val d = 2 }"), "");
+    EXPECT_TRUE(has(compileError("class A { def d = 1 }\nclass B extends A { val d = 2 }"),
+                    "needs an `override` modifier"));
+    // A var never overrides a var, with or without the modifier.
+    EXPECT_TRUE(has(compileError("class A { var v = 1 }\nclass B extends A { override var v = 2 }"),
+                    "cannot override a mutable variable"));
+    EXPECT_TRUE(has(compileError("class A { var v = 1 }\nclass B extends A { var v = 2 }"),
+                    "cannot override a mutable variable"));
+    EXPECT_TRUE(has(compileError("trait T { var v: Int }\nclass B extends T { override var v = 5 }"),
+                    "cannot override a mutable variable"));
+    // Only a stable member may take the place of a val or a var.
+    EXPECT_TRUE(has(compileError("class A { val v = 1 }\nclass B extends A { override def v = 2 }"),
+                    "needs to be a stable, immutable value"));
+    EXPECT_TRUE(has(compileError("class A { val v = 1 }\nclass B extends A { override var v = 2 }"),
+                    "needs to be a stable, immutable value"));
+    EXPECT_TRUE(has(compileError("trait T { val v: Int }\nclass B extends T { def v = 5 }"),
+                    "needs to be a stable, immutable value"));
+    // An abstract var declares an abstract setter, which a val cannot supply.
+    EXPECT_TRUE(has(compileError("trait T { var v: Int }\nclass B extends T { val v = 5 }"),
+                    "needs to be abstract, since def v_= is not defined"));
+}
+
 TEST(Compiler, SpliceOutsideAFunctionCallIsRejected) {
     EXPECT_TRUE(has(compileError("def f(xs: Int*) = xs.foo(xs*)"),
                     "splices are only supported in function calls"));
