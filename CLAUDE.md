@@ -39,6 +39,9 @@ ctest --test-dir build_release --output-on-failure
 - **Never write outside `/home/gamarino/Documentos/proyectos`** — no `/tmp`,
   no `$HOME` edits, no `cmake --install` outside the workspace. Scratch files
   go in `../.agent_scratch/<task>/`.
+- Every phase updates the tutorial (docs/TUTORIAL.md, docs/tutorial/) for
+  both audiences; every runnable snippet has a fixture in
+  `tests/conformance/tutorial/`.
 - Benchmarks self-report the work they did and the runner verifies it.
 - Commit with the repository's configured git identity; do not override it.
 - Docs, comments and messages in professional English.

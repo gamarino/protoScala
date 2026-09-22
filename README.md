@@ -43,6 +43,7 @@ binary does not run Scala programs yet. See:
 - [docs/LANGUAGE.md](docs/LANGUAGE.md) — supported language and departures from Scala
 - [docs/ROADMAP.md](docs/ROADMAP.md) — phases with verifiable done-when criteria
 - [docs/STATUS.md](docs/STATUS.md) — living implementation tracker
+- [docs/TUTORIAL.md](docs/TUTORIAL.md) — dual-audience tutorial (Scala programmers; Python/JavaScript developers)
 - [docs/INTEROP.md](docs/INTEROP.md) — UMD polyglot interop
 - [docs/platform/](docs/platform/) — protoCore extensions specified by this project
 - [docs/plans/](docs/plans/) — task-level implementation plans

@@ -4,7 +4,8 @@ Versioning: `0.0.1` until Phase 1 is complete; each completed phase bumps the
 minor version (`0.1.0` after Phase 1, ...). Releases are tagged `vX.Y.Z`.
 
 Each milestone has a **Goal** and a verifiable **Done when**. A milestone is
-done only when its conformance fixtures pass, [STATUS.md](STATUS.md) is updated
+done only when its conformance fixtures pass, [STATUS.md](STATUS.md) is updated,
+**its tutorial chapters are written or extended** (see the Documentation track)
 and the full test suite is green. Platform phases (P, C, S) change other
 repositories; they follow those repositories' conventions and are merged there.
 
@@ -87,6 +88,20 @@ and verifies message counts.
 provider, and with protoST's provider when both are built); CPack produces a
 `.deb` and a `.tar.gz` that install and run `protoscala` without
 `LD_LIBRARY_PATH`. Release `0.6.0`.
+
+## Documentation track (every phase)
+
+**Goal:** documentation and a dual-audience tutorial ([TUTORIAL.md](TUTORIAL.md))
+for traditional Scala programmers and for developers coming from Python or
+JavaScript, as in protoClojure and protoST.
+**Done when (per phase):** the chapters listed for that phase in TUTORIAL.md
+are written; chapter 2 (Python/JavaScript bridge) and chapter 3 (departures
+from Scala 3, keyed to the D-ids) are extended with the phase's features;
+every runnable snippet has a matching fixture in
+`tests/conformance/tutorial/`; LANGUAGE.md, STATUS.md, README and CHANGELOG
+reflect the phase.
+**Final deliverable (Phase 6):** all 15 chapters, the worked example, and a
+"protoScala in 10 minutes" section in the README for each audience.
 
 ## Track C — protoClojure onto `ProtoSparseListObject` *(platform)*
 

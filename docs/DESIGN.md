@@ -483,6 +483,17 @@ reply completes the `Future` of an ask. Priority bands: `!` and `?` use
   and the runner verifies it; exit code alone never counts as success.
 - TDD: each feature starts with failing fixtures.
 
+### 10.1 Documentation
+
+Documentation is part of every phase, not a final step. The dual-audience
+tutorial ([TUTORIAL.md](TUTORIAL.md), 15 chapters) serves traditional Scala
+programmers — an honest catalogue of departures keyed to the D-ids — and
+developers coming from Python or JavaScript — Scala from first principles with
+bridges to concepts they know. Each phase writes the chapters for the features
+it delivers, and every runnable snippet is also a conformance fixture under
+`tests/conformance/tutorial/`, so the text cannot drift from the
+implementation.
+
 ---
 
 ## 11. Risk register and platform questions
