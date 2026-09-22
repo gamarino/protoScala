@@ -83,12 +83,14 @@ const proto::ProtoObject* ExecutionEngine::invoke(proto::ProtoContext* ctx,
         if (m->isMethod()) {  // a bound method: its receiver travels in slot 0
             const proto::ProtoObject* self = callee->getOwnAttributeDirect(ctx, layout_.selfKey);
             if (!self) throw std::logic_error("invoke: unbound method");
+            const proto::ProtoObject* caps =
+                m->captureCount() ? callee->getOwnAttributeDirect(ctx, layout_.capturesKey) : nullptr;
             proto::ProtoContext scope(ctx->space, ctx);
             scope.resizeAutomaticLocals(argc + 1);
             const proto::ProtoObject** a = scope.getAutomaticLocals();
             a[0] = self;
             for (unsigned k = 0; k < argc; ++k) a[k + 1] = args[k];
-            const proto::ProtoObject* r = execute(&scope, *m, a, argc + 1, nullptr);
+            const proto::ProtoObject* r = execute(&scope, *m, a, argc + 1, caps);
             scope.returnValue = r;
             return r;
         }
@@ -174,16 +176,20 @@ const proto::ProtoObject* ExecutionEngine::callWithReceiver(proto::ProtoContext*
 }
 
 // A function value for `receiver.m` (eta-expansion): a Function<N> object
-// sharing the method's code, with the receiver in __self__.
+// sharing the method's code and its captures, with the receiver in __self__.
 const proto::ProtoObject* ExecutionEngine::bindMethod(proto::ProtoContext* ctx,
                                                       const proto::ProtoObject* method,
                                                       const proto::ProtoObject* receiver) {
     const RuntimeLayout& L = layout_;
     const BytecodeModule* mod = compiledModuleOf(ctx, L, method);
-    return L.functionProtoFor(static_cast<unsigned>(mod->arity() - 1))
-        ->newChild(ctx)
-        ->setAttribute(ctx, L.codeKey, method->getOwnAttributeDirect(ctx, L.codeKey))
-        ->setAttribute(ctx, L.selfKey, receiver);
+    const proto::ProtoObject* fn = L.functionProtoFor(static_cast<unsigned>(mod->arity() - 1))
+                                       ->newChild(ctx)
+                                       ->setAttribute(ctx, L.codeKey,
+                                                      method->getOwnAttributeDirect(ctx, L.codeKey))
+                                       ->setAttribute(ctx, L.selfKey, receiver);
+    if (mod->captureCount() > 0)  // a method of a class declared inside a function
+        fn = fn->setAttribute(ctx, L.capturesKey, method->getOwnAttributeDirect(ctx, L.capturesKey));
+    return fn;
 }
 
 // A lazy val member: the holder's thunk is a method, run once with the
@@ -212,7 +218,11 @@ const proto::ProtoObject* ExecutionEngine::instantiate(proto::ProtoContext* ctx,
                                                        unsigned argc) {
     const RuntimeLayout& L = layout_;
     const proto::ProtoObject* cls = base[0];
-    const bool mutableInstances = cls->getOwnAttributeDirect(ctx, L.mutableKey) == PROTO_TRUE;
+    // Mutability is inherited: a subclass of a class with a `var` field also
+    // builds mutable instances, so this is a chain lookup (the shape's chain
+    // is the linearization, as TEST_PROTO relies on). The constructor is not:
+    // inheriting a parent's <init> would skip the subclass's own fields.
+    const bool mutableInstances = cls->getAttribute(ctx, L.mutableKey) == PROTO_TRUE;
     const proto::ProtoObject* init = cls->getOwnAttributeDirect(ctx, ctorKey);
     base[0] = cls->newChild(ctx, mutableInstances);  // the instance's chain keeps cls alive
     if (!init)
@@ -286,15 +296,21 @@ const proto::ProtoObject* ExecutionEngine::superSend(proto::ProtoContext* ctx,
     const proto::ProtoObject* owner = L.globals->getOwnAttributeDirect(ctx, site.keySymbol);
     const proto::ProtoList* chain = base[0]->getParents(ctx);  // young in ctx
     const unsigned long n = chain->getSize(ctx);
+    const std::string ownerName = GlobalTable::nameOfKey(site.key.substr(1));
     unsigned long k = 0;
     while (k < n && chain->getAt(ctx, static_cast<int>(k)) != owner) ++k;
+    if (k == n)
+        throw ScalaError("NoSuchMethodError",
+                         ownerName + " is not in the linearization of " +
+                             typeName(ctx, L, base[0]) + ", so super." + site.sval +
+                             " has no meaning here");
     for (++k; k < n; ++k) {
         const proto::ProtoObject* m =
             chain->getAt(ctx, static_cast<int>(k))->getOwnAttributeDirect(ctx, site.symbol);
         if (m) return callMember(ctx, m, base, site.argc);
     }
-    throw ScalaError("NoSuchMethodError", "super." + site.sval + " has no implementation after " +
-                                              GlobalTable::nameOfKey(site.key.substr(1)));
+    throw ScalaError("NoSuchMethodError",
+                     "super." + site.sval + " has no implementation after " + ownerName);
 }
 
 // Named arguments reach native methods (Product.copy) through protoCore's
@@ -399,6 +415,14 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
     if (mod.isVariadic())
         slots[fixed] = frame.newList(argc - fixed, args + fixed)->asObject(&frame);
     if (mod.captureCount() > 0) {
+        // A module with captures is never run without them: filling its
+        // capture slots with nulls would corrupt the frame silently. Scala
+        // methods (callMember, callWithReceiver) pass none, so a class
+        // declared inside a function whose members read an enclosing local
+        // fails loudly here instead.
+        if (!captures)
+            throw std::logic_error(mod.name() + " needs " + std::to_string(mod.captureCount()) +
+                                   " captured value(s) but was called without any");
         const proto::ProtoList* caps = captures->asList(&frame);
         const auto& specs = mod.captureSpecs();
         for (std::size_t k = 0; k < specs.size(); ++k)
@@ -690,6 +714,9 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                                                                " cannot be cast to " + mod.constAt(operand).sval);
                 case Op::MAKE_TUPLE: {
                     const unsigned n = static_cast<unsigned>(operand);
+                    if (n < 2 || n > kMaxTupleArity)  // Tuple2..Tuple22 only
+                        throw std::logic_error("MAKE_TUPLE of arity " + std::to_string(n) + " in " +
+                                               mod.name());
                     const proto::ProtoObject** base = sp - n;
                     base[0] = makeTuple(&frame, base, n);
                     sp = base + 1;

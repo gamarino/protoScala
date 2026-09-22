@@ -55,6 +55,32 @@ TEST(Values, ShowAndEquality) {
     EXPECT_EQ(typeName(&ctx, L, PROTO_NONE), "Null");
 }
 
+// Outside a run there is no ActiveCallContext, so an instance cannot answer
+// through its own toString/equals/hashCode: every one of those falls back to
+// the AnyRef behaviour (Session.cpp echoes results in exactly this shape).
+TEST(Values, InstancesWithoutAnActiveEngineFallBackToIdentity) {
+    proto::ProtoSpace space;
+    Runtime rt(space);
+    proto::ProtoContext ctx(&space, rt.rootContext());
+    const RuntimeLayout& L = rt.layout();
+    // A class shape as MAKE_CLASS builds it, and two of its instances.
+    const proto::ProtoObject* cls = L.anyRefProto->newChild(&ctx, false)
+                                        ->setAttribute(&ctx, L.nameKey, makeString(&ctx, "Box"));
+    const proto::ProtoObject* a = cls->newChild(&ctx, false);
+    const proto::ProtoObject* b = cls->newChild(&ctx, false);
+    EXPECT_TRUE(isScalaInstance(&ctx, L, a));
+    EXPECT_FALSE(isScalaInstance(&ctx, L, L.cellProto->newChild(&ctx, true)));  // a boxed var
+    EXPECT_FALSE(isScalaInstance(&ctx, L, ctx.fromInteger(1)));
+
+    EXPECT_EQ(typeName(&ctx, L, a), "Box");
+    EXPECT_EQ(show(&ctx, L, a), defaultToString(&ctx, L, a));
+    EXPECT_EQ(show(&ctx, L, a).rfind("Box@", 0), 0u);
+    EXPECT_TRUE(valuesEqual(&ctx, L, a, a));   // identity
+    EXPECT_FALSE(valuesEqual(&ctx, L, a, b));
+    EXPECT_EQ(scalaHash(&ctx, L, a), identityHash(&ctx, a));
+    EXPECT_EQ(identityHash(&ctx, a), identityHash(&ctx, a));  // stable
+}
+
 TEST(Values, PrimitivePrototypesAreRebound) {
     proto::ProtoSpace space;
     Runtime rt(space);

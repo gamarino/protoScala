@@ -40,13 +40,13 @@ public:
         modules_.push_back(std::move(cu.module));
         try {
             engine_.run(&ctx, mod);
+            if (cu.resultName.empty()) return "";
+            const auto* key = proto::ProtoString::createSymbol(&ctx, cu.resultKey.c_str());
+            const proto::ProtoObject* v = runtime_.layout().globals->getOwnAttributeDirect(&ctx, key);
+            return engine_.showTopLevel(&ctx, v ? v : PROTO_NONE);  // a Scala toString may throw
         } catch (const ScalaError& e) {
             return std::string("error: ") + e.what();
         }
-        if (cu.resultName.empty()) return "";
-        const auto* key = proto::ProtoString::createSymbol(&ctx, cu.resultKey.c_str());
-        const proto::ProtoObject* v = runtime_.layout().globals->getOwnAttributeDirect(&ctx, key);
-        return engine_.showTopLevel(&ctx, v ? v : PROTO_NONE);
     }
 
     // Runs a hand-assembled top-level module (engine tests of opcodes the

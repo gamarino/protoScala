@@ -55,7 +55,7 @@ const BytecodeModule* compiledModuleOf(proto::ProtoContext* ctx, const RuntimeLa
 bool isScalaInstance(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v) {
     if (!isObjectCellFast(v) || v == PROTO_NONE) return false;
     if (compiledModuleOf(ctx, L, v)) return false;  // function objects
-    return v->getAttribute(ctx, L.nameKey) != PROTO_NONE;
+    return v->hasAttribute(ctx, L.nameKey) == PROTO_TRUE;  // presence, never a PROTO_NONE compare
 }
 
 namespace {
@@ -218,7 +218,7 @@ bool valuesEqual(proto::ProtoContext* ctx, const RuntimeLayout& L,
     }
     if (isScalaInstance(ctx, L, a)) {  // a == b is a.equals(b) (null was handled above)
         const ActiveCallContext* active = activeCallContext();
-        if (!active) return false;
+        if (!active) return a == b;  // no engine to run equals: identity, as show and hash do
         checkNativeStack();
         const proto::ProtoObject* argv[1] = {b};
         return active->engine->send(ctx, a, L.equalsName, argv, 1) == PROTO_TRUE;

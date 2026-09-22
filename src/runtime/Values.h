@@ -87,13 +87,14 @@ std::string show(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::
 std::int32_t scalaHash(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v);
 
 // Scala `==`: cooperative numeric equality across Int/Double/Char (NaN is
-// equal to nothing), strings by content, lists element-wise, identity
-// otherwise. Allocates nothing.
+// equal to nothing), strings by content, lists element-wise, an instance's own
+// `equals` method (identity when no engine is active), identity otherwise.
+// Allocates only through a Scala `equals`.
 bool valuesEqual(proto::ProtoContext* ctx, const RuntimeLayout& L,
                  const proto::ProtoObject* a, const proto::ProtoObject* b);
 
 // "Int", "Double", "Boolean", "Char", "String", "Unit", "Null", "List",
-// "Function", "Object".
+// "Function", "Object", or an instance's class name ("Box", "Tuple2", ...).
 std::string typeName(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v);
 
 // `v` as a ProtoString object: `v` itself when it is a string, else a new

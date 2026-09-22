@@ -198,6 +198,113 @@ std::unique_ptr<BytecodeModule> boxProgram(const char* member, bool mutableInsta
     top->setMaxStack(4);
     return top;
 }
+// <init>(this, x): this.x = x; this
+std::unique_ptr<BytecodeModule> fieldInit(int line) {
+    auto m = std::make_unique<BytecodeModule>();
+    m->setName("<init>");
+    m->setMethod(true);
+    m->setArity(2);
+    m->setMaxStack(1);
+    m->emit(Op::PUSH_LOCAL, 1, line);
+    m->emit(Op::STORE_FIELD, m->addSymbol("x"), line);
+    m->emit(Op::PUSH_LOCAL, 0, line);
+    m->emit(Op::RETURN, 0, line);
+    return m;
+}
+
+// bump(this): this.x = 99; this.x   (SET_FIELD, so the instance must be mutable)
+std::unique_ptr<BytecodeModule> bumpMethod(int line) {
+    auto m = std::make_unique<BytecodeModule>();
+    m->setName("bump");
+    m->setMethod(true);
+    m->setArity(1);
+    m->setMaxStack(2);
+    m->emit(Op::PUSH_LOCAL, 0, line);
+    m->emit(Op::PUSH_CONST, m->addInt(99), line);
+    m->emit(Op::SET_FIELD, m->addSymbol("x"), line);
+    m->emit(Op::PUSH_LOCAL, 0, line);
+    m->emit(Op::SEND, m->addSendSite("x", 0), line);
+    m->emit(Op::RETURN, 0, line);
+    return m;
+}
+
+// class Mut(x) { var x; def bump = ... }   (mutable instances)
+// class Sub(x) extends Mut(x)              (no var of its own: mutability is inherited)
+// class Imm(x) { def bump = ... }          (immutable instances)
+// Instantiates `target` and calls bump on it.
+std::unique_ptr<BytecodeModule> mutabilityProgram(const char* target) {
+    auto top = std::make_unique<BytecodeModule>();
+    auto declare = [&top](const char* name, const char* key,
+                          const std::vector<std::string>& parents,
+                          std::vector<std::string> members,
+                          std::vector<std::unique_ptr<BytecodeModule>> bodies,
+                          std::uint32_t flags) {
+        for (const std::string& p : parents) top->emit(Op::PUSH_GLOBAL, top->addSymbol(p), 1);
+        for (auto& b : bodies) top->emit(Op::MAKE_FN, top->addBlock(std::move(b)), 1);
+        BytecodeModule::ClassSpecData spec{name, key, static_cast<std::uint32_t>(parents.size()),
+                                           std::move(members), {}, flags};
+        top->emit(Op::MAKE_CLASS, top->addClassSpec(spec), 1);
+        top->emit(Op::STORE_GLOBAL, top->addSymbol(key), 1);
+    };
+    std::vector<std::unique_ptr<BytecodeModule>> mut;
+    mut.push_back(fieldInit(1));
+    mut.push_back(bumpMethod(1));
+    declare("Mut", "@Mut", {"@AnyRef", "@Any"}, {"<init>", "bump"}, std::move(mut),
+            BytecodeModule::kClassMutableInstances);
+    std::vector<std::unique_ptr<BytecodeModule>> sub;
+    sub.push_back(fieldInit(2));
+    declare("Sub", "@Sub", {"@Mut", "@AnyRef", "@Any"}, {"<init>"}, std::move(sub), 0u);
+    std::vector<std::unique_ptr<BytecodeModule>> imm;
+    imm.push_back(fieldInit(3));
+    imm.push_back(bumpMethod(3));
+    declare("Imm", "@Imm", {"@AnyRef", "@Any"}, {"<init>", "bump"}, std::move(imm), 0u);
+
+    top->emit(Op::PUSH_GLOBAL, top->addSymbol(target), 4);
+    top->emit(Op::PUSH_CONST, top->addInt(1), 4);
+    top->emit(Op::NEW, top->addSendSite("<init>", 1), 4);
+    top->emit(Op::SEND, top->addSendSite("bump", 0), 4);
+    top->emit(Op::RETURN, 0, 4);
+    top->setMaxStack(6);
+    return top;
+}
+
+// A class member method that declares a capture. Scala methods are called
+// without captures, so running it must fail loudly rather than read nulls.
+std::unique_ptr<BytecodeModule> capturingMethodProgram() {
+    auto capturing = std::make_unique<BytecodeModule>();
+    capturing->setName("needsCapture");
+    capturing->setMethod(true);
+    capturing->setArity(1);
+    capturing->setLocalCount(1);
+    capturing->setMaxStack(1);
+    capturing->addCapture(0, 1);
+    capturing->emit(Op::PUSH_LOCAL, 1, 1);
+    capturing->emit(Op::RETURN, 0, 1);
+    auto init = std::make_unique<BytecodeModule>();  // <init>(this) = this
+    init->setName("<init>");
+    init->setMethod(true);
+    init->setArity(1);
+    init->setMaxStack(1);
+    init->emit(Op::PUSH_LOCAL, 0, 1);
+    init->emit(Op::RETURN, 0, 1);
+
+    auto top = std::make_unique<BytecodeModule>();
+    top->emit(Op::PUSH_GLOBAL, top->addSymbol("@AnyRef"), 2);
+    top->emit(Op::PUSH_GLOBAL, top->addSymbol("@Any"), 2);
+    top->emit(Op::PUSH_CONST, top->addInt(7), 2);  // the captured value
+    top->emit(Op::MAKE_FN, top->addBlock(std::move(capturing)), 2);
+    top->emit(Op::MAKE_FN, top->addBlock(std::move(init)), 2);
+    BytecodeModule::ClassSpecData spec{"Holder", "@Holder", 2, {"needsCapture", "<init>"}, {}, 0u};
+    top->emit(Op::MAKE_CLASS, top->addClassSpec(spec), 2);
+    top->emit(Op::STORE_GLOBAL, top->addSymbol("@Holder"), 2);
+    top->emit(Op::PUSH_GLOBAL, top->addSymbol("@Holder"), 3);
+    top->emit(Op::NEW, top->addSendSite("<init>", 0), 3);
+    top->emit(Op::SEND, top->addSendSite("needsCapture", 0), 3);
+    top->emit(Op::RETURN, 0, 3);
+    top->setMaxStack(5);
+    return top;
+}
+
 // class Base { def name = 1 }; class Derived extends Base { override def name = super.name + 10 }
 // SEND_SUPER relies on protoCore flattening an instance's getParents() into the
 // whole linearization ([Derived, Base, AnyRef, Any]); if that ever changes,
@@ -339,4 +446,22 @@ TEST(EngineObjectModel, HandAssembledClassDispatchesMethodsAndFields) {
               "error: NoSuchMethodError: value nope is not a member of Box");
     const std::string shown = h.runModule(boxProgram("toString", false));
     EXPECT_EQ(shown.rfind("Box@", 0), 0u) << shown;  // default toString: Name@hex
+}
+
+TEST(EngineObjectModel, MutableInstancesAcceptSetFieldAndInheritTheirMutability) {
+    EvalHarness h;
+    EXPECT_EQ(h.runModule(mutabilityProgram("@Mut")), "99");
+    EXPECT_EQ(h.runModule(mutabilityProgram("@Sub")), "99");  // mutability comes down the chain
+    EXPECT_EQ(h.runModule(mutabilityProgram("@Imm")),
+              "error: UnsupportedOperationException: cannot assign a field of an immutable object");
+}
+
+TEST(EngineObjectModel, AMethodWithCapturesIsNeverRunWithoutThem) {
+    EvalHarness h;
+    try {
+        const std::string r = h.runModule(capturingMethodProgram());
+        FAIL() << "a method with captures ran without them: " << r;
+    } catch (const std::logic_error& e) {
+        EXPECT_NE(std::string(e.what()).find("captured value"), std::string::npos) << e.what();
+    }
 }
