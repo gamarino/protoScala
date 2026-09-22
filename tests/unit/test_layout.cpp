@@ -283,3 +283,28 @@ TEST(Layout, EmptyRawTokenVector) {
     ASSERT_EQ(toks.size(), 1u);
     EXPECT_EQ(toks[0].kind, protoScala::TokenKind::EndOfFile);
 }
+
+// Fix round 2: `do` accepts a closed old-style condition as its partner.
+
+TEST(Layout, DoOfInnerForInsideDoWhileBody) {
+    EXPECT_EQ(lay("while\n  for (x <- xs) do f(x)\n  cond\ndo body"),
+              "KwWhile Indent KwFor LParen Identifier LeftArrow Identifier RParen KwDo "
+              "Identifier LParen Identifier RParen Newline Identifier Outdent KwDo Identifier EOF");
+}
+
+TEST(Layout, ForDoNestedInsideWhileRegion) {
+    EXPECT_EQ(lay("while c do\n  for (x <- xs) do f(x)\n  g"),
+              "KwWhile Identifier KwDo Indent KwFor LParen Identifier LeftArrow Identifier "
+              "RParen KwDo Identifier LParen Identifier RParen Newline Identifier Outdent EOF");
+}
+
+TEST(Layout, ElseAfterWhileDoPairsWithThen) {
+    EXPECT_EQ(lay("if a then while (x) do y else z"),
+              "KwIf Identifier KwThen KwWhile LParen Identifier RParen KwDo Identifier KwElse "
+              "Identifier EOF");
+    // The inner else must consume the inner `then`, so the second else closes
+    // the outer `then` region.
+    EXPECT_EQ(lay("if c then\n  if a then while (x) do y else z else w"),
+              "KwIf Identifier KwThen Indent KwIf Identifier KwThen KwWhile LParen Identifier "
+              "RParen KwDo Identifier KwElse Identifier Outdent KwElse Identifier EOF");
+}

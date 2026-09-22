@@ -92,7 +92,8 @@ bool closesRegionOpenedBy(TokenKind closer, TokenKind opener) {
     switch (closer) {
         case TokenKind::KwThen:    return opener == TokenKind::KwIf || opener == TokenKind::RParen;
         case TokenKind::KwElse:    return opener == TokenKind::KwThen || opener == TokenKind::RParen;
-        case TokenKind::KwDo:      return opener == TokenKind::KwWhile || opener == TokenKind::KwFor;
+        case TokenKind::KwDo:      return opener == TokenKind::KwWhile || opener == TokenKind::KwFor ||
+                                          opener == TokenKind::RParen;
         case TokenKind::KwYield:   return opener == TokenKind::KwFor || opener == TokenKind::RParen ||
                                           opener == TokenKind::RBrace;
         case TokenKind::KwCatch:   return opener == TokenKind::KwTry;
