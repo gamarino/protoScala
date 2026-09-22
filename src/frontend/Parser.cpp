@@ -127,7 +127,18 @@ bool Parser::sameLineAhead(TokenKind k) const {
         const Token& t = peek(j);
         if (t.kind == TokenKind::EndOfFile || isLayoutToken(t.kind)) return false;
         if (j > 0 && t.firstOnLine) return false;
-        if (t.kind == k && depth == 0) return true;
+        if (depth == 0) {
+            if (t.kind == k) return true;
+            // A nested construct starts (or the condition ends): a then/do
+            // further right belongs to it, not to the construct being parsed.
+            switch (t.kind) {
+                case TokenKind::KwElse: case TokenKind::KwIf: case TokenKind::KwWhile:
+                case TokenKind::KwThen: case TokenKind::KwDo: case TokenKind::Arrow:
+                    return false;
+                default:
+                    break;
+            }
+        }
         switch (t.kind) {
             case TokenKind::LParen: case TokenKind::LBracket: case TokenKind::LBrace:
                 ++depth;
@@ -334,8 +345,15 @@ NodePtr Parser::parseInfix(int minPrec, int assocPrec, bool assocRight) {
 // precedence), so mixing associativity at one level is caught across the
 // recursion as well as within this loop.
 NodePtr Parser::parseInfixRest(NodePtr lhs, int minPrec, int assocPrec, bool assocRight) {
-    int lastPrec = assocPrec;
-    bool lastRight = assocRight;
+    // Associativity seen per precedence level in this operator sequence
+    // (-1: none, 0: left, 1: right). Scala forbids consecutive operators of
+    // one level with different associativity even when tighter operators sit
+    // in between (`a +: b * c +- d`), so a level is forgotten only when a
+    // looser operator closes it.
+    constexpr int kLevels = 11;  // precedence() returns 0..10
+    int seen[kLevels];
+    for (int& s : seen) s = -1;
+    if (assocPrec >= 0) seen[assocPrec] = assocRight ? 1 : 0;
     while (at(TokenKind::Identifier)) {
         const Token& opTok = peek();
         const std::string op = opTok.text;
@@ -344,7 +362,7 @@ NodePtr Parser::parseInfixRest(NodePtr lhs, int minPrec, int assocPrec, bool ass
         const int p = precedence(op);
         if (p < minPrec) break;
         const bool right = isRightAssociative(op);
-        if (p == lastPrec && right != lastRight)
+        if (seen[p] != -1 && seen[p] != (right ? 1 : 0))
             fail("left- and right-associative operators with the same precedence may not "
                  "be mixed", opTok);
         advance();
@@ -357,8 +375,8 @@ NodePtr Parser::parseInfixRest(NodePtr lhs, int minPrec, int assocPrec, bool ass
         NodePtr rhs = right ? parseInfix(p, p, true) : parseInfix(p + 1);
         const SourcePos pos = lhs->pos;
         lhs = std::make_unique<Infix>(pos, std::move(lhs), op, std::move(rhs));
-        lastPrec = p;
-        lastRight = right;
+        seen[p] = right ? 1 : 0;
+        for (int q = p + 1; q < kLevels; ++q) seen[q] = -1;
     }
     return lhs;
 }
@@ -368,7 +386,10 @@ NodePtr Parser::parsePrefix() {
     if (t.kind == TokenKind::Identifier && !t.backquoted &&
         (t.text == "-" || t.text == "+" || t.text == "!" || t.text == "~")) {
         const Token& operand = peek(1);
-        const bool adjacent = operand.pos.line == t.pos.line;
+        // Only `-5` (no blank between sign and digits) is a negative literal;
+        // `- 5` is a prefix application.
+        const bool adjacent =
+            operand.pos.line == t.end.line && operand.pos.column == t.end.column;
         if (t.text == "-" && adjacent &&
             (operand.kind == TokenKind::IntLit || operand.kind == TokenKind::FloatLit)) {
             advance();

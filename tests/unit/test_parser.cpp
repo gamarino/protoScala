@@ -197,12 +197,19 @@ TEST(Parser, MixedAssociativityIsCaughtInNestedOperands) {
     EXPECT_THROW(parseExpressionSource("a +: b +: c +- d"), ParseError);
     EXPECT_THROW(parseExpressionSource("a +- b +: c"), ParseError);
     EXPECT_EQ(e("a +: b * c +: d"), "(infix +: a (infix +: (infix * b c) d))");
+    // A tighter operator in between does not reset the level's associativity.
+    EXPECT_THROW(parseExpressionSource("a +: b * c +- d"), ParseError);
+    EXPECT_THROW(parseExpressionSource("a :: b + c :+ d"), ParseError);
+    // A looser operator does.
+    EXPECT_EQ(e("a +- b < c +: d"), "(infix < (infix +- a b) (infix +: c d))");
 }
 
 TEST(Parser, NegativeLiteralFoldAndSelections) {
     EXPECT_EQ(e("-1.abs"), "(. (int -1) abs)");
     EXPECT_EQ(e("- x.abs"), "(prefix - (. x abs))");
     EXPECT_EQ(e("a - 1"), "(infix - a (int 1))");
+    EXPECT_EQ(e("- 5"), "(prefix - (int 5))");
+    EXPECT_EQ(e("- 2.5"), "(prefix - (float 2.5))");
     EXPECT_EQ(e("-9223372036854775808L"), "(int -9223372036854775808)");
 }
 
@@ -242,4 +249,13 @@ TEST(Parser, CompilationUnitOfExpressions) {
     EXPECT_EQ(dump(*protoScala::parseSource("f(1)\ng(2); h")),
               "(unit (apply f (int 1)) (apply g (int 2)) h)");
     EXPECT_EQ(dump(*protoScala::parseSource("")), "(unit)");
+}
+
+TEST(Parser, OldStyleConditionFollowedByNestedNewStyleConstruct) {
+    EXPECT_EQ(e("if (x) 1 else if y then 2 else 3"), "(if x (int 1) (if y (int 2) (int 3)))");
+    EXPECT_EQ(e("if (a) if b then c else d"), "(if a (if b c d))");
+    EXPECT_EQ(e("while (a) while b do c"), "(while a (while b c))");
+    EXPECT_EQ(e("if (a) xs.map(x => x) else b"),
+              "(if a (apply (. xs map) (lambda (x) x)) b)");
+    EXPECT_EQ(e("if (a) || b then c else d"), "(if (infix || (parens a) b) c d)");
 }
