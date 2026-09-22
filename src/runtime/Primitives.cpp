@@ -620,6 +620,189 @@ PRIM(list_mkString) {
     return str(ctx, out);
 }
 
+// Builds a List element by element (Design note 6): the list so far is slot 0
+// of the builder's own context, the element being appended slot 1. While the
+// builder is open its context is the innermost one: every call made during
+// the build takes context() (or a child of it) as its parent.
+class ListBuilder {
+public:
+    explicit ListBuilder(ProtoContext* parent) : scope_(parent->space, parent) {
+        scope_.resizeAutomaticLocals(2);
+        scope_.setAutomaticLocal(0, scope_.newList()->asObject(&scope_));
+    }
+    ProtoContext* context() { return &scope_; }
+    void add(const ProtoObject* v) {
+        scope_.setAutomaticLocal(1, v);
+        const ProtoList* l = scope_.getAutomaticLocal(0)->asList(&scope_);
+        scope_.setAutomaticLocal(0, l->appendLast(&scope_, v)->asObject(&scope_));
+    }
+    void addAll(const ProtoList* other) {
+        const ProtoList* l = scope_.getAutomaticLocal(0)->asList(&scope_);
+        scope_.setAutomaticLocal(0, l->extend(&scope_, other)->asObject(&scope_));
+    }
+    // The finished list; the builder's context hands it to its parent on exit.
+    const ProtoObject* finish() {
+        const ProtoObject* r = scope_.getAutomaticLocal(0);
+        scope_.returnValue = r;
+        return r;
+    }
+
+private:
+    ProtoContext scope_;
+};
+
+// f(x) in a short-lived context (its garbage is released when it ends); the
+// result is handed to `parent`.
+const ProtoObject* callOne(ProtoContext* parent, const ProtoObject* f, const ProtoObject* x) {
+    ProtoContext step(parent->space, parent);
+    step.resizeAutomaticLocals(1);
+    step.setAutomaticLocal(0, x);
+    const ProtoObject* r = activeCallContext()->engine->invoke(&step, f, step.getAutomaticLocals(), 1);
+    step.returnValue = r;
+    return r;
+}
+
+bool truth(ProtoContext* ctx, const ProtoObject* v, const char* method) {
+    if (v == PROTO_TRUE) return true;
+    if (v == PROTO_FALSE) return false;
+    throw ScalaError("ClassCastException", std::string(method) +
+                                               " expects a function returning Boolean, got " +
+                                               typeName(ctx, layoutOf(), v));
+}
+
+// Appends what `f` returned for flatMap: a List's elements, or an Option-like
+// value's content (anything answering isEmpty/get: Scala's IterableOnce).
+void addFlat(ListBuilder& b, const ProtoObject* r, const char* method) {
+    ProtoContext* ctx = b.context();
+    if (isListFast(r)) {
+        b.addAll(r->asList(ctx));
+        return;
+    }
+    const RuntimeLayout& L = layoutOf();
+    if (!isScalaInstance(ctx, L, r))
+        throw ScalaError("ClassCastException", std::string(method) +
+                                                   " expects a function returning a List or an Option, got " +
+                                                   typeName(ctx, L, r));
+    ExecutionEngine* engine = activeCallContext()->engine;
+    const ProtoObject* v;
+    {
+        // The calls run in a child context that is closed before the builder
+        // allocates again (the innermost context allocates, Design note 6).
+        ProtoContext probe(ctx->space, ctx);
+        const auto* isEmpty = proto::ProtoString::createSymbol(&probe, "isEmpty");
+        if (engine->send(&probe, r, isEmpty, nullptr, 0) == PROTO_TRUE) return;
+        v = engine->send(&probe, r, proto::ProtoString::createSymbol(&probe, "get"), nullptr, 0);
+        probe.returnValue = v;  // re-rooted in the builder's context when `probe` ends
+    }
+    b.add(v);
+}
+
+PRIM(list_cons) {  // x :: xs is xs.::(x): an O(log n) prepend (DESIGN §6)
+    return self->asList(ctx)->appendFirst(ctx, arg(ctx, args, 0, "::", 1))->asObject(ctx);
+}
+
+PRIM(list_tail) {
+    expectArgs(ctx, args, "tail", 0);
+    const ProtoList* list = self->asList(ctx);
+    if (list->getSize(ctx) == 0) throw ScalaError("UnsupportedOperationException", "tail of empty list");
+    return list->removeFirst(ctx)->asObject(ctx);
+}
+
+PRIM(list_drop) {
+    const long long n = intArg(ctx, arg(ctx, args, 0, "drop", 1), "drop");
+    const ProtoList* list = self->asList(ctx);
+    const long long size = static_cast<long long>(list->getSize(ctx));
+    if (n <= 0) return self;
+    if (n >= size) return ctx->newList()->asObject(ctx);
+    return list->getSlice(ctx, static_cast<int>(n), static_cast<int>(size))->asObject(ctx);
+}
+
+PRIM(list_map) {
+    const ProtoObject* f = arg(ctx, args, 0, "map", 1);
+    const ProtoList* list = self->asList(ctx);
+    ListBuilder b(ctx);
+    for (unsigned long i = 0, n = list->getSize(ctx); i < n; ++i)
+        b.add(callOne(b.context(), f, list->getAt(b.context(), static_cast<int>(i))));
+    return b.finish();
+}
+
+PRIM(list_flatMap) {
+    const ProtoObject* f = arg(ctx, args, 0, "flatMap", 1);
+    const ProtoList* list = self->asList(ctx);
+    ListBuilder b(ctx);
+    for (unsigned long i = 0, n = list->getSize(ctx); i < n; ++i)
+        addFlat(b, callOne(b.context(), f, list->getAt(b.context(), static_cast<int>(i))), "flatMap");
+    return b.finish();
+}
+
+PRIM(list_filter) {
+    const ProtoObject* p = arg(ctx, args, 0, "filter", 1);
+    const ProtoList* list = self->asList(ctx);
+    ListBuilder b(ctx);
+    for (unsigned long i = 0, n = list->getSize(ctx); i < n; ++i) {
+        const ProtoObject* x = list->getAt(b.context(), static_cast<int>(i));
+        if (truth(b.context(), callOne(b.context(), p, x), "filter")) b.add(x);
+    }
+    return b.finish();
+}
+
+// xs.withFilter(p): Scala's lazy WithFilter. Its map/flatMap/foreach test the
+// predicates on an element right before using it, so for-comprehension
+// guards and bodies interleave exactly as in Scala (Design note 11).
+const ProtoObject* makeWithFilter(ProtoContext* ctx, const ProtoObject* list, const ProtoList* preds) {
+    const RuntimeLayout& L = layoutOf();
+    return L.withFilterProto->newChild(ctx)
+        ->setAttribute(ctx, L.listKey, list)
+        ->setAttribute(ctx, L.predsKey, preds->asObject(ctx));
+}
+
+PRIM(list_withFilter) {
+    const ProtoObject* p = arg(ctx, args, 0, "withFilter", 1);
+    const ProtoObject* preds[1] = {p};
+    return makeWithFilter(ctx, self, ctx->newList(1, preds));
+}
+
+PRIM(withFilter_withFilter) {
+    const RuntimeLayout& L = layoutOf();
+    const ProtoObject* p = arg(ctx, args, 0, "withFilter", 1);
+    const ProtoList* preds = self->getOwnAttributeDirect(ctx, L.predsKey)->asList(ctx);
+    return makeWithFilter(ctx, self->getOwnAttributeDirect(ctx, L.listKey), preds->appendLast(ctx, p));
+}
+
+bool accepted(ProtoContext* ctx, const ProtoList* preds, const ProtoObject* x) {
+    for (unsigned long k = 0, n = preds->getSize(ctx); k < n; ++k)
+        if (!truth(ctx, callOne(ctx, preds->getAt(ctx, static_cast<int>(k)), x), "withFilter")) return false;
+    return true;
+}
+
+enum class WithFilterOp { Map, FlatMap, Foreach };
+
+const ProtoObject* withFilterApply(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+                                   WithFilterOp op, const char* method) {
+    const RuntimeLayout& L = layoutOf();
+    const ProtoObject* f = arg(ctx, args, 0, method, 1);
+    const ProtoList* list = self->getOwnAttributeDirect(ctx, L.listKey)->asList(ctx);
+    const ProtoList* preds = self->getOwnAttributeDirect(ctx, L.predsKey)->asList(ctx);
+    ListBuilder b(ctx);
+    for (unsigned long i = 0, n = list->getSize(ctx); i < n; ++i) {
+        const ProtoObject* x = list->getAt(b.context(), static_cast<int>(i));
+        if (!accepted(b.context(), preds, x)) continue;
+        const ProtoObject* r = callOne(b.context(), f, x);
+        if (op == WithFilterOp::Map) b.add(r);
+        else if (op == WithFilterOp::FlatMap) addFlat(b, r, method);
+    }
+    if (op == WithFilterOp::Foreach) return L.unit;
+    return b.finish();
+}
+
+PRIM(withFilter_map)     { return withFilterApply(ctx, self, args, WithFilterOp::Map, "map"); }
+PRIM(withFilter_flatMap) { return withFilterApply(ctx, self, args, WithFilterOp::FlatMap, "flatMap"); }
+PRIM(withFilter_foreach) { return withFilterApply(ctx, self, args, WithFilterOp::Foreach, "foreach"); }
+
+// The `List` companion: List(xs*) is the argument list itself; List.empty.
+PRIM(listCompanion_apply) { return args ? args->asObject(ctx) : ctx->newList()->asObject(ctx); }
+PRIM(listCompanion_empty) { expectArgs(ctx, args, "empty", 0); return ctx->newList()->asObject(ctx); }
+
 // ---------------------------------------------------------------------------
 // Function
 // ---------------------------------------------------------------------------
@@ -663,7 +846,8 @@ void installAll(ProtoContext* ctx, proto::ProtoObject* target, const MethodEntry
 const std::vector<std::string>& builtinGlobalNames() {
     // The TupleN companions are globals too: `Tuple2(1, 2)` is `(1, 2)`.
     static const std::vector<std::string> names = [] {
-        std::vector<std::string> v = {"println", "print"};
+        // `__raise` is installed by Task 11; naming it here is harmless.
+        std::vector<std::string> v = {"println", "print", "List", "Nil", "__raise"};
         for (unsigned n = 2; n <= kMaxTupleArity; ++n) v.push_back("Tuple" + std::to_string(n));
         return v;
     }();
@@ -715,7 +899,14 @@ void installPrimitives(ProtoContext* ctx, const RuntimeLayout& L) {
     static constexpr MethodEntry lists[] = {
         {"length", &list_length}, {"size", &list_size}, {"isEmpty", &list_isEmpty},
         {"nonEmpty", &list_nonEmpty}, {"apply", &list_apply}, {"head", &list_head},
-        {"foreach", &list_foreach}, {"mkString", &list_mkString}};
+        {"foreach", &list_foreach}, {"mkString", &list_mkString},
+        {"::", &list_cons}, {"tail", &list_tail}, {"drop", &list_drop}, {"map", &list_map},
+        {"flatMap", &list_flatMap}, {"filter", &list_filter}, {"withFilter", &list_withFilter}};
+    static constexpr MethodEntry withFilters[] = {
+        {"map", &withFilter_map}, {"flatMap", &withFilter_flatMap},
+        {"foreach", &withFilter_foreach}, {"withFilter", &withFilter_withFilter}};
+    static constexpr MethodEntry listCompanion[] = {
+        {"apply", &listCompanion_apply}, {"empty", &listCompanion_empty}};
     static constexpr MethodEntry functions[] = {{"apply", &function_apply}};
 
     installAll(ctx, L.globals, globals);
@@ -726,7 +917,12 @@ void installPrimitives(ProtoContext* ctx, const RuntimeLayout& L) {
     installAll(ctx, L.charProto, chars);
     installAll(ctx, L.stringProto, strings);
     installAll(ctx, L.listProto, lists);
+    installAll(ctx, L.withFilterProto, withFilters);
+    installAll(ctx, L.listCompanion, listCompanion);
     installAll(ctx, L.functionProto, functions);
+    // The globals the compiler resolves `List` and `Nil` to (builtinGlobalNames).
+    L.globals->setAttribute(ctx, proto::ProtoString::createSymbol(ctx, "List"), L.listCompanion);
+    L.globals->setAttribute(ctx, proto::ProtoString::createSymbol(ctx, "Nil"), ctx->newList()->asObject(ctx));
     installProductPrimitives(ctx, L);
 }
 

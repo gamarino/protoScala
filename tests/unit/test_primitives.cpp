@@ -202,3 +202,23 @@ TEST(Primitives, TuplesAreCaseClassesNeverProtoTuples) {
     EXPECT_EQ(h.eval("Tuple3(1, 2, 3).productArity"), "3");
     EXPECT_EQ(h.eval("Tuple2(1, 2, 3)"), "error: IllegalArgumentException: apply takes 2 argument(s), got 3");
 }
+
+TEST(Primitives, Phase2Lists) {
+    EvalHarness h;
+    EXPECT_EQ(h.eval("List(1, 2, 3)"), "List(1, 2, 3)");
+    EXPECT_EQ(h.eval("List()"), "List()");
+    EXPECT_EQ(h.eval("List.empty"), "List()");
+    EXPECT_EQ(h.eval("1 :: 2 :: Nil"), "List(1, 2)");
+    EXPECT_EQ(h.eval("List(1, 2, 3).map(x => x * 10)"), "List(10, 20, 30)");
+    EXPECT_EQ(h.eval("List(1, 2, 3, 4).filter(_ % 2 == 0)"), "List(2, 4)");
+    EXPECT_EQ(h.eval("List(1, 2).flatMap(x => List(x, x))"), "List(1, 1, 2, 2)");
+    EXPECT_EQ(h.eval("List(1, 2, 3).tail"), "List(2, 3)");
+    EXPECT_EQ(h.eval("List(1, 2, 3).drop(2)"), "List(3)");
+    EXPECT_EQ(h.eval("List(1, 2, 3).drop(5)"), "List()");
+    EXPECT_EQ(h.eval("Nil.tail"), "error: UnsupportedOperationException: tail of empty list");
+    EXPECT_EQ(h.eval("List() == Nil"), "true");
+    EXPECT_EQ(h.eval("List(1, 2, 3).withFilter(_ > 1).map(_ * 2)"), "List(4, 6)");
+    EXPECT_EQ(h.eval("List(1, 2).map(_ > 1).filter(x => x)"), "List(true)");
+    EXPECT_EQ(h.eval("List(1).filter(x => 1)"),
+              "error: ClassCastException: filter expects a function returning Boolean, got Int");
+}
