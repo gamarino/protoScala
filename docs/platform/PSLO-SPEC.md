@@ -107,7 +107,8 @@ values). Current usage (`headers/proto_internal.h:222-254`):
 | Embedded types | 0, 2, 3, 4, 5 (5 values) | 1, 6–15 (11 values) |
 
 Every language added to the platform will want new types, so tags are a
-scarce, platform-wide resource. Rules for this work:
+scarce, platform-wide resource. (`ProtoMPSCQueue`, PMQ-SPEC, takes one more
+tag under the same rules.) Rules for this work:
 
 1. `ProtoSparseListObject` consumes **at most one new pointer tag**, for its
    public handle.

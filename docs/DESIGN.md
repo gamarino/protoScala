@@ -437,9 +437,11 @@ The printed form is distinct from other objects: `Actor(10)`.
   protoClojure's value), then the end-of-batch release CAS races the senders'
   claim CAS and at most one wins, so no concurrent sender can schedule the
   actor on a second worker (the protoClojure session-19 race and its fix).
-- **Per-actor mailbox** — three lock-free MPSC stacks, one per band. Senders
-  push with a CAS loop; the claiming worker takes a whole band with one
-  exchange and reverses it to FIFO. Bands drain High, then Medium, then Low.
+- **Per-actor mailbox** — three **`ProtoMPSCQueue`s**, one per band: a new
+  protoCore type (maintainer decision on R9; spec in
+  [platform/PMQ-SPEC.md](platform/PMQ-SPEC.md)) that keeps protoClojure's
+  lock-free O(1) push and whole-batch `takeAll`, with every queued item traced
+  by the GC. Bands drain High, then Medium, then Low.
 - **Global ready queues** — one per band; workers take the highest non-empty
   band first. protoClojure's ready queues sit behind one mutex + condition
   variable and its README records them as the MPMC bottleneck; protoScala uses
@@ -482,7 +484,7 @@ inherit:
 
 | protoClojure defect | protoScala requirement |
 |---|---|
-| `ActorMessage` (fn, args, promise) and `ActorState::value` live on the C++ heap, unrooted (`ActorScheduler.h:61-89`) | every message payload, reply future and actor state is reachable from a protoCore structure while queued or in flight (P1). How the lock-free stacks are made GC-visible is platform question R9 |
+| `ActorMessage` (fn, args, promise) and `ActorState::value` live on the C++ heap, unrooted (`ActorScheduler.h:61-89`) | every message payload, reply future and actor state is reachable from a protoCore structure while queued or in flight (P1): mailboxes are `ProtoMPSCQueue`s (R9, decided) |
 | handler exceptions are swallowed and the result becomes nil | a handler exception completes the ask's future with `Failure(e)`, is reported on stderr, and the actor keeps its previous state; supervision trees are out of scope for v0.1 |
 | send arguments beyond 15 silently dropped | a message is one object (any size); no argument limit exists |
 | `deref` polls every 1 ms | parking on a semaphore; cooperative suspension inside actors |
@@ -592,8 +594,8 @@ project raises them and does not decide them unilaterally.
 | R5 | One runtime per process (process-global UMD module cache, protoST K1) | multi-runtime tests | maintainer |
 | R6 | `super` is O(n) per call (§4.4); a protoCore "lookup after parent" API is the escape hatch | performance | protoScala, later |
 | R7 | No public API to attach a foreign OS thread | embedding | maintainer |
-| R9 | Actor mailboxes must be GC-visible (§8.4). Options: (a) protoClojure's atomic C++ MPSC stacks with every queued payload also anchored in a per-actor protoCore list; (b) protoST's mailbox as an immutable `ProtoList` updated with `setAttributeIfEqual`; (c) a new protoCore type — a lock-free MPSC queue with GC-traced nodes — shared by protoScala, protoClojure and protoST (P3). Decided at the start of Phase 5; the benchmarks of §8.5 compare the candidates | correctness / throughput | maintainer |
-| R8 | Tagged-pointer budget: 37 of 64 pointer tags and 11 of 16 embedded types are free; every new protoCore type must justify a tag | platform longevity | platform spec |
+| R9 | Actor mailboxes must be GC-visible (§8.4). **Decided (2026-09-22): a new protoCore type, `ProtoMPSCQueue`** — lock-free MPSC queue with GC-traced items, shared by protoScala, protoClojure and protoST ([platform/PMQ-SPEC.md](platform/PMQ-SPEC.md)). Its GC strategy is settled with the maintainer in the P2 plan's Task 0 | correctness / throughput | decided; P2 |
+| R8 | Tagged-pointer budget: 37 of 64 pointer tags and 11 of 16 embedded types are free today; P1 and P2 take one tag each (35 left); every new protoCore type must justify a tag | platform longevity | platform specs |
 
 ---
 
@@ -606,11 +608,12 @@ Summarised here; milestones, done-when criteria and tracks are in
 |---|---|
 | 0 | Repository skeleton, build against protoCore, test harnesses, `--version` |
 | P1 *(platform)* | `ProtoSparseListObject` in protoCore (+ hashed-collection helper), tests, full rebuild of every embedder |
+| P2 *(platform)* | `ProtoMPSCQueue` in protoCore (GC-traced lock-free mailbox), tests, microbenchmarks, full rebuild of every embedder |
 | 1 | Lexer (with offside rule), parser, AST, core compiler + VM (expressions, `val`/`var`/`def`, `if`/`while`, lambdas), `println`, REPL |
 | 2 | Classes, objects, traits + linearization, case classes, universal `apply`, for-comprehensions, pattern matching |
 | 3 | SmallInteger fast paths, `List`/`Vector`/`Map`/`Set`/`Range`, prelude (`Option`, `Either`, `Try`), string interpolation |
 | 4 | Exceptions, `super` in stackable traits, enums and sealed hierarchies, named/default arguments |
 | 5 | Actors, priority bands, cooperative futures |
 | 6 | UMD provider and prefix routing, CPack `.deb`/`.tgz` |
-| C *(platform)* | protoClojure: maps/sets onto `ProtoSparseListObject`; vectors off `ProtoTuple` (R2) |
-| S *(platform)* | protoST: `Dictionary`/`Set` onto `ProtoSparseListObject` (unblocks its D32 decision) |
+| C *(platform)* | protoClojure: maps/sets onto `ProtoSparseListObject`; vectors off `ProtoTuple` (R2); actor mailboxes onto `ProtoMPSCQueue` |
+| S *(platform)* | protoST: `Dictionary`/`Set` onto `ProtoSparseListObject` (unblocks its D32 decision); actor mailboxes onto `ProtoMPSCQueue` |

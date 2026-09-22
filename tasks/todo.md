@@ -10,6 +10,7 @@
 
 ## Next
 - [ ] Phase P1 — Task 0: maintainer decisions (iterator option, helper location)
+- [ ] Phase P2 — plan + Task 0: GC strategy for `ProtoMPSCQueue` with the maintainer
 - [ ] Phase 1 — execute docs/plans/2026-09-22-phase-1-core-language.md
 
 ## Review

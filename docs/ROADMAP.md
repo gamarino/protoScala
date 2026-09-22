@@ -31,6 +31,20 @@ full suite passes; every embedder was rebuilt from clean and passes its suite.
 **Opens with:** maintainer review of PSLO-SPEC §3.3 (iterator) and §4 (helper
 location).
 
+## Phase P2 — `ProtoMPSCQueue` in protoCore *(platform)*
+
+**Goal:** a lock-free multi-producer / single-consumer queue whose items the
+GC traces, used as the actor mailbox of every runtime
+([platform/PMQ-SPEC.md](platform/PMQ-SPEC.md); maintainer decision on R9).
+**Opens with:** Task 0 — the GC strategy that satisfies PMQ-SPEC §3, agreed
+with the maintainer.
+**Done when:** the type is merged in protoCore with the tests of PMQ-SPEC §5
+(including TSan and GC-pressure runs); the microbenchmark table is recorded;
+protoCore's full suite passes; every embedder was rebuilt from clean and passes
+its suite.
+**Prerequisite for:** Phase 5, and the mailbox part of tracks C and S.
+**Plan:** written when P2 starts (after P1).
+
 ## Phase 1 — Lexer, parser, core evaluator, REPL
 
 **Goal:** run straight-line and functional Scala 3 programs.
@@ -74,8 +88,7 @@ hierarchies, named and default arguments, extension methods pass.
 ## Phase 5 — Actors and futures
 
 **Goal:** GIL-free concurrency on protoClojure's actor model (DESIGN §8).
-**Opens with:** maintainer decision on R9 (GC-visible mailbox: anchored C++
-stacks, protoST CAS list, or a new protoCore MPSC queue type).
+**Requires:** Phase P2 (`ProtoMPSCQueue` mailboxes; R9 decided 2026-09-22).
 **Done when:**
 - `Actor.spawn`, `!`, `?`, `send`/`ask` with `Priority`, `value`,
   `Actor.isActor`, `Actor.stats`, `Future` (`await`, `map`, `flatMap`,
@@ -115,21 +128,25 @@ reflect the phase.
 **Final deliverable (Phase 6):** all 15 chapters, the worked example, and a
 "protoScala in 10 minutes" section in the README for each audience.
 
-## Track C — protoClojure onto `ProtoSparseListObject` *(platform)*
+## Track C — protoClojure onto the new protoCore types *(platform)*
 
-**Goal:** remove protoClojure's custom map/set layout and its `ProtoTuple`
-vectors (DESIGN R2).
+**Goal:** remove protoClojure's custom map/set layout, its `ProtoTuple`
+vectors (DESIGN R2) and its unrooted actor mailboxes.
 **Done when:** protoClojure maps and sets use `ProtoSparseListObject` (via the
 shared helper if adopted); vectors no longer retain memory perennially; the
 full protoClojure suite passes; no ordering guarantee beyond Clojure's is
-introduced. Requires P1 and a maintainer decision on R2.
+introduced; actor mailboxes use three `ProtoMPSCQueue`s per actor, with
+`actor-bench.sh` tables recorded before and after. Requires P1, P2 and a
+maintainer decision on R2.
 
-## Track S — protoST onto `ProtoSparseListObject` *(platform)*
+## Track S — protoST onto the new protoCore types *(platform)*
 
-**Goal:** one mechanism for protoST's `Dictionary` and `Set`.
+**Goal:** one mechanism for protoST's `Dictionary` and `Set`, and GC-traced
+lock-free mailboxes.
 **Done when:** both use `ProtoSparseListObject`; protoST's D32 is resolved by
-the protoST language decision it is waiting for; the full protoST suite
-passes. Requires P1.
+the protoST language decision it is waiting for; actor mailboxes use
+`ProtoMPSCQueue` with actor benchmark tables recorded before and after; the
+full protoST suite passes. Requires P1 and P2.
 
 ## Later (v0.7+)
 
