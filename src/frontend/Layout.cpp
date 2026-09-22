@@ -1,6 +1,8 @@
 #include "frontend/Layout.h"
 #include "frontend/Lexer.h"
 
+#include <algorithm>
+
 namespace protoScala {
 
 namespace {
@@ -13,6 +15,14 @@ struct Region {
     bool widthKnown = true;
     TokenKind opener = TokenKind::EndOfFile;  // Indented: the token that opened it
     bool condition = false;                   // Parens/Braces right after if/while/for
+    // Constructs begun in this region that still wait for a partner keyword,
+    // innermost last: KwIf (awaits then), KwThen (else), KwTry (catch or
+    // finally), KwCatch (finally), KwWhile (do), KwFor (do or yield), and
+    // RParen for a closed old-style condition (then, else, do or yield).
+    // A same-line closer satisfies one of these before it may close an
+    // Indented region, so `if d then x else y` keeps its `else`. The list is
+    // cleared at every statement boundary (Newline, `;`) of the region.
+    std::vector<TokenKind> pending{};
 };
 
 bool canEndStatement(TokenKind k) {
@@ -74,11 +84,13 @@ bool continuesStatement(TokenKind k) {
     }
 }
 
-// Legacy rule: a closing keyword on the same line closes an Indented region
-// opened by its partner. RParen/RBrace stand for an old-style condition.
+// Whether `closer` is the partner of `opener`: used both for the Indented
+// region an opener started (legacy rule: a closing keyword on the same line
+// closes it) and for the pending partners of a region. RParen/RBrace stand
+// for an old-style condition.
 bool closesRegionOpenedBy(TokenKind closer, TokenKind opener) {
     switch (closer) {
-        case TokenKind::KwThen:    return opener == TokenKind::KwIf;
+        case TokenKind::KwThen:    return opener == TokenKind::KwIf || opener == TokenKind::RParen;
         case TokenKind::KwElse:    return opener == TokenKind::KwThen || opener == TokenKind::RParen;
         case TokenKind::KwDo:      return opener == TokenKind::KwWhile || opener == TokenKind::KwFor;
         case TokenKind::KwYield:   return opener == TokenKind::KwFor || opener == TokenKind::RParen ||
@@ -131,7 +143,7 @@ public:
                 tryEndMarker(i)) {
                 continue;
             }
-            if (!t.firstOnLine) closeByKeyword(t);
+            closeByKeyword(t);
             bool closesCondition = false;
             switch (t.kind) {
                 case TokenKind::LParen:
@@ -153,6 +165,14 @@ public:
                 }
                 case TokenKind::RParen: case TokenKind::RBracket: case TokenKind::RBrace:
                     closesCondition = closeBracket(t);
+                    if (closesCondition) conditionClosed();
+                    break;
+                case TokenKind::Semicolon:
+                    regions_.back().pending.clear();
+                    break;
+                case TokenKind::KwIf: case TokenKind::KwTry: case TokenKind::KwWhile:
+                case TokenKind::KwFor:
+                    regions_.back().pending.push_back(t.kind);
                     break;
                 default:
                     break;
@@ -187,7 +207,21 @@ private:
         }
     }
 
+    static const char* tokenKindSpelling(TokenKind k) {
+        switch (k) {
+            case TokenKind::KwThen:    return "then";
+            case TokenKind::KwElse:    return "else";
+            case TokenKind::KwDo:      return "do";
+            case TokenKind::KwCatch:   return "catch";
+            case TokenKind::KwFinally: return "finally";
+            case TokenKind::KwYield:   return "yield";
+            case TokenKind::KwMatch:   return "match";
+            default:                   return "?";
+        }
+    }
+
     void synth(TokenKind k, const Token& at) {
+        if (k == TokenKind::Newline) regions_.back().pending.clear();
         Token s;
         s.kind = k;
         s.pos = at.pos;
@@ -219,7 +253,12 @@ private:
             return;
         }
         if (w < regions_.back().width) {
-            if (continuesStatement(prevKind_)) return;
+            // After `then`, `else`, `do`, `catch`, `finally`, `yield` or
+            // `match` the construct continues on the next line, which
+            // therefore cannot leave the region holding the construct.
+            if (continuesStatement(prevKind_))
+                throw LexError(std::string("the line after '") + tokenKindSpelling(prevKind_) +
+                               "' is indented less than its enclosing block", t.pos, false);
             bool popped = false;
             while (regions_.back().kind == RegionKind::Indented && w < regions_.back().width) {
                 regions_.pop_back();
@@ -259,12 +298,44 @@ private:
         return canBeginStatement(n.kind) && !isCloser(n.kind);
     }
 
+    // A closing keyword first satisfies the innermost pending partner of the
+    // current region (a construct still open on this line or, for a closer
+    // first on its line, the construct the preceding Outdents returned to).
+    // Only when none is pending does a same-line closer close an Indented
+    // region opened by its partner; it then satisfies the partner that opened
+    // it, which is pending in the enclosing region.
     void closeByKeyword(const Token& t) {
-        while (regions_.back().kind == RegionKind::Indented &&
-               closesRegionOpenedBy(t.kind, regions_.back().opener)) {
+        if (satisfyPending(t.kind)) return;
+        if (t.firstOnLine) return;
+        if (regions_.back().kind == RegionKind::Indented &&
+            closesRegionOpenedBy(t.kind, regions_.back().opener)) {
             regions_.pop_back();
             synth(TokenKind::Outdent, t);
+            satisfyPending(t.kind);
         }
+    }
+
+    // Consumes the innermost pending partner of `closer` in the current
+    // region (and the constructs begun after it, which ended with it).
+    // `then` and `catch` leave their own optional partner pending.
+    bool satisfyPending(TokenKind closer) {
+        auto& pending = regions_.back().pending;
+        const auto it = std::find_if(pending.rbegin(), pending.rend(),
+                                     [closer](TokenKind p) { return closesRegionOpenedBy(closer, p); });
+        if (it == pending.rend()) return false;
+        pending.erase(std::next(it).base(), pending.end());
+        if (closer == TokenKind::KwThen || closer == TokenKind::KwCatch)
+            pending.push_back(closer);
+        return true;
+    }
+
+    // An old-style condition `if (...)`, `while (...)`, `for (...)` or
+    // `for {...}` just closed: its keyword now awaits the partners of a
+    // closed condition.
+    void conditionClosed() {
+        auto& pending = regions_.back().pending;
+        if (!pending.empty() && isConditionKeyword(pending.back()))
+            pending.back() = TokenKind::RParen;
     }
 
     // Returns whether the closed bracket was an old-style condition.
@@ -303,6 +374,16 @@ private:
 } // namespace
 
 std::vector<Token> applyLayout(const std::vector<Token>& raw) {
+    // Precondition: `raw` is a Lexer output, which ends with EndOfFile or
+    // Error. An empty vector is the layout of empty input.
+    if (raw.empty()) {
+        Token eof;
+        eof.kind = TokenKind::EndOfFile;
+        return {eof};
+    }
+    const TokenKind last = raw.back().kind;
+    if (last != TokenKind::EndOfFile && last != TokenKind::Error)
+        throw std::invalid_argument("applyLayout: token vector must end with EndOfFile or Error");
     return LayoutPass(raw).run();
 }
 

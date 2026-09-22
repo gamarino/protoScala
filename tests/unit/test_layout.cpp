@@ -232,3 +232,54 @@ TEST(Layout, BlankLinesBetweenTemplateMembers) {
 TEST(Layout, DedentBelowTopLevelIsAnError) {
     EXPECT_THROW(tokenize("  a\nb"), LexError);
 }
+
+// Fix round 1: a same-line closer belongs to the innermost construct still
+// waiting for it; it closes an Indented region only when none is pending.
+
+TEST(Layout, ElseOfNestedIfOnOneLineStaysInside) {
+    EXPECT_EQ(lay("if c then\n  if d then x else y"),
+              "KwIf Identifier KwThen Indent KwIf Identifier KwThen Identifier KwElse "
+              "Identifier Outdent EOF");
+}
+
+TEST(Layout, ElseOfNestedOldStyleIfStaysInside) {
+    EXPECT_EQ(lay("if (c)\n  if (d) x else y"),
+              "KwIf LParen Identifier RParen Indent KwIf LParen Identifier RParen Identifier "
+              "KwElse Identifier Outdent EOF");
+}
+
+TEST(Layout, CatchOfNestedTryOnOneLineStaysInside) {
+    EXPECT_EQ(lay("try\n  try a catch b finally c"),
+              "KwTry Indent KwTry Identifier KwCatch Identifier KwFinally Identifier "
+              "Outdent EOF");
+}
+
+TEST(Layout, YieldOfNestedForStaysInside) {
+    EXPECT_EQ(lay("while (c)\n  for (x <- xs) yield x"),
+              "KwWhile LParen Identifier RParen Indent KwFor LParen Identifier LeftArrow "
+              "Identifier RParen KwYield Identifier Outdent EOF");
+}
+
+TEST(Layout, CatchClosesTheInnerOfTwoNestedTryRegions) {
+    EXPECT_EQ(lay("try\n  try\n    a catch b\n  finally c"),
+              "KwTry Indent KwTry Indent Identifier Outdent KwCatch Identifier KwFinally "
+              "Identifier Outdent EOF");
+}
+
+TEST(Layout, StalePartnerDoesNotCaptureALaterElse) {
+    // `if a then b` ends at the Newline; the `else` closes the `then` region.
+    EXPECT_EQ(lay("if c then\n  if a then b\n  x else y"),
+              "KwIf Identifier KwThen Indent KwIf Identifier KwThen Identifier Newline "
+              "Identifier Outdent KwElse Identifier EOF");
+}
+
+TEST(Layout, DedentRightAfterContinuationKeywordIsAnError) {
+    EXPECT_THROW(tokenize("def f =\n  if c then\nx"), LexError);
+    EXPECT_THROW(tokenize("def f =\n  x match\ny"), LexError);
+}
+
+TEST(Layout, EmptyRawTokenVector) {
+    const auto toks = protoScala::applyLayout({});
+    ASSERT_EQ(toks.size(), 1u);
+    EXPECT_EQ(toks[0].kind, protoScala::TokenKind::EndOfFile);
+}
