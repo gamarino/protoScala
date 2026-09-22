@@ -85,6 +85,14 @@ steady state — where the JVM would be far ahead on `fib30`, as its 190 ms
 total already suggests — is not measured. Cold-process timing favours
 short-lived runtimes.
 
+**What these numbers are for.** protoScala is positioned as an agile,
+interoperable, easily integrable and very simple Scala — not a fast one.
+Beating the JVM on integer loops is an explicit non-goal (see
+[docs/DESIGN.md](docs/DESIGN.md) §1); this suite tracks start-up and guards
+against regressions. The workloads that matter for the positioning — actors,
+complex persistent structures, deep object graphs and interop — join the suite
+as the phases that enable them land.
+
 **Pending workloads** (need later phases; not approximated): `list_append`
 and protoClojure's `sum-squares` (Phase 3 collections), `attr_lookup`
 (Phase 2 classes), `exception_latency` (Phase 4 exceptions), the actor

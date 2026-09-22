@@ -30,6 +30,15 @@ reproduce `scalac`'s static typechecker. Its value proposition:
    and Clojure modules are consumed and exposed through protoCore's UMD
    (Unified Module Discovery) without serialization.
 
+In one sentence: **an agile, interoperable, easily integrable and, above all,
+very simple to use Scala.** protoScala is *not* a fast Scala. Competing with
+the JVM on integer arithmetic or micro-benchmark loops is an explicit
+non-goal: real processes are not optimized integer loops. Where the platform
+is meant to shine is actors, complex persistent structures and deep object
+graphs, plus instant start-up and in-memory interop. Language features,
+simplicity of use and integration take priority over raw performance work,
+and benchmark suites grow toward those workloads.
+
 ### 1.1 Engineering principles
 
 Inherited from protoClojure (P1–P4) and protoST, and binding for every change:
