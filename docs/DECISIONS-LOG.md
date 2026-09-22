@@ -16,3 +16,4 @@ it tomorrow"); the maintainer reviews them and may reverse any of them.
 | 2026-09-22 | P1: iterator option (a); hashed-collection helper in protoCore | maintainer (accepted recommendation) | PSLO-SPEC §3.3, §4 |
 | 2026-09-22 | Overnight scope: Phases 1+2 on protoScala `main`; P1 on a protoCore branch, not merged, embedders not rebuilt | maintainer | — |
 | 2026-09-22 | P1 D2a–D7 (bucket encoding, hashed key word, keep key, nullptr keys, isEqual identity, own prototype, CellType discrimination, SOVERSION 1) | agent, pending review | PSLO-SPEC §7 |
+| 2026-09-22 | Phase 1 Q1–Q22: the plan's provisional behaviours adopted as written (notably Q21: `ProtoContext::safepoint()` at loop back-edges, touching DESIGN R1; Q4: captured `var`s boxed in mutable cells; Q2: script mode with eager top-level vals); recorded as provisional D9–D18 in STATUS.md by Task 13 | agent, pending review | plans/2026-09-22-phase-1-core-language.md, "Open questions for the maintainer" |
