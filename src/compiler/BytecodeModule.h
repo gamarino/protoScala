@@ -32,16 +32,45 @@ namespace protoScala {
 
 class BytecodeModule {
 public:
-    enum class ConstKind : uint8_t { Int, BigInt, Double, String, Char, Symbol, SendSite };
+    enum class ConstKind : uint8_t {
+        Int, BigInt, Double, String, Char, Symbol, SendSite,
+        Names, ClassSpec, SuperSite, KwSendSite,   // Phase 2
+    };
+
+    // ClassSpec flag bits.
+    enum ClassFlag : std::uint32_t {
+        kClassCase = 1, kClassCaseObject = 2, kClassMutableInstances = 4, kClassTrait = 8,
+        kClassObject = 16,
+    };
 
     struct Const {
         ConstKind kind;
         long long ival = 0;         // Int; Char (code point)
         double dval = 0.0;          // Double
-        std::string sval;           // String bytes; BigInt digits; Symbol/SendSite name
+        std::string sval;           // String bytes; BigInt digits; Symbol/SendSite/SuperSite/
+                                    // KwSendSite name; ClassSpec display name
         int base = 10;              // BigInt
-        std::uint32_t argc = 0;     // SendSite
-        const proto::ProtoString* symbol = nullptr;  // Symbol/SendSite, after linkSymbols
+        std::uint32_t argc = 0;     // SendSite, SuperSite; KwSendSite: positional count;
+                                    // ClassSpec: number of parents pushed
+        const proto::ProtoString* symbol = nullptr;  // the name, after linkSymbols
+        std::vector<std::string> names{};            // Names; ClassSpec: member keys;
+                                                     // KwSendSite: keyword names
+        std::vector<const proto::ProtoString*> nameSymbols{}; // after linkSymbols
+        std::vector<std::string> fields{};           // ClassSpec: product element keys
+        std::vector<const proto::ProtoString*> fieldSymbols{}; // after linkSymbols
+        std::string key{};                           // ClassSpec: type key; SuperSite: the
+                                                     // type key of the defining template
+        const proto::ProtoString* keySymbol = nullptr;        // after linkSymbols
+        std::uint32_t flags = 0;                     // ClassSpec: ClassFlag bits
+    };
+
+    struct ClassSpecData {
+        std::string displayName;          // __name__, and __prefix__ of a case class
+        std::string key;                  // type key (the membership marker)
+        std::uint32_t parentCount = 0;    // values pushed before the members
+        std::vector<std::string> memberKeys;
+        std::vector<std::string> fields;  // case classes: product elements, in order
+        std::uint32_t flags = 0;
     };
 
     struct CaptureSpec {
@@ -56,6 +85,11 @@ public:
     std::size_t addChar(char32_t c);
     std::size_t addSymbol(const std::string& name);
     std::size_t addSendSite(const std::string& name, std::uint32_t argc);
+    std::size_t addNames(const std::vector<std::string>& names);      // de-duplicated by content
+    std::size_t addClassSpec(const ClassSpecData& spec);              // never de-duplicated
+    std::size_t addSuperSite(const std::string& name, std::uint32_t argc, const std::string& ownerKey);
+    std::size_t addKwSendSite(const std::string& name, std::uint32_t positional,
+                              const std::vector<std::string>& keywords);
 
     // Emits `op operand` (with an EXTEND prefix when operand > kMaxOperand) and
     // returns the position of the `op` word. Throws std::length_error beyond
@@ -85,6 +119,10 @@ public:
     int maxStack() const { return maxStack_; }
     void setMaxStack(int n) { maxStack_ = n; }
 
+    // A method: the receiver is argument 0 (`this`); arity() counts it.
+    bool isMethod() const { return method_; }
+    void setMethod(bool m) { method_ = m; }
+
     void addCapture(int parentSlot, int localSlot) { captures_.push_back({parentSlot, localSlot}); }
     const std::vector<CaptureSpec>& captureSpecs() const { return captures_; }
     int captureCount() const { return static_cast<int>(captures_.size()); }
@@ -93,7 +131,8 @@ public:
     const BytecodeModule& block(std::size_t i) const { return *blocks_[i]; }
     std::size_t blockCount() const { return blocks_.size(); }
 
-    // Interns every Symbol and SendSite name, recursively through blocks.
+    // Interns every name a constant can hand the VM (the site names, the member
+    // and keyword names, the field keys, the type keys), through the blocks too.
     void linkSymbols(proto::ProtoContext* ctx);
 
     // Human-readable listing of this module and its blocks (tests, --disassemble).
@@ -110,6 +149,9 @@ private:
     std::unordered_map<long long, std::size_t> charIndex_;
     std::unordered_map<std::string, std::size_t> symbolIndex_;
     std::unordered_map<std::string, std::size_t> sendIndex_;      // name + "/" + argc
+    std::unordered_map<std::string, std::size_t> namesIndex_;     // the names, joined by ","
+    std::unordered_map<std::string, std::size_t> superIndex_;     // ownerKey + "/" + name + "/" + argc
+    std::unordered_map<std::string, std::size_t> kwIndex_;        // name + "/" + n + "/" + keywords
     std::vector<std::unique_ptr<BytecodeModule>> blocks_;
     std::vector<CaptureSpec> captures_;
     std::string name_ = "<top>";
@@ -117,6 +159,7 @@ private:
     bool variadic_ = false;
     int localCount_ = 0;
     int maxStack_ = 0;
+    bool method_ = false;
 };
 
 } // namespace protoScala

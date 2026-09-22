@@ -171,7 +171,8 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                         case K::Double: *sp++ = frame.fromDouble(c.dval); break;
                         case K::String: *sp++ = makeString(&frame, c.sval); break;  // may hold NUL
                         case K::Char:   *sp++ = frame.fromUnicodeChar(static_cast<unsigned>(c.ival)); break;
-                        case K::Symbol: case K::SendSite:
+                        case K::Symbol: case K::SendSite: case K::Names:
+                        case K::ClassSpec: case K::SuperSite: case K::KwSendSite:
                             throw std::logic_error("PUSH_CONST of a name constant");
                     }
                     continue;
@@ -354,6 +355,16 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                                        proto::ProtoString::createSymbol(&frame, "unary_!"), nullptr, 0);
                     continue;
                 }
+                // The Phase 2 object-model opcodes are declared but not yet
+                // executable; they fall through to the rejection below until
+                // their handlers land. Listing them keeps this switch
+                // exhaustive over Op (-Wswitch).
+                case Op::MAKE_CLASS: case Op::NEW: case Op::INVOKE_INIT:
+                case Op::STORE_FIELD: case Op::SET_FIELD: case Op::SEND_SUPER:
+                case Op::TEST_TYPE: case Op::TEST_PROTO: case Op::UNAPPLY_FIELDS:
+                case Op::UNCONS: case Op::MATCH_ERROR: case Op::CAST_FAIL:
+                case Op::MAKE_TUPLE: case Op::SEND_KW:
+                    break;
             }
             // Every handled opcode continues the loop or returns; reaching this
             // point means the module holds an opcode value the VM does not know

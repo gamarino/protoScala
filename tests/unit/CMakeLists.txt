@@ -12,6 +12,8 @@ add_executable(protoscala_unit_tests
     test_bytecode.cpp
     test_compiler.cpp
     test_values.cpp
+    test_objectmodel.cpp
+    test_hashing.cpp
     test_stackguard.cpp
     test_engine.cpp
     test_primitives.cpp

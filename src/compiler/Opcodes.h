@@ -53,7 +53,23 @@ enum class Op : uint8_t {
     NEG = 36,                              // [a] -> [-a]
     NOT = 37,                              // [b] -> [!b]
     // 38..63   reserved (Phase 1 additions)
-    // 64..95   object model, Phase 2: SEND_SUPER, TEST_TYPE, TEST_PROTO, UNAPPLY_FIELDS
+    // Object model and pattern matching, Phase 2 (64..95); stack effects in
+    // the Phase 2 plan's opcode table and in docs/STATUS.md.
+    MAKE_CLASS     = 64,  // [p1..pk m1..mn] -> [cls]    operand: ClassSpec constant
+    NEW            = 65,  // [cls a1..an] -> [obj]        operand: SendSite (constructor key, n)
+    INVOKE_INIT    = 66,  // [cls this a1..an] -> [this'] operand: SendSite (constructor key, n)
+    STORE_FIELD    = 67,  // [v] -> []   slot[0] = slot[0].setAttribute(key, v); operand: Symbol
+    SET_FIELD      = 68,  // [obj v] -> [] obj must be mutable;              operand: Symbol
+    SEND_SUPER     = 69,  // [this a1..an] -> [r]         operand: SuperSite constant
+    TEST_TYPE      = 70,  // [v] -> [Boolean]             operand: TypeCode
+    TEST_PROTO     = 71,  // [v] -> [Boolean]             operand: Symbol (type key: the class marker)
+    UNAPPLY_FIELDS = 72,  // [v] -> [f1..fn]              operand: Names constant (attribute keys)
+    UNCONS         = 73,  // [list] -> [head tail]        list must be non-empty
+    MATCH_ERROR    = 74,  // [v] -> throws MatchError
+    CAST_FAIL      = 75,  // [v] -> throws ClassCastException; operand: String constant (type name)
+    MAKE_TUPLE     = 76,  // [a1..an] -> [tuple]          operand: n (2..22)
+    SEND_KW        = 77,  // [recv a1..an v1..vm] -> [r]  operand: KwSendSite constant
+    // 78..95   reserved (object model)
     // 96..127  exceptions, Phase 4: THROW (+ per-module handler table)
     // 128..159 actors, Phase 5: SEND_ASYNC, ASK, AWAIT
 };
@@ -62,6 +78,14 @@ using Instr = std::uint32_t;
 inline constexpr unsigned      kOperandShift       = 8;
 inline constexpr std::uint32_t kMaxOperand         = (1u << 24) - 1;
 inline constexpr std::uint64_t kMaxExtendedOperand = (1ull << 48) - 1;
+
+// Operand of TEST_TYPE: the built-in types a type pattern or isInstanceOf can
+// name (D29: Int = Long = Short = Byte = BigInt, Float = Double).
+enum class TypeCode : uint8_t {
+    Integer, Double, Boolean, Char, String, Unit, List, ConsList, Function,
+    AnyRef, AnyVal, Null, NonNull, Nothing,
+};
+const char* typeCodeName(TypeCode code);
 
 const char* opName(Op op);
 

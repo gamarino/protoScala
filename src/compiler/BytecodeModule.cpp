@@ -49,6 +49,33 @@ const char* opName(Op op) {
         case Op::NE:            return "NE";
         case Op::NEG:           return "NEG";
         case Op::NOT:           return "NOT";
+        case Op::MAKE_CLASS:     return "MAKE_CLASS";
+        case Op::NEW:            return "NEW";
+        case Op::INVOKE_INIT:    return "INVOKE_INIT";
+        case Op::STORE_FIELD:    return "STORE_FIELD";
+        case Op::SET_FIELD:      return "SET_FIELD";
+        case Op::SEND_SUPER:     return "SEND_SUPER";
+        case Op::TEST_TYPE:      return "TEST_TYPE";
+        case Op::TEST_PROTO:     return "TEST_PROTO";
+        case Op::UNAPPLY_FIELDS: return "UNAPPLY_FIELDS";
+        case Op::UNCONS:         return "UNCONS";
+        case Op::MATCH_ERROR:    return "MATCH_ERROR";
+        case Op::CAST_FAIL:      return "CAST_FAIL";
+        case Op::MAKE_TUPLE:     return "MAKE_TUPLE";
+        case Op::SEND_KW:        return "SEND_KW";
+    }
+    return "?";
+}
+
+const char* typeCodeName(TypeCode code) {
+    switch (code) {
+        case TypeCode::Integer: return "Int";      case TypeCode::Double: return "Double";
+        case TypeCode::Boolean: return "Boolean";  case TypeCode::Char: return "Char";
+        case TypeCode::String: return "String";    case TypeCode::Unit: return "Unit";
+        case TypeCode::List: return "List";        case TypeCode::ConsList: return "::";
+        case TypeCode::Function: return "Function"; case TypeCode::AnyRef: return "AnyRef";
+        case TypeCode::AnyVal: return "AnyVal";    case TypeCode::Null: return "Null";
+        case TypeCode::NonNull: return "Any";      case TypeCode::Nothing: return "Nothing";
     }
     return "?";
 }
@@ -113,6 +140,49 @@ std::size_t BytecodeModule::addSendSite(const std::string& name, std::uint32_t a
     return findOrAdd(sendIndex_, key, consts_, std::move(c));
 }
 
+namespace {
+std::string joined(const std::vector<std::string>& v) {
+    std::string out;
+    for (const auto& s : v) out += (out.empty() ? "" : ",") + s;
+    return out;
+}
+} // namespace
+
+std::size_t BytecodeModule::addNames(const std::vector<std::string>& names) {
+    Const c{ConstKind::Names, 0, 0.0, {}};
+    c.names = names;
+    return findOrAdd(namesIndex_, joined(names), consts_, std::move(c));
+}
+
+std::size_t BytecodeModule::addClassSpec(const ClassSpecData& spec) {
+    Const c{ConstKind::ClassSpec, 0, 0.0, spec.displayName};
+    c.argc = spec.parentCount;
+    c.names = spec.memberKeys;
+    c.fields = spec.fields;
+    c.key = spec.key;
+    c.flags = spec.flags;
+    consts_.push_back(std::move(c));
+    return consts_.size() - 1;
+}
+
+std::size_t BytecodeModule::addSuperSite(const std::string& name, std::uint32_t argc,
+                                         const std::string& ownerKey) {
+    Const c{ConstKind::SuperSite, 0, 0.0, name};
+    c.argc = argc;
+    c.key = ownerKey;
+    return findOrAdd(superIndex_, ownerKey + "/" + name + "/" + std::to_string(argc), consts_,
+                     std::move(c));
+}
+
+std::size_t BytecodeModule::addKwSendSite(const std::string& name, std::uint32_t positional,
+                                          const std::vector<std::string>& keywords) {
+    Const c{ConstKind::KwSendSite, 0, 0.0, name};
+    c.argc = positional;
+    c.names = keywords;
+    return findOrAdd(kwIndex_, name + "/" + std::to_string(positional) + "/" + joined(keywords),
+                     consts_, std::move(c));
+}
+
 std::size_t BytecodeModule::emit(Op op, std::uint64_t operand, int line) {
     if (operand > kMaxExtendedOperand)
         throw std::length_error(std::string(opName(op)) + " operand " +
@@ -146,9 +216,24 @@ std::size_t BytecodeModule::emitJumpBack(std::size_t target, int line) {
 }
 
 void BytecodeModule::linkSymbols(proto::ProtoContext* ctx) {
-    for (Const& c : consts_)
-        if (c.kind == ConstKind::Symbol || c.kind == ConstKind::SendSite)
-            c.symbol = proto::ProtoString::createSymbol(ctx, c.sval);
+    // createSymbol takes a C string: a name with an embedded NUL cannot occur —
+    // identifiers never contain one.
+    auto intern = [ctx](const std::string& s) { return proto::ProtoString::createSymbol(ctx, s.c_str()); };
+    for (Const& c : consts_) {
+        switch (c.kind) {
+            case ConstKind::Symbol: case ConstKind::SendSite: case ConstKind::SuperSite:
+            case ConstKind::KwSendSite: case ConstKind::ClassSpec:
+                c.symbol = intern(c.sval);
+                break;
+            default:
+                break;
+        }
+        c.nameSymbols.clear();
+        for (const auto& n : c.names) c.nameSymbols.push_back(intern(n));
+        c.fieldSymbols.clear();
+        for (const auto& f : c.fields) c.fieldSymbols.push_back(intern(f));
+        if (!c.key.empty()) c.keySymbol = intern(c.key);
+    }
     for (auto& b : blocks_) b->linkSymbols(ctx);
 }
 
@@ -191,6 +276,15 @@ std::string formatChar(long long codepoint) {
     return out;
 }
 
+std::string nameList(const std::vector<std::string>& v) {
+    std::string out = "[";
+    for (std::size_t i = 0; i < v.size(); ++i) {
+        if (i) out += ",";
+        out += v[i];
+    }
+    return out + "]";
+}
+
 std::string formatConst(const BytecodeModule::Const& c) {
     switch (c.kind) {
         case BytecodeModule::ConstKind::Int:      return std::to_string(c.ival);
@@ -200,6 +294,23 @@ std::string formatConst(const BytecodeModule::Const& c) {
         case BytecodeModule::ConstKind::Char:     return formatChar(c.ival);
         case BytecodeModule::ConstKind::Symbol:   return c.sval;
         case BytecodeModule::ConstKind::SendSite: return c.sval + "/" + std::to_string(c.argc);
+        case BytecodeModule::ConstKind::Names:    return nameList(c.names);
+        case BytecodeModule::ConstKind::ClassSpec: {
+            std::string out = "class " + c.sval + " " + c.key + " parents=" +
+                              std::to_string(c.argc) + " members=" + nameList(c.names);
+            if (c.flags & BytecodeModule::kClassCase) out += " fields=" + nameList(c.fields);
+            return out;
+        }
+        case BytecodeModule::ConstKind::SuperSite:
+            return "super." + c.sval + "/" + std::to_string(c.argc) + " in " + c.key;
+        case BytecodeModule::ConstKind::KwSendSite: {
+            std::string out = c.sval + "/" + std::to_string(c.argc) + "(";
+            for (std::size_t i = 0; i < c.names.size(); ++i) {
+                if (i) out += ",";
+                out += c.names[i] + "=";
+            }
+            return out + ")";
+        }
     }
     return "?";
 }
@@ -223,6 +334,20 @@ std::string commentFor(const BytecodeModule& m, Op op, std::uint64_t operand, st
             const auto& c = m.constAt(operand);
             return " ; " + c.sval + "/" + std::to_string(c.argc);
         }
+        case Op::MAKE_CLASS:
+        case Op::NEW:
+        case Op::INVOKE_INIT:
+        case Op::SEND_SUPER:
+        case Op::UNAPPLY_FIELDS:
+        case Op::SEND_KW:
+            return " ; " + formatConst(m.constAt(operand));
+        case Op::STORE_FIELD:
+        case Op::SET_FIELD:
+        case Op::TEST_PROTO:
+        case Op::CAST_FAIL:
+            return " ; " + m.constAt(operand).sval;
+        case Op::TEST_TYPE:
+            return " ; " + std::string(typeCodeName(static_cast<TypeCode>(operand)));
         case Op::MAKE_FN:
             return " ; -> block " + std::to_string(operand);
         case Op::JUMP:
@@ -245,6 +370,7 @@ std::string BytecodeModule::disassemble() const {
             const std::string pad(static_cast<std::size_t>(indent) * 2, ' ');
             out += pad + "function " + m.name_ + " arity=" + std::to_string(m.arity_);
             if (m.variadic_) out += " variadic";
+            if (m.method_) out += " method";
             out += " locals=" + std::to_string(m.localCount_) +
                    " stack=" + std::to_string(m.maxStack_) +
                    " captures=" + std::to_string(m.captures_.size()) + "\n";

@@ -108,3 +108,29 @@ TEST(Bytecode, LinkSymbolsInternsInTheSpace) {
     EXPECT_EQ(m.constAt(site).symbol, proto::ProtoString::createSymbol(ctx, "length"));
     EXPECT_EQ(m.block(0).constAt(inner).symbol, proto::ProtoString::createSymbol(ctx, "inner"));
 }
+
+TEST(Bytecode, Phase2ConstantsAndDisassembly) {
+    BytecodeModule m;
+    EXPECT_EQ(m.addNames({"x", "y"}), m.addNames({"x", "y"}));
+    EXPECT_NE(m.addNames({"x", "y"}), m.addNames({"x"}));
+    EXPECT_EQ(m.addSuperSite("f", 1, "@T"), m.addSuperSite("f", 1, "@T"));
+    EXPECT_NE(m.addSuperSite("f", 1, "@T"), m.addSuperSite("f", 1, "@U"));
+    BytecodeModule::ClassSpecData spec{"Point", "@Point", 2, {"<init>"}, {"x", "y"},
+                                       BytecodeModule::kClassCase};
+    const auto k = m.addClassSpec(spec);
+    EXPECT_NE(m.addClassSpec(spec), k);  // never shared
+    m.emit(Op::MAKE_CLASS, k, 1);
+    m.emit(Op::TEST_TYPE, static_cast<unsigned>(protoScala::TypeCode::String), 2);
+    m.emit(Op::SEND_KW, m.addKwSendSite("copy", 0, {"y"}), 3);
+    m.setMethod(true);
+    const std::string text = m.disassemble();
+    EXPECT_NE(text.find("MAKE_CLASS"), std::string::npos);
+    EXPECT_NE(text.find("class Point @Point parents=2"), std::string::npos);
+    EXPECT_NE(text.find("TEST_TYPE 4 ; String"), std::string::npos);
+    EXPECT_NE(text.find("copy/0(y=)"), std::string::npos);
+    EXPECT_NE(text.find(" method "), std::string::npos);
+    proto::ProtoSpace space;
+    m.linkSymbols(space.rootContext);
+    EXPECT_EQ(m.constAt(k).keySymbol, proto::ProtoString::createSymbol(space.rootContext, "@Point"));
+    EXPECT_EQ(m.constAt(k).fieldSymbols.size(), 2u);
+}

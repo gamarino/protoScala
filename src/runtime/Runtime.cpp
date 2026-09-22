@@ -1,12 +1,17 @@
 #include "runtime/Runtime.h"
+#include "runtime/Values.h"
 #include "protoCore.h"
+
+#include <string>
 
 namespace protoScala {
 
 namespace {
 enum RootSlot : unsigned {
     kGlobals, kAny, kInt, kDouble, kBoolean, kChar, kString, kList, kUnitProto,
-    kFunction, kFunctionArities, kCell, kLazy, kUnit, kRootSlotCount
+    kFunction, kFunctionArities, kCell, kLazy, kUnit,
+    kAnyRef, kProduct, kSerializable, kWithFilter, kListCompanion, kTuples,
+    kRootSlotCount
 };
 } // namespace
 
@@ -46,6 +51,64 @@ Runtime::Runtime(proto::ProtoSpace& space) : space_(space) {
     L.valueKey    = proto::ProtoString::createSymbol(ctx, "__value__");
     L.thunkKey    = proto::ProtoString::createSymbol(ctx, "__thunk__");
     L.applyName   = proto::ProtoString::createSymbol(ctx, "apply");
+
+    // Phase 2: the class-model prototypes. Tuple2..Tuple22 are pinned together
+    // in one list, as the function arities are.
+    L.anyRefProto       = pin(kAnyRef, L.anyProto->newChild(ctx, true));
+    L.productProto      = pin(kProduct, L.anyRefProto->newChild(ctx, true));
+    L.serializableProto = pin(kSerializable, L.anyRefProto->newChild(ctx, true));
+    L.withFilterProto   = pin(kWithFilter, L.anyRefProto->newChild(ctx, true));
+    L.listCompanion     = pin(kListCompanion, L.anyRefProto->newChild(ctx, true));
+    const proto::ProtoObject* tuples[kMaxTupleArity + 1];
+    for (unsigned n = 2; n <= kMaxTupleArity; ++n)
+        tuples[n] = L.productProto->newChild(ctx, true);
+    ctx->setAutomaticLocal(kTuples, ctx->newList(kMaxTupleArity - 1, tuples + 2)->asObject(ctx));
+    for (unsigned n = 2; n <= kMaxTupleArity; ++n)
+        L.tupleProto[n] = const_cast<proto::ProtoObject*>(tuples[n]);
+
+    auto key = [&](const char* s) { return proto::ProtoString::createSymbol(ctx, s); };
+    L.nameKey = key("__name__");
+    L.prefixKey = key("__prefix__");
+    L.fieldsKey = key("__fields__");
+    L.tupleKey = key("__tuple__");
+    L.mutableKey = key("__mutable__");
+    L.selfKey = key("__self__");
+    L.listKey = key("__list__");
+    L.predsKey = key("__preds__");
+    L.initKey = key(kPrimaryCtorKey);
+    L.toStringName = key("toString");
+    L.equalsName = key("equals");
+    L.hashCodeName = key("hashCode");
+    for (unsigned k = 1; k <= kMaxTupleArity; ++k)
+        L.tupleFieldKey[k] = key(("_" + std::to_string(k)).c_str());
+
+    // The built-in types: bound in the globals under their type keys (MAKE_CLASS
+    // pushes them as parents) and marked on themselves (TEST_PROTO, Design note 5).
+    // Everything below AnyRef has a __name__ (a class name, Task 6's
+    // isScalaInstance); Any does not, so Cells, lazy holders, function objects
+    // and the () singleton - children of Any - never pass for instances.
+    auto bindType = [&](proto::ProtoObject* proto, const std::string& typeKey, const char* name) {
+        const auto* k = key(typeKey.c_str());
+        L.globals->setAttribute(ctx, k, proto);   // mutable: in place
+        proto->setAttribute(ctx, k, PROTO_TRUE);
+        if (name) proto->setAttribute(ctx, L.nameKey, makeString(ctx, name));
+    };
+    bindType(L.anyProto, kAnyKey, nullptr);
+    bindType(L.anyRefProto, kAnyRefKey, "AnyRef");
+    bindType(L.productProto, kProductKey, "Product");
+    bindType(L.serializableProto, kSerializableKey, "Serializable");
+    for (unsigned n = 2; n <= kMaxTupleArity; ++n) {
+        const std::string name = "Tuple" + std::to_string(n);
+        proto::ProtoObject* t = L.tupleProto[n];
+        bindType(t, tupleTypeKey(n), name.c_str());
+        t->setAttribute(ctx, L.prefixKey, makeString(ctx, name));
+        t->setAttribute(ctx, L.tupleKey, PROTO_TRUE);
+        const proto::ProtoObject* keys[kMaxTupleArity];
+        for (unsigned k = 1; k <= n; ++k) keys[k - 1] = L.tupleFieldKey[k]->asObject(ctx);
+        t->setAttribute(ctx, L.fieldsKey, ctx->newList(n, keys)->asObject(ctx));
+    }
+    L.withFilterProto->setAttribute(ctx, L.nameKey, makeString(ctx, "WithFilter"));
+    L.listCompanion->setAttribute(ctx, L.nameKey, makeString(ctx, "List"));
 
     // Rebind the primitive prototypes (see the header comment).
     space.smallIntegerPrototype = L.intProto;

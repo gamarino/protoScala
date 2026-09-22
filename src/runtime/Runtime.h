@@ -13,6 +13,7 @@
  * §6). One runtime per process (R5).
  */
 #pragma once
+#include "compiler/ClassInfo.h"  // the type-key constants and kMaxTupleArity
 
 namespace proto {
 class ProtoContext;
@@ -47,6 +48,27 @@ struct RuntimeLayout {
     const proto::ProtoString* valueKey = nullptr;     // "__value__": Cell / Lazy value
     const proto::ProtoString* thunkKey = nullptr;     // "__thunk__": Lazy initialiser
     const proto::ProtoString* applyName = nullptr;    // "apply"
+
+    // Phase 2 (pinned in root-context slots like the rest):
+    proto::ProtoObject* anyRefProto = nullptr;        // AnyRef: the root of every class chain
+    proto::ProtoObject* productProto = nullptr;       // Product: case-class members (natives)
+    proto::ProtoObject* serializableProto = nullptr;  // Serializable: a marker trait
+    proto::ProtoObject* withFilterProto = nullptr;    // the lazy result of List.withFilter
+    proto::ProtoObject* listCompanion = nullptr;      // the value of the global `List`
+    proto::ProtoObject* tupleProto[kMaxTupleArity + 1] = {};  // [2..22]: Tuple2..Tuple22
+    const proto::ProtoString* nameKey = nullptr;      // "__name__": a class's display name
+    const proto::ProtoString* prefixKey = nullptr;    // "__prefix__": a case class's productPrefix
+    const proto::ProtoString* fieldsKey = nullptr;    // "__fields__": ProtoList of element keys
+    const proto::ProtoString* tupleKey = nullptr;     // "__tuple__": PROTO_TRUE on Tuple2..22
+    const proto::ProtoString* mutableKey = nullptr;   // "__mutable__": instances are mutable
+    const proto::ProtoString* selfKey = nullptr;      // "__self__": receiver of a bound method
+    const proto::ProtoString* listKey = nullptr;      // "__list__": the source of a WithFilter
+    const proto::ProtoString* predsKey = nullptr;     // "__preds__": its predicates (ProtoList)
+    const proto::ProtoString* initKey = nullptr;      // "<init>"
+    const proto::ProtoString* toStringName = nullptr; // "toString"
+    const proto::ProtoString* equalsName = nullptr;   // "equals"
+    const proto::ProtoString* hashCodeName = nullptr; // "hashCode"
+    const proto::ProtoString* tupleFieldKey[kMaxTupleArity + 1] = {};  // [1..22]: "_1".."_22"
 
     const proto::ProtoObject* functionProtoFor(unsigned arity) const {
         return functionArity[arity <= kMaxFunctionArity ? arity : kMaxFunctionArity + 1];
