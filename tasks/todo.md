@@ -34,3 +34,9 @@ measured with `benchmarks/cold-start.sh` — see `benchmarks/RESULTS.md`
 machine; the default RelWithDebInfo build measured slower and less
 consistently). D9–D25 recorded in STATUS.md as provisional, pending
 maintainer review.
+
+## Closing sequence (maintainer, 2026-09-22) — after Phase 2 and the protoCore fixes
+- [ ] Merge protoCore feature/pslo-p1 (ProtoMap) then feature/descendant-of (isInstanceOf/hasParent/setParents) into master; version 2.0.0, SOVERSION 2
+- [ ] protoCore: full suite, ASan, perf gate on a quiet host
+- [ ] Clean rebuild + suites + fixes: protoPython, protoJS (-j1, sequential test262), protoST, protoClojure, protoScala
+- [ ] Push everything; remove temporary worktrees (protoCore-pslo, protoCore-desc)
