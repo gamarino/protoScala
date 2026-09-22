@@ -663,9 +663,8 @@ Token Lexer::lexInterpolated(std::string interpolator, SourcePos start) {
         literal.clear();
     };
 
-    const bool atEofMsgTriple = triple;
     const std::string unterminatedMsg =
-        atEofMsgTriple ? "unclosed multi-line string literal" : "unclosed string literal";
+        triple ? "unclosed multi-line string literal" : "unclosed string literal";
 
     while (true) {
         if (eof()) return error(unterminatedMsg, start, triple);
