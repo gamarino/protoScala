@@ -64,6 +64,14 @@ const Node& rhsOf(const ValDef& v) {
 //     the reference (the def is hoisted above the val's initialiser).
 // Parameters (decl == nullptr) are never boxed: they are immutable and bound
 // before any hoisted MAKE_FN runs.
+//
+// The pass also rejects forward references that would read a slot before its
+// initialiser ran: a reference from a block statement (directly, or from a
+// lambda / lazy thunk created by it) to a val or var of the same block
+// declared at or after that statement. References through a local def are
+// legal (the def is hoisted and the declaration is boxed). A lazy val
+// referenced that way from a lambda or thunk is boxed instead; a direct
+// forward reference to a lazy val is rejected as not supported yet.
 // ---------------------------------------------------------------------------
 class CaptureAnalysis {
 public:
@@ -73,27 +81,34 @@ public:
         if (static_cast<int>(isDefLevel_.size()) <= depth) isDefLevel_.resize(depth + 1);
         isDefLevel_[depth] = isDef;
         scopes_.emplace_back();
-        for (const Param& p : params) scopes_.back()[p.name] = Decl{nullptr, depth, DeclKind::Param};
+        for (const Param& p : params)
+            scopes_.back().names[p.name] = Decl{nullptr, depth, DeclKind::Param, -1};
         walk(body, depth);
         scopes_.pop_back();
     }
 
 private:
-    enum class DeclKind : uint8_t { Param, Val, Var, Def };
+    enum class DeclKind : uint8_t { Param, Val, LazyVal, Var, Def };
     struct Decl {
         const Node* decl;
         int depth;
         DeclKind kind;
+        int index;  // statement index in its block; -1 for parameters
+    };
+    struct Scope {
+        std::unordered_map<std::string, Decl> names;
+        const Block* block = nullptr;  // null for a parameter scope
+        int current = -1;              // index of the block statement being walked
     };
 
     std::unordered_set<const Node*>& boxed_;
-    std::vector<std::unordered_map<std::string, Decl>> scopes_;
+    std::vector<Scope> scopes_;
     std::vector<bool> isDefLevel_;
 
-    const Decl* lookup(const std::string& name) const {
+    const Decl* lookup(const std::string& name, const Scope** where) const {
         for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it) {
-            auto hit = it->find(name);
-            if (hit != it->end()) return &hit->second;
+            auto hit = it->names.find(name);
+            if (hit != it->names.end()) { *where = &*it; return &hit->second; }
         }
         return nullptr;
     }
@@ -104,11 +119,30 @@ private:
         return false;
     }
 
-    void reference(const std::string& name, int depth) {
-        const Decl* d = lookup(name);
-        if (!d || !d->decl || d->depth >= depth) return;
+    void reference(const std::string& name, int depth, SourcePos pos) {
+        const Scope* scope = nullptr;
+        const Decl* d = lookup(name, &scope);
+        if (!d || !d->decl) return;
+        const bool throughDef = defBetween(d->depth, depth);
+        const bool forward = scope->block && d->index >= scope->current &&
+                             d->kind != DeclKind::Def && !throughDef;
+        if (forward) {
+            if (d->kind == DeclKind::LazyVal) {
+                if (d->depth == depth)
+                    throw CompileError("forward reference to lazy value " + name +
+                                       " is not supported yet", pos);
+                boxed_.insert(d->decl);  // the closure must see the later MAKE_LAZY
+                return;
+            }
+            const Node& at = *scope->block->stats[static_cast<std::size_t>(scope->current)];
+            const std::string over =
+                at.kind == NodeKind::ValDef ? as<ValDef>(at).name : name;
+            throw CompileError("forward reference to value " + name +
+                               " extends over definition of value " + over, pos);
+        }
+        if (d->depth >= depth) return;
         const bool box = d->kind == DeclKind::Var || d->kind == DeclKind::Def ||
-                         (d->kind == DeclKind::Val && defBetween(d->depth, depth));
+                         ((d->kind == DeclKind::Val || d->kind == DeclKind::LazyVal) && throughDef);
         if (box) boxed_.insert(d->decl);
     }
 
@@ -122,7 +156,7 @@ private:
             case NodeKind::CharLit: case NodeKind::BoolLit: case NodeKind::NullLit:
             case NodeKind::UnitLit: case NodeKind::InterpString: case NodeKind::Import:
                 return;  // interpolations are rejected by the compiler
-            case NodeKind::Ident: reference(as<Ident>(n).name, depth); return;
+            case NodeKind::Ident: reference(as<Ident>(n).name, depth, n.pos); return;
             case NodeKind::Select: walk(as<Select>(n).qualifier.get(), depth); return;
             case NodeKind::Apply: {
                 const auto& a = as<Apply>(n);
@@ -191,16 +225,25 @@ private:
 
     void block(const Block& b, int depth) {
         scopes_.emplace_back();
-        for (const auto& s : b.stats) {
-            if (s->kind == NodeKind::ValDef) {
-                const auto& v = as<ValDef>(*s);
-                scopes_.back()[v.name] =
-                    Decl{s.get(), depth, v.isVar ? DeclKind::Var : DeclKind::Val};
-            } else if (s->kind == NodeKind::DefDef) {
-                scopes_.back()[as<DefDef>(*s).name] = Decl{s.get(), depth, DeclKind::Def};
+        scopes_.back().block = &b;
+        for (std::size_t k = 0; k < b.stats.size(); ++k) {
+            const Node& s = *b.stats[k];
+            const int index = static_cast<int>(k);
+            if (s.kind == NodeKind::ValDef) {
+                const auto& v = as<ValDef>(s);
+                const DeclKind kind = v.isLazy ? DeclKind::LazyVal
+                                    : v.isVar  ? DeclKind::Var : DeclKind::Val;
+                scopes_.back().names[v.name] = Decl{&s, depth, kind, index};
+            } else if (s.kind == NodeKind::DefDef) {
+                scopes_.back().names[as<DefDef>(s).name] = Decl{&s, depth, DeclKind::Def, index};
             }
         }
-        for (const auto& s : b.stats) walk(*s, depth);
+        // scopes_ may grow while walking; address the block scope by index.
+        const std::size_t self = scopes_.size() - 1;
+        for (std::size_t k = 0; k < b.stats.size(); ++k) {
+            scopes_[self].current = static_cast<int>(k);
+            walk(*b.stats[k], depth);
+        }
         scopes_.pop_back();
     }
 };
@@ -328,6 +371,7 @@ void Compiler::compileExpr(const Node& n) {
         case NodeKind::Block: compileBlock(as<Block>(n)); return;
         case NodeKind::Lambda: {
             const auto& l = as<Lambda>(n);
+            if (!l.body) throw CompileError("a function literal needs a body", n.pos);
             compileFunction("<lambda>", l.params, *l.body, /*isDef=*/false, n.pos);
             return;
         }
@@ -477,6 +521,18 @@ void Compiler::compileReturn(const Return& r) {
 }
 
 void Compiler::compileBlock(const Block& b) {
+    // Two definitions of one name in the same block are an error; shadowing
+    // in a nested block is legal. `_` may be bound any number of times.
+    {
+        std::unordered_set<std::string> seen;
+        for (const auto& s : b.stats) {
+            const std::string* name = nullptr;
+            if (s->kind == NodeKind::ValDef) name = &as<ValDef>(*s).name;
+            else if (s->kind == NodeKind::DefDef) name = &as<DefDef>(*s).name;
+            if (name && *name != "_" && !seen.insert(*name).second)
+                throw CompileError(*name + " is already defined", s->pos);
+        }
+    }
     fn_->scopes.emplace_back();
     // 1. Declare every definition of the block; boxed ones get a Cell now.
     for (const auto& s : b.stats) {

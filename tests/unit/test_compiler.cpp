@@ -223,3 +223,69 @@ TEST(Compiler, StackDepthIsBalancedAcrossBranches) {
     EXPECT_EQ(fn.maxStack(), 2);
     EXPECT_EQ(cu.module->maxStack(), 1);
 }
+
+// --- Fix round 1 -------------------------------------------------------------
+
+TEST(Compiler, ForwardReferenceFromLambdaIsRejected) {
+    EXPECT_TRUE(has(compileError("def f() = { val g = () => y; val y = 1; g() }"),
+                    "forward reference to value y extends over definition of value g"));
+}
+
+TEST(Compiler, ForwardReferenceFromLazyThunkIsRejected) {
+    EXPECT_TRUE(has(compileError("def f() = { lazy val a = b; val b = 1; a }"),
+                    "forward reference to value b extends over definition of value a"));
+}
+
+TEST(Compiler, DirectForwardReferencesAreRejected) {
+    EXPECT_TRUE(has(compileError("def f() = { val a = b; val b = 1; a }"),
+                    "forward reference to value b extends over definition of value a"));
+    EXPECT_TRUE(has(compileError("def f() = { c = 1; var c = 0; c }"),
+                    "forward reference to value c"));
+    EXPECT_TRUE(has(compileError("def f() = { val a = z; lazy val z = 1; a }"),
+                    "forward reference to lazy value z is not supported yet"));
+}
+
+TEST(Compiler, ForwardReferenceToLazyValFromLambdaIsBoxed) {
+    const auto l = listing("def f() = { val g = () => z; lazy val z = 1; g() }");
+    EXPECT_TRUE(has(l, "MAKE_CELL"));
+    EXPECT_TRUE(has(l, "PUSH_CELL"));
+}
+
+TEST(Compiler, ForwardReferencesThroughLocalDefsStayLegal) {
+    const auto l = listing("def f() = {\n  def inc() = c += 1\n  var c = 0\n  inc()\n  c\n}");
+    EXPECT_TRUE(has(l, "MAKE_CELL"));
+}
+
+TEST(Compiler, DuplicateNamesInOneBlockAreRejected) {
+    EXPECT_TRUE(has(compileError("def f() = { val x = 1; val x = 2; x }"), "x is already defined"));
+    EXPECT_TRUE(has(compileError("def f() = { def g() = 1; val g = 2; g }"), "g is already defined"));
+    EXPECT_EQ(compileError("def f() = { val x = 1; { val x = 2; x } }"), "");
+}
+
+TEST(Compiler, VarInsideWhileBodyGetsAFreshCellPerIteration) {
+    GlobalTable g;
+    auto cu = compile("def f() = {\n  var i = 0\n  while i < 3 do {\n    var j = i\n"
+                      "    val h = () => j\n    i += 1\n  }\n}", g);
+    const std::string l = cu.module->block(0).disassemble();
+    const auto body = l.substr(0, l.find("function <lambda>"));
+    const auto test = body.find("JUMP_IF_FALSE");
+    const auto cell = body.find("MAKE_CELL");
+    const auto back = body.find("JUMP_BACK");
+    ASSERT_NE(cell, std::string::npos);
+    EXPECT_LT(test, cell);
+    EXPECT_LT(cell, back);
+    EXPECT_EQ(body.find("MAKE_CELL", cell + 1), std::string::npos);  // i is not boxed
+}
+
+TEST(Compiler, MaxStackOfAWhileLoopIsExact) {
+    GlobalTable g;
+    auto cu = compile("def f() = { var i = 0; while i < 3 do i += 1; i }", g);
+    EXPECT_EQ(cu.module->block(0).maxStack(), 2);
+}
+
+TEST(Compiler, MaxStackOfNestedShortCircuitsIsExact) {
+    GlobalTable g;
+    // x stays on the stack under the condition: 1 + (x < y) = 3 at the deepest point.
+    auto cu = compile("def f(x: Int, y: Int) = x + (if x < y && (y < x || x == y) then 1 else 2)", g);
+    EXPECT_EQ(cu.module->block(0).maxStack(), 3);
+}
