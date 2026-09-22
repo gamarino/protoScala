@@ -65,10 +65,13 @@ configure_file(src/support/Version.h.in
 # Shared by every later library (frontend, compiler, runtime, repl). Phase 1
 # adds protoscala_frontend, protoscala_compiler, protoscala_runtime and
 # protoscala_repl next to it (docs/DESIGN.md §3.1).
+# The native stack guard (src/runtime/StackGuard.cpp) lives here too: the
+# parser, the desugarer and the compiler check it as well as the VM.
 add_library(protoscala_support STATIC
     src/support/Version.cpp
+    src/runtime/StackGuard.cpp
 )
-target_link_libraries(protoscala_support PUBLIC ${PROTOCORE_LIBRARY})
+target_link_libraries(protoscala_support PUBLIC ${PROTOCORE_LIBRARY} pthread)
 target_compile_options(protoscala_support PRIVATE -Wall -Wextra -Wpedantic)
 
 # --- Frontend: lexer (with offside rule), parser, AST, desugar ------------------
@@ -90,9 +93,8 @@ add_library(protoscala_compiler STATIC
 target_link_libraries(protoscala_compiler PUBLIC protoscala_frontend protoscala_support)
 target_compile_options(protoscala_compiler PRIVATE -Wall -Wextra -Wpedantic)
 
-# --- Runtime: VM, values, primitives, stack guard --------------------------------
+# --- Runtime: VM, values, primitives (the stack guard is in support) -----------
 add_library(protoscala_runtime STATIC
-    src/runtime/StackGuard.cpp
     src/runtime/Runtime.cpp
     src/runtime/Values.cpp
     src/runtime/ExecutionEngine.cpp

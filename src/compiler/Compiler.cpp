@@ -372,7 +372,8 @@ void Compiler::compileExpr(const Node& n) {
         case NodeKind::Lambda: {
             const auto& l = as<Lambda>(n);
             if (!l.body) throw CompileError("a function literal needs a body", n.pos);
-            compileFunction("<lambda>", l.params, *l.body, /*isDef=*/false, n.pos);
+            // A curried def's lambda owns its body's `return`s (Desugar).
+            compileFunction("<lambda>", l.params, *l.body, /*isDef=*/l.ownsReturn, n.pos);
             return;
         }
         case NodeKind::ValDef:
@@ -660,8 +661,24 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
         }
         if (main) {
             const auto& lists = main->paramLists;
+            if (main->curried)
+                throw CompileError("@main methods take no parameters or a single repeated "
+                                   "String parameter", main->pos);
             const bool noParams = lists.empty() || (lists.size() == 1 && lists[0].empty());
-            const bool varargs = lists.size() == 1 && lists[0].size() == 1 && lists[0][0].repeated;
+            const auto isString = [](const TypeTree* t) {
+                return t && t->kind == TypeTree::Kind::Name &&
+                       (t->name == "String" || t->name == "Predef.String" ||
+                        t->name == "scala.Predef.String" || t->name == "java.lang.String");
+            };
+            const bool varargs = lists.size() == 1 && lists[0].size() == 1 &&
+                                 lists[0][0].repeated && isString(lists[0][0].type.get());
+            // Scala 3 parses typed @main parameters from the command line
+            // (FromString); Phase 1 does not (D27).
+            const bool typed = lists.size() == 1 && !lists[0].empty() &&
+                               !(lists[0].size() == 1 && lists[0][0].repeated);
+            if (typed)
+                throw CompileError("typed @main parameters are not supported (D27); take "
+                                   "`args: String*` and convert the strings", main->pos);
             if (!noParams && !varargs)
                 throw CompileError("@main methods take no parameters or a single repeated "
                                    "String parameter", main->pos);

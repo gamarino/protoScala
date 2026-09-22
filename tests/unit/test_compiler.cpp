@@ -81,7 +81,22 @@ TEST(Compiler, QualifiedMainAnnotationCounts) {
 
 TEST(Compiler, MainRestrictions) {
     EXPECT_TRUE(has(compileError("@main def a() = 1\n@main def b() = 2"), "only one @main"));
-    EXPECT_TRUE(has(compileError("@main def a(x: Int) = x"), "@main methods take"));
+    EXPECT_TRUE(has(compileError("@main def a(x: Int) = x"), "typed @main parameters"));
+    EXPECT_TRUE(has(compileError("@main def a(xs: Int*) = xs"), "@main methods take"));
+    EXPECT_TRUE(has(compileError("@main def a(a: String*)(b: Int) = b"), "@main methods take"));
+}
+
+TEST(Compiler, ReturnInsideACurriedDefBody) {
+    EXPECT_EQ(compileError("def f(a: Int)(b: Int): Int = { if a > b then return a; b }"), "");
+    EXPECT_TRUE(has(compileError("def f(a: Int)(b: Int): Int = { val g = () => return a; b }"),
+                    "return inside a lambda"));
+}
+
+TEST(Compiler, UnitResultDiscardsTheBodyValue) {
+    const auto l = listing("def u(): Unit = 5");
+    const auto fn = l.substr(l.find("function u"));
+    EXPECT_TRUE(has(fn, "POP"));
+    EXPECT_TRUE(has(fn, "PUSH_UNIT"));
 }
 
 TEST(Compiler, CapturedVarIsBoxed) {

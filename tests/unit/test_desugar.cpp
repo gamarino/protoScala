@@ -41,7 +41,13 @@ TEST(Desugar, AssignmentOperators) {
 TEST(Desugar, ParensTypedAndIfWithoutElse) {
     EXPECT_EQ(d("(a)"), "a");
     EXPECT_EQ(d("x: Int"), "x");
-    EXPECT_EQ(d("if a then b"), "(if a b ())");
+    EXPECT_EQ(d("if a then b"), "(if a (block b ()) ())");
+    EXPECT_EQ(d("if a then b = 1"), "(if a (= b (int 1)) ())");  // already ()
+}
+
+TEST(Desugar, ValueDiscardingForUnit) {
+    EXPECT_EQ(d("(x: Unit)"), "(block x ())");
+    EXPECT_EQ(d("(x: Int)"), "x");
 }
 
 TEST(Desugar, RecursesEverywhere) {

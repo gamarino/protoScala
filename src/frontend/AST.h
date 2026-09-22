@@ -121,6 +121,10 @@ struct Lambda : Node {
     Lambda(SourcePos p) : Node(NodeKind::Lambda, p) {}
     std::vector<Param> params;
     NodePtr body;
+    // Set by Desugar on the lambdas that carry the extra parameter lists of a
+    // curried def (`def f(a)(b) = e` becomes `def f(a) = (b) => e`): the body
+    // is the def's own body, so a `return` in it returns from the lambda.
+    bool ownsReturn = false;
 };
 struct Typed : Node {
     Typed(SourcePos p, NodePtr e, TypePtr t)
@@ -153,6 +157,7 @@ struct DefDef : Node {
     std::vector<std::vector<Param>> paramLists;  // empty: parameterless def
     TypePtr resultType;  // may be null
     NodePtr body;
+    bool curried = false;  // set by Desugar when it folded extra parameter lists into lambdas
     // `@main` under any qualification (`@scala.main`): the last dot-segment
     // of the annotation name decides (annotations are not resolved in Phase 1).
     bool isMain() const {

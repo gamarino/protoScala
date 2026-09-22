@@ -1,5 +1,6 @@
 #include "frontend/Desugar.h"
 #include "frontend/Parser.h"
+#include "runtime/StackGuard.h"
 
 namespace protoScala {
 
@@ -17,12 +18,25 @@ public:
                                                 "unary_" + p.op);
             }
             case NodeKind::Parens: return expr(std::move(as<Parens>(*n).expr));
-            case NodeKind::Typed:  return expr(std::move(as<Typed>(*n).expr));
+            case NodeKind::Typed: {
+                // `(e: Unit)`: the expected type Unit discards e's value.
+                auto& t = as<Typed>(*n);
+                const bool unit = isUnitType(t.type.get());
+                NodePtr e = expr(std::move(t.expr));
+                return unit ? discardValue(std::move(e)) : std::move(e);
+            }
             case NodeKind::If: {
+                // `if c then t` has type Unit: t runs for its effect and the
+                // expression yields () on both paths.
                 auto& i = as<If>(*n);
                 i.cond = expr(std::move(i.cond));
                 i.thenp = expr(std::move(i.thenp));
-                i.elsep = i.elsep ? expr(std::move(i.elsep)) : std::make_unique<UnitLit>(i.pos);
+                if (i.elsep) {
+                    i.elsep = expr(std::move(i.elsep));
+                } else {
+                    i.thenp = discardValue(std::move(i.thenp));
+                    i.elsep = std::make_unique<UnitLit>(i.pos);
+                }
                 return n;
             }
             case NodeKind::While: {
@@ -84,6 +98,7 @@ public:
             case NodeKind::ValDef: {
                 auto& v = as<ValDef>(*n);
                 v.rhs = expr(std::move(v.rhs));
+                if (v.rhs && isUnitType(v.type.get())) v.rhs = discardValue(std::move(v.rhs));
                 return n;
             }
             case NodeKind::DefDef: return defDef(std::move(n));
@@ -94,6 +109,85 @@ public:
 
 private:
     int tempCounter_ = 0;
+
+    // `Unit` / `scala.Unit` as written (types are not resolved in Phase 1).
+    static bool isUnitType(const TypeTree* t) {
+        return t && t->kind == TypeTree::Kind::Name && (t->name == "Unit" || t->name == "scala.Unit");
+    }
+
+    // True when the (desugared) expression is known to yield () already, so
+    // value discarding needs no extra code.
+    static bool yieldsUnit(const Node& n) {
+        switch (n.kind) {
+            case NodeKind::UnitLit: case NodeKind::While: case NodeKind::Assign:
+            case NodeKind::Return:
+                return true;
+            case NodeKind::If: {
+                const auto& i = as<If>(n);
+                return i.elsep && yieldsUnit(*i.thenp) && yieldsUnit(*i.elsep);
+            }
+            case NodeKind::Block: {
+                const auto& b = as<Block>(n);
+                if (b.stats.empty()) return true;
+                const Node& last = *b.stats.back();
+                return last.kind == NodeKind::ValDef || last.kind == NodeKind::DefDef ||
+                       last.kind == NodeKind::Import || yieldsUnit(last);
+            }
+            default:
+                return false;
+        }
+    }
+
+    // Value discarding (Scala 3 reference, "Value Discarding"): an expression
+    // whose expected type is Unit is evaluated for its effect and () is its
+    // value: `e` becomes `{ e; () }`.
+    static NodePtr discardValue(NodePtr e) {
+        if (!e || yieldsUnit(*e)) return e;
+        const SourcePos pos = e->pos;
+        auto block = std::make_unique<Block>(pos);
+        block->stats.push_back(std::move(e));
+        block->stats.push_back(std::make_unique<UnitLit>(pos));
+        return block;
+    }
+
+    // The `return e` statements that return from a def declared `: Unit`
+    // discard e's value. Nested defs own their returns and are skipped;
+    // lambdas are searched (a return in them targets the enclosing def).
+    static void discardReturnValues(Node& n) {
+        checkNativeStack(StackUse::Source);
+        auto visit = [](NodePtr& c) { if (c) discardReturnValues(*c); };
+        switch (n.kind) {
+            case NodeKind::Return: {
+                auto& r = as<Return>(n);
+                visit(r.value);
+                if (r.value) r.value = discardValue(std::move(r.value));
+                return;
+            }
+            case NodeKind::DefDef: return;
+            case NodeKind::Select: visit(as<Select>(n).qualifier); return;
+            case NodeKind::Apply: {
+                auto& a = as<Apply>(n);
+                visit(a.fn);
+                for (auto& arg : a.args) visit(arg);
+                return;
+            }
+            case NodeKind::TypeApply: visit(as<TypeApply>(n).fn); return;
+            case NodeKind::Assign: visit(as<Assign>(n).target); visit(as<Assign>(n).value); return;
+            case NodeKind::If: {
+                auto& i = as<If>(n);
+                visit(i.cond); visit(i.thenp); visit(i.elsep);
+                return;
+            }
+            case NodeKind::While: visit(as<While>(n).cond); visit(as<While>(n).body); return;
+            case NodeKind::Block: for (auto& s : as<Block>(n).stats) visit(s); return;
+            case NodeKind::Lambda: visit(as<Lambda>(n).body); return;
+            case NodeKind::Tuple: for (auto& e : as<Tuple>(n).elems) visit(e); return;
+            case NodeKind::Splice: visit(as<Splice>(n).expr); return;
+            case NodeKind::NamedArg: visit(as<NamedArg>(n).value); return;
+            case NodeKind::ValDef: visit(as<ValDef>(n).rhs); return;
+            default: return;  // literals, identifiers, imports
+        }
+    }
 
     void params(std::vector<Param>& ps) {
         for (auto& p : ps) p.defaultValue = expr(std::move(p.defaultValue));
@@ -144,9 +238,18 @@ private:
         auto& d = as<DefDef>(*n);
         for (auto& list : d.paramLists) params(list);
         NodePtr body = expr(std::move(d.body));
-        // def f(a)(b)(c) = e  →  def f(a) = (b) => (c) => e
+        if (body && isUnitType(d.resultType.get())) {
+            discardReturnValues(*body);
+            body = discardValue(std::move(body));
+        }
+        // def f(a)(b)(c) = e  →  def f(a) = (b) => (c) => e; the innermost
+        // lambda's body is the def's body, so `return` returns from it.
+        bool innermost = true;
+        d.curried = d.paramLists.size() > 1;
         while (d.paramLists.size() > 1) {
             auto lambda = std::make_unique<Lambda>(d.pos);
+            lambda->ownsReturn = innermost;
+            innermost = false;
             lambda->params = std::move(d.paramLists.back());
             d.paramLists.pop_back();
             lambda->body = std::move(body);

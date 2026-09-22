@@ -145,8 +145,9 @@ Prints:
 ```
 
 `if` is an expression (chapter 2, §2.3); `else if` chains need no special
-syntax. An `if` without `else` has type `Unit` and yields `()` when the
-condition is false. The condition must be a `Boolean`: `if 1 then …` is a
+syntax. An `if` without `else` has type `Unit` and always yields `()`: when
+the condition is true the branch runs for its effect and its value is
+discarded (§4.7). The condition must be a `Boolean`: `if 1 then …` is a
 `ClassCastException` at run time (D4).
 
 `while cond do body` repeats while `cond` is true; with braces it is written
@@ -158,23 +159,39 @@ also accept the parenthesised Scala 2 style, `if (c) a else b`.
 Fixture: [`tests/conformance/tutorial/04-values-unit.scala`](../../tests/conformance/tutorial/04-values-unit.scala)
 
 ```scala
+def log(msg: String): Unit =
+  println(msg)
+  msg.length
+
 @main def run(): Unit =
-  val nothing = println("side effect")
-  println(nothing)
+  val result = log("side effect")
+  val maybe = if result == () then 42
+  println(result.toString + " " + maybe)
 ```
 
 Prints:
 
 ```text
-()
+side effect
+() ()
 ```
 
-`println` returns `Unit`, whose only value is `()` — Scala's equivalent of
-Python's `None` returned from a procedure, or JavaScript's `undefined`. The
-program first prints `side effect`, then `()`.
+`Unit` is the type of expressions evaluated only for their effect; its only
+value is `()` — Scala's equivalent of Python's `None` returned from a
+procedure, or JavaScript's `undefined`. `println` returns `()`.
 
-One consequence of erased types (D4): Scala on the JVM discards the value of
-the last expression of a method declared `: Unit` and returns `()`, whereas
-protoScala does not read the declared type, so such a method returns whatever
-its last expression produced. Programs that only call a `Unit` method for its
-effect, which is the normal use, see no difference.
+*Value discarding.* When the expected type of an expression is `Unit`, Scala
+evaluates the expression and throws its value away. `log` is declared
+`: Unit`, so the value of its last expression, `msg.length`, is discarded and
+`log` returns `()`. The same holds for `return e` inside such a method, for
+the innermost body of a method with several parameter lists declared `: Unit`,
+for `val v: Unit = e`, and for an ascription `(e: Unit)`. An `if` without
+`else` has type `Unit` as well, so `maybe` is `()` even though the condition
+is true and the branch computed `42`.
+
+One consequence of erased types (D4, D26): protoScala does not type-check, so
+it discards values only where the `Unit` is written on the definition itself.
+When the expected type comes from a function type — `val f: Int => Unit =
+x => x + 1`, or a lambda passed to a parameter of type `Int => Unit` — the
+lambda returns its last value (`f(1)` is `2`, where Scala gives `()`).
+Programs that call such functions only for their effect see no difference.

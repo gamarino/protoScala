@@ -84,3 +84,8 @@
 | D6 | Extension methods dispatch on the runtime prototype, not the static type | types are erased |
 | D7 | `Map`/`Set` iteration order is unspecified and may differ from Scala's | persistent structures; no ordering guarantee beyond Scala's own (`ListMap`/`SortedMap` are separate types, later) |
 | D8 | Java interop (`java.*` classes) is absent; polyglot interop goes through UMD | no JVM |
+| D26 | Value discarding (`Unit` expected type) applies only where `Unit` is written on the definition or an ascription, not when it comes from a function type (`val f: Int => Unit = x => x + 1` returns `x + 1`) | types are erased |
+| D27 | `@main` methods take no parameters or one `String*` parameter; typed `@main` parameters are rejected | no `FromString` instances without static types |
+
+D9–D25 are the provisional Phase 1 departures listed in
+[STATUS.md](STATUS.md#intentional-deviations), pending maintainer review.
