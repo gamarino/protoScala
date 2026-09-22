@@ -46,3 +46,4 @@ it tomorrow"); the maintainer reviews them and may reverse any of them.
 | 2026-09-22 | protoCore C1: fix the root cause in `newChild` (take the chain from a mutable prototype's current snapshot) rather than patching isInstanceOf; C2: keep the universal-root answer for parentless objects | maintainer |
 | 2026-09-22 | protoCore: remove `getAttribute`'s 500-step cap (chains are flat and finite; setParents rejects cycles), so every lookup helper agrees at any depth | maintainer |
 | 2026-09-22 | protoCore C2/C3: keep the `newChild` fix; fix the embedders instead — protoJS integrity markers (freeze/seal/preventExtensions) must stop being parent-chain markers, protoPython instances must not inherit the metaclass chain | maintainer |
+| 2026-09-22 | Cold-start target raised from < 20 ms to < 25 ms (Phase 2: the embedded Scala prelude adds ~1.2 ms and the standard library will keep growing) | maintainer |

@@ -6,7 +6,7 @@ protoScala is a language runtime of the [protoCore](https://github.com/numaes/pr
 
 It is **not** a JVM replacement: there is no JVM, no sbt/Maven, no Java interop and no static typechecker. It runs Scala 3 source — braces or significant indentation — with types parsed and erased, on a runtime that aims to:
 
-- **start in under 20 ms with ~20 MB RSS**, making Scala viable for scripts and REPL-driven work;
+- **start in under 25 ms with ~20 MB RSS**, making Scala viable for scripts and REPL-driven work;
 - map **case classes and functional collections** onto protoCore's persistent, structurally shared data;
 - run **native actors without a GIL**: messages are pointers to immutable data, mailboxes are lock-free with three priority bands, and `await` inside an actor suspends cooperatively instead of blocking a thread;
 - **import modules from sibling runtimes** (`import py.numpy as np`) through protoCore's Unified Module Discovery, with no serialization at the boundary.
@@ -66,7 +66,7 @@ runtime), 2 warmup + 5 timed runs, every run's printed result verified;
 | `factorial_100` (BigInt) | 15.0 | 15.5 | 199.8 | 29.4 | 18.1 | — | 15.3 | 0.51× |
 | **Geomean vs CPython** (rows) | 0.74× (8) | 0.74× (8) | 4.30× (8) | 1.00× | 2.20× (8) | 1.62× (4) | 1.11× (4) | **0.74×** |
 
-Cold start (`benchmarks/cold-start.sh`, 21 runs, target < 20 ms): script
+Cold start (`benchmarks/cold-start.sh`, 21 runs, target < 25 ms): script
 17.43 ms, REPL 18.66 ms (RelWithDebInfo); 17.99 / 18.73 ms (Release).
 
 **Reading.** Most rows measure start-up more than work: protoScala starts in

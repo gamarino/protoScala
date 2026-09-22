@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Cold-start measurement (DESIGN §1: < 20 ms to a prompt). Runs
+# Cold-start measurement (DESIGN §1: < 25 ms to a prompt). Runs
 #   (a) examples/hello.scala and
 #   (b) a REPL session that quits immediately
 # N times each, verifies every run's output, and reports the median wall
@@ -16,7 +16,7 @@ export LC_ALL=C
 root=$(cd "$(dirname "$0")/.." && pwd)
 P="${1:-$root/build_release/protoscala}"
 N="${2:-21}"
-TARGET_MS=20
+TARGET_MS=25
 
 median_ms() {  # reads nanosecond samples on stdin, prints the median in ms
     sort -n | awk '{ a[NR] = $1 } END { printf "%.2f", a[int((NR + 1) / 2)] / 1e6 }'

@@ -19,8 +19,12 @@ have (protoClojure, protoST), those runtimes are migrated as well.
 protoScala does **not** emulate the JVM, produce Maven/sbt artifacts or
 reproduce `scalac`'s static typechecker. Its value proposition:
 
-1. **Instant start-up and small footprint** — target < 20 ms to a REPL prompt
-   and ~20 MB RSS, suited to systems scripting and interactive use.
+1. **Instant start-up and small footprint** — target < 25 ms to a REPL prompt
+   and ~20 MB RSS, suited to systems scripting and interactive use. (The target
+   was 20 ms through Phase 1; it was raised to 25 ms in Phase 2, when the
+   embedded Scala prelude began to grow — the standard library will keep adding
+   start-up work, and 25 ms keeps the "instant" property without turning every
+   prelude addition into a performance negotiation.)
 2. **Native structural immutability** — functional collections and case
    classes map onto protoCore's persistent structures.
 3. **Real concurrency without a GIL** — native actors with O(1) message

@@ -97,7 +97,7 @@ writes no `hsperfdata` files outside the tree.
 
 `benchmarks/cold-start.sh [protoscala] [runs]` runs `examples/hello.scala` and
 a REPL session that quits immediately, verifies every run's output and checks
-the median against the < 20 ms target (DESIGN §1). The suite harness runs it
+the median against the < 25 ms target (DESIGN §1). The suite harness runs it
 on each protoScala build and includes the result in its report.
 
 ## Later

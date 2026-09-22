@@ -56,7 +56,7 @@ its suite.
 - deep recursion raises `StackOverflowError` (no crash);
 - the REPL evaluates expressions and definitions with readline history and
   multi-line continuation;
-- `examples/hello.scala` and `examples/fib.scala` run; cold start < 20 ms.
+- `examples/hello.scala` and `examples/fib.scala` run; cold start < 20 ms (the target became < 25 ms in Phase 2, see DESIGN §1).
 **Plan:** [plans/2026-09-22-phase-1-core-language.md](plans/2026-09-22-phase-1-core-language.md).
 
 ## Phase 2 — Object model, apply, for, match
