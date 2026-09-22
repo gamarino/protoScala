@@ -1,0 +1,301 @@
+# 2. For the Python or JavaScript Developer
+
+> **Implementation status.** This chapter uses only what protoScala runs
+> today. Classes and objects (chapter 6), collections such as `List` and
+> `Map` literals (chapter 8) and string interpolation such as `s"Hi $name"`
+> (chapter 10) are not implemented yet and are left to their own chapters.
+> See [STATUS.md](../STATUS.md) for the exact list.
+
+Scala looks like a cross between the languages you know. From JavaScript it
+takes braces, arrow functions and `val`/`var` that feel like `const`/`let`;
+from Python it takes significant indentation and integers that never
+overflow. What is new is the idea that almost *everything is an expression*
+that produces a value, and a type annotation on most definitions. This
+chapter walks through those ideas with the programs you would write in Python
+or JavaScript first.
+
+Every program below is a file you can run with `protoscala file.scala`; the
+block under it is what it prints.
+
+## 2.1 Programs and `@main`
+
+A Python script runs top to bottom, and the idiom
+`if __name__ == "__main__": main()` marks the entry point. A Node.js file also
+runs top to bottom. A Scala 3 program instead names its entry point with the
+`@main` annotation on a method (chapter 1, §1.3):
+
+Fixture: [`tests/conformance/tutorial/01-introduction-hello.scala`](../../tests/conformance/tutorial/01-introduction-hello.scala)
+
+```scala
+@main def hello(): Unit =
+  println("Hello, protoScala!")
+```
+
+Prints:
+
+```text
+Hello, protoScala!
+```
+
+protoScala also accepts the Python/JavaScript style — statements at the top
+level of the file run in order, like a Scala `.sc` script. That is a
+protoScala convenience rather than standard Scala 3 (chapter 3, §3.2), so the
+rest of this tutorial uses `@main`.
+
+## 2.2 Names: `val` and `var`
+
+Fixture: [`tests/conformance/tutorial/02-python-js-val-var.scala`](../../tests/conformance/tutorial/02-python-js-val-var.scala)
+
+```scala
+@main def run(): Unit =
+  val name = "Ada"      // like a JS const, or a Python name you never rebind
+  var visits = 0        // like a JS let
+  visits += 1
+  visits += 2
+  println(visits.toString + " visits, name=" + name)
+```
+
+Prints:
+
+```text
+3 visits, name=Ada
+```
+
+- `val` is a name you cannot reassign — JavaScript's `const`, or a Python name
+  you simply never rebind. Reassigning a `val` is a compile error.
+- `var` can be reassigned — JavaScript's `let`. `visits += 1` means
+  `visits = visits + 1`, as in both languages.
+
+Idiomatic Scala uses `val` almost everywhere and reaches for `var` only for a
+local counter or accumulator. You will see why in chapter 5: closures and
+immutable values make most loops unnecessary.
+
+Two small things in the last line: `visits.toString` turns the integer into a
+string (like `str(visits)` or `String(visits)`), and `+` between a string and
+anything else concatenates, like JavaScript.
+
+## 2.3 Everything is an expression
+
+In JavaScript, `if` is a statement and the ternary `c ? a : b` is its
+expression form; Python has `a if c else b`. In Scala there is only one `if`,
+and it always produces a value:
+
+Fixture: [`tests/conformance/tutorial/02-python-js-if-expression.scala`](../../tests/conformance/tutorial/02-python-js-if-expression.scala)
+
+```scala
+def category(age: Int): String = if age < 18 then "minor" else "adult"
+@main def run(): Unit =
+  println(category(12) + " " + category(40))
+```
+
+Prints:
+
+```text
+minor adult
+```
+
+`if age < 18 then "minor" else "adult"` *is* the result of `category`; there is
+no `return`. A method whose body is one expression is written on one line
+after `=`.
+
+Blocks are expressions too. The value of a block is the value of its last
+expression — like a Ruby block, or a JavaScript arrow function whose body is
+an expression:
+
+Fixture: [`tests/conformance/tutorial/02-python-js-blocks-are-expressions.scala`](../../tests/conformance/tutorial/02-python-js-blocks-are-expressions.scala)
+
+```scala
+@main def run(): Unit =
+  val area =
+    val width = 5
+    val height = 5
+    width * height
+  println(area)
+```
+
+Prints:
+
+```text
+25
+```
+
+`width` and `height` exist only inside the indented block; `area` receives the
+value of its last line, `width * height`.
+
+## 2.4 Indentation and braces
+
+Scala 3 accepts both styles, and protoScala implements both. The two methods
+below are the same program:
+
+Fixture: [`tests/conformance/tutorial/02-python-js-indentation-and-braces.scala`](../../tests/conformance/tutorial/02-python-js-indentation-and-braces.scala)
+
+```scala
+def sumIndented(n: Int): Int =
+  var total = 0
+  var i = 1
+  while i <= n do
+    total += i
+    i += 1
+  total
+
+def sumBraces(n: Int): Int = {
+  var total = 0
+  var i = 1
+  while (i <= n) {
+    total += i
+    i += 1
+  }
+  total
+}
+
+@main def run(): Unit =
+  println(sumIndented(3).toString + " " + sumBraces(3))
+```
+
+Prints:
+
+```text
+6 6
+```
+
+The indentation style is close to Python's, with keywords where Python uses a
+colon:
+
+| Python | Scala 3 (indentation) | Scala 3 (braces) |
+|---|---|---|
+| `def f(n):` + indented body | `def f(n: Int): Int =` + indented body | `def f(n: Int): Int = { ... }` |
+| `if c:` | `if c then` | `if (c) { ... }` |
+| `while c:` | `while c do` | `while (c) { ... }` |
+
+A region ends when the indentation returns to the enclosing level; an optional
+end marker (`end if`, `end while`, `end sumIndented`) makes long regions easier
+to read. The brace style is what a JavaScript developer already writes; the
+parentheses around the condition are then required, as in JavaScript. You can
+mix the two styles in one file — but not tabs and spaces in the same
+indentation (chapter 3).
+
+## 2.5 Functions and arrow functions
+
+Fixture: [`tests/conformance/tutorial/02-python-js-arrow-functions.scala`](../../tests/conformance/tutorial/02-python-js-arrow-functions.scala)
+
+```scala
+@main def run(): Unit =
+  val double = (x: Int) => x * 2          // JS: x => x * 2, Python: lambda x: x * 2
+  def applyTwice(f: Int => Int, x: Int): Int = f(f(x))
+  println(double(7).toString + " " + applyTwice(double, 3))
+```
+
+Prints:
+
+```text
+14 12
+```
+
+- `(x: Int) => x * 2` is an anonymous function — JavaScript's `x => x * 2`,
+  Python's `lambda x: x * 2`. Stored in a `val`, it is called like any
+  function: `double(7)`.
+- `def applyTwice(f: Int => Int, x: Int)` takes a function as a parameter.
+  `Int => Int` is the *type* of a function from `Int` to `Int`; like every
+  type, protoScala reads it and does not check it.
+- A `def` can be nested inside another `def`, as a Python `def` can be nested
+  inside a function.
+
+## 2.6 Closures
+
+The counter idiom every JavaScript developer has written:
+
+Fixture: [`tests/conformance/tutorial/02-python-js-closure-counter.scala`](../../tests/conformance/tutorial/02-python-js-closure-counter.scala)
+
+```scala
+def makeCounter(): () => Int =
+  var count = 0
+  () =>
+    count += 1
+    count
+@main def run(): Unit =
+  val next = makeCounter()
+  val a = next()
+  val b = next()
+  println(a.toString + " " + b + " " + next())
+```
+
+Prints:
+
+```text
+1 2 3
+```
+
+`makeCounter` returns a function (its result type `() => Int` reads "a
+function with no arguments returning an `Int`"). The returned function
+captures `count`, and every call updates the same variable — exactly like a
+JavaScript closure over a `let`, or a Python closure with `nonlocal count`.
+Scala needs no `nonlocal`: a captured `var` is always shared.
+
+The lambda body spans two lines: after `() =>` at the end of a line, the
+indented lines are its body, and its value is the last one, `count`.
+
+## 2.7 Numbers: integers never overflow
+
+JavaScript has one number type, a 64-bit double, so large integers silently
+lose precision. Python has arbitrary-precision integers. protoScala follows
+Python:
+
+Fixture: [`tests/conformance/tutorial/02-python-js-big-integers.scala`](../../tests/conformance/tutorial/02-python-js-big-integers.scala)
+
+```scala
+// Like Python, integers never overflow (D1). This is 2 to the power 100.
+@main def run(): Unit =
+  var result: BigInt = 1
+  var i = 0
+  while i < 100 do
+    result = result * 2
+    i += 1
+  println(result)
+```
+
+Prints:
+
+```text
+1267650600228229401496703205376
+```
+
+Scala on the JVM has fixed-width `Int` (32 bits) and `Long` (64 bits) that
+wrap around on overflow, and a separate `BigInt`. In protoScala all three are
+one integer that grows as needed (deviation D1); `BigInt` is still accepted as
+a type name, so programs written for the JVM read naturally. Decimal numbers
+are `Double`, the same IEEE double JavaScript and Python use.
+
+## 2.8 Types as annotations
+
+Fixture: [`tests/conformance/tutorial/02-python-js-type-annotations.scala`](../../tests/conformance/tutorial/02-python-js-type-annotations.scala)
+
+```scala
+// Types are annotations, like TypeScript or Python type hints; they are not checked (D4).
+def add(a: Int, b: Int): Int = a + b
+@main def run(): Unit =
+  val total: Int = add(2, 3)
+  println(total)
+```
+
+Prints:
+
+```text
+5
+```
+
+`a: Int` and `: Int` after the parameter list look like TypeScript, or Python
+type hints. In Scala on the JVM they are checked by the compiler before the
+program runs. protoScala has no static checker: annotations are parsed and
+erased, like Python type hints at run time (deviation D4). A mistake the Scala
+compiler would reject is reported when the offending line runs instead —
+chapter 3 shows one. Most local `val`s need no annotation at all; `val total =
+add(2, 3)` is just as good.
+
+## 2.9 Where to go next
+
+- [Chapter 4](04-values-and-expressions.md): literals, operators (which are
+  methods), strings, equality, `if` and `while` in detail.
+- [Chapter 5](05-functions-and-closures.md): everything about `def`, lambdas,
+  closures, recursion and `lazy val`.
+- [Chapter 14](14-repl-and-tooling.md): the REPL, for trying each idea
+  interactively.
