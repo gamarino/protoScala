@@ -10,6 +10,9 @@
 #
 # Usage: benchmarks/cold-start.sh [path-to-protoscala] [runs]
 set -u
+# Number formatting (awk printf "%.2f") and parsing must not follow the
+# user's locale: a decimal comma would break the target comparison.
+export LC_ALL=C
 root=$(cd "$(dirname "$0")/.." && pwd)
 P="${1:-$root/build_release/protoscala}"
 N="${2:-21}"
