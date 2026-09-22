@@ -28,14 +28,6 @@ bool readFile(const std::string& path, std::string* out) {
     return true;
 }
 
-// A value as the REPL echoes it: Scala's toString, with a String in quotes
-// (the Scala 3 REPL shows `val res0: String = "hi"`).
-std::string showResult(proto::ProtoContext* ctx, const RuntimeLayout& L,
-                       const proto::ProtoObject* v) {
-    const std::string shown = show(ctx, L, v);
-    return proto::ProtoObject::isStringTagFast(v) ? "\"" + shown + "\"" : shown;
-}
-
 void reportAt(const std::string& name, SourcePos pos, const std::string& msg) {
     std::fflush(stdout);
     std::fprintf(stderr, "%s:%d:%d: error: %s\n", name.c_str(), pos.line, pos.column, msg.c_str());
@@ -117,18 +109,29 @@ EvalStatus Session::evaluate(const std::string& source, const std::string& sourc
     }
     if (bindsResult) ++resultCounter_;
     globals_ = std::move(trial);
-    if (outcome) {
-        for (const ReplDefinition& d : cu.definitions) {
-            if (d.text.rfind("val ", 0) == 0 || d.text.rfind("var ", 0) == 0)
-                outcome->echo.push_back(d.text + " = " + showResult(&ctx, L, global(d.key)));
-            else
-                outcome->echo.push_back(d.text);  // "def f", "lazy val x"
+    try {
+        if (outcome) {
+            for (const ReplDefinition& d : cu.definitions) {
+                if (d.text.rfind("val ", 0) == 0 || d.text.rfind("var ", 0) == 0)
+                    outcome->echo.push_back(d.text + " = " + showResult(&ctx, global(d.key)));
+                else
+                    outcome->echo.push_back(d.text);  // "def f", "lazy val x", "// defined class C"
+            }
+            if (bindsResult)
+                outcome->echo.push_back("val " + cu.resultName + " = " +
+                                        showResult(&ctx, global(cu.resultKey)));
         }
-        if (bindsResult)
-            outcome->echo.push_back("val " + cu.resultName + " = " +
-                                    showResult(&ctx, L, global(cu.resultKey)));
+    } catch (const ScalaError& e) {  // a toString that throws
+        std::fflush(stdout);
+        std::fprintf(stderr, "%s: error: %s\n", sourceName.c_str(), e.what());
+        return EvalStatus::Error;
     }
     return EvalStatus::Ok;
+}
+
+std::string Session::showResult(proto::ProtoContext* ctx, const proto::ProtoObject* v) {
+    const std::string shown = engine_.showTopLevel(ctx, v);
+    return proto::ProtoObject::isStringTagFast(v) ? "\"" + shown + "\"" : shown;
 }
 
 void Session::callMain(proto::ProtoContext* ctx, const std::string& mainKey, bool takesArgs,

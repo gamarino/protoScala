@@ -68,6 +68,10 @@ private:
                         EvalOutcome* outcome, bool allowIncomplete);
     void callMain(proto::ProtoContext* ctx, const std::string& mainKey, bool takesArgs,
                   const std::vector<std::string>& args);
+    // A value as the REPL echoes it: Scala's toString (through the engine, so
+    // a user-defined toString runs), with a String in quotes (the Scala 3
+    // REPL shows `val res0: String = "hi"`).
+    std::string showResult(proto::ProtoContext* ctx, const proto::ProtoObject* v);
 };
 
 } // namespace protoScala

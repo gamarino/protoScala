@@ -14,7 +14,7 @@ add_subdirectory(unit)
 # --- CLI checks -----------------------------------------------------------------
 foreach(cli_test help version unknown-option script-errors main-args
                  repl-basic repl-multiline repl-errors repl-load repl-history-hygiene
-                 repl-redefinition repl-results repl-indented-input deep-source
+                 repl-redefinition repl-results repl-indented-input repl-classes deep-source
                  tutorial-repl)
     add_test(NAME cli/${cli_test}
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/cli/${cli_test}.sh" "$<TARGET_FILE:protoscala>")

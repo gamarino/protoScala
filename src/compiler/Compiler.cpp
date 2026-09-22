@@ -813,7 +813,7 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
             } else if (s->kind == NodeKind::ValDef) {
                 const auto& v = as<ValDef>(*s);
                 const std::string& key = globals_.declare(v.name, kindOf(v));
-                if (mode == UnitMode::Repl)
+                if (mode == UnitMode::Repl && v.name.rfind('<', 0) != 0)
                     out.definitions.push_back(
                         {std::string(v.isLazy ? "lazy val " : v.isVar ? "var " : "val ") + v.name,
                          key});
