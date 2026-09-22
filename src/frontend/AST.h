@@ -29,6 +29,7 @@ enum class NodeKind : uint8_t {
     Ident, Select, Apply, TypeApply, Infix, Prefix, Assign, If, While, Return,
     Block, Lambda, Typed, Parens, Tuple, Splice, NamedArg,
     ValDef, DefDef, Import,
+    TemplateDef, New, Match, For,   // Phase 2
 };
 
 struct Node {
@@ -109,6 +110,18 @@ struct Block : Node {
     std::vector<NodePtr> stats;  // statements, in order; the block's value is the last
                                  // one when it is an expression, else ()
 };
+// Modifiers of a definition or class parameter. Only `private` changes the
+// meaning of a program (D5: class-qualified member keys); the others are
+// recorded for the checks the compiler does make (abstract, final, sealed).
+struct Modifiers {
+    bool isPrivate = false;    // also private[this] and private[pkg]
+    bool isProtected = false;
+    bool isOverride = false;
+    bool isAbstract = false;
+    bool isFinal = false;
+    bool isSealed = false;
+};
+
 struct Param {
     std::string name;
     TypePtr type;          // may be null (lambda parameters)
@@ -116,6 +129,10 @@ struct Param {
     bool byName = false;   // x: => T
     bool repeated = false; // x: T*
     SourcePos pos;
+    // Class parameters only: `val x: T`, `var x: T`, and their modifiers.
+    bool isVal = false;
+    bool isVar = false;
+    Modifiers mods;
 };
 struct Lambda : Node {
     Lambda(SourcePos p) : Node(NodeKind::Lambda, p) {}
@@ -141,13 +158,21 @@ struct NamedArg : Node {
     std::string name;
     NodePtr value;
 };
+struct Pattern;
+using PatternPtr = std::unique_ptr<Pattern>;
+
 struct ValDef : Node {
-    ValDef(SourcePos p) : Node(NodeKind::ValDef, p) {}
-    std::string name;
+    // Both defined in AST.cpp: Pattern is incomplete here, and a constructor
+    // needs the destructors of the members it initialises.
+    explicit ValDef(SourcePos p);
+    ~ValDef() override;
+    std::string name;               // empty when `pattern` is set
     bool isVar = false;
     bool isLazy = false;
-    TypePtr type;  // may be null
-    NodePtr rhs;
+    Modifiers mods;
+    TypePtr type;                   // may be null
+    NodePtr rhs;                    // null: an abstract member (templates only)
+    PatternPtr pattern;             // `val (a, b) = e` (Task 2); null for a simple name
 };
 struct DefDef : Node {
     DefDef(SourcePos p) : Node(NodeKind::DefDef, p) {}
@@ -158,6 +183,10 @@ struct DefDef : Node {
     TypePtr resultType;  // may be null
     NodePtr body;
     bool curried = false;  // set by Desugar when it folded extra parameter lists into lambdas
+    Modifiers mods;
+    bool synthetic = false;  // written by Desugar (case-class companions), not by the user
+    // `body` is null for an abstract member (templates only). A DefDef named
+    // "this" is an auxiliary constructor (templates only).
     // `@main` under any qualification (`@scala.main`): the last dot-segment
     // of the annotation name decides (annotations are not resolved in Phase 1).
     bool isMain() const {
@@ -169,6 +198,40 @@ struct DefDef : Node {
     }
 };
 struct Import : Node { Import(SourcePos p) : Node(NodeKind::Import, p) {} std::string text; };
+
+enum class TemplateKind : uint8_t { Class, Trait, Object };
+
+// One entry of an `extends` clause: `B(args)`, `T`, `Option[A]`.
+struct ParentRef {
+    TypePtr type;                 // a Name or Applied type tree
+    std::vector<NodePtr> args;    // constructor / trait arguments
+    bool hasArgs = false;         // an argument list was written (possibly empty)
+    SourcePos pos;
+};
+
+// class, trait, object, case class, case object.
+struct TemplateDef : Node {
+    TemplateDef(SourcePos p) : Node(NodeKind::TemplateDef, p) {}
+    TemplateKind kind = TemplateKind::Class;
+    bool isCase = false;
+    Modifiers mods;
+    std::string name;
+    std::vector<std::string> typeParams;   // erased
+    bool hasParamClause = false;           // `class C()` vs `class C`
+    std::vector<Param> ctorParams;         // primary constructor (or trait) parameters
+    std::vector<ParentRef> parents;        // the extends clause, superclass first
+    std::string selfName;                  // `self =>` alias of `this`, or empty
+    std::vector<NodePtr> body;             // template statements
+    bool synthetic = false;                // a companion object created by Desugar
+};
+
+// new T(args)
+struct New : Node {
+    New(SourcePos p) : Node(NodeKind::New, p) {}
+    TypePtr type;
+    std::vector<NodePtr> args;
+    bool hasArgs = false;
+};
 
 // Destroys a tree without recursion: an expression nested deeper than the
 // native stack (a 200 000-term `a + b + ...` chain, which the parser builds

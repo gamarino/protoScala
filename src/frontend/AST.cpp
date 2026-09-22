@@ -19,17 +19,37 @@
  *   Typed / Parens    (typed e T) / (parens e)
  *   Tuple / Splice    (tuple a b ...) / (splice e)
  *   NamedArg          (named n v)
- *   ValDef            (val x [: T] <rhs>), (var x ...), (lazy-val x ...)
- *   DefDef            (def [@ann ...] name [[A B]] [(<list>...)] [: T] <body>),
+ *   ValDef            (val [mods] x [: T] [<rhs>]), (var x ...), (lazy-val x ...);
+ *                     no <rhs> for an abstract member
+ *   DefDef            (def [@ann ...] [mods] name [[A B]] [(<list>...)] [: T] [<body>]),
  *                     each list `(<param>...)`, param `name:T`, `name:=> T`,
- *                     `name:T*`, with ` = <default>` appended
+ *                     `name:T*`, with ` = <default>` appended; no <body> for
+ *                     an abstract member; name `this` for an auxiliary constructor
+ *                     [mods]: ` private`, ` override`, ` abstract` (only the
+ *                     ones set, in that order)
  *   Import            (import <text>)
+ *   TemplateDef       (<kind> [abstract] [final] [sealed] Name [[A B]]
+ *                      [(<class-param>...)] [(extends <parent>...)] [(self s)]
+ *                      (body <stat>...))
+ *                     <kind>: class, case-class, trait, object, case-object;
+ *                     <class-param>: `[private ]val x:Int`, `[private ]var x:Int`
+ *                     or `x:Int`, with ` = <default>` appended;
+ *                     <parent>: `T`, or `(T <arg>...)` with an argument list
+ *   New               (new T <arg>...)
  *   CompilationUnit   (unit <stat>...)
  *   TypeTree          Name, a.b.C, C[A, B], (A, B) => R, (A, B), => T, T*, ?, A | B
  */
 #include "frontend/AST.h"
 
 namespace protoScala {
+
+// Placeholder until the pattern tree is defined together with pattern
+// matching: no ValDef carries a pattern yet, but its destructor needs a
+// complete type. The real definition replaces this one.
+struct Pattern {};
+
+ValDef::ValDef(SourcePos p) : Node(NodeKind::ValDef, p) {}
+ValDef::~ValDef() = default;
 
 namespace {
 
@@ -146,6 +166,30 @@ void renderParams(std::string& out, const std::vector<Param>& params) {
         if (k) out += ' ';
         renderParam(out, params[k]);
     }
+    out += ')';
+}
+
+void renderMods(std::string& out, const Modifiers& m) {
+    if (m.isPrivate) out += " private";
+    if (m.isOverride) out += " override";
+    if (m.isAbstract) out += " abstract";
+}
+
+void renderClassParam(std::string& out, const Param& p) {
+    if (p.mods.isPrivate) out += "private ";
+    if (p.isVal) out += "val ";
+    if (p.isVar) out += "var ";
+    renderParam(out, p);
+}
+
+void renderParent(std::string& out, const ParentRef& p) {
+    if (!p.hasArgs) {
+        renderType(out, *p.type);
+        return;
+    }
+    out += '(';
+    renderType(out, *p.type);
+    renderChildren(out, p.args);
     out += ')';
 }
 
@@ -319,8 +363,9 @@ void render(std::string& out, const Node& n) {
         }
         case NodeKind::ValDef: {
             const auto& x = as<ValDef>(n);
-            out += x.isLazy ? "(lazy-val " : x.isVar ? "(var " : "(val ";
-            out += x.name;
+            out += x.isLazy ? "(lazy-val" : x.isVar ? "(var" : "(val";
+            renderMods(out, x.mods);
+            out += ' ' + x.name;
             if (x.type) {
                 out += " : ";
                 renderType(out, *x.type);
@@ -336,6 +381,7 @@ void render(std::string& out, const Node& n) {
             const auto& x = as<DefDef>(n);
             out += "(def";
             for (const std::string& a : x.annotations) out += " @" + a;
+            renderMods(out, x.mods);
             out += ' ' + x.name;
             if (!x.typeParams.empty()) {
                 out += " [";
@@ -367,6 +413,59 @@ void render(std::string& out, const Node& n) {
         case NodeKind::Import:
             out += "(import " + as<Import>(n).text + ")";
             break;
+        case NodeKind::TemplateDef: {
+            const auto& x = as<TemplateDef>(n);
+            out += '(';
+            switch (x.kind) {
+                case TemplateKind::Class:  out += x.isCase ? "case-class" : "class"; break;
+                case TemplateKind::Trait:  out += "trait"; break;
+                case TemplateKind::Object: out += x.isCase ? "case-object" : "object"; break;
+            }
+            if (x.mods.isAbstract) out += " abstract";
+            if (x.mods.isFinal) out += " final";
+            if (x.mods.isSealed) out += " sealed";
+            out += ' ' + x.name;
+            if (!x.typeParams.empty()) {
+                out += " [";
+                for (std::size_t k = 0; k < x.typeParams.size(); ++k) {
+                    if (k) out += ' ';
+                    out += x.typeParams[k];
+                }
+                out += ']';
+            }
+            if (x.hasParamClause) {
+                out += " (";
+                for (std::size_t k = 0; k < x.ctorParams.size(); ++k) {
+                    if (k) out += ' ';
+                    renderClassParam(out, x.ctorParams[k]);
+                }
+                out += ')';
+            }
+            if (!x.parents.empty()) {
+                out += " (extends";
+                for (const ParentRef& p : x.parents) {
+                    out += ' ';
+                    renderParent(out, p);
+                }
+                out += ')';
+            }
+            if (!x.selfName.empty()) out += " (self " + x.selfName + ")";
+            out += " (body";
+            renderChildren(out, x.body);
+            out += "))";
+            break;
+        }
+        case NodeKind::New: {
+            const auto& x = as<New>(n);
+            out += "(new ";
+            renderType(out, *x.type);
+            renderChildren(out, x.args);
+            out += ')';
+            break;
+        }
+        case NodeKind::Match:
+        case NodeKind::For:
+            break;  // declared by Task 2; never created before it
     }
 }
 
@@ -430,6 +529,14 @@ void releaseChildren(Node& n, std::vector<NodePtr>& out) {
             take(d.body);
             return;
         }
+        case NodeKind::TemplateDef: {
+            auto& t = as<TemplateDef>(n);
+            takeParams(t.ctorParams);
+            for (auto& p : t.parents) for (auto& a : p.args) take(a);
+            for (auto& s : t.body) take(s);
+            return;
+        }
+        case NodeKind::New: for (auto& a : as<New>(n).args) take(a); return;
         default: return;  // leaves
     }
 }

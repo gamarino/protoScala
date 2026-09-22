@@ -44,7 +44,9 @@ private:
     bool atIdent(const char* text) const;
     const Token& expect(TokenKind k, const char* what);
     [[noreturn]] void fail(const std::string& msg, const Token& at) const;
-    [[noreturn]] void unsupported(const std::string& feature, const Token& at) const;
+    // "<feature> is not implemented yet", or "... are ..." when `plural`.
+    [[noreturn]] void unsupported(const std::string& feature, const Token& at,
+                                  bool plural = false) const;
     bool skipOneNewline();  // consumes one Newline or Semicolon if present
 
     // Expressions
@@ -88,6 +90,17 @@ private:
     NodePtr parseImport();
     bool atDefinitionStart() const;
     void checkEndMarker(const Node& previous, const Token& marker) const;
+
+    // Templates (Phase 2)
+    bool inTemplateBody_ = false;  // parsing the statements of a template body (abstract members allowed)
+    Modifiers parseModifiers(bool* isLazy);
+    NodePtr parseTemplateDef(Modifiers mods);           // at `case`, `class`, `trait` or `object`
+    std::vector<Param> parseClassParamClause();         // after the name: `(` ... `)`
+    std::vector<ParentRef> parseParents();              // after `extends`
+    std::vector<NodePtr> parseTemplateBody(std::string* selfName);  // `{...}` or `:` + indented block
+    NodePtr parseTemplateStat();
+    std::vector<std::string> parseTypeParams();         // `[` ... `]`, variance and bounds erased
+    NodePtr parseNew();                                 // at `new`
 };
 
 int precedence(const std::string& op);

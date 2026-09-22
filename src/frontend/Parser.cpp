@@ -122,8 +122,8 @@ void Parser::fail(const std::string& msg, const Token& at) const {
                      at.pos, eof);
 }
 
-void Parser::unsupported(const std::string& feature, const Token& at) const {
-    throw ParseError(feature + " is not implemented yet", at.pos, false);
+void Parser::unsupported(const std::string& feature, const Token& at, bool plural) const {
+    throw ParseError(feature + (plural ? " are" : " is") + " not implemented yet", at.pos, false);
 }
 
 const Token& Parser::expect(TokenKind k, const char* what) {
@@ -515,9 +515,19 @@ NodePtr Parser::parseSimple() {
         case TokenKind::LBrace:
             base = parseBlockExpr();
             break;
-        case TokenKind::KwNew:      unsupported("new", t);
-        case TokenKind::KwThis:     unsupported("this", t);
-        case TokenKind::KwSuper:    unsupported("super", t);
+        case TokenKind::KwNew:
+            base = parseNew();
+            break;
+        case TokenKind::KwThis:
+            base = std::make_unique<Ident>(t.pos, "this");
+            advance();
+            break;
+        case TokenKind::KwSuper:
+            advance();
+            if (at(TokenKind::LBracket)) unsupported("super[T] (a qualified super call)", peek());
+            if (!at(TokenKind::Dot)) fail("'.' expected after 'super'", peek());
+            base = std::make_unique<Ident>(t.pos, "super");  // the compiler checks the context
+            break;
         case TokenKind::Underscore: unsupported("placeholder syntax '_'", t);
         case TokenKind::KwMatch:    unsupported("match", t);
         default:
@@ -651,6 +661,10 @@ NodePtr Parser::parseIndentedBlock() {
 std::unique_ptr<Block> Parser::parseBlockBody(TokenKind terminator, SourcePos pos) {
     checkNativeStack(StackUse::Source);
     auto block = std::make_unique<Block>(pos);
+    // A block (a method body, a local block) is never a template body, even
+    // inside one: abstract members are rejected there.
+    const bool savedTemplate = inTemplateBody_;
+    inTemplateBody_ = false;
     for (;;) {
         while (skipOneNewline()) {}
         if (at(terminator)) break;
@@ -668,6 +682,7 @@ std::unique_ptr<Block> Parser::parseBlockBody(TokenKind terminator, SourcePos po
         if (k != TokenKind::Newline && k != TokenKind::Semicolon && k != terminator)
             fail("';' or newline expected but '" + spelling(peek()) + "' found", peek());
     }
+    inTemplateBody_ = savedTemplate;
     return block;
 }
 
@@ -695,6 +710,7 @@ void Parser::checkEndMarker(const Node& previous, const Token& marker) const {
         case NodeKind::While: ok = d == "while"; break;
         case NodeKind::DefDef: ok = d == as<DefDef>(previous).name; break;
         case NodeKind::ValDef: ok = d == "val" || d == as<ValDef>(previous).name; break;
+        case NodeKind::TemplateDef: ok = d == as<TemplateDef>(previous).name; break;
         default: break;
     }
     if (!ok)
@@ -762,8 +778,9 @@ bool Parser::atDefinitionStart() const {
     return j > 0 && isDefinitionKeyword(peek(j).kind);
 }
 
-// {Annotation} {Modifier} (val | var | lazy val | def | import), or one of
-// the definition forms reported as not implemented yet.
+// {Annotation} {Modifier} (val | var | lazy val | def | import | [case] class |
+// trait | [case] object), or one of the definition forms reported as not
+// implemented yet.
 NodePtr Parser::parseDefinition(std::vector<std::string> annotations) {
     while (at(TokenKind::At)) {
         advance();
@@ -786,47 +803,42 @@ NodePtr Parser::parseDefinition(std::vector<std::string> annotations) {
         while (at(TokenKind::Newline)) advance();
     }
     bool isLazy = false;
-    for (;;) {  // modifiers: advisory, ignored (D5)
-        const Token& t = peek();
-        if (t.kind == TokenKind::KwImplicit || t.kind == TokenKind::KwGiven)
-            fail(kImplicitsUnsupported, t);
-        if (t.kind == TokenKind::KwLazy) {
-            isLazy = true;
-            advance();
-            continue;
-        }
-        if (!isHardModifier(t.kind) && !isSoftModifier(t)) break;
-        const bool qualifiable =
-            t.kind == TokenKind::KwPrivate || t.kind == TokenKind::KwProtected;
-        advance();
-        if (qualifiable && at(TokenKind::LBracket)) {  // private[pkg]
-            advance();
-            if (!at(TokenKind::KwThis)) expect(TokenKind::Identifier, "access qualifier");
-            else advance();
-            expect(TokenKind::RBracket, "']'");
-        }
-    }
+    const Modifiers mods = parseModifiers(&isLazy);
     const Token& t = peek();
     switch (t.kind) {
-        case TokenKind::KwVal:
+        case TokenKind::KwVal: {
             advance();
-            return parseValDef(t.pos, false, isLazy);
-        case TokenKind::KwVar:
+            NodePtr v = parseValDef(t.pos, false, isLazy);
+            as<ValDef>(*v).mods = mods;
+            return v;
+        }
+        case TokenKind::KwVar: {
             if (isLazy) fail("'lazy' is not allowed on a var", t);
             advance();
-            return parseValDef(t.pos, true, false);
-        case TokenKind::KwDef:
+            NodePtr v = parseValDef(t.pos, true, false);
+            as<ValDef>(*v).mods = mods;
+            return v;
+        }
+        case TokenKind::KwDef: {
             if (isLazy) fail("'lazy' is not allowed on a def", t);
             advance();
-            return parseDefDef(t.pos, std::move(annotations));
+            NodePtr d = parseDefDef(t.pos, std::move(annotations));
+            as<DefDef>(*d).mods = mods;
+            return d;
+        }
         case TokenKind::KwImport:
             if (isLazy || !annotations.empty()) fail("an import takes no modifiers", t);
             return parseImport();
         case TokenKind::KwCase:
-            if (peek(1).kind == TokenKind::KwClass || peek(1).kind == TokenKind::KwObject)
-                notImplemented("'case " + peek(1).text + "' definitions", t);
-            notImplemented("'case' clauses (pattern matching)", t);
+            if (peek(1).kind == TokenKind::KwClass || peek(1).kind == TokenKind::KwObject) {
+                if (isLazy) fail("'lazy' is not allowed on a class or object", t);
+                return parseTemplateDef(mods);
+            }
+            fail("'case' is only allowed in a match or in a pattern-matching function "
+                 "literal `{ case ... }`", t);
         case TokenKind::KwClass: case TokenKind::KwObject: case TokenKind::KwTrait:
+            if (isLazy) fail("'lazy' is not allowed on a class, trait or object", t);
+            return parseTemplateDef(mods);
         case TokenKind::KwEnum: case TokenKind::KwType: case TokenKind::KwPackage:
         case TokenKind::KwExport:
             notImplemented("'" + t.text + "' definitions", t);
@@ -834,6 +846,76 @@ NodePtr Parser::parseDefinition(std::vector<std::string> annotations) {
             if (isExtensionStart(t, peek(1))) notImplemented("'extension' definitions", t);
             fail("definition expected but '" + spelling(t) + "' found", t);
     }
+}
+
+// Hard and soft modifiers before a definition. `lazy` is reported apart;
+// implicit/given are rejected (D3).
+Modifiers Parser::parseModifiers(bool* isLazy) {
+    Modifiers mods;
+    for (;;) {
+        const Token& t = peek();
+        if (t.kind == TokenKind::KwImplicit || t.kind == TokenKind::KwGiven)
+            fail(kImplicitsUnsupported, t);
+        if (t.kind == TokenKind::KwLazy) {
+            *isLazy = true;
+            advance();
+            continue;
+        }
+        if (!isHardModifier(t.kind) && !isSoftModifier(t)) break;
+        switch (t.kind) {
+            case TokenKind::KwPrivate:   mods.isPrivate = true; break;
+            case TokenKind::KwProtected: mods.isProtected = true; break;
+            case TokenKind::KwOverride:  mods.isOverride = true; break;
+            case TokenKind::KwAbstract:  mods.isAbstract = true; break;
+            case TokenKind::KwFinal:     mods.isFinal = true; break;
+            case TokenKind::KwSealed:    mods.isSealed = true; break;
+            default: break;              // soft modifiers: accepted and ignored
+        }
+        const bool qualifiable =
+            t.kind == TokenKind::KwPrivate || t.kind == TokenKind::KwProtected;
+        advance();
+        if (qualifiable && at(TokenKind::LBracket)) {  // private[this], private[pkg]
+            advance();
+            if (at(TokenKind::KwThis)) advance();
+            else expect(TokenKind::Identifier, "access qualifier");
+            expect(TokenKind::RBracket, "']'");
+        }
+    }
+    return mods;
+}
+
+// `[` TypeParam {`,` TypeParam} `]`. Names are kept; variance (`+A`, `-A`),
+// higher-kinded parameters (`F[_]`), bounds (`<:`, `>:`) and context bounds
+// (`: Ordering`) are parsed and erased (DESIGN §2).
+std::vector<std::string> Parser::parseTypeParams() {
+    expect(TokenKind::LBracket, "'['");
+    std::vector<std::string> names;
+    while (!at(TokenKind::RBracket)) {
+        if (atIdent("+") || atIdent("-")) advance();
+        if (at(TokenKind::Underscore)) {
+            advance();
+            names.push_back("_");
+        } else {
+            names.push_back(expect(TokenKind::Identifier, "type parameter").text);
+        }
+        if (at(TokenKind::LBracket)) {  // F[_]: the arity of a type constructor
+            int depth = 0;
+            do {
+                if (at(TokenKind::EndOfFile)) fail("']' expected", peek());
+                if (at(TokenKind::LBracket)) ++depth;
+                if (at(TokenKind::RBracket)) --depth;
+                advance();
+            } while (depth > 0);
+        }
+        while (at(TokenKind::Subtype) || at(TokenKind::Supertype) || at(TokenKind::Colon)) {
+            advance();
+            parseType();
+        }
+        if (!at(TokenKind::Comma)) break;
+        advance();
+    }
+    expect(TokenKind::RBracket, "']'");
+    return names;
 }
 
 // After `val` / `var`: name [: T] = rhs. Only a single name is supported.
@@ -850,8 +932,10 @@ NodePtr Parser::parseValDef(SourcePos pos, bool isVar, bool isLazy) {
         advance();
         node->type = parseType();
     }
-    if (!at(TokenKind::Equals))
+    if (!at(TokenKind::Equals)) {
+        if (inTemplateBody_ && node->type) return node;  // abstract member
         fail("'=' expected: a value definition needs an initialiser", peek());
+    }
     advance();
     if (isVar && at(TokenKind::Underscore))
         fail("default initialisation 'var x: T = _' is not supported", peek());
@@ -889,24 +973,18 @@ std::vector<Param> Parser::parseParamClause() {
     return params;
 }
 
-// After `def`: name [TypeParams] {ParamClause} [: T] = body.
+// After `def`: name [TypeParams] {ParamClause} [: T] = body; the body is
+// absent for an abstract member of a template.
 NodePtr Parser::parseDefDef(SourcePos pos, std::vector<std::string> annotations) {
     auto node = std::make_unique<DefDef>(pos);
     node->annotations = std::move(annotations);
-    node->name = expect(TokenKind::Identifier, "method name").text;
-    if (at(TokenKind::LBracket)) {  // type parameters: names kept, bounds parsed and dropped
+    if (at(TokenKind::KwThis) && inTemplateBody_) {  // auxiliary constructor
         advance();
-        while (!at(TokenKind::RBracket)) {
-            node->typeParams.push_back(expect(TokenKind::Identifier, "type parameter").text);
-            while (at(TokenKind::Subtype) || at(TokenKind::Supertype) || at(TokenKind::Colon)) {
-                advance();
-                parseType();
-            }
-            if (!at(TokenKind::Comma)) break;
-            advance();
-        }
-        expect(TokenKind::RBracket, "']'");
+        node->name = "this";
+    } else {
+        node->name = expect(TokenKind::Identifier, "method name").text;
     }
+    if (at(TokenKind::LBracket)) node->typeParams = parseTypeParams();
     while (at(TokenKind::LParen) && !peek().firstOnLine)
         node->paramLists.push_back(parseParamClause());
     if (at(TokenKind::Colon)) {
@@ -917,8 +995,12 @@ NodePtr Parser::parseDefDef(SourcePos pos, std::vector<std::string> annotations)
         fail("procedure syntax is not supported in Scala 3; write `def " + node->name +
                  "(): Unit = ...`",
              peek());
-    if (!at(TokenKind::Equals))
-        fail("'=' expected: abstract methods are not supported outside classes", peek());
+    if (!at(TokenKind::Equals)) {
+        // An abstract member: only in a template body, never for a constructor.
+        if (inTemplateBody_ && node->name != "this") return node;
+        fail("'=' expected: abstract methods are only allowed in classes, traits and objects",
+             peek());
+    }
     advance();
     node->body = parseExprOrIndented();
     return node;
@@ -951,6 +1033,231 @@ NodePtr Parser::parseImport() {
         advance();
     }
     if (node->text.empty()) fail("import selector expected", peek());
+    return node;
+}
+
+// ---------------------------------------------------------------------------
+// Templates
+
+// [case] (class | trait | object) Name [TypeParams] [ConstrMods] [ParamClause]
+// [extends Parents] [derives Types] [TemplateBody]
+NodePtr Parser::parseTemplateDef(Modifiers mods) {
+    const Token& start = peek();
+    auto node = std::make_unique<TemplateDef>(start.pos);
+    node->mods = mods;
+    if (at(TokenKind::KwCase)) {
+        advance();
+        node->isCase = true;
+    }
+    switch (peek().kind) {
+        case TokenKind::KwClass:  node->kind = TemplateKind::Class; break;
+        case TokenKind::KwTrait:  node->kind = TemplateKind::Trait; break;
+        case TokenKind::KwObject: node->kind = TemplateKind::Object; break;
+        default: fail("'class', 'trait' or 'object' expected", peek());
+    }
+    advance();
+    node->name = expect(TokenKind::Identifier, "class name").text;
+    if (at(TokenKind::LBracket)) node->typeParams = parseTypeParams();
+    if (node->kind != TemplateKind::Object) {
+        // `class C private (x: Int)`: a constructor access modifier (advisory, D5).
+        if ((at(TokenKind::KwPrivate) || at(TokenKind::KwProtected)) &&
+            peek(1).kind == TokenKind::LParen) {
+            advance();
+        }
+        if (at(TokenKind::LParen) && !peek().firstOnLine) {
+            node->hasParamClause = true;
+            node->ctorParams = parseClassParamClause();
+            if (at(TokenKind::LParen) && !peek().firstOnLine)
+                unsupported("multiple constructor parameter lists", peek(), true);
+        }
+    }
+    if (node->isCase && node->kind == TemplateKind::Class && !node->hasParamClause)
+        fail("A case class must have a parameter list; write `case class " + node->name +
+                 "()` or a case object",
+             start);
+    if (at(TokenKind::KwExtends)) {
+        advance();
+        node->parents = parseParents();
+    }
+    if (atIdent("derives")) {  // type-class derivation: parsed and ignored (D3)
+        advance();
+        parseType();
+        while (at(TokenKind::Comma)) {
+            advance();
+            parseType();
+        }
+    }
+    // A template body on the same line, or `{` on the next line (Scala allows a
+    // newline before a template body).
+    if (at(TokenKind::Newline) && peek(1).kind == TokenKind::LBrace) advance();
+    if (at(TokenKind::LBrace) || at(TokenKind::ColonEol) ||
+        (at(TokenKind::Colon) && peek(1).kind == TokenKind::EndOfFile))
+        node->body = parseTemplateBody(&node->selfName);
+    return node;
+}
+
+// `(` [ClassParam {`,` ClassParam}] `)`;
+// ClassParam ::= {Modifier} [`val` | `var`] id `:` Type [`=` Expr]
+std::vector<Param> Parser::parseClassParamClause() {
+    expect(TokenKind::LParen, "'('");
+    if (at(TokenKind::KwImplicit) || (atIdent("using") && peek(1).kind != TokenKind::Colon))
+        fail(kImplicitsUnsupported, peek());
+    std::vector<Param> params;
+    while (!at(TokenKind::RParen)) {
+        Param p;
+        p.pos = peek().pos;
+        bool lazyIgnored = false;
+        p.mods = parseModifiers(&lazyIgnored);
+        if (lazyIgnored) fail("'lazy' is not allowed on a class parameter", peek());
+        if (at(TokenKind::KwVal)) {
+            advance();
+            p.isVal = true;
+        } else if (at(TokenKind::KwVar)) {
+            advance();
+            p.isVar = true;
+        }
+        p.name = expect(TokenKind::Identifier, "parameter name").text;
+        expect(TokenKind::Colon, "':' and a parameter type");
+        p.type = parseType();
+        p.byName = p.type->kind == TypeTree::Kind::ByName;
+        if (atIdent("*")) {
+            advance();
+            p.repeated = true;
+        }
+        if (at(TokenKind::Equals)) {
+            advance();
+            p.defaultValue = parseExpr();
+        }
+        params.push_back(std::move(p));
+        if (!at(TokenKind::Comma)) break;
+        advance();
+    }
+    expect(TokenKind::RParen, "')'");
+    return params;
+}
+
+// Parents ::= ConstrApp {(`with` | `,`) ConstrApp}; ConstrApp ::= SimpleType [ArgumentExprs]
+std::vector<ParentRef> Parser::parseParents() {
+    std::vector<ParentRef> out;
+    for (;;) {
+        ParentRef p;
+        p.pos = peek().pos;
+        p.type = parseSimpleType();
+        if (at(TokenKind::LParen) && !peek().firstOnLine) {
+            advance();
+            p.args = parseArgs();
+            p.hasArgs = true;
+            if (at(TokenKind::LParen) && !peek().firstOnLine)
+                unsupported("multiple constructor argument lists", peek(), true);
+        }
+        out.push_back(std::move(p));
+        if (at(TokenKind::KwWith) || at(TokenKind::Comma)) {
+            advance();
+            continue;
+        }
+        return out;
+    }
+}
+
+// `{` [SelfAlias] stats `}`  |  `:` Indent [SelfAlias] stats Outdent
+std::vector<NodePtr> Parser::parseTemplateBody(std::string* selfName) {
+    TokenKind terminator;
+    if (at(TokenKind::LBrace)) {
+        advance();
+        terminator = TokenKind::RBrace;
+    } else {
+        // ColonEol, or a plain `:` at the very end of the input (`class A:` typed
+        // at the REPL): both need an indented body; at end of input the error
+        // is "unexpected end of input", so the REPL asks for more lines.
+        if (!at(TokenKind::ColonEol) && !at(TokenKind::Colon)) fail("template body expected", peek());
+        advance();
+        if (!at(TokenKind::Indent)) fail("an indented template body is expected after ':'", peek());
+        advance();
+        terminator = TokenKind::Outdent;
+    }
+    while (skipOneNewline()) {}
+    // Self alias: `self =>`, `self: T =>`, `this: T =>` (the type is erased).
+    bool alias = false;
+    if ((at(TokenKind::Identifier) || at(TokenKind::KwThis)) && peek(1).kind == TokenKind::Arrow) {
+        if (at(TokenKind::Identifier)) *selfName = peek().text;
+        advance();
+        advance();
+        alias = true;
+    } else if ((at(TokenKind::Identifier) || at(TokenKind::KwThis)) &&
+               peek(1).kind == TokenKind::Colon) {
+        const std::size_t save = i_;
+        const std::string name = at(TokenKind::Identifier) ? peek().text : "";
+        advance();
+        advance();
+        bool isAlias = false;
+        try {
+            parseInfixType();
+            isAlias = at(TokenKind::Arrow);
+        } catch (const ParseError&) {
+            isAlias = false;
+        }
+        if (isAlias) {
+            advance();
+            *selfName = name;
+            alias = true;
+        } else {
+            i_ = save;  // an ordinary statement `x: T` (a typed expression)
+        }
+    }
+    // `{ self =>` followed by members on deeper lines: Layout opened an
+    // indented region after `=>`; the members end with its Outdent.
+    const bool aliasRegion = alias && at(TokenKind::Indent);
+    if (aliasRegion) advance();
+    const TokenKind statsEnd = aliasRegion ? TokenKind::Outdent : terminator;
+    const bool saved = inTemplateBody_;
+    inTemplateBody_ = true;
+    std::vector<NodePtr> stats;
+    for (;;) {
+        while (skipOneNewline()) {}
+        if (at(statsEnd)) break;
+        if (at(TokenKind::EndOfFile)) fail("", peek());
+        if (at(TokenKind::EndMarker)) {
+            if (stats.empty())
+                fail("misaligned end marker: 'end " + peek().text +
+                     "' does not close a preceding construct", peek());
+            checkEndMarker(*stats.back(), peek());
+            advance();
+            continue;
+        }
+        stats.push_back(parseTemplateStat());
+        const TokenKind k = peek().kind;
+        if (k != TokenKind::Newline && k != TokenKind::Semicolon && k != statsEnd)
+            fail("';' or newline expected but '" + spelling(peek()) + "' found", peek());
+    }
+    inTemplateBody_ = saved;
+    if (aliasRegion) {
+        expect(TokenKind::Outdent, "end of template body");
+        while (skipOneNewline()) {}
+    }
+    expect(terminator, terminator == TokenKind::RBrace ? "'}'" : "end of template body");
+    return stats;
+}
+
+NodePtr Parser::parseTemplateStat() {
+    if (atDefinitionStart()) return parseDefinition({});
+    return parseExpr();
+}
+
+// new T | new T(args) | new T[A](args). Anonymous class bodies are not
+// supported (Open question Q6).
+NodePtr Parser::parseNew() {
+    auto node = std::make_unique<New>(expect(TokenKind::KwNew, "'new'").pos);
+    node->type = parseSimpleType();
+    if (at(TokenKind::LParen) && !peek().firstOnLine) {
+        advance();
+        node->args = parseArgs();
+        node->hasArgs = true;
+    }
+    if (at(TokenKind::LParen) && !peek().firstOnLine)
+        unsupported("multiple constructor argument lists", peek(), true);
+    if ((at(TokenKind::LBrace) && !peek().firstOnLine) || at(TokenKind::ColonEol) ||
+        at(TokenKind::KwWith))
+        unsupported("anonymous classes", peek(), true);
     return node;
 }
 

@@ -221,6 +221,9 @@ private:
             case NodeKind::NamedArg: walk(as<NamedArg>(n).value.get(), depth); return;
             case NodeKind::ValDef: definitionBody(n, depth); return;
             case NodeKind::DefDef: definitionBody(n, depth); return;
+            case NodeKind::TemplateDef: case NodeKind::New: case NodeKind::Match:
+            case NodeKind::For:
+                return;  // rejected by compileExpr until they are compiled
         }
     }
 
@@ -399,7 +402,13 @@ void Compiler::compileExpr(const Node& n) {
         case NodeKind::ValDef:
         case NodeKind::DefDef:
         case NodeKind::Import:
+        case NodeKind::TemplateDef:
             throw CompileError("definition used as an expression", n.pos);
+        case NodeKind::New:
+            throw CompileError("object creation with 'new' is not implemented yet", n.pos);
+        case NodeKind::Match:
+        case NodeKind::For:
+            throw std::logic_error("compiler: node kind not produced by the parser yet");
         case NodeKind::Infix:
         case NodeKind::Prefix:
         case NodeKind::Parens:

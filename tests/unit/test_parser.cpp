@@ -134,7 +134,7 @@ TEST(Parser, TypesAreParsedIntoTypeTrees) {
 
 TEST(Parser, LaterPhaseConstructsAreReportedClearly) {
     for (const char* src : {"x match { case 1 => 2 }", "throw e", "try a finally b",
-                            "for (x <- xs) yield x", "new A", "this", "_ + 1"}) {
+                            "for (x <- xs) yield x", "new A { }", "super[T].f", "_ + 1"}) {
         try {
             parseExpressionSource(src);
             FAIL() << "expected ParseError for " << src;
@@ -328,7 +328,7 @@ TEST(ParserDefs, ScriptModeTopLevelStatements) {
 }
 
 TEST(ParserDefs, ModifiersAndOtherAnnotationsAreKeptOrIgnored) {
-    EXPECT_EQ(u("private final def f = 1"), "(unit (def f (int 1)))");
+    EXPECT_EQ(u("private final def f = 1"), "(unit (def private f (int 1)))");
     EXPECT_EQ(u("@tailrec def f(n: Int): Int = n"), "(unit (def @tailrec f ((n:Int)) : Int n))");
 }
 
@@ -338,8 +338,8 @@ TEST(ParserDefs, Imports) {
 }
 
 TEST(ParserDefs, UnsupportedDefinitionsAreReportedClearly) {
-    EXPECT_NE(unitError("class A").find("not implemented yet"), std::string::npos);
-    EXPECT_NE(unitError("object O").find("not implemented yet"), std::string::npos);
+    EXPECT_NE(unitError("enum Color { case Red }").find("not implemented yet"), std::string::npos);
+    EXPECT_NE(unitError("type T = Int").find("not implemented yet"), std::string::npos);
     EXPECT_NE(unitError("val (a, b) = p").find("patterns in val definitions"), std::string::npos);
     EXPECT_NE(unitError("given x: Int = 1").find("(D3)"), std::string::npos);
     EXPECT_NE(unitError("def f(using x: Int) = x").find("(D3)"), std::string::npos);
@@ -360,7 +360,7 @@ TEST(ParserDefs, AnnotationsModifiersAndEndMarkerVariants) {
               "(unit (def @main run ((args:String*)) : Unit ()))");
     EXPECT_EQ(u("@deprecated(\"old\", \"1.0\") def f = 1"), "(unit (def @deprecated f (int 1)))");
     EXPECT_EQ(u("inline transparent def f = 1"), "(unit (def f (int 1)))");
-    EXPECT_EQ(u("private[this] val x = 1"), "(unit (val x (int 1)))");
+    EXPECT_EQ(u("private[this] val x = 1"), "(unit (val private x (int 1)))");
     EXPECT_EQ(u("def f(using: Int) = using"), "(unit (def f ((using:Int)) using))");
     EXPECT_EQ(u("open(1)"), "(unit (apply open (int 1)))");
     EXPECT_EQ(u("val x =\n  1\nend val"), "(unit (val x (block (int 1))))");
@@ -375,9 +375,9 @@ TEST(ParserDefs, ImportsInsideBlocksAndSelectors) {
 }
 
 TEST(ParserDefs, MoreUnsupportedAndInvalidDefinitions) {
-    EXPECT_NE(unitError("case class P(x: Int)").find("'case class' definitions are not implemented yet"),
+    EXPECT_NE(unitError("enum E { case A }").find("'enum' definitions are not implemented yet"),
               std::string::npos);
-    EXPECT_NE(unitError("trait T").find("'trait' definitions are not implemented yet"),
+    EXPECT_NE(unitError("type T = Int").find("'type' definitions are not implemented yet"),
               std::string::npos);
     EXPECT_NE(unitError("extension (x: Int) def y = x").find("not implemented yet"),
               std::string::npos);
@@ -399,4 +399,106 @@ TEST(ParserDefs, TruncatedDefinitionsAskForMoreInput) {
             EXPECT_TRUE(err.atEof) << src << ": " << err.what();
         }
     }
+}
+
+namespace {
+std::string parseErrorOf(const std::string& src) {
+    try {
+        protoScala::parseSource(src);
+    } catch (const ParseError& err) {
+        return err.what();
+    }
+    return "";
+}
+} // namespace
+
+TEST(ParserTemplates, ClassWithParametersBothSyntaxes) {
+    const std::string expected =
+        "(unit (class Point (val x:Int var y:Int z:Int) (body "
+        "(def sum (infix + x y)) (val scaled (infix * x z)))))";
+    EXPECT_EQ(u("class Point(val x: Int, var y: Int, z: Int) {\n"
+                "  def sum = x + y\n"
+                "  val scaled = x * z\n"
+                "}\n"),
+              expected);
+    EXPECT_EQ(u("class Point(val x: Int, var y: Int, z: Int):\n"
+                "  def sum = x + y\n"
+                "  val scaled = x * z\n"),
+              expected);
+    EXPECT_EQ(u("class Point(val x: Int, var y: Int, z: Int):\n"
+                "  def sum = x + y\n"
+                "  val scaled = x * z\n"
+                "end Point\n"),
+              expected);
+    EXPECT_EQ(u("class Empty"), "(unit (class Empty (body)))");
+    EXPECT_EQ(u("class Unit0()"), "(unit (class Unit0 () (body)))");
+}
+
+TEST(ParserTemplates, CaseClassesObjectsAndTraits) {
+    EXPECT_EQ(u("case class P(x: Int, y: Int)"), "(unit (case-class P (x:Int y:Int) (body)))");
+    EXPECT_EQ(u("case object Nada"), "(unit (case-object Nada (body)))");
+    EXPECT_EQ(u("object O:\n  val a = 1\n  def f(n: Int) = n + a\n"),
+              "(unit (object O (body (val a (int 1)) (def f ((n:Int)) (infix + n a)))))");
+    EXPECT_EQ(u("trait Shape {\n  def area: Double\n  def describe = \"area \" + area\n}"),
+              "(unit (trait Shape (body (def area : Double) "
+              "(def describe (infix + (str \"area \") area)))))");
+    EXPECT_EQ(u("sealed abstract class Expr"), "(unit (class abstract sealed Expr (body)))");
+    EXPECT_EQ(u("final case class Box[+A](value: A)"),
+              "(unit (case-class final Box [A] (value:A) (body)))");
+}
+
+TEST(ParserTemplates, ExtendsWithArgumentsAndMixins) {
+    EXPECT_EQ(u("class C(n: Int) extends B(n, 2) with T1 with T2"),
+              "(unit (class C (n:Int) (extends (B n (int 2)) T1 T2) (body)))");
+    EXPECT_EQ(u("class C extends B, T1, T2"), "(unit (class C (extends B T1 T2) (body)))");
+    EXPECT_EQ(u("class C(x: Int)\n    extends B(x)\n    with T:\n  def f = 1\n"),
+              "(unit (class C (x:Int) (extends (B x) T) (body (def f (int 1)))))");
+    EXPECT_EQ(u("case object None extends Option[Nothing]"),
+              "(unit (case-object None (extends Option[Nothing]) (body)))");
+    EXPECT_EQ(u("trait Greeter(val greeting: String)"),
+              "(unit (trait Greeter (val greeting:String) (body)))");
+}
+
+TEST(ParserTemplates, MembersModifiersAndAuxiliaryConstructors) {
+    EXPECT_EQ(u("class A {\n  private val secret = 1\n  override def toString = \"A\"\n"
+                "  abstract override def put(x: Int) = super.put(x)\n}"),
+              "(unit (class A (body (val private secret (int 1)) "
+              "(def override toString (str \"A\")) "
+              "(def override abstract put ((x:Int)) (apply (. super put) x)))))");
+    EXPECT_EQ(u("class R(val n: Int, val d: Int):\n  def this(n: Int) = this(n, 1)\n"),
+              "(unit (class R (val n:Int val d:Int) (body (def this ((n:Int)) "
+              "(apply this n (int 1))))))");
+    EXPECT_EQ(u("class A(private val k: Int)"), "(unit (class A (private val k:Int) (body)))");
+    EXPECT_EQ(u("abstract class Q { val size: Int }"),
+              "(unit (class abstract Q (body (val size : Int))))");
+}
+
+TEST(ParserTemplates, NewThisSuperAndSelfAlias) {
+    EXPECT_EQ(e("new Point(1, 2)"), "(new Point (int 1) (int 2))");
+    EXPECT_EQ(e("new Point(1, 2).x"), "(. (new Point (int 1) (int 2)) x)");
+    EXPECT_EQ(e("new Box[Int](3)"), "(new Box[Int] (int 3))");
+    EXPECT_EQ(e("new Empty"), "(new Empty)");
+    EXPECT_EQ(e("this.x"), "(. this x)");
+    EXPECT_EQ(e("super.toString"), "(. super toString)");
+    EXPECT_EQ(u("class A { self =>\n  def me = self\n}"),
+              "(unit (class A (self self) (body (def me self))))");
+}
+
+TEST(ParserTemplates, Errors) {
+    EXPECT_NE(parseErrorOf("case class P").find("case class must have a parameter list"),
+              std::string::npos);
+    EXPECT_NE(parseErrorOf("new T { def f = 1 }").find("anonymous classes are not implemented yet"),
+              std::string::npos);
+    EXPECT_NE(parseErrorOf("class A(x: Int)(y: Int)")
+                  .find("multiple constructor parameter lists are not implemented yet"),
+              std::string::npos);
+    EXPECT_NE(parseErrorOf("def f: Int").find("'=' expected"), std::string::npos);  // outside a template
+    EXPECT_NE(parseErrorOf("super.f[Int]; super[T].f").find("super[T]"), std::string::npos);
+    EXPECT_NE(parseErrorOf("case 1 => 2").find("'case'"), std::string::npos);
+}
+
+TEST(ParserTemplates, IncompleteTemplatesAskForMoreInput) {
+    EXPECT_TRUE(parseErrorOf("class A {").find("unexpected end of input") == 0 ||
+                parseErrorOf("class A {").find("unclosed") != std::string::npos);
+    EXPECT_NE(parseErrorOf("class A:\n").find("indented template body"), std::string::npos);
 }
