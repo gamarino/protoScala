@@ -63,6 +63,7 @@ const char* opName(Op op) {
         case Op::CAST_FAIL:      return "CAST_FAIL";
         case Op::MAKE_TUPLE:     return "MAKE_TUPLE";
         case Op::SEND_KW:        return "SEND_KW";
+        case Op::NEW_SPREAD:     return "NEW_SPREAD";
     }
     return "?";
 }
@@ -336,6 +337,7 @@ std::string commentFor(const BytecodeModule& m, Op op, std::uint64_t operand, st
         }
         case Op::MAKE_CLASS:
         case Op::NEW:
+        case Op::NEW_SPREAD:
         case Op::INVOKE_INIT:
         case Op::SEND_SUPER:
         case Op::UNAPPLY_FIELDS:

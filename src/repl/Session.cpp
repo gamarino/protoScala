@@ -45,6 +45,7 @@ void reportAt(const std::string& name, SourcePos pos, const std::string& msg) {
 Session::Session() : runtime_(space_), engine_(runtime_.layout()) {
     installPrimitives(runtime_.rootContext(), runtime_.layout());
     for (const auto& n : builtinGlobalNames()) globals_.declare(n, BindingKind::Builtin);
+    for (ClassInfo& t : builtinTypes()) globals_.defineBuiltinType(std::move(t));
 }
 
 Session::~Session() { std::fflush(stdout); }

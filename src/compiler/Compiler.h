@@ -10,6 +10,7 @@
  */
 #pragma once
 #include "compiler/BytecodeModule.h"
+#include "compiler/ClassInfo.h"
 #include "compiler/GlobalTable.h"
 #include "frontend/AST.h"
 
@@ -70,16 +71,27 @@ private:
         bool allowsReturn = false;  // def bodies
         bool isTopLevel = false;
     };
-    enum class RefKind { Local, Global };
+    // Method: `this` in slot 0 and no enclosing function (Design note 9).
+    enum class FnShape { Lambda, Def, Method };
+    enum class RefKind { Local, Member, Global };
     struct Resolution {
         RefKind ref;
-        LocalInfo local;    // RefKind::Local
-        BindingKind kind;   // binding kind in both cases
-        std::string key;    // RefKind::Global: the global's key
+        LocalInfo local;                     // RefKind::Local
+        BindingKind kind;                    // Local / Global
+        std::string key;                     // Global: the global's key; Member: the attribute key
+        const MemberInfo* member = nullptr;  // RefKind::Member
+    };
+
+    // The template whose members are being compiled (CompileTemplates.cpp).
+    struct TemplateScope {
+        const ClassInfo* info;       // the class, trait or the class of an object
+        const ClassInfo* companion;  // its companion (private access, D5), or nullptr
+        std::string selfName;        // `self =>` alias of `this`, or empty
     };
 
     GlobalTable& globals_;
     FunctionState* fn_ = nullptr;
+    const TemplateScope* tmpl_ = nullptr;
     std::unordered_set<const Node*> boxed_;  // declarations kept in Cells
 
     // Emission with stack-depth accounting.
@@ -108,15 +120,39 @@ private:
     void compileShortCircuit(const Node& lhs, const Node& rhs, bool isAnd, SourcePos pos);
     void compileArgsAndCall(const std::vector<NodePtr>& args, SourcePos pos);
     // Compiles a function body into a new block of the current module and emits
-    // the capture pushes and MAKE_FN. `isDef` enables `return`.
+    // the capture pushes and MAKE_FN. Def and Method bodies allow `return`.
     void compileFunction(const std::string& name, const std::vector<Param>& params,
-                         const Node& body, bool isDef, SourcePos pos);
+                         const Node& body, FnShape shape, SourcePos pos);
     void compileLazyThunk(const Node& rhs, SourcePos pos);  // thunk + MAKE_LAZY
+    void compileStats(const std::vector<NodePtr>& stats, std::size_t from, SourcePos pos);
     void storeLocal(const LocalInfo& info, SourcePos pos);
     void loadLocal(const LocalInfo& info, SourcePos pos);
 
     // Pre-pass: fills boxed_ for the declarations of one function body.
     void analyseCaptures(const std::vector<Param>& params, const Node& body);
+
+    // --- Templates (CompileTemplates.cpp) ---------------------------------
+    const MemberInfo* memberOf(const std::string& name) const;
+    std::string selectKey(const std::string& name) const;
+    void loadThis(SourcePos pos);
+    std::vector<const TemplateDef*> sortTemplates(const std::vector<const TemplateDef*>& ts) const;
+    ClassInfo buildClassInfo(const TemplateDef& t, const std::string& typeKey) const;
+    void linkCompanions(const std::vector<const TemplateDef*>& ts);
+    const ClassInfo& resolveType(const TypeTree& t, SourcePos pos) const;
+    const ClassInfo* superclassOf(const ClassInfo& info) const;  // nullptr: AnyRef
+    std::vector<std::string> runtimeChain(const ClassInfo& info) const;
+    std::string ctorKeyFor(const ClassInfo& info, std::size_t argc, SourcePos pos) const;
+    void compileTemplate(const TemplateDef& t, const ClassInfo& info);
+    void compileConstructor(const TemplateDef& t, const ClassInfo& info);
+    void compileAuxConstructor(const DefDef& d, const ClassInfo& info);
+    void compileSetter(const std::string& fieldKey, SourcePos pos);
+    void compileObjectHolder(const ClassInfo& info, const std::string& termKey, SourcePos pos);
+    void compileInitCall(const ClassInfo& target, const std::vector<NodePtr>& args, SourcePos pos);
+    void compileNew(const New& n);
+    void compileNewOf(const ClassInfo& info, const std::vector<NodePtr>& args, SourcePos pos);
+    void compileTuple(const Tuple& t);
+    void compileSuperSend(const std::string& name, const std::vector<NodePtr>& args, SourcePos pos);
+    void compileNamedSend(const Select& sel, const std::vector<NodePtr>& args, SourcePos pos);
 };
 
 } // namespace protoScala

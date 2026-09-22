@@ -18,12 +18,14 @@ CompiledUnit compile(const std::string& src, GlobalTable& g, UnitMode mode = Uni
 std::string listing(const std::string& src, UnitMode mode = UnitMode::Script) {
     GlobalTable g;
     g.declare("println", BindingKind::Builtin);
+    for (ClassInfo& t : builtinTypes()) g.defineBuiltinType(std::move(t));
     return compile(src, g, mode).module->disassemble();
 }
 
 std::string compileError(const std::string& src) {
     GlobalTable g;
     g.declare("println", BindingKind::Builtin);
+    for (ClassInfo& t : builtinTypes()) g.defineBuiltinType(std::move(t));
     try {
         compile(src, g);
     } catch (const CompileError& e) {
@@ -217,8 +219,49 @@ TEST(Compiler, AssignmentTargetsAndVarWrites) {
 
 TEST(Compiler, Phase2NodesAreRejectedUntilImplemented) {
     EXPECT_TRUE(has(compileError("val r = 1 match { case 1 => 2 }"), "match is not implemented yet"));
-    EXPECT_TRUE(has(compileError("class A"), "classes, traits and objects are not implemented yet"));
-    EXPECT_TRUE(has(compileError("val a = new A"), "'new' is not implemented yet"));
+}
+
+TEST(CompilerTemplates, ClassesCompileToMakeClassNewAndMethods) {
+    const auto l = listing("class P(val x: Int) { def twice = x * 2 }\nval p = new P(3)");
+    EXPECT_TRUE(has(l, "class P @P parents=2 members=[twice,<init>]"));
+    EXPECT_TRUE(has(l, "; @P"));
+    EXPECT_TRUE(has(l, "NEW"));
+    EXPECT_TRUE(has(l, "function twice arity=1 method"));
+    EXPECT_TRUE(has(l, "function P.<init> arity=2 method"));
+    EXPECT_TRUE(has(l, "STORE_FIELD"));
+    const auto t = listing("trait T\nclass C extends T\nobject O extends C");
+    EXPECT_TRUE(has(t, "class C @C parents=3"));        // [T, AnyRef, Any]
+    EXPECT_TRUE(has(t, "class O @O.type parents=4"));   // [C, T, AnyRef, Any]
+    EXPECT_TRUE(has(t, "MAKE_LAZY"));                   // the singleton holder
+}
+
+TEST(CompilerTemplates, StaticErrors) {
+    EXPECT_TRUE(has(compileError("trait T\nval t = new T"), "T is a trait; it cannot be instantiated"));
+    EXPECT_TRUE(has(compileError("abstract class A\nval a = new A"), "A is abstract; it cannot be instantiated"));
+    EXPECT_TRUE(has(compileError("trait S { def area: Double }\nclass C extends S"),
+                    "class C needs to be abstract, since def area is not defined"));
+    EXPECT_TRUE(has(compileError("final class F\nclass G extends F"), "cannot extend final class F"));
+    EXPECT_TRUE(has(compileError("class A\nclass B\nclass C extends A with B"), "class B is not a trait"));
+    EXPECT_TRUE(has(compileError("class A\nclass B\ntrait T extends A\nclass C extends B with T"),
+                    "illegal inheritance: superclass B is not a subclass of the superclass A "
+                    "of the mixin trait T"));
+    EXPECT_TRUE(has(compileError("class A extends B\nclass B extends A"), "cyclic inheritance"));
+    EXPECT_TRUE(has(compileError("case class A(x: Int)\ncase class B(y: Int) extends A(y)"),
+                    "case-to-case inheritance is prohibited"));
+    EXPECT_TRUE(has(compileError("class A(val x: Int) { def f = { x = 1 } }"), "Reassignment to val x"));
+    EXPECT_TRUE(has(compileError("class A { def f = 1; def f = 2 }"), "f is already defined in A"));
+    EXPECT_TRUE(has(compileError("class A(x: Int) { def this(y: Int) = this(y) }"),
+                    "differ in their number of parameters"));
+    EXPECT_TRUE(has(compileError("class A(x: Int) { def this() = println(1) }"),
+                    "must begin with a call to another constructor"));
+    EXPECT_TRUE(has(compileError("def f = { class Local; 1 }"), "must be defined at the top level"));
+    EXPECT_TRUE(has(compileError("val x = this"), "this can be used only inside"));
+    EXPECT_TRUE(has(compileError("class A(x: Int)\nval a = new A(1, 2)"),
+                    "wrong number of arguments for the constructor of A"));
+    EXPECT_TRUE(has(compileError("class A extends Nope"), "Not found: type Nope"));
+    EXPECT_TRUE(has(compileError("object O { @main def m() = 1 }"), "@main methods must be top-level"));
+    EXPECT_TRUE(has(compileError("trait G(val g: Int)\ntrait H extends G\nclass C extends H"),
+                    "parameterized trait G"));
 }
 
 TEST(Compiler, SpliceOutsideAFunctionCallIsRejected) {

@@ -333,12 +333,20 @@ Compiler::LocalInfo Compiler::captureInto(FunctionState* f, const std::string& n
     return mine;
 }
 
+// A bare name inside a template resolves: local (including `this`, the self
+// alias and the constructor parameters inside the constructor) -> member of
+// the template (own, inherited, Any's) -> global.
 Compiler::Resolution Compiler::resolve(const std::string& name, SourcePos pos) {
     bool found = false;
     LocalInfo info = captureInto(fn_, name, pos, &found);
-    if (found) return Resolution{RefKind::Local, info, info.kind, {}};
+    if (found) return Resolution{RefKind::Local, info, info.kind, {}, nullptr};
+    if (const MemberInfo* m = memberOf(name))
+        return Resolution{RefKind::Member, {}, BindingKind::Val, m->key, m};
     if (const GlobalBinding* g = globals_.binding(name))
-        return Resolution{RefKind::Global, {}, g->kind, g->key};
+        return Resolution{RefKind::Global, {}, g->kind, g->key, nullptr};
+    if (name == "this")
+        throw CompileError("this can be used only inside a class, trait or object", pos);
+    if (name == "super") throw CompileError("'super' must be followed by a member selection", pos);
     throw CompileError("Not found: " + name, pos);
 }
 
@@ -390,7 +398,7 @@ void Compiler::compileExpr(const Node& n) {
         case NodeKind::UnitLit: emit(Op::PUSH_UNIT, 0, n.pos, +1); return;
         case NodeKind::InterpString:
             throw CompileError("string interpolation is not implemented yet", n.pos);
-        case NodeKind::Tuple: throw CompileError("tuples are not implemented yet", n.pos);
+        case NodeKind::Tuple: compileTuple(as<Tuple>(n)); return;
         case NodeKind::Splice:
             throw CompileError("a splice must be the last argument of a function call", n.pos);
         case NodeKind::NamedArg:
@@ -408,7 +416,8 @@ void Compiler::compileExpr(const Node& n) {
             const auto& l = as<Lambda>(n);
             if (!l.body) throw CompileError("a function literal needs a body", n.pos);
             // A curried def's lambda owns its body's `return`s (Desugar).
-            compileFunction("<lambda>", l.params, *l.body, /*isDef=*/l.ownsReturn, n.pos);
+            compileFunction("<lambda>", l.params, *l.body,
+                            l.ownsReturn ? FnShape::Def : FnShape::Lambda, n.pos);
             return;
         }
         case NodeKind::ValDef:
@@ -416,8 +425,9 @@ void Compiler::compileExpr(const Node& n) {
         case NodeKind::Import:
             throw CompileError("definition used as an expression", n.pos);
         case NodeKind::TemplateDef:
-            throw CompileError("classes, traits and objects are not implemented yet", n.pos);
-        case NodeKind::New: throw CompileError("'new' is not implemented yet", n.pos);
+            throw CompileError("classes, traits and objects must be defined at the top level "
+                               "of a file", n.pos);
+        case NodeKind::New: compileNew(as<New>(n)); return;
         case NodeKind::Match: throw CompileError("match is not implemented yet", n.pos);
         case NodeKind::For: throw std::logic_error("compiler: for-comprehension not desugared");
         case NodeKind::Infix:
@@ -430,22 +440,37 @@ void Compiler::compileExpr(const Node& n) {
 
 void Compiler::compileIdent(const Ident& id) {
     const Resolution r = resolve(id.name, id.pos);
+    if (r.ref == RefKind::Member) {  // this.name (virtual: an override in a subclass wins)
+        loadThis(id.pos);
+        emit(Op::SEND, fn_->mod->addSendSite(r.key, 0), id.pos, 0);
+        return;
+    }
     if (r.ref == RefKind::Local) loadLocal(r.local, id.pos);
     else emit(Op::PUSH_GLOBAL, fn_->mod->addSymbol(r.key), id.pos, +1);
     if (r.kind == BindingKind::ParamlessDef) emit(Op::CALL, 0, id.pos, 0);
-    else if (r.kind == BindingKind::LazyVal) emit(Op::FORCE, 0, id.pos, 0);
+    else if (r.kind == BindingKind::LazyVal || r.kind == BindingKind::Object)
+        emit(Op::FORCE, 0, id.pos, 0);
 }
 
 void Compiler::compileApply(const Apply& a) {
-    for (const auto& arg : a.args) {
-        if (arg->kind == NodeKind::NamedArg)
-            throw CompileError("named arguments are not implemented yet", arg->pos);
-    }
     // Type arguments are erased: recv.m[T](args) is a send like recv.m(args).
     const Node* fn = a.fn.get();
     while (fn->kind == NodeKind::TypeApply) fn = as<TypeApply>(*fn).fn.get();
+    bool named = false;
+    for (const auto& arg : a.args) named = named || arg->kind == NodeKind::NamedArg;
+    if (named) {
+        if (fn->kind != NodeKind::Select)
+            throw CompileError("named arguments are not implemented yet", a.pos);
+        compileNamedSend(as<Select>(*fn), a.args, a.pos);
+        return;
+    }
     if (fn->kind == NodeKind::Select) {
         const auto& sel = as<Select>(*fn);
+        if (sel.qualifier->kind == NodeKind::Ident &&
+            as<Ident>(*sel.qualifier).name == "super") {
+            compileSuperSend(sel.name, a.args, a.pos);
+            return;
+        }
         if (a.args.size() == 1 && (sel.name == "&&" || sel.name == "||")) {
             compileShortCircuit(*sel.qualifier, *a.args[0], sel.name == "&&", a.pos);
             return;
@@ -465,8 +490,32 @@ void Compiler::compileApply(const Apply& a) {
             compileExpr(*arg);
         }
         const auto n = static_cast<std::uint32_t>(a.args.size());
-        emit(Op::SEND, fn_->mod->addSendSite(sel.name, n), a.pos, -static_cast<int>(n));
+        emit(Op::SEND, fn_->mod->addSendSite(selectKey(sel.name), n), a.pos, -static_cast<int>(n));
         return;
+    }
+    if (fn->kind == NodeKind::Ident) {
+        const auto& id = as<Ident>(*fn);
+        const Resolution r = resolve(id.name, id.pos);
+        if (r.ref == RefKind::Member) {  // f(args) inside a template: this.f(args)
+            loadThis(a.pos);
+            for (const auto& arg : a.args) {
+                if (arg->kind == NodeKind::Splice)
+                    throw CompileError("splices are only supported in function calls", arg->pos);
+                compileExpr(*arg);
+            }
+            const auto n = static_cast<std::uint32_t>(a.args.size());
+            emit(Op::SEND, fn_->mod->addSendSite(r.key, n), a.pos, -static_cast<int>(n));
+            return;
+        }
+        if (r.ref == RefKind::Global && r.kind == BindingKind::Object) {
+            // C(args) where C's companion apply is the synthesised one: new C(args).
+            const ClassInfo* cls = globals_.findType(id.name);
+            if (cls && cls->isCase && cls->kind == ClassKind::Class &&
+                cls->companionTermKey == r.key && !cls->companionHasApply) {
+                compileNewOf(*cls, a.args, a.pos);
+                return;
+            }
+        }
     }
     compileExpr(*fn);
     compileArgsAndCall(a.args, a.pos);
@@ -491,10 +540,14 @@ void Compiler::compileArgsAndCall(const std::vector<NodePtr>& args, SourcePos po
 }
 
 void Compiler::compileSelect(const Select& s) {
+    if (s.qualifier->kind == NodeKind::Ident && as<Ident>(*s.qualifier).name == "super") {
+        compileSuperSend(s.name, {}, s.pos);
+        return;
+    }
     compileExpr(*s.qualifier);
     if (s.name == "unary_-") { emit(Op::NEG, 0, s.pos, 0); return; }
     if (s.name == "unary_!") { emit(Op::NOT, 0, s.pos, 0); return; }
-    emit(Op::SEND, fn_->mod->addSendSite(s.name, 0), s.pos, 0);
+    emit(Op::SEND, fn_->mod->addSendSite(selectKey(s.name), 0), s.pos, 0);
 }
 
 // a && b  ==>  a; JUMP_IF_FALSE Lf; b; JUMP Lend; Lf: PUSH_FALSE; Lend:
@@ -516,6 +569,14 @@ void Compiler::compileAssign(const Assign& a) {
         throw std::logic_error("compiler: assignment target not desugared");
     const auto& id = as<Ident>(*a.target);
     const Resolution r = resolve(id.name, id.pos);
+    if (r.ref == RefKind::Member) {  // a var field: this.x_=(v), which yields ()
+        if (r.member->kind != MemberKind::Var)
+            throw CompileError("Reassignment to val " + id.name, a.pos);
+        loadThis(a.pos);
+        compileExpr(*a.value);
+        emit(Op::SEND, fn_->mod->addSendSite(memberOf(setterName(id.name))->key, 1), a.pos, -1);
+        return;
+    }
     if (r.kind != BindingKind::Var) throw CompileError("Reassignment to val " + id.name, a.pos);
     compileExpr(*a.value);
     if (r.ref == RefKind::Local) {
@@ -574,9 +635,16 @@ void Compiler::compileBlock(const Block& b) {
                 throw CompileError(*name + " is already defined", s->pos);
         }
     }
+    compileStats(b.stats, 0, b.pos);
+}
+
+// The body of a block, from statement `from` (an auxiliary constructor skips
+// its leading `this(...)` call). Leaves exactly one value on the stack.
+void Compiler::compileStats(const std::vector<NodePtr>& stats, std::size_t from, SourcePos pos) {
     fn_->scopes.emplace_back();
     // 1. Declare every definition of the block; boxed ones get a Cell now.
-    for (const auto& s : b.stats) {
+    for (std::size_t k = from; k < stats.size(); ++k) {
+        const NodePtr& s = stats[k];
         if (s->kind == NodeKind::DefDef) {
             const auto& d = as<DefDef>(*s);
             const LocalInfo info = declareLocal(d.name, kindOf(d), boxed_.count(s.get()) > 0);
@@ -588,10 +656,11 @@ void Compiler::compileBlock(const Block& b) {
         }
     }
     // 2. Hoisted local defs and lazy vals (their thunks), in order.
-    for (const auto& s : b.stats) {
+    for (std::size_t k = from; k < stats.size(); ++k) {
+        const NodePtr& s = stats[k];
         if (s->kind == NodeKind::DefDef) {
             const auto& d = as<DefDef>(*s);
-            compileFunction(d.name, paramsOf(d), bodyOf(d), /*isDef=*/true, d.pos);
+            compileFunction(d.name, paramsOf(d), bodyOf(d), FnShape::Def, d.pos);
             storeLocal(*findInFunction(fn_, d.name), d.pos);
         } else if (s->kind == NodeKind::ValDef && as<ValDef>(*s).isLazy) {
             const auto& v = as<ValDef>(*s);
@@ -601,9 +670,9 @@ void Compiler::compileBlock(const Block& b) {
     }
     // 3. Statements in order; the last expression is the block's value.
     bool valueOnStack = false;
-    for (std::size_t k = 0; k < b.stats.size(); ++k) {
-        const Node& s = *b.stats[k];
-        const bool last = (k + 1 == b.stats.size());
+    for (std::size_t k = from; k < stats.size(); ++k) {
+        const Node& s = *stats[k];
+        const bool last = (k + 1 == stats.size());
         if (s.kind == NodeKind::DefDef || s.kind == NodeKind::Import) continue;
         if (s.kind == NodeKind::ValDef) {
             const auto& v = as<ValDef>(s);
@@ -616,7 +685,7 @@ void Compiler::compileBlock(const Block& b) {
         if (last) valueOnStack = true;
         else emit(Op::POP, 0, s.pos, -1);
     }
-    if (!valueOnStack) emit(Op::PUSH_UNIT, 0, b.pos, +1);
+    if (!valueOnStack) emit(Op::PUSH_UNIT, 0, pos, +1);
     fn_->scopes.pop_back();
 }
 
@@ -625,31 +694,39 @@ void Compiler::compileBlock(const Block& b) {
 // ---------------------------------------------------------------------------
 
 void Compiler::compileFunction(const std::string& name, const std::vector<Param>& params,
-                               const Node& body, bool isDef, SourcePos pos) {
+                               const Node& body, FnShape shape, SourcePos pos) {
     for (const Param& p : params) {
         if (p.defaultValue)
             throw CompileError("default parameter values are not implemented yet", p.pos);
         if (p.byName) throw CompileError("by-name parameters are not supported yet", p.pos);
     }
+    const bool method = shape == FnShape::Method;
     auto mod = std::make_unique<BytecodeModule>();
     mod->setName(name);
+    mod->setMethod(method);
     FunctionState fs;
     fs.mod = mod.get();
-    fs.parent = fn_;
-    fs.allowsReturn = isDef;
+    fs.parent = method ? nullptr : fn_;  // methods capture nothing (Design note 9)
+    fs.allowsReturn = shape != FnShape::Lambda;
     fs.scopes.emplace_back();
     FunctionState* saved = fn_;
     fn_ = &fs;
+    if (method) {
+        const LocalInfo self{newSlot(), BindingKind::Param, false, false};
+        fs.scopes.back()["this"] = self;
+        if (tmpl_ && !tmpl_->selfName.empty()) fs.scopes.back()[tmpl_->selfName] = self;
+    }
     for (const Param& p : params) {
         const int slot = newSlot();
         if (p.name != "_") fs.scopes.back()[p.name] = LocalInfo{slot, BindingKind::Param, false, false};
     }
-    mod->setArity(static_cast<int>(params.size()));
+    const int arity = static_cast<int>(params.size()) + (method ? 1 : 0);
+    mod->setArity(arity);
     mod->setVariadic(!params.empty() && params.back().repeated);
     analyseCaptures(params, body);
     compileExpr(body);
     emit(Op::RETURN, 0, pos, -1);
-    mod->setLocalCount(fs.nextSlot - static_cast<int>(params.size()));
+    mod->setLocalCount(fs.nextSlot - arity);
     mod->setMaxStack(fs.maxDepth);
     fn_ = saved;
     // In the enclosing function: push the captured slot values, then MAKE_FN.
@@ -662,7 +739,7 @@ void Compiler::compileFunction(const std::string& name, const std::vector<Param>
 }
 
 void Compiler::compileLazyThunk(const Node& rhs, SourcePos pos) {
-    compileFunction("<lazy>", {}, rhs, /*isDef=*/false, pos);
+    compileFunction("<lazy>", {}, rhs, FnShape::Lambda, pos);
     emit(Op::MAKE_LAZY, 0, pos, 0);
 }
 
@@ -688,6 +765,8 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
         globals_.beginUnit();
         // 1. Declare every top-level name; validate @main.
         const DefDef* main = nullptr;
+        std::vector<const TemplateDef*> templates;
+        std::unordered_map<const TemplateDef*, std::string> typeKeys;
         for (const auto& s : unit.stats) {
             if (s->kind == NodeKind::DefDef) {
                 const auto& d = as<DefDef>(*s);
@@ -704,6 +783,28 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
                     out.definitions.push_back(
                         {std::string(v.isLazy ? "lazy val " : v.isVar ? "var " : "val ") + v.name,
                          key});
+            } else if (s->kind == NodeKind::TemplateDef) {
+                const auto& t = as<TemplateDef>(*s);
+                templates.push_back(&t);
+                if (t.kind == TemplateKind::Object) {
+                    const std::string termKey = globals_.declare(t.name, BindingKind::Object);
+                    typeKeys[&t] = globals_.declareType(t.name + ".type");
+                    if (mode == UnitMode::Repl && !t.synthetic)
+                        out.definitions.push_back(
+                            {std::string("// defined ") +
+                                 (t.isCase ? "case object " : "object ") + t.name,
+                             termKey});
+                } else {
+                    typeKeys[&t] = globals_.declareType(t.name);
+                    if (mode == UnitMode::Repl)
+                        out.definitions.push_back(
+                            {std::string("// defined ") +
+                                 (t.kind == TemplateKind::Trait ? "trait "
+                                  : t.isCase                    ? "case class "
+                                                                : "class ") +
+                                 t.name,
+                             typeKeys[&t]});
+                }
             }
         }
         if (main) {
@@ -733,11 +834,21 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
             out.mainKey = globalKey(main->name);
             out.mainTakesArgs = varargs;
         }
-        // 2. Hoisted top-level defs and lazy vals (their thunks), in order.
+        // 1b. Describe the templates, parents first, and link the companions.
+        const std::vector<const TemplateDef*> sorted = sortTemplates(templates);
+        for (const TemplateDef* t : sorted) globals_.defineType(buildClassInfo(*t, typeKeys.at(t)));
+        linkCompanions(sorted);
+        // 2. Hoisted templates, object holders, top-level defs and lazy vals.
+        for (const TemplateDef* t : sorted)
+            compileTemplate(*t, *globals_.findTypeByKey(typeKeys.at(t)));
+        for (const TemplateDef* t : sorted)
+            if (t->kind == TemplateKind::Object)
+                compileObjectHolder(*globals_.findTypeByKey(typeKeys.at(t)),
+                                    globals_.binding(t->name)->key, t->pos);
         for (const auto& s : unit.stats) {
             if (s->kind == NodeKind::DefDef) {
                 const auto& d = as<DefDef>(*s);
-                compileFunction(d.name, paramsOf(d), bodyOf(d), /*isDef=*/true, d.pos);
+                compileFunction(d.name, paramsOf(d), bodyOf(d), FnShape::Def, d.pos);
                 emit(Op::STORE_GLOBAL, top.mod->addSymbol(globalKey(d.name)), d.pos, -1);
             } else if (s->kind == NodeKind::ValDef && as<ValDef>(*s).isLazy) {
                 const auto& v = as<ValDef>(*s);
@@ -750,7 +861,8 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
         for (const auto& s : unit.stats) {
             if (s->kind == NodeKind::ValDef) {
                 if (!as<ValDef>(*s).isLazy) analyseCaptures({}, rhsOf(as<ValDef>(*s)));
-            } else if (s->kind != NodeKind::DefDef && s->kind != NodeKind::Import) {
+            } else if (s->kind != NodeKind::DefDef && s->kind != NodeKind::Import &&
+                       s->kind != NodeKind::TemplateDef) {
                 analyseCaptures({}, *s);
             }
         }
@@ -758,7 +870,9 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
         for (std::size_t k = 0; k < unit.stats.size(); ++k) {
             const Node& s = *unit.stats[k];
             const bool last = (k + 1 == unit.stats.size());
-            if (s.kind == NodeKind::DefDef || s.kind == NodeKind::Import) continue;
+            if (s.kind == NodeKind::DefDef || s.kind == NodeKind::Import ||
+                s.kind == NodeKind::TemplateDef)
+                continue;
             if (s.kind == NodeKind::ValDef) {
                 const auto& v = as<ValDef>(s);
                 if (v.isLazy) continue;  // hoisted (step 2)
@@ -783,6 +897,7 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
         return out;
     } catch (...) {
         fn_ = nullptr;
+        tmpl_ = nullptr;
         globals_ = snapshot;
         throw;
     }

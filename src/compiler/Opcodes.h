@@ -69,7 +69,8 @@ enum class Op : uint8_t {
     CAST_FAIL      = 75,  // [v] -> throws ClassCastException; operand: String constant (type name)
     MAKE_TUPLE     = 76,  // [a1..an] -> [tuple]          operand: n (2..22)
     SEND_KW        = 77,  // [recv a1..an v1..vm] -> [r]  operand: KwSendSite constant
-    // 78..95   reserved (object model)
+    NEW_SPREAD     = 78,  // [cls a1..an list] -> [obj]   operand: SendSite (constructor key, n)
+    // 79..95   reserved (object model)
     // 96..127  exceptions, Phase 4: THROW (+ per-module handler table)
     // 128..159 actors, Phase 5: SEND_ASYNC, ASK, AWAIT
 };

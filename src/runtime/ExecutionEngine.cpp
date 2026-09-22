@@ -652,6 +652,32 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                     sp = base + 1;
                     continue;
                 }
+                case Op::NEW_SPREAD: {
+                    const auto& site = mod.constAt(operand);
+                    const unsigned n = site.argc;
+                    const proto::ProtoObject** base = sp - n - 2;  // [cls a1..an list]
+                    const proto::ProtoObject* listObj = sp[-1];
+                    if (!isListFast(listObj))
+                        throw ScalaError("ClassCastException",
+                                         typeName(&frame, L, listObj) +
+                                             " cannot be spliced as arguments");
+                    const proto::ProtoList* list = listObj->asList(&frame);
+                    const unsigned extra = static_cast<unsigned>(list->getSize(&frame));
+                    const proto::ProtoObject* r;
+                    {
+                        proto::ProtoContext argScope(frame.space, &frame);
+                        argScope.resizeAutomaticLocals(n + extra + 1);
+                        const proto::ProtoObject** a = argScope.getAutomaticLocals();
+                        for (unsigned k = 0; k <= n; ++k) a[k] = base[k];
+                        for (unsigned k = 0; k < extra; ++k)
+                            a[n + 1 + k] = list->getAt(&argScope, static_cast<int>(k));
+                        r = instantiate(&argScope, a, site.symbol, n + extra);
+                        argScope.returnValue = r;
+                    }
+                    base[0] = r;
+                    sp = base + 1;
+                    continue;
+                }
                 case Op::INVOKE_INIT: {
                     const auto& site = mod.constAt(operand);
                     const proto::ProtoObject** base = sp - site.argc - 2;  // [cls this a1..an]
