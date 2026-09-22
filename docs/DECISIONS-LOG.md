@@ -18,3 +18,16 @@ it tomorrow"); the maintainer reviews them and may reverse any of them.
 | 2026-09-22 | P1 D2a–D7 (bucket encoding, hashed key word, keep key, nullptr keys, isEqual identity, own prototype, CellType discrimination, SOVERSION 1) | agent, pending review | PROTOMAP-SPEC §7 |
 | 2026-09-22 | Phase 1 Q1–Q22: the plan's provisional behaviours adopted as written (notably Q21: `ProtoContext::safepoint()` at loop back-edges, touching DESIGN R1; Q4: captured `var`s boxed in mutable cells; Q2: script mode with eager top-level vals); recorded as provisional D9–D18 in STATUS.md by Task 13 | agent, pending review | plans/2026-09-22-phase-1-core-language.md, "Open questions for the maintainer" |
 | 2026-09-22 | Rename `ProtoSparseListObject` → **`ProtoMap`** (and iterator, tag, CellTypes, accessors `newMap`/`isMap`/`asMap`, prototype `mapPrototype`, files, spec) | maintainer | protoCore feature/pslo-p1, docs |
+
+## Overnight run 2026-09-22 — agent rulings pending review
+
+| Decision | Cost if wrong |
+|---|---|
+| Phase 1 plan open questions Q1–Q22 adopted as the plan's provisional behaviours (incl. Q21: `safepoint()` at loop back-edges, touching DESIGN R1; Q4: captured vars boxed in mutable cells) | each reversible; Q21 is a GC-interaction choice to confirm with protoCore |
+| Layout: a same-line closer (`else`, `catch`, `do`, `yield`) pairs with a pending partner inside the current region before popping it (Scala semantics over the plan's simpler rule) | extra layout complexity |
+| Forward references follow SLS 4.4 (interval includes the referenced definition): `{ def f = y; val y = 1 }` is rejected, as in scalac | a program scalac also rejects |
+| REPL redefinition uses per-definition keys `x#N` (Scala REPL shadowing); a throwing `val` leaves the name undefined | compiler/global-table change |
+| Primitives: negative shift, `Int.toChar` out of range → IllegalArgumentException; `toInt`/`toLong`/`round` of ±Infinity → ArithmeticException; Char predicates ASCII-only (D19–D22) | small behaviour changes |
+| `@main` accepts only no parameters or `args: String*` (typed parameters recorded as a deviation) | missing Scala 3 feature |
+| P1: perf gate parked (retired instructions flat, cycles noisy under host load) and ASan pre-existing findings (3 timing/limit tests, ProtoSpace teardown leaks) not fixed | a real slowdown could slip; re-run `perf stat -r 3` on a quiet host before merge |
+| P1: Task 12 (rebuild of every embedder) not run; branch `feature/pslo-p1` not merged, not pushed | embedder validation pending |
