@@ -81,6 +81,7 @@ add_library(protoscala_frontend STATIC
     src/frontend/AST.cpp
     src/frontend/Parser.cpp
     src/frontend/Desugar.cpp
+    src/frontend/Linearizer.cpp
 )
 target_link_libraries(protoscala_frontend PUBLIC protoscala_support)
 target_compile_options(protoscala_frontend PRIVATE -Wall -Wextra -Wpedantic)
@@ -88,6 +89,7 @@ target_compile_options(protoscala_frontend PRIVATE -Wall -Wextra -Wpedantic)
 # --- Compiler: opcodes, bytecode modules, AST -> bytecode ------------------------
 add_library(protoscala_compiler STATIC
     src/compiler/BytecodeModule.cpp
+    src/compiler/ClassInfo.cpp
     src/compiler/Compiler.cpp
 )
 target_link_libraries(protoscala_compiler PUBLIC protoscala_frontend protoscala_support)

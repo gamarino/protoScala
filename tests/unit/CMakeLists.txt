@@ -7,6 +7,7 @@ add_executable(protoscala_unit_tests
     test_lexer.cpp
     test_layout.cpp
     test_parser.cpp
+    test_linearizer.cpp
     test_desugar.cpp
     test_bytecode.cpp
     test_compiler.cpp

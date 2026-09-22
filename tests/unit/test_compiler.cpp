@@ -359,3 +359,29 @@ TEST(Compiler, ReplRedefinitionGetsAFreshGlobalKey) {
     EXPECT_EQ(GlobalTable::nameOfKey("##"), "##");
     EXPECT_EQ(GlobalTable::nameOfKey("##12"), "#");
 }
+
+TEST(GlobalTableTypes, KeysShadowAcrossUnitsAndStayFindable) {
+    GlobalTable g;
+    for (ClassInfo& t : builtinTypes()) g.defineBuiltinType(std::move(t));
+    g.beginUnit();
+    const std::string k1 = g.declareType("Point");
+    EXPECT_EQ(k1, "@Point");
+    ClassInfo p;
+    p.name = "Point";
+    p.key = k1;
+    g.defineType(p);
+    g.beginUnit();
+    const std::string k2 = g.declareType("Point");
+    EXPECT_EQ(k2, "@Point#1");
+    ClassInfo p2 = p;
+    p2.key = k2;
+    g.defineType(p2);
+    EXPECT_EQ(g.findType("Point")->key, "@Point#1");
+    ASSERT_NE(g.findTypeByKey("@Point"), nullptr);
+    EXPECT_EQ(g.findType("Tuple3")->fields.size(), 3u);
+    EXPECT_EQ(g.findType("Product")->kind, ClassKind::Trait);
+    const GlobalTable copy = g;  // a REPL trial copy shares the counters
+    GlobalTable g2 = copy;
+    g2.beginUnit();
+    EXPECT_EQ(g2.declareType("Point"), "@Point#2");
+}

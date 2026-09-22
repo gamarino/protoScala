@@ -10,6 +10,8 @@
 // are never reused, even when a unit that allocated one is rolled back: the
 // key counters are shared by every copy of the table.
 #pragma once
+#include "compiler/ClassInfo.h"
+
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -19,7 +21,9 @@
 
 namespace protoScala {
 
-enum class BindingKind : uint8_t { Val, Var, LazyVal, Def, ParamlessDef, Builtin, Param };
+// An `Object` binding holds the lazy singleton holder of an `object`: reads
+// FORCE it like a lazy val.
+enum class BindingKind : uint8_t { Val, Var, LazyVal, Def, ParamlessDef, Builtin, Param, Object };
 
 struct GlobalBinding {
     BindingKind kind;
@@ -30,7 +34,10 @@ class GlobalTable {
 public:
     // Starts a compilation unit: names declared from now on shadow the
     // bindings of earlier units.
-    void beginUnit() { declaredInUnit_.clear(); }
+    void beginUnit() {
+        declaredInUnit_.clear();
+        typesDeclaredInUnit_.clear();
+    }
 
     // Declares (or, within one unit, redeclares) a global; returns its key.
     const std::string& declare(const std::string& name, BindingKind kind) {
@@ -73,11 +80,55 @@ public:
         return key.substr(0, hash);
     }
 
+    // --- Type namespace (classes, traits, the classes of objects) ---------
+    // Declares (or, within one unit, redeclares) a type name; returns its key:
+    // "@Name" for the first definition, "@Name#N" for a definition that
+    // shadows one from an earlier unit (the REPL rule of term keys, D25).
+    const std::string& declareType(const std::string& name) {
+        if (!typesDeclaredInUnit_.count(name)) {
+            typesDeclaredInUnit_.insert(name);
+            auto [counter, fresh] = typeCounters_->try_emplace(name, 0);
+            typeKeyOfName_[name] =
+                fresh ? "@" + name : "@" + name + "#" + std::to_string(++counter->second);
+        }
+        return typeKeyOfName_.at(name);
+    }
+    // Records the description of a declared type (info.key from declareType).
+    void defineType(ClassInfo info) {
+        const std::string key = info.key;
+        typesByKey_[key] = std::move(info);
+    }
+    // A runtime-provided type: its name resolves to its fixed key.
+    void defineBuiltinType(ClassInfo info) {
+        typeKeyOfName_[info.name] = info.key;
+        defineType(std::move(info));
+    }
+    const ClassInfo* findType(const std::string& name) const {
+        auto it = typeKeyOfName_.find(name);
+        return it == typeKeyOfName_.end() ? nullptr : findTypeByKey(it->second);
+    }
+    // Every type ever defined stays reachable by key: the linearizations of
+    // classes compiled earlier name the keys of their (possibly shadowed) parents.
+    const ClassInfo* findTypeByKey(const std::string& key) const {
+        auto it = typesByKey_.find(key);
+        return it == typesByKey_.end() ? nullptr : &it->second;
+    }
+    ClassInfo* mutableTypeByKey(const std::string& key) {
+        auto it = typesByKey_.find(key);
+        return it == typesByKey_.end() ? nullptr : &it->second;
+    }
+
 private:
     std::unordered_map<std::string, GlobalBinding> table_;
     std::unordered_set<std::string> declaredInUnit_;
     // Per name: how many shadowing keys were handed out (shared by copies).
     std::shared_ptr<std::unordered_map<std::string, int>> counters_ =
+        std::make_shared<std::unordered_map<std::string, int>>();
+
+    std::unordered_map<std::string, std::string> typeKeyOfName_;  // name -> current type key
+    std::unordered_map<std::string, ClassInfo> typesByKey_;
+    std::unordered_set<std::string> typesDeclaredInUnit_;
+    std::shared_ptr<std::unordered_map<std::string, int>> typeCounters_ =
         std::make_shared<std::unordered_map<std::string, int>>();
 };
 

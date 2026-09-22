@@ -1,0 +1,71 @@
+/*
+ * ClassInfo — the compile-time description of a class, trait or object
+ * (the class of an object), kept in GlobalTable's type namespace.
+ *
+ * Keys: a type key starts with '@' (`@Point`, `@Point#1` for a REPL
+ * redefinition, `@O.type` for the class of `object O`); the class prototype is
+ * stored in the globals object under it, and it is also the marker attribute
+ * every instance's chain answers (Design note 5 of the Phase 2 plan). A member
+ * key is the member's name, or `<TypeKey-without-@>::<name>` for a private
+ * member (D5). None of these can be a Scala identifier.
+ */
+#pragma once
+#include <cstdint>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+namespace protoScala {
+
+enum class ClassKind : uint8_t { Class, Trait, Object };
+enum class MemberKind : uint8_t { Val, Var, LazyVal, Def, ParamlessDef };
+
+struct MemberInfo {
+    MemberKind kind = MemberKind::Def;
+    std::string key;        // attribute key on the instance or the prototype
+    bool concrete = true;   // false: declared abstract (no body / no initialiser)
+};
+
+inline constexpr const char* kAnyKey = "@Any";
+inline constexpr const char* kAnyRefKey = "@AnyRef";
+inline constexpr const char* kProductKey = "@Product";
+inline constexpr const char* kSerializableKey = "@Serializable";
+inline constexpr const char* kPrimaryCtorKey = "<init>";
+inline constexpr unsigned kMaxTupleArity = 22;
+
+inline std::string tupleTypeKey(unsigned n) { return "@Tuple" + std::to_string(n); }
+inline std::string auxCtorKey(std::size_t arity) { return "<init>" + std::to_string(arity); }
+inline std::string setterName(const std::string& name) { return name + "_="; }
+inline std::string privateKey(const std::string& typeKey, const std::string& name) {
+    return typeKey.substr(1) + "::" + name;
+}
+
+struct ClassInfo {
+    std::string name;                 // source name ("Point"; for an object, the object's name)
+    std::string key;                  // type key
+    ClassKind kind = ClassKind::Class;
+    bool isCase = false;
+    bool isAbstract = false;
+    bool isFinal = false;
+    bool isSealed = false;
+    bool builtin = false;             // provided by the runtime (Any, AnyRef, Product, TupleN, ...)
+    bool mutableInstances = false;    // it or an ancestor declares a var field (DESIGN §4.2)
+    bool hasInit = true;              // traits: false when the trait has no fields, parameters or statements
+    std::vector<std::string> linearization;  // type keys, the class first, ending with @AnyRef, @Any
+    std::vector<std::string> fields;         // case classes: the product elements' attribute keys
+    std::vector<std::string> ctorParams;     // primary constructor parameter names
+    std::size_t primaryArity = 0;
+    bool primaryVariadic = false;
+    std::vector<std::size_t> auxArities;     // auxiliary constructors, by arity (D31)
+    std::unordered_map<std::string, MemberInfo> members;  // public (own + inherited) and own private
+    std::string companionTermKey;     // classes: the term key of the companion object, if any
+    std::string companionTypeKey;     // classes: the companion object's type key; objects: their companion class's
+    bool companionHasApply = false;   // the companion object defines apply / unapply itself
+    bool companionHasUnapply = false;
+};
+
+// Any, AnyRef, Product, Serializable and Tuple2..Tuple22, with the keys the
+// runtime binds (Runtime.cpp).
+std::vector<ClassInfo> builtinTypes();
+
+} // namespace protoScala
