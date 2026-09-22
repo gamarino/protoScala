@@ -62,6 +62,13 @@ add_library(protoscala_support STATIC
 target_link_libraries(protoscala_support PUBLIC ${PROTOCORE_LIBRARY})
 target_compile_options(protoscala_support PRIVATE -Wall -Wextra -Wpedantic)
 
+# --- Frontend: lexer (with offside rule), parser, AST, desugar ------------------
+add_library(protoscala_frontend STATIC
+    src/frontend/Lexer.cpp
+)
+target_link_libraries(protoscala_frontend PUBLIC protoscala_support)
+target_compile_options(protoscala_frontend PRIVATE -Wall -Wextra -Wpedantic)
+
 # --- protoscala binary ----------------------------------------------------------
 add_executable(protoscala
     src/main.cpp
