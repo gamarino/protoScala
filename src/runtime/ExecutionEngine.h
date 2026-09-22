@@ -44,6 +44,12 @@ public:
     const proto::ProtoObject* invoke(proto::ProtoContext* ctx, const proto::ProtoObject* callable,
                                      const proto::ProtoObject* const* args, unsigned argc);
 
+    // Like invoke, but installs this engine's ActiveCallContext (entry from
+    // C++ code that is not itself running inside the VM, e.g. the @main call).
+    const proto::ProtoObject* callTopLevel(proto::ProtoContext* ctx,
+                                           const proto::ProtoObject* callable,
+                                           const proto::ProtoObject* const* args, unsigned argc);
+
     // Scala method call `receiver.name(args)`; `args` must be rooted.
     const proto::ProtoObject* send(proto::ProtoContext* ctx, const proto::ProtoObject* receiver,
                                    const proto::ProtoString* name,

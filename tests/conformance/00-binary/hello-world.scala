@@ -1,5 +1,4 @@
-// XFAIL: Hello, protoScala!
-// Pins the first Phase 1 program. Remove the XFAIL marker (make it EXPECT)
-// when the frontend, compiler and VM run it.
+// EXPECT: Hello, protoScala!
+// The first protoScala program.
 @main def hello(): Unit =
   println("Hello, protoScala!")

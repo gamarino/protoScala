@@ -135,3 +135,21 @@ TEST(Engine, DeepButBoundedRecursionWorks) {
     }, nullptr);
     EXPECT_EQ(rc, 0);
 }
+
+TEST(Engine, UnknownOpcodeIsALogicErrorNotSkipped) {
+    EvalHarness h;
+    protoScala::BytecodeModule mod;
+    mod.setName("<corrupt>");
+    mod.setMaxStack(1);  // room for the PUSH_UNIT an old VM would reach
+    mod.emit(static_cast<protoScala::Op>(200), 0, 1);  // no such opcode
+    mod.emit(protoScala::Op::PUSH_UNIT, 0, 1);
+    mod.emit(protoScala::Op::RETURN, 0, 1);
+    proto::ProtoContext ctx(&h.space(), h.runtime().rootContext());
+    protoScala::ExecutionEngine engine(h.runtime().layout());
+    try {
+        engine.run(&ctx, mod);
+        FAIL() << "an unknown opcode was skipped";
+    } catch (const std::logic_error& e) {
+        EXPECT_NE(std::string(e.what()).find("unknown opcode 200"), std::string::npos) << e.what();
+    }
+}

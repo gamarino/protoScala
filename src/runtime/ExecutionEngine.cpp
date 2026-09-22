@@ -6,6 +6,7 @@
 #include "protoCore.h"
 
 #include <cmath>
+#include <stdexcept>
 #include <string>
 
 namespace protoScala {
@@ -45,6 +46,14 @@ const ActiveCallContext* activeCallContext() { return tl_activeSet ? &tl_active 
 const proto::ProtoObject* ExecutionEngine::run(proto::ProtoContext* parent, const BytecodeModule& mod) {
     ActiveGuard guard(this, &layout_);
     return execute(parent, mod, nullptr, 0, nullptr);
+}
+
+const proto::ProtoObject* ExecutionEngine::callTopLevel(proto::ProtoContext* ctx,
+                                                        const proto::ProtoObject* callable,
+                                                        const proto::ProtoObject* const* args,
+                                                        unsigned argc) {
+    ActiveGuard guard(this, &layout_);
+    return invoke(ctx, callable, args, argc);
 }
 
 const proto::ProtoObject* ExecutionEngine::callNative(proto::ProtoContext* ctx, proto::ProtoMethod fn,
@@ -151,7 +160,7 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                 op = static_cast<Op>(next & 0xFF);
             }
             switch (op) {
-                case Op::NOP: case Op::EXTEND: break;
+                case Op::NOP: case Op::EXTEND: continue;
                 case Op::PUSH_CONST: {
                     const auto& c = mod.constAt(operand);
                     using K = BytecodeModule::ConstKind;
@@ -164,28 +173,28 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                         case K::Symbol: case K::SendSite:
                             throw std::logic_error("PUSH_CONST of a name constant");
                     }
-                    break;
+                    continue;
                 }
-                case Op::PUSH_UNIT:  *sp++ = L.unit; break;
-                case Op::PUSH_NULL:  *sp++ = PROTO_NONE; break;
-                case Op::PUSH_TRUE:  *sp++ = PROTO_TRUE; break;
-                case Op::PUSH_FALSE: *sp++ = PROTO_FALSE; break;
-                case Op::POP: --sp; break;
-                case Op::DUP: *sp = sp[-1]; ++sp; break;
-                case Op::PUSH_LOCAL:  *sp++ = slots[operand]; break;
-                case Op::STORE_LOCAL: slots[operand] = *--sp; break;
+                case Op::PUSH_UNIT:  *sp++ = L.unit; continue;
+                case Op::PUSH_NULL:  *sp++ = PROTO_NONE; continue;
+                case Op::PUSH_TRUE:  *sp++ = PROTO_TRUE; continue;
+                case Op::PUSH_FALSE: *sp++ = PROTO_FALSE; continue;
+                case Op::POP: --sp; continue;
+                case Op::DUP: *sp = sp[-1]; ++sp; continue;
+                case Op::PUSH_LOCAL:  *sp++ = slots[operand]; continue;
+                case Op::STORE_LOCAL: slots[operand] = *--sp; continue;
                 case Op::MAKE_CELL:
                     slots[operand] = L.cellProto->newChild(&frame, /*isMutable=*/true);
-                    break;
+                    continue;
                 case Op::PUSH_CELL: {
                     const proto::ProtoObject* v = slots[operand]->getOwnAttributeDirect(&frame, L.valueKey);
                     *sp++ = v ? v : PROTO_NONE;
-                    break;
+                    continue;
                 }
                 case Op::STORE_CELL:
                     slots[operand]->setAttribute(&frame, L.valueKey, sp[-1]);  // mutable: in place
                     --sp;
-                    break;
+                    continue;
                 case Op::PUSH_GLOBAL: {
                     const auto* key = mod.constAt(operand).symbol;
                     const proto::ProtoObject* v = L.globals->getOwnAttributeDirect(&frame, key);
@@ -194,12 +203,12 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                         throw ScalaError("UninitializedFieldError",
                                          mod.constAt(operand).sval + " is used before it is initialised");
                     *sp++ = v ? v : PROTO_NONE;
-                    break;
+                    continue;
                 }
                 case Op::STORE_GLOBAL:
                     L.globals->setAttribute(&frame, mod.constAt(operand).symbol, sp[-1]);
                     --sp;
-                    break;
+                    continue;
                 case Op::MAKE_FN: {
                     const BytecodeModule& sub = mod.block(operand);
                     const unsigned nc = static_cast<unsigned>(sub.captureCount());
@@ -213,7 +222,7 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                                               frame.newList(nc, sp - nc)->asObject(&frame));
                     sp -= nc;
                     *sp++ = fn;
-                    break;
+                    continue;
                 }
                 case Op::CALL: {
                     const proto::ProtoObject** base = sp - operand - 1;
@@ -221,7 +230,7 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                         invoke(&frame, base[0], base + 1, static_cast<unsigned>(operand));
                     base[0] = r;
                     sp = base + 1;
-                    break;
+                    continue;
                 }
                 case Op::CALL_SPREAD: {
                     const unsigned n = static_cast<unsigned>(operand);
@@ -244,7 +253,7 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                     }
                     base[0] = r;
                     sp = base + 1;
-                    break;
+                    continue;
                 }
                 case Op::SEND: {
                     const auto& site = mod.constAt(operand);
@@ -252,7 +261,7 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                     const proto::ProtoObject* r = send(&frame, base[0], site.symbol, base + 1, site.argc);
                     base[0] = r;
                     sp = base + 1;
-                    break;
+                    continue;
                 }
                 case Op::RETURN: {
                     const proto::ProtoObject* r = sp[-1];
@@ -263,26 +272,26 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                     const proto::ProtoObject* holder = L.lazyProto->newChild(&frame, true);
                     holder->setAttribute(&frame, L.thunkKey, sp[-1]);  // mutable: in place
                     sp[-1] = holder;
-                    break;
+                    continue;
                 }
-                case Op::FORCE: sp[-1] = force(&frame, sp[-1]); break;
-                case Op::JUMP: ip += operand; break;
+                case Op::FORCE: sp[-1] = force(&frame, sp[-1]); continue;
+                case Op::JUMP: ip += operand; continue;
                 case Op::JUMP_IF_FALSE: {
                     const proto::ProtoObject* v = *--sp;
                     if (v == PROTO_FALSE) ip += operand;
                     else if (v != PROTO_TRUE) throwNotBoolean(&frame, L, v);
-                    break;
+                    continue;
                 }
                 case Op::JUMP_IF_TRUE: {
                     const proto::ProtoObject* v = *--sp;
                     if (v == PROTO_TRUE) ip += operand;
                     else if (v != PROTO_FALSE) throwNotBoolean(&frame, L, v);
-                    break;
+                    continue;
                 }
                 case Op::JUMP_BACK:
                     ip -= operand;
                     frame.safepoint();  // Open question Q21; every live value is in a slot
-                    break;
+                    continue;
                 case Op::ADD: case Op::SUB: case Op::MUL: {
                     const proto::ProtoObject* a = sp[-2];
                     const proto::ProtoObject* b = sp[-1];
@@ -302,7 +311,7 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                         sp[-2] = slowBinary(&frame, op, a, b);
                     }
                     --sp;
-                    break;
+                    continue;
                 }
                 case Op::LT: case Op::LE: case Op::GT: case Op::GE: {
                     const proto::ProtoObject* a = sp[-2];
@@ -316,13 +325,13 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                         sp[-2] = slowBinary(&frame, op, a, b);
                     }
                     --sp;
-                    break;
+                    continue;
                 }
                 case Op::EQ: case Op::NE: {
                     const bool eq = valuesEqual(&frame, L, sp[-2], sp[-1]);
                     sp[-2] = (eq == (op == Op::EQ)) ? PROTO_TRUE : PROTO_FALSE;
                     --sp;
-                    break;
+                    continue;
                 }
                 case Op::NEG: {
                     const proto::ProtoObject* a = sp[-1];
@@ -333,7 +342,7 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                     else
                         sp[-1] = send(&frame, a,
                                       proto::ProtoString::createSymbol(&frame, "unary_-"), nullptr, 0);
-                    break;
+                    continue;
                 }
                 case Op::NOT: {
                     const proto::ProtoObject* a = sp[-1];
@@ -341,9 +350,14 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                     else if (a == PROTO_FALSE) sp[-1] = PROTO_TRUE;
                     else sp[-1] = send(&frame, a,
                                        proto::ProtoString::createSymbol(&frame, "unary_!"), nullptr, 0);
-                    break;
+                    continue;
                 }
             }
+            // Every handled opcode continues the loop or returns; reaching this
+            // point means the module holds an opcode value the VM does not know
+            // (a compiler bug or a corrupted module), which is never skipped.
+            throw std::logic_error("unknown opcode " +
+                                   std::to_string(static_cast<unsigned>(op)) + " in " + mod.name());
         }
     } catch (ScalaError& e) {
         if (e.line == 0) e.line = mod.lineAt(static_cast<std::size_t>(ip - code) - 1);

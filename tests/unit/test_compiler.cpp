@@ -72,6 +72,13 @@ TEST(Compiler, MainWithStringVarargs) {
     EXPECT_TRUE(cu.mainTakesArgs);
 }
 
+TEST(Compiler, QualifiedMainAnnotationCounts) {
+    GlobalTable g;
+    EXPECT_EQ(compile("@scala.main def go(): Unit = ()", g).mainName, "go");
+    GlobalTable h;
+    EXPECT_EQ(compile("@deprecated def notMain(): Unit = ()", h).mainName, "");
+}
+
 TEST(Compiler, MainRestrictions) {
     EXPECT_TRUE(has(compileError("@main def a() = 1\n@main def b() = 2"), "only one @main"));
     EXPECT_TRUE(has(compileError("@main def a(x: Int) = x"), "@main methods take"));

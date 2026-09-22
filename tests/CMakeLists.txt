@@ -12,9 +12,14 @@ FetchContent_MakeAvailable(googletest)
 add_subdirectory(unit)
 
 # --- CLI checks -----------------------------------------------------------------
-foreach(cli_test help version unknown-option)
+foreach(cli_test help version unknown-option script-errors main-args)
     add_test(NAME cli/${cli_test}
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/cli/${cli_test}.sh" "$<TARGET_FILE:protoscala>")
+endforeach()
+foreach(cli_test disassemble gc-pressure)
+    add_test(NAME cli/${cli_test}
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/cli/${cli_test}.sh" "$<TARGET_FILE:protoscala>"
+                "${CMAKE_CURRENT_SOURCE_DIR}")
 endforeach()
 
 # --- Conformance fixtures (glob-discovered) -------------------------------------

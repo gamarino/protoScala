@@ -93,11 +93,19 @@ target_link_libraries(protoscala_runtime PUBLIC protoscala_compiler protoscala_s
     ${PROTOCORE_LIBRARY} pthread)
 target_compile_options(protoscala_runtime PRIVATE -Wall -Wextra -Wpedantic)
 
+# --- REPL and session (script runner + interactive loop share Session) -----------
+add_library(protoscala_repl STATIC
+    src/repl/Session.cpp
+)
+target_link_libraries(protoscala_repl PUBLIC protoscala_runtime protoscala_compiler
+    protoscala_frontend protoscala_support)
+target_compile_options(protoscala_repl PRIVATE -Wall -Wextra -Wpedantic)
+
 # --- protoscala binary ----------------------------------------------------------
 add_executable(protoscala
     src/main.cpp
 )
-target_link_libraries(protoscala PRIVATE protoscala_support)
+target_link_libraries(protoscala PRIVATE protoscala_repl protoscala_support)
 target_compile_options(protoscala PRIVATE -Wall -Wextra -Wpedantic)
 
 # --- Tests ----------------------------------------------------------------------

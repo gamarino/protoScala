@@ -153,8 +153,13 @@ struct DefDef : Node {
     std::vector<std::vector<Param>> paramLists;  // empty: parameterless def
     TypePtr resultType;  // may be null
     NodePtr body;
+    // `@main` under any qualification (`@scala.main`): the last dot-segment
+    // of the annotation name decides (annotations are not resolved in Phase 1).
     bool isMain() const {
-        for (const auto& a : annotations) if (a == "main") return true;
+        for (const auto& a : annotations) {
+            const auto dot = a.rfind('.');
+            if ((dot == std::string::npos ? a : a.substr(dot + 1)) == "main") return true;
+        }
         return false;
     }
 };
