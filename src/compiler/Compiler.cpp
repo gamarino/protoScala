@@ -11,6 +11,7 @@
  *    local defs).
  */
 #include "compiler/Compiler.h"
+#include "runtime/StackGuard.h"
 
 #include <stdexcept>
 
@@ -57,29 +58,32 @@ const Node& rhsOf(const ValDef& v) {
 // CaptureAnalysis: decides which declarations of one function body live in a
 // Cell. Scopes map names to their declaration and the function depth (0 =
 // the analysed function, +1 per nested lambda / local def / lazy thunk)
-// where they are bound. A reference from a deeper function boxes:
+// where they are bound. Local defs and lazy vals are hoisted: their function
+// objects are created when the block starts, before any statement runs. A
+// reference from a deeper function boxes:
 //   - a var (every closure must see the same variable),
 //   - a local def (hoisted, so it may be captured before it is stored),
-//   - a val / lazy val when some local def lies between the declaration and
-//     the reference (the def is hoisted above the val's initialiser).
+//   - a val / lazy val when a hoisted function (local def or lazy thunk) lies
+//     between the declaration and the reference (it is created before the
+//     val's initialiser runs).
 // Parameters (decl == nullptr) are never boxed: they are immutable and bound
 // before any hoisted MAKE_FN runs.
 //
-// The pass also rejects forward references that would read a slot before its
-// initialiser ran: a reference from a block statement (directly, or from a
-// lambda / lazy thunk created by it) to a val or var of the same block
-// declared at or after that statement. References through a local def are
-// legal (the def is hoisted and the declaration is boxed). A lazy val
-// referenced that way from a lambda or thunk is boxed instead; a direct
-// forward reference to a lazy val is rejected as not supported yet.
+// The pass also enforces Scala's forward-reference rule for blocks (SLS
+// 6.11; Scala 3 ForwardDepChecks): a reference from statement i — directly or
+// from any function nested in it — to a definition at index j >= i of the
+// same block is illegal when a strict (non-lazy) val or var lies in [i, j].
+// Legal forward references reach local defs and lazy vals only, which are
+// hoisted, so no statement ever reads a slot before it is initialised.
 // ---------------------------------------------------------------------------
 class CaptureAnalysis {
 public:
     explicit CaptureAnalysis(std::unordered_set<const Node*>& boxed) : boxed_(boxed) {}
 
-    void function(const std::vector<Param>& params, const Node& body, int depth, bool isDef) {
-        if (static_cast<int>(isDefLevel_.size()) <= depth) isDefLevel_.resize(depth + 1);
-        isDefLevel_[depth] = isDef;
+    void function(const std::vector<Param>& params, const Node& body, int depth, bool hoisted) {
+        checkNativeStack(StackUse::Source);
+        if (static_cast<int>(isHoistedLevel_.size()) <= depth) isHoistedLevel_.resize(depth + 1);
+        isHoistedLevel_[depth] = hoisted;
         scopes_.emplace_back();
         for (const Param& p : params)
             scopes_.back().names[p.name] = Decl{nullptr, depth, DeclKind::Param, -1};
@@ -103,7 +107,7 @@ private:
 
     std::unordered_set<const Node*>& boxed_;
     std::vector<Scope> scopes_;
-    std::vector<bool> isDefLevel_;
+    std::vector<bool> isHoistedLevel_;
 
     const Decl* lookup(const std::string& name, const Scope** where) const {
         for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it) {
@@ -113,36 +117,45 @@ private:
         return nullptr;
     }
 
-    bool defBetween(int declDepth, int refDepth) const {
+    bool hoistedBetween(int declDepth, int refDepth) const {
         for (int d = declDepth + 1; d <= refDepth; ++d)
-            if (isDefLevel_[d]) return true;
+            if (isHoistedLevel_[d]) return true;
         return false;
+    }
+
+    // "value x", "variable c", "lazy value z", "method f" (scalac wording).
+    static std::string describe(DeclKind kind, const std::string& name) {
+        switch (kind) {
+            case DeclKind::Var: return "variable " + name;
+            case DeclKind::LazyVal: return "lazy value " + name;
+            case DeclKind::Def: return "method " + name;
+            default: return "value " + name;
+        }
+    }
+
+    void checkForwardReference(const Scope& scope, const Decl& d, const std::string& name,
+                               SourcePos pos) const {
+        if (!scope.block || d.index < scope.current) return;
+        for (int k = scope.current; k <= d.index; ++k) {
+            const Node& s = *scope.block->stats[static_cast<std::size_t>(k)];
+            if (s.kind != NodeKind::ValDef || as<ValDef>(s).isLazy) continue;
+            const auto& v = as<ValDef>(s);
+            throw CompileError("forward reference to " + describe(d.kind, name) +
+                                   " extends over the definition of " +
+                                   describe(v.isVar ? DeclKind::Var : DeclKind::Val, v.name),
+                               pos);
+        }
     }
 
     void reference(const std::string& name, int depth, SourcePos pos) {
         const Scope* scope = nullptr;
         const Decl* d = lookup(name, &scope);
         if (!d || !d->decl) return;
-        const bool throughDef = defBetween(d->depth, depth);
-        const bool forward = scope->block && d->index >= scope->current &&
-                             d->kind != DeclKind::Def && !throughDef;
-        if (forward) {
-            if (d->kind == DeclKind::LazyVal) {
-                if (d->depth == depth)
-                    throw CompileError("forward reference to lazy value " + name +
-                                       " is not supported yet", pos);
-                boxed_.insert(d->decl);  // the closure must see the later MAKE_LAZY
-                return;
-            }
-            const Node& at = *scope->block->stats[static_cast<std::size_t>(scope->current)];
-            const std::string over =
-                at.kind == NodeKind::ValDef ? as<ValDef>(at).name : name;
-            throw CompileError("forward reference to value " + name +
-                               " extends over definition of value " + over, pos);
-        }
+        checkForwardReference(*scope, *d, name, pos);
         if (d->depth >= depth) return;
         const bool box = d->kind == DeclKind::Var || d->kind == DeclKind::Def ||
-                         ((d->kind == DeclKind::Val || d->kind == DeclKind::LazyVal) && throughDef);
+                         ((d->kind == DeclKind::Val || d->kind == DeclKind::LazyVal) &&
+                          hoistedBetween(d->depth, depth));
         if (box) boxed_.insert(d->decl);
     }
 
@@ -151,6 +164,7 @@ private:
     }
 
     void walk(const Node& n, int depth) {
+        checkNativeStack(StackUse::Source);
         switch (n.kind) {
             case NodeKind::IntLit: case NodeKind::FloatLit: case NodeKind::StringLit:
             case NodeKind::CharLit: case NodeKind::BoolLit: case NodeKind::NullLit:
@@ -195,7 +209,7 @@ private:
             case NodeKind::Block: block(as<Block>(n), depth); return;
             case NodeKind::Lambda: {
                 const auto& l = as<Lambda>(n);
-                if (l.body) function(l.params, *l.body, depth + 1, /*isDef=*/false);
+                if (l.body) function(l.params, *l.body, depth + 1, /*hoisted=*/false);
                 return;
             }
             case NodeKind::Typed: walk(as<Typed>(n).expr.get(), depth); return;
@@ -215,11 +229,11 @@ private:
         if (n.kind == NodeKind::ValDef) {
             const auto& v = as<ValDef>(n);
             if (!v.rhs) return;
-            if (v.isLazy) function({}, *v.rhs, depth + 1, /*isDef=*/false);
+            if (v.isLazy) function({}, *v.rhs, depth + 1, /*hoisted=*/true);
             else walk(*v.rhs, depth);
         } else {
             const auto& d = as<DefDef>(n);
-            if (d.body) function(paramsOf(d), *d.body, depth + 1, /*isDef=*/true);
+            if (d.body) function(paramsOf(d), *d.body, depth + 1, /*hoisted=*/true);
         }
     }
 
@@ -323,7 +337,7 @@ void Compiler::storeLocal(const LocalInfo& info, SourcePos pos) {
 }
 
 void Compiler::analyseCaptures(const std::vector<Param>& params, const Node& body) {
-    CaptureAnalysis(boxed_).function(params, body, 0, /*isDef=*/false);
+    CaptureAnalysis(boxed_).function(params, body, 0, /*hoisted=*/false);
 }
 
 // ---------------------------------------------------------------------------
@@ -547,12 +561,17 @@ void Compiler::compileBlock(const Block& b) {
             if (info.boxed) emit(Op::MAKE_CELL, static_cast<std::uint64_t>(info.slot), v.pos, 0);
         }
     }
-    // 2. Hoisted local defs.
+    // 2. Hoisted local defs and lazy vals (their thunks), in order.
     for (const auto& s : b.stats) {
-        if (s->kind != NodeKind::DefDef) continue;
-        const auto& d = as<DefDef>(*s);
-        compileFunction(d.name, paramsOf(d), bodyOf(d), /*isDef=*/true, d.pos);
-        storeLocal(*findInFunction(fn_, d.name), d.pos);
+        if (s->kind == NodeKind::DefDef) {
+            const auto& d = as<DefDef>(*s);
+            compileFunction(d.name, paramsOf(d), bodyOf(d), /*isDef=*/true, d.pos);
+            storeLocal(*findInFunction(fn_, d.name), d.pos);
+        } else if (s->kind == NodeKind::ValDef && as<ValDef>(*s).isLazy) {
+            const auto& v = as<ValDef>(*s);
+            compileLazyThunk(rhsOf(v), v.pos);
+            storeLocal(*findInFunction(fn_, v.name), v.pos);
+        }
     }
     // 3. Statements in order; the last expression is the block's value.
     bool valueOnStack = false;
@@ -562,8 +581,8 @@ void Compiler::compileBlock(const Block& b) {
         if (s.kind == NodeKind::DefDef || s.kind == NodeKind::Import) continue;
         if (s.kind == NodeKind::ValDef) {
             const auto& v = as<ValDef>(s);
-            if (v.isLazy) compileLazyThunk(rhsOf(v), v.pos);
-            else compileExpr(rhsOf(v));
+            if (v.isLazy) continue;  // hoisted (step 2)
+            compileExpr(rhsOf(v));
             storeLocal(*findInFunction(fn_, v.name), v.pos);
             continue;
         }
@@ -685,18 +704,26 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
             out.mainName = main->name;
             out.mainTakesArgs = varargs;
         }
-        // 2. Hoisted top-level defs.
+        // 2. Hoisted top-level defs and lazy vals (their thunks), in order.
         for (const auto& s : unit.stats) {
-            if (s->kind != NodeKind::DefDef) continue;
-            const auto& d = as<DefDef>(*s);
-            compileFunction(d.name, paramsOf(d), bodyOf(d), /*isDef=*/true, d.pos);
-            emit(Op::STORE_GLOBAL, top.mod->addSymbol(d.name), d.pos, -1);
+            if (s->kind == NodeKind::DefDef) {
+                const auto& d = as<DefDef>(*s);
+                compileFunction(d.name, paramsOf(d), bodyOf(d), /*isDef=*/true, d.pos);
+                emit(Op::STORE_GLOBAL, top.mod->addSymbol(d.name), d.pos, -1);
+            } else if (s->kind == NodeKind::ValDef && as<ValDef>(*s).isLazy) {
+                const auto& v = as<ValDef>(*s);
+                compileLazyThunk(rhsOf(v), v.pos);
+                emit(Op::STORE_GLOBAL, top.mod->addSymbol(v.name), v.pos, -1);
+            }
         }
         // 3. Boxing analysis for code that runs in the top-level frame (top-level
         //    names themselves are globals and never boxed).
         for (const auto& s : unit.stats) {
-            if (s->kind == NodeKind::ValDef) analyseCaptures({}, rhsOf(as<ValDef>(*s)));
-            else if (s->kind != NodeKind::DefDef && s->kind != NodeKind::Import) analyseCaptures({}, *s);
+            if (s->kind == NodeKind::ValDef) {
+                if (!as<ValDef>(*s).isLazy) analyseCaptures({}, rhsOf(as<ValDef>(*s)));
+            } else if (s->kind != NodeKind::DefDef && s->kind != NodeKind::Import) {
+                analyseCaptures({}, *s);
+            }
         }
         // 4. Initialisers and statements in order.
         for (std::size_t k = 0; k < unit.stats.size(); ++k) {
@@ -705,8 +732,8 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
             if (s.kind == NodeKind::DefDef || s.kind == NodeKind::Import) continue;
             if (s.kind == NodeKind::ValDef) {
                 const auto& v = as<ValDef>(s);
-                if (v.isLazy) compileLazyThunk(rhsOf(v), v.pos);
-                else compileExpr(rhsOf(v));
+                if (v.isLazy) continue;  // hoisted (step 2)
+                compileExpr(rhsOf(v));
                 emit(Op::STORE_GLOBAL, top.mod->addSymbol(v.name), v.pos, -1);
                 continue;
             }

@@ -192,7 +192,7 @@ TEST(Compiler, CapturesChainThroughIntermediateFunctions) {
 
 TEST(Compiler, LocalValReadByLocalDefIsBoxed) {
     // The def is hoisted above the val's initialiser, so it must share a Cell.
-    const auto l = listing("def f() = {\n  def g() = y\n  val y = 1\n  g()\n}");
+    const auto l = listing("def f() = {\n  val y = 1\n  def g() = y\n  g()\n}");
     EXPECT_TRUE(has(l, "MAKE_CELL"));
     EXPECT_TRUE(has(l, "STORE_CELL"));
 }
@@ -248,34 +248,59 @@ TEST(Compiler, StackDepthIsBalancedAcrossBranches) {
 
 // --- Fix round 1 -------------------------------------------------------------
 
+// Scala 3 block rule (SLS 6.11, dotty ForwardDepChecks): a reference from
+// statement i to a definition at j >= i of the same block is illegal when a
+// strict val or var lies in [i, j].
 TEST(Compiler, ForwardReferenceFromLambdaIsRejected) {
     EXPECT_TRUE(has(compileError("def f() = { val g = () => y; val y = 1; g() }"),
-                    "forward reference to value y extends over definition of value g"));
+                    "forward reference to value y extends over the definition of value g"));
 }
 
 TEST(Compiler, ForwardReferenceFromLazyThunkIsRejected) {
     EXPECT_TRUE(has(compileError("def f() = { lazy val a = b; val b = 1; a }"),
-                    "forward reference to value b extends over definition of value a"));
+                    "forward reference to value b extends over the definition of value b"));
 }
 
 TEST(Compiler, DirectForwardReferencesAreRejected) {
     EXPECT_TRUE(has(compileError("def f() = { val a = b; val b = 1; a }"),
-                    "forward reference to value b extends over definition of value a"));
+                    "forward reference to value b extends over the definition of value a"));
     EXPECT_TRUE(has(compileError("def f() = { c = 1; var c = 0; c }"),
-                    "forward reference to value c"));
+                    "forward reference to variable c extends over the definition of variable c"));
     EXPECT_TRUE(has(compileError("def f() = { val a = z; lazy val z = 1; a }"),
-                    "forward reference to lazy value z is not supported yet"));
+                    "forward reference to lazy value z extends over the definition of value a"));
+    EXPECT_TRUE(has(compileError("def f() = { val a = { val q = 1; b }; val b = 1; a }"),
+                    "forward reference to value b extends over the definition of value a"));
 }
 
-TEST(Compiler, ForwardReferenceToLazyValFromLambdaIsBoxed) {
-    const auto l = listing("def f() = { val g = () => z; lazy val z = 1; g() }");
-    EXPECT_TRUE(has(l, "MAKE_CELL"));
-    EXPECT_TRUE(has(l, "PUSH_CELL"));
+TEST(Compiler, ForwardReferencesThroughDefsExtendOverStrictVals) {
+    EXPECT_TRUE(has(compileError("def m() = { def f = y; val x = f; val y = 1; x }"),
+                    "forward reference to value y extends over the definition of value x"));
+    EXPECT_TRUE(has(compileError("def m() = { def g() = z + 1; val r = g(); val z = 1; r }"),
+                    "forward reference to value z extends over the definition of value r"));
+    EXPECT_TRUE(has(compileError("def m() = { def f = y; val y = 1; f }"),
+                    "forward reference to value y extends over the definition of value y"));
+    EXPECT_TRUE(has(compileError("def f() = {\n  def inc() = c += 1\n  var c = 0\n  inc()\n  c\n}"),
+                    "forward reference to variable c"));
+    EXPECT_TRUE(has(compileError("def m() = { def f = g; val x = 1; def g = 2; f }"),
+                    "forward reference to method g extends over the definition of value x"));
 }
 
-TEST(Compiler, ForwardReferencesThroughLocalDefsStayLegal) {
-    const auto l = listing("def f() = {\n  def inc() = c += 1\n  var c = 0\n  inc()\n  c\n}");
+TEST(Compiler, LegalForwardReferences) {
+    // Mutual recursion between local defs; lazy vals with no strict val between.
+    EXPECT_EQ(compileError("def m() = { def a(n: Int): Int = b(n); def b(n: Int): Int = a(n); a(1) }"), "");
+    EXPECT_EQ(compileError("def m() = { def f = z; lazy val z = 1; f }"), "");
+    EXPECT_EQ(compileError("def m() = { lazy val a = z; lazy val z = 1; a }"), "");
+    EXPECT_EQ(compileError("def m() = { println(z); lazy val z = 1; z }"), "");
+    EXPECT_EQ(compileError("def m() = { val x = 1; def f = x; val y = f; y }"), "");
+}
+
+TEST(Compiler, LazyValsAreHoistedLikeDefs) {
+    // The thunk is created before the statements run, so a strict val it reads
+    // lives in a Cell (like a val read by a hoisted def).
+    const auto l = listing("def f() = { val x = 1; lazy val z = x + 1; z }");
     EXPECT_TRUE(has(l, "MAKE_CELL"));
+    const auto body = l.substr(l.find("function f"));
+    EXPECT_LT(body.find("MAKE_LAZY"), body.find("PUSH_CONST"));  // before x = 1 runs
 }
 
 TEST(Compiler, DuplicateNamesInOneBlockAreRejected) {
