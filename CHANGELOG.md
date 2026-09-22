@@ -6,9 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-Fixes from the final Phase 1 review.
+### Added
+
+- Benchmark suite: `benchmarks/comparable/*.scala`, Scala 3 twins (same
+  algorithm and N) of the protoPython/protoST core workloads (`int_sum_loop`,
+  `fib`, `str_concat`, `range_iterate`) and of protoClojure's (`tak`, `fib30`,
+  `sum_loop`, `factorial_100`), each self-checking through an `// EXPECT:`
+  line and valid for `scalac` unchanged. `benchmarks/bench.sh` /
+  `run_benchmarks.py` run them interleaved against Scala on the JVM, CPython,
+  protopy, protost and protoclj, verify every run's result, include
+  `cold-start.sh`, and write dated reports to `benchmarks/reports/`. First
+  results in the README "Performance" section. Every comparable file is also
+  a CTest case (`benchmarks/<file>`).
 
 ### Fixed
+
+Fixes from the final Phase 1 review:
+
 
 - REPL: an indented construct typed line by line (`while i < 3 do`, then
   its body lines) is read to its end instead of running after its first

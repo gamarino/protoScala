@@ -44,6 +44,53 @@ exceptions and actors are not implemented yet — see
 [docs/STATUS.md](docs/STATUS.md) for the exact boundary and
 [docs/ROADMAP.md](docs/ROADMAP.md) for what each later phase brings.
 
+## Performance
+
+Latest measured run: 2026-09-22, AMD Ryzen 5 5500U (6 cores, 12 logical CPUs),
+Linux 7.0, protoScala commit `154ab1a`, load average 2.92 at start and 3.88 at
+end. Full report, with versions and build types of every runtime:
+[benchmarks/reports/2026-09-22-suite.md](benchmarks/reports/2026-09-22-suite.md).
+Median wall-clock in ms of a **cold process** (start-up included, for every
+runtime), 2 warmup + 5 timed runs, every run's printed result verified;
+`—` means the runtime has no twin of that workload.
+
+| Workload | protoScala | protoScala Release | Scala 3.9 (JVM 21) | CPython 3.14 | protopy | protost | protoclj | protoScala ÷ CPython |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `int_sum_loop` (0 until 100000) | 19.2 | 19.3 | 213.6 | 34.4 | 111.0 | 31.5 | — | 0.56× |
+| `fib` (fib(25)) | 42.2 | 42.8 | 193.4 | 41.3 | 168.4 | 379.4 | — | 1.02× |
+| `str_concat` (2000 concats) | 16.3 | 16.0 | 192.1 | 30.7 | 128.0 | 16.4 | — | 0.53× |
+| `range_iterate` (100000) | 19.3 | 19.2 | 192.1 | 36.2 | 115.7 | 55.0 | — | 0.53× |
+| `tak` (18, 12, 6) | 22.1 | 22.1 | 188.8 | 32.4 | 34.5 | — | 40.6 | 0.68× |
+| `fib30` (fib(30)) | 336.1 | 340.0 | 189.6 | 154.2 | 790.4 | — | 513.4 | 2.18× |
+| `sum_loop` (0..1000000) | 61.3 | 63.3 | 212.9 | 86.3 | 79.8 | — | 60.3 | 0.71× |
+| `factorial_100` (BigInt) | 15.0 | 15.5 | 199.8 | 29.4 | 18.1 | — | 15.3 | 0.51× |
+| **Geomean vs CPython** (rows) | 0.74× (8) | 0.74× (8) | 4.30× (8) | 1.00× | 2.20× (8) | 1.62× (4) | 1.11× (4) | **0.74×** |
+
+Cold start (`benchmarks/cold-start.sh`, 21 runs, target < 20 ms): script
+17.43 ms, REPL 18.66 ms (RelWithDebInfo); 17.99 / 18.73 ms (Release).
+
+**Reading.** Most rows measure start-up more than work: protoScala starts in
+about 15 ms (`factorial_100` is almost pure start-up) and CPython in about
+25-30 ms, so on short workloads protoScala comes out ahead and the 0.74×
+geomean is largely a start-up figure, not a throughput claim. Where the work
+dominates, the picture reverses: `fib30` (2.69M calls) is 2.2× slower than
+CPython 3.14 — protoScala is call-dispatch bound, which the `fib(25)` row hides
+behind its start-up advantage. Loop arithmetic (`sum_loop`, one million
+iterations) runs at 0.71× CPython and on a par with protoClojure. The Release
+build is indistinguishable from the canonical RelWithDebInfo build. The JVM
+column runs the same `.scala` source compiled with `scalac` (compile time
+excluded, reported separately); each sample is a fresh `java` process, so
+~190 ms of JVM start-up and class loading dominate every row, and the JIT's
+steady state — where the JVM would be far ahead on `fib30`, as its 190 ms
+total already suggests — is not measured. Cold-process timing favours
+short-lived runtimes.
+
+**Pending workloads** (need later phases; not approximated): `list_append`
+and protoClojure's `sum-squares` (Phase 3 collections), `attr_lookup`
+(Phase 2 classes), `exception_latency` (Phase 4 exceptions), the actor
+benchmarks (Phase 5). See [benchmarks/README.md](benchmarks/README.md) to run
+the suite.
+
 ## Building
 
 Prerequisites: a C++20 compiler, CMake ≥ 3.20, libreadline (from Phase 1), and

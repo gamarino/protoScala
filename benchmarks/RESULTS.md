@@ -3,6 +3,18 @@
 Every benchmark prints the work it did and its runner verifies it; exit code alone never
 counts as success (DESIGN §10).
 
+## Suite reports
+
+Full runs of the comparable suite (`benchmarks/bench.sh`) are dated reports in
+[`reports/`](reports/), each with machine, date, commit, build types, load
+average, per-runtime medians, the JVM compile times and the cold-start result:
+
+| Date | Report | protoScala ÷ CPython (geomean) | Notes |
+|---|---|---:|---|
+| 2026-09-22 | [2026-09-22-suite.md](reports/2026-09-22-suite.md) | 0.74× (8 workloads) | commit `154ab1a`; load 2.9-3.9; all 7 columns, every cell verified |
+
+The latest table is also in the top-level README ("Performance").
+
 ## Cold start (Phase 1)
 
 `benchmarks/cold-start.sh build_release/protoscala 21`, x86_64 (AMD Ryzen 5 5500U with
@@ -42,3 +54,8 @@ machine-dependent. **The maintainer should re-run
 `benchmarks/cold-start.sh build_release/protoscala 21` on an idle machine to confirm the
 17-19 ms Release numbers as the representative baseline** before relying on the < 20 ms
 budget holding under load.
+
+The suite run of 2026-09-22 (load average 2.9-3.9) re-measured cold start with
+21 runs per case: script 17.43 ms and REPL 18.66 ms for the RelWithDebInfo
+`build_release`; 17.99 / 18.73 ms for a Release build in `build_bench` — all
+below target ([report](reports/2026-09-22-suite.md#cold-start)).

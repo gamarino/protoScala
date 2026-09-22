@@ -7,8 +7,9 @@
 > Scala 3 offside rule, parser, compiler and VM for values, `val`/`var`/
 > `lazy val`/`def`, `if`/`while`, lambdas and closures, recursion with
 > `StackOverflowError`, `println`, readline REPL.
-> **Tests:** 327 total (`ctest --test-dir build_release -N`) — 204 unit
-> (GoogleTest), 105 conformance fixtures, 18 CLI checks. All green, also
+> **Tests:** 335 total (`ctest --test-dir build_release -N`) — 204 unit
+> (GoogleTest), 105 conformance fixtures, 18 CLI checks, 8 benchmark smoke
+> checks. All green, also
 > under `PROTOCORE_HEAP_LIMIT_CELLS=20000`. Last verified 2026-09-22 (after
 > the final Phase 1 review fixes).
 
@@ -173,7 +174,7 @@ See DESIGN §11 for the full table. Unchanged this phase: R2, R4, R5, R8.
 
 ## Open bugs
 
-None known. 327/327 tests pass (`ctest --test-dir build_release`).
+None known. 335/335 tests pass (`ctest --test-dir build_release`).
 
 ## History
 
