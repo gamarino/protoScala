@@ -6,6 +6,7 @@ add_executable(protoscala_unit_tests
     test_smoke.cpp
     test_lexer.cpp
     test_layout.cpp
+    test_parser.cpp
 )
 
 target_link_libraries(protoscala_unit_tests

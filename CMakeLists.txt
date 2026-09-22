@@ -66,6 +66,8 @@ target_compile_options(protoscala_support PRIVATE -Wall -Wextra -Wpedantic)
 add_library(protoscala_frontend STATIC
     src/frontend/Lexer.cpp
     src/frontend/Layout.cpp
+    src/frontend/AST.cpp
+    src/frontend/Parser.cpp
 )
 target_link_libraries(protoscala_frontend PUBLIC protoscala_support)
 target_compile_options(protoscala_frontend PRIVATE -Wall -Wextra -Wpedantic)
