@@ -68,6 +68,7 @@ add_library(protoscala_frontend STATIC
     src/frontend/Layout.cpp
     src/frontend/AST.cpp
     src/frontend/Parser.cpp
+    src/frontend/Desugar.cpp
 )
 target_link_libraries(protoscala_frontend PUBLIC protoscala_support)
 target_compile_options(protoscala_frontend PRIVATE -Wall -Wextra -Wpedantic)
