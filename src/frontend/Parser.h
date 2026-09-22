@@ -33,6 +33,10 @@ public:
 private:
     std::vector<Token> toks_;
     std::size_t i_ = 0;
+    // For each `(` token, the index of its matching `)` (or npos when it is
+    // unclosed): lambdaAhead looks past a parenthesised list in O(1) instead
+    // of rescanning it at every nesting level.
+    std::vector<std::size_t> closingParen_;
 
     const Token& peek(std::size_t k = 0) const;  // clamps at the final EOF token
     const Token& advance();
@@ -58,9 +62,11 @@ private:
     NodePtr parseInfix(int minPrec, int assocPrec = -1, bool assocRight = false);
     NodePtr parseInfixRest(NodePtr lhs, int minPrec, int assocPrec = -1,
                            bool assocRight = false);
+    NodePtr parseInfixLoop(NodePtr& lhs, int minPrec, int assocPrec, bool assocRight);
     NodePtr parsePrefix();
     NodePtr parseSimple();
     NodePtr parseSimpleRest(NodePtr base);
+    NodePtr parseSimpleLoop(NodePtr& base);
     NodePtr parseParensExpr();  // `(` ... `)`: unit, parens or tuple
     std::vector<NodePtr> parseArgs();  // after `(`, up to and including `)`
     NodePtr parseBlockExpr();          // `{` ... `}`

@@ -350,6 +350,7 @@ void Compiler::analyseCaptures(const std::vector<Param>& params, const Node& bod
 // ---------------------------------------------------------------------------
 
 void Compiler::compileExpr(const Node& n) {
+    checkNativeStack(StackUse::Source);
     switch (n.kind) {
         case NodeKind::IntLit: {
             const auto& i = as<IntLit>(n);

@@ -170,7 +170,19 @@ struct DefDef : Node {
 };
 struct Import : Node { Import(SourcePos p) : Node(NodeKind::Import, p) {} std::string text; };
 
+// Destroys a tree without recursion: an expression nested deeper than the
+// native stack (a 200 000-term `a + b + ...` chain, which the parser builds
+// iteratively) must not overflow it when it is freed. Owners of trees that
+// may be arbitrarily deep use it (CompilationUnit, the parser's error paths).
+void destroyTree(NodePtr root);
+
 struct CompilationUnit {
+    CompilationUnit() = default;
+    CompilationUnit(const CompilationUnit&) = delete;
+    CompilationUnit& operator=(const CompilationUnit&) = delete;
+    ~CompilationUnit() {
+        for (auto& s : stats) destroyTree(std::move(s));
+    }
     std::vector<NodePtr> stats;
 };
 

@@ -10,6 +10,12 @@ class Desugarer {
 public:
     NodePtr expr(NodePtr n) {
         if (!n) return n;
+        try {
+            checkNativeStack(StackUse::Source);
+        } catch (...) {
+            destroyTree(std::move(n));  // n may be deep: free it without recursion
+            throw;
+        }
         switch (n->kind) {
             case NodeKind::Infix:  return infix(std::move(n));
             case NodeKind::Prefix: {

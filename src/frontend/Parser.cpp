@@ -8,6 +8,7 @@
  */
 #include "frontend/Parser.h"
 #include "frontend/Layout.h"
+#include "runtime/StackGuard.h"
 
 #include <cctype>
 
@@ -76,6 +77,16 @@ Parser::Parser(std::vector<Token> tokens) : toks_(std::move(tokens)) {
         eof.kind = TokenKind::EndOfFile;
         if (!toks_.empty()) eof.pos = toks_.back().end;
         toks_.push_back(eof);
+    }
+    closingParen_.assign(toks_.size(), std::string::npos);
+    std::vector<std::size_t> open;
+    for (std::size_t j = 0; j < toks_.size(); ++j) {
+        if (toks_[j].kind == TokenKind::LParen) {
+            open.push_back(j);
+        } else if (toks_[j].kind == TokenKind::RParen && !open.empty()) {
+            closingParen_[open.back()] = j;
+            open.pop_back();
+        }
     }
 }
 
@@ -188,6 +199,7 @@ NodePtr Parser::parseExprOrIndented() {
 }
 
 NodePtr Parser::parseExpr() {
+    checkNativeStack(StackUse::Source);
     const Token& t = peek();
     switch (t.kind) {
         case TokenKind::KwIf:     return parseIf();
@@ -293,14 +305,10 @@ bool Parser::lambdaAhead() const {
     const TokenKind k0 = peek().kind;
     if ((k0 == TokenKind::Identifier && !peek().isOperator) || k0 == TokenKind::Underscore)
         return peek(1).kind == TokenKind::Arrow;
-    if (k0 != TokenKind::LParen) return false;
-    int depth = 0;
-    for (std::size_t k = 0;; ++k) {
-        const TokenKind kk = peek(k).kind;
-        if (kk == TokenKind::EndOfFile) return false;
-        if (kk == TokenKind::LParen) ++depth;
-        if (kk == TokenKind::RParen && --depth == 0) return peek(k + 1).kind == TokenKind::Arrow;
-    }
+    if (k0 != TokenKind::LParen || i_ >= closingParen_.size()) return false;
+    const std::size_t close = closingParen_[i_];
+    return close != std::string::npos && close + 1 < toks_.size() &&
+           toks_[close + 1].kind == TokenKind::Arrow;
 }
 
 std::vector<Param> Parser::parseLambdaParams() {
@@ -358,6 +366,17 @@ NodePtr Parser::parseInfixRest(NodePtr lhs, int minPrec, int assocPrec, bool ass
     // one level with different associativity even when tighter operators sit
     // in between (`a +: b * c +- d`), so a level is forgotten only when a
     // looser operator closes it.
+    // The chain built here grows without native recursion; free it without
+    // recursion too if parsing fails part-way (AST.h, destroyTree).
+    try {
+        return parseInfixLoop(lhs, minPrec, assocPrec, assocRight);
+    } catch (...) {
+        destroyTree(std::move(lhs));
+        throw;
+    }
+}
+
+NodePtr Parser::parseInfixLoop(NodePtr& lhs, int minPrec, int assocPrec, bool assocRight) {
     constexpr int kLevels = 11;  // precedence() returns 0..10
     int seen[kLevels];
     for (int& s : seen) s = -1;
@@ -386,10 +405,11 @@ NodePtr Parser::parseInfixRest(NodePtr lhs, int minPrec, int assocPrec, bool ass
         seen[p] = right ? 1 : 0;
         for (int q = p + 1; q < kLevels; ++q) seen[q] = -1;
     }
-    return lhs;
+    return std::move(lhs);
 }
 
 NodePtr Parser::parsePrefix() {
+    checkNativeStack(StackUse::Source);
     const Token& t = peek();
     if (t.kind == TokenKind::Identifier && !t.backquoted &&
         (t.text == "-" || t.text == "+" || t.text == "!" || t.text == "~")) {
@@ -432,6 +452,7 @@ NodePtr Parser::parsePrefix() {
 }
 
 NodePtr Parser::parseSimple() {
+    checkNativeStack(StackUse::Source);
     const Token& t = peek();
     NodePtr base;
     switch (t.kind) {
@@ -506,6 +527,17 @@ NodePtr Parser::parseSimple() {
 }
 
 NodePtr Parser::parseSimpleRest(NodePtr base) {
+    // `a.b.c...` and `f(x)(y)...` chains grow here without native recursion;
+    // free them without recursion too if parsing fails part-way.
+    try {
+        return parseSimpleLoop(base);
+    } catch (...) {
+        destroyTree(std::move(base));
+        throw;
+    }
+}
+
+NodePtr Parser::parseSimpleLoop(NodePtr& base) {
     for (;;) {
         const Token& t = peek();
         if (t.kind == TokenKind::Dot) {
@@ -537,7 +569,7 @@ NodePtr Parser::parseSimpleRest(NodePtr base) {
             expect(TokenKind::RBracket, "']'");
             base = std::move(tapp);
         } else {
-            return base;
+            return std::move(base);
         }
     }
 }
@@ -617,6 +649,7 @@ NodePtr Parser::parseIndentedBlock() {
 
 // Statements up to (not including) `terminator`.
 std::unique_ptr<Block> Parser::parseBlockBody(TokenKind terminator, SourcePos pos) {
+    checkNativeStack(StackUse::Source);
     auto block = std::make_unique<Block>(pos);
     for (;;) {
         while (skipOneNewline()) {}
@@ -925,6 +958,7 @@ NodePtr Parser::parseImport() {
 // Types
 
 TypePtr Parser::parseType() {
+    checkNativeStack(StackUse::Source);
     const Token& t = peek();
     if (t.kind == TokenKind::Arrow) {  // by-name `=> T`
         advance();
@@ -981,6 +1015,7 @@ TypePtr Parser::parseInfixType() {
 }
 
 TypePtr Parser::parseSimpleType() {
+    checkNativeStack(StackUse::Source);
     const Token& t = peek();
     TypePtr ty;
     if (atIdent("_*")) {  // `xs: _*`, which the lexer reads as one mixed identifier

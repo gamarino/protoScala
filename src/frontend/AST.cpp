@@ -391,4 +391,59 @@ std::string dump(const CompilationUnit& u) {
     return out;
 }
 
+namespace {
+
+// Moves every child subtree of `n` to `out`, leaving `n` childless.
+void releaseChildren(Node& n, std::vector<NodePtr>& out) {
+    auto take = [&out](NodePtr& c) { if (c) out.push_back(std::move(c)); };
+    auto takeParams = [&](std::vector<Param>& ps) { for (auto& p : ps) take(p.defaultValue); };
+    switch (n.kind) {
+        case NodeKind::Select: take(as<Select>(n).qualifier); return;
+        case NodeKind::Apply: {
+            auto& a = as<Apply>(n);
+            take(a.fn);
+            for (auto& arg : a.args) take(arg);
+            return;
+        }
+        case NodeKind::TypeApply: take(as<TypeApply>(n).fn); return;
+        case NodeKind::Infix: take(as<Infix>(n).lhs); take(as<Infix>(n).rhs); return;
+        case NodeKind::Prefix: take(as<Prefix>(n).operand); return;
+        case NodeKind::Assign: take(as<Assign>(n).target); take(as<Assign>(n).value); return;
+        case NodeKind::If: {
+            auto& i = as<If>(n);
+            take(i.cond); take(i.thenp); take(i.elsep);
+            return;
+        }
+        case NodeKind::While: take(as<While>(n).cond); take(as<While>(n).body); return;
+        case NodeKind::Return: take(as<Return>(n).value); return;
+        case NodeKind::Block: for (auto& st : as<Block>(n).stats) take(st); return;
+        case NodeKind::Lambda: takeParams(as<Lambda>(n).params); take(as<Lambda>(n).body); return;
+        case NodeKind::Typed: take(as<Typed>(n).expr); return;
+        case NodeKind::Parens: take(as<Parens>(n).expr); return;
+        case NodeKind::Tuple: for (auto& e : as<Tuple>(n).elems) take(e); return;
+        case NodeKind::Splice: take(as<Splice>(n).expr); return;
+        case NodeKind::NamedArg: take(as<NamedArg>(n).value); return;
+        case NodeKind::ValDef: take(as<ValDef>(n).rhs); return;
+        case NodeKind::DefDef: {
+            auto& d = as<DefDef>(n);
+            for (auto& list : d.paramLists) takeParams(list);
+            take(d.body);
+            return;
+        }
+        default: return;  // leaves
+    }
+}
+
+} // namespace
+
+void destroyTree(NodePtr root) {
+    std::vector<NodePtr> work;
+    if (root) work.push_back(std::move(root));
+    while (!work.empty()) {
+        NodePtr n = std::move(work.back());
+        work.pop_back();
+        releaseChildren(*n, work);
+    }  // each node is freed childless
+}
+
 } // namespace protoScala
