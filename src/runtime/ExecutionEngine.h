@@ -55,7 +55,6 @@ private:
     const proto::ProtoObject* execute(proto::ProtoContext* parent, const BytecodeModule& mod,
                                       const proto::ProtoObject* const* args, unsigned argc,
                                       const proto::ProtoObject* captures);
-    const BytecodeModule* compiledModule(proto::ProtoContext* ctx, const proto::ProtoObject* v) const;
     const proto::ProtoObject* callNative(proto::ProtoContext* ctx, proto::ProtoMethod fn,
                                          const proto::ProtoObject* self,
                                          const proto::ProtoObject* const* args, unsigned argc);

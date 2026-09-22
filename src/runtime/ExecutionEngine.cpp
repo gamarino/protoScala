@@ -47,15 +47,6 @@ const proto::ProtoObject* ExecutionEngine::run(proto::ProtoContext* parent, cons
     return execute(parent, mod, nullptr, 0, nullptr);
 }
 
-const BytecodeModule* ExecutionEngine::compiledModule(proto::ProtoContext* ctx,
-                                                      const proto::ProtoObject* v) const {
-    // getOwnAttributeDirect returns nullptr for non-object receivers
-    // (protoCore core/ProtoObject.cpp:1446-1449) and for a missing attribute.
-    const proto::ProtoObject* code = v->getOwnAttributeDirect(ctx, layout_.codeKey);
-    if (!code || !proto::isSmallInt(code)) return nullptr;
-    return reinterpret_cast<const BytecodeModule*>(proto::asSmallInt(code));
-}
-
 const proto::ProtoObject* ExecutionEngine::callNative(proto::ProtoContext* ctx, proto::ProtoMethod fn,
                                                       const proto::ProtoObject* self,
                                                       const proto::ProtoObject* const* args,
@@ -73,7 +64,7 @@ const proto::ProtoObject* ExecutionEngine::invoke(proto::ProtoContext* ctx,
                                                   const proto::ProtoObject* const* args,
                                                   unsigned argc) {
     if (callee == PROTO_NONE) throw ScalaError("NullPointerException", "cannot call null");
-    if (const BytecodeModule* m = compiledModule(ctx, callee)) {
+    if (const BytecodeModule* m = compiledModuleOf(ctx, layout_, callee)) {
         const proto::ProtoObject* caps =
             m->captureCount() ? callee->getOwnAttributeDirect(ctx, layout_.capturesKey) : nullptr;
         return execute(ctx, *m, args, argc, caps);
@@ -101,7 +92,7 @@ const proto::ProtoObject* ExecutionEngine::send(proto::ProtoContext* ctx,
         throw ScalaError("NullPointerException", "cannot call null");
     }
     if (m->isMethod(ctx)) return callNative(ctx, m->asMethod(ctx), receiver, args, argc);
-    if (argc == 0 && !compiledModule(ctx, m)) return m;  // a plain attribute (field read)
+    if (argc == 0 && !compiledModuleOf(ctx, layout_, m)) return m;  // a plain attribute (field read)
     throw ScalaError("NoSuchMethodError",
                      "methods written in Scala on objects are not implemented yet");
 }
@@ -381,11 +372,8 @@ const proto::ProtoObject* ExecutionEngine::slowBinary(proto::ProtoContext* ctx, 
     if (op == Op::MUL && proto::ProtoObject::isStringTagFast(a) && isIntegerFast(b))
         return a->multiply(ctx, b);
     // Numbers, with Char promoted to its code point (Scala Char arithmetic yields Int).
-    auto numeric = [&](const proto::ProtoObject* v) {
-        return isCharFast(v) ? ctx->fromInteger(static_cast<long long>(charValueFast(v))) : v;
-    };
-    const proto::ProtoObject* x = numeric(a);
-    const proto::ProtoObject* y = numeric(b);
+    const proto::ProtoObject* x = widenChar(a);
+    const proto::ProtoObject* y = widenChar(b);
     if (isNumberFast(x) && isNumberFast(y)) {
         switch (op) {
             case Op::ADD: return x->add(ctx, y);

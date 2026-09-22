@@ -160,3 +160,34 @@ TEST(Primitives, RestOfTheSurface) {
     EXPECT_EQ(testing::internal::GetCapturedStdout(), "x\n1\nList(1, 2)\n2.5");
     EXPECT_TRUE(isError(h.eval("println(1, 2)"), "IllegalArgumentException"));
 }
+
+TEST(Primitives, NumericPlusStringAndLargeIntegerDivision) {
+    EvalHarness h;
+    // A numeric receiver's `+` concatenates a String argument (dot call: no fast path).
+    EXPECT_EQ(h.eval("(1).+(\"a\")"), "1a");
+    EXPECT_EQ(h.eval("'a'.+(\"b\")"), "ab");
+    EXPECT_EQ(h.eval("2.5.+(\"x\")"), "2.5x");
+    // `/` truncates toward zero and `%` takes the dividend's sign, beyond 64 bits too.
+    EXPECT_EQ(h.eval("(1 << 70) / 3"), "393530540239137101141");
+    EXPECT_EQ(h.eval("(1 << 70) % 7"), "2");
+    EXPECT_EQ(h.eval("-(1 << 70) / 3"), "-393530540239137101141");
+    EXPECT_EQ(h.eval("-(1 << 70) % 7"), "-2");
+    EXPECT_EQ(h.eval("(1 << 70) % -7"), "2");
+    EXPECT_EQ(h.eval("7 / (1 << 70)"), "0");
+    EXPECT_EQ(h.eval("-7 % (1 << 70)"), "-7");
+    EXPECT_EQ(h.eval("(1 << 70) / 0"), "error: ArithmeticException: / by zero");
+    EXPECT_EQ(h.eval("(1 << 70) % 0"), "error: ArithmeticException: / by zero");
+}
+
+TEST(Primitives, ArgumentCountErrorsNameTheCalledMethod) {
+    EvalHarness h;
+    const std::string prefix = "error: IllegalArgumentException: ";
+    EXPECT_EQ(h.eval("1.toLong(2)"), prefix + "toLong takes 0 argument(s), got 1");
+    EXPECT_EQ(h.eval("1.toFloat(2)"), prefix + "toFloat takes 0 argument(s), got 1");
+    EXPECT_EQ(h.eval("1.5.toLong(2)"), prefix + "toLong takes 0 argument(s), got 1");
+    EXPECT_EQ(h.eval("1.5.toFloat(2)"), prefix + "toFloat takes 0 argument(s), got 1");
+    EXPECT_EQ(h.eval("'a'.toLong(2)"), prefix + "toLong takes 0 argument(s), got 1");
+    EXPECT_EQ(h.eval("'a'.toChar(2)"), prefix + "toChar takes 0 argument(s), got 1");
+    EXPECT_EQ(h.eval("def l(xs: Int*) = xs"), "");
+    EXPECT_EQ(h.eval("l(1).size(2)"), prefix + "size takes 0 argument(s), got 1");
+}

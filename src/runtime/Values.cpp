@@ -34,6 +34,10 @@ void splitScientific(const std::string& s, std::string& digits, int& exponent) {
     exponent = std::atoi(s.c_str() + e + 1);
 }
 
+} // namespace
+
+// Shared helpers (declared in Values.h).
+
 const BytecodeModule* compiledModuleOf(proto::ProtoContext* ctx, const RuntimeLayout& L,
                                        const proto::ProtoObject* v) {
     // nullptr for non-object receivers and for a missing attribute
@@ -60,14 +64,6 @@ void appendUtf8(std::string& out, char32_t c) {
         out += static_cast<char>(0x80 | (c & 0x3F));
     }
 }
-
-// A Char as the SmallInteger of its code point (Scala Char widens to Int in
-// ==); other values unchanged. Allocates nothing.
-const proto::ProtoObject* widenChar(const proto::ProtoObject* v) {
-    return isCharFast(v) ? proto::makeSmallInt(static_cast<long long>(charValueFast(v))) : v;
-}
-
-} // namespace
 
 // Java's Double.toString, copied from protoClojure src/runtime/Primitives.cpp
 // with Java's spelling of the special values.

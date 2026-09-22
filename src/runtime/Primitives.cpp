@@ -87,15 +87,9 @@ const ProtoObject* str(ProtoContext* ctx, const std::string& s) {
     return ctx->fromUTF8String(s.c_str());
 }
 
-// A Char as the SmallInteger of its code point (Scala Char arithmetic yields
-// Int); other values unchanged. Allocates nothing.
-const ProtoObject* widen(const ProtoObject* v) {
-    return isCharFast(v) ? proto::makeSmallInt(static_cast<long long>(charValueFast(v))) : v;
-}
-
 // A numeric operand (Int, Double, or Char widened to Int).
 const ProtoObject* numberArg(ProtoContext* ctx, const ProtoObject* v, const char* method) {
-    const ProtoObject* w = widen(v);
+    const ProtoObject* w = widenChar(v);
     if (!isNumberFast(w)) wrongType(ctx, method, "a number", v);
     return w;
 }
@@ -103,24 +97,6 @@ const ProtoObject* numberArg(ProtoContext* ctx, const ProtoObject* v, const char
 // ---------------------------------------------------------------------------
 // UTF-8 (strings are handed out as UTF-8; indices count code points, Q11)
 // ---------------------------------------------------------------------------
-
-void appendUtf8(std::string& out, char32_t c) {
-    if (c < 0x80) {
-        out += static_cast<char>(c);
-    } else if (c < 0x800) {
-        out += static_cast<char>(0xC0 | (c >> 6));
-        out += static_cast<char>(0x80 | (c & 0x3F));
-    } else if (c < 0x10000) {
-        out += static_cast<char>(0xE0 | (c >> 12));
-        out += static_cast<char>(0x80 | ((c >> 6) & 0x3F));
-        out += static_cast<char>(0x80 | (c & 0x3F));
-    } else {
-        out += static_cast<char>(0xF0 | (c >> 18));
-        out += static_cast<char>(0x80 | ((c >> 12) & 0x3F));
-        out += static_cast<char>(0x80 | ((c >> 6) & 0x3F));
-        out += static_cast<char>(0x80 | (c & 0x3F));
-    }
-}
 
 bool isContinuation(char b) { return (static_cast<unsigned char>(b) & 0xC0) == 0x80; }
 
@@ -232,7 +208,7 @@ const ProtoObject* arith(ProtoContext* ctx, Arith op, const char* method,
         const ProtoObject* lhs = toScalaString(ctx, layoutOf(), self);
         return asStr(lhs)->appendLast(ctx, asStr(rhs))->asObject(ctx);
     }
-    const ProtoObject* x = widen(self);
+    const ProtoObject* x = widenChar(self);
     const ProtoObject* y = numberArg(ctx, rhs, method);
     const bool dbl = isDoubleFast(x) || isDoubleFast(y);
     switch (op) {
@@ -255,7 +231,7 @@ enum class Cmp { Lt, Le, Gt, Ge };
 
 const ProtoObject* compare(ProtoContext* ctx, Cmp op, const char* method,
                            const ProtoObject* self, const ProtoList* args) {
-    const ProtoObject* x = widen(self);
+    const ProtoObject* x = widenChar(self);
     const ProtoObject* y = numberArg(ctx, arg(ctx, args, 0, method, 1), method);
     const auto c = x->partialCompare(ctx, y);  // IEEE: NaN compares false
     switch (op) {
@@ -271,7 +247,7 @@ const ProtoObject* compare(ProtoContext* ctx, Cmp op, const char* method,
 // NaN wins, and max(-0.0, 0.0) is 0.0).
 const ProtoObject* maxMin(ProtoContext* ctx, bool isMax, const char* method,
                           const ProtoObject* self, const ProtoList* args) {
-    const ProtoObject* x = widen(self);
+    const ProtoObject* x = widenChar(self);
     const ProtoObject* y = numberArg(ctx, arg(ctx, args, 0, method, 1), method);
     if (isDoubleFast(x) || isDoubleFast(y)) {
         const double a = x->asDouble(ctx), b = y->asDouble(ctx);
@@ -303,18 +279,37 @@ PRIM(num_min) { return maxMin(ctx, false, "min", self, args); }
 PRIM(num_abs) { expectArgs(ctx, args, "abs", 0); return self->abs(ctx); }
 PRIM(num_neg) { expectArgs(ctx, args, "unary_-", 0); return self->negate(ctx); }
 PRIM(num_pos) { expectArgs(ctx, args, "unary_+", 0); return self; }
-PRIM(num_self) { expectArgs(ctx, args, "conversion", 0); return self; }  // toInt on Int, ...
-PRIM(num_toDouble) {
-    expectArgs(ctx, args, "toDouble", 0);
-    return ctx->fromDouble(widen(self)->asDouble(ctx));
+
+// Conversions installed under several names: one thin wrapper per name, so
+// an argument-count error names the method that was called.
+const ProtoObject* identity(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+                            const char* method) {
+    expectArgs(ctx, args, method, 0);
+    return self;
 }
+const ProtoObject* toDouble(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+                            const char* method) {
+    expectArgs(ctx, args, method, 0);
+    return ctx->fromDouble(widenChar(self)->asDouble(ctx));
+}
+
+#define NAMED(fn, helper, method) \
+    PRIM(fn) { return helper(ctx, self, args, method); }
+
+NAMED(num_toInt, identity, "toInt")        // Int
+NAMED(num_toLong, identity, "toLong")      // Int
+NAMED(num_toDouble, toDouble, "toDouble")  // Int, Char
+NAMED(num_toFloat, toDouble, "toFloat")    // Int
+NAMED(double_toDouble, identity, "toDouble")
+NAMED(double_toFloat, identity, "toFloat")
+NAMED(char_toChar, identity, "toChar")
 
 // ---------------------------------------------------------------------------
 // Int
 // ---------------------------------------------------------------------------
 
 const ProtoObject* integerArg(ProtoContext* ctx, const ProtoObject* v, const char* method) {
-    const ProtoObject* w = widen(v);
+    const ProtoObject* w = widenChar(v);
     if (!isIntegerFast(w)) wrongType(ctx, method, "an Int", v);
     return w;
 }
@@ -369,10 +364,13 @@ const ProtoObject* integralToInt(ProtoContext* ctx, double t, const char* method
     return ctx->fromString(digits, 10);
 }
 
-PRIM(double_toInt) {
-    expectArgs(ctx, args, "toInt", 0);
-    return integralToInt(ctx, std::trunc(doubleSelf(ctx, self)), "toInt");
+const ProtoObject* doubleToInteger(ProtoContext* ctx, const ProtoObject* self,
+                                   const ProtoList* args, const char* method) {
+    expectArgs(ctx, args, method, 0);
+    return integralToInt(ctx, std::trunc(doubleSelf(ctx, self)), method);
 }
+NAMED(double_toInt, doubleToInteger, "toInt")
+NAMED(double_toLong, doubleToInteger, "toLong")
 
 // java.lang.Math.round: the closest integer, ties toward positive infinity.
 PRIM(double_round) {
@@ -414,7 +412,13 @@ bool asciiDigit(char32_t c) { return c >= '0' && c <= '9'; }
 bool asciiUpper(char32_t c) { return c >= 'A' && c <= 'Z'; }
 bool asciiLower(char32_t c) { return c >= 'a' && c <= 'z'; }
 
-PRIM(char_toInt) { expectArgs(ctx, args, "toInt", 0); return widen(self); }
+const ProtoObject* codePoint(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+                             const char* method) {
+    expectArgs(ctx, args, method, 0);
+    return widenChar(self);
+}
+NAMED(char_toInt, codePoint, "toInt")
+NAMED(char_toLong, codePoint, "toLong")
 PRIM(char_isDigit) { expectArgs(ctx, args, "isDigit", 0); return boolean(asciiDigit(charSelf(self))); }
 PRIM(char_isLetter) {
     expectArgs(ctx, args, "isLetter", 0);
@@ -593,7 +597,13 @@ long long listSize(ProtoContext* ctx, const ProtoObject* self) {
     return static_cast<long long>(self->asList(ctx)->getSize(ctx));
 }
 
-PRIM(list_length) { expectArgs(ctx, args, "length", 0); return ctx->fromInteger(listSize(ctx, self)); }
+const ProtoObject* listLength(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+                             const char* method) {
+    expectArgs(ctx, args, method, 0);
+    return ctx->fromInteger(listSize(ctx, self));
+}
+NAMED(list_length, listLength, "length")
+NAMED(list_size, listLength, "size")
 PRIM(list_isEmpty) { expectArgs(ctx, args, "isEmpty", 0); return boolean(listSize(ctx, self) == 0); }
 PRIM(list_nonEmpty) { expectArgs(ctx, args, "nonEmpty", 0); return boolean(listSize(ctx, self) != 0); }
 
@@ -672,6 +682,7 @@ PRIM(function_apply) {
 }
 
 #undef NUMERIC_BINARY
+#undef NAMED
 #undef PRIM
 
 // ---------------------------------------------------------------------------
@@ -709,22 +720,22 @@ void installPrimitives(ProtoContext* ctx, const RuntimeLayout& L) {
         {"unary_-", &num_neg}, {"unary_+", &num_pos}, {"unary_~", &int_not},
         {"&", &int_and}, {"|", &int_or}, {"^", &int_xor}, {"<<", &int_shl}, {">>", &int_shr},
         {">>>", &int_ushr}, {"abs", &num_abs}, {"max", &num_max}, {"min", &num_min},
-        {"toInt", &num_self}, {"toLong", &num_self}, {"toDouble", &num_toDouble},
-        {"toFloat", &num_toDouble}, {"toChar", &int_toChar}};
+        {"toInt", &num_toInt}, {"toLong", &num_toLong}, {"toDouble", &num_toDouble},
+        {"toFloat", &num_toFloat}, {"toChar", &int_toChar}};
     static constexpr MethodEntry doubles[] = {
         {"+", &num_add}, {"-", &num_sub}, {"*", &num_mul}, {"/", &num_div}, {"%", &num_mod},
         {"<", &num_lt}, {"<=", &num_le}, {">", &num_gt}, {">=", &num_ge},
         {"unary_-", &num_neg}, {"unary_+", &num_pos}, {"abs", &num_abs}, {"max", &num_max},
         {"min", &num_min}, {"round", &double_round}, {"floor", &double_floor},
         {"ceil", &double_ceil}, {"isNaN", &double_isNaN}, {"isInfinite", &double_isInfinite},
-        {"toInt", &double_toInt}, {"toLong", &double_toInt}, {"toDouble", &num_self},
-        {"toFloat", &num_self}};
+        {"toInt", &double_toInt}, {"toLong", &double_toLong}, {"toDouble", &double_toDouble},
+        {"toFloat", &double_toFloat}};
     static constexpr MethodEntry booleans[] = {
         {"&", &bool_and}, {"|", &bool_or}, {"^", &bool_xor}, {"unary_!", &bool_not}};
     static constexpr MethodEntry chars[] = {
         {"+", &num_add}, {"-", &num_sub}, {"<", &num_lt}, {"<=", &num_le}, {">", &num_gt},
-        {">=", &num_ge}, {"toInt", &char_toInt}, {"toLong", &char_toInt},
-        {"toDouble", &num_toDouble}, {"toChar", &num_self}, {"isDigit", &char_isDigit},
+        {">=", &num_ge}, {"toInt", &char_toInt}, {"toLong", &char_toLong},
+        {"toDouble", &num_toDouble}, {"toChar", &char_toChar}, {"isDigit", &char_isDigit},
         {"isLetter", &char_isLetter}, {"isWhitespace", &char_isWhitespace},
         {"isUpper", &char_isUpper}, {"isLower", &char_isLower}, {"toUpper", &char_toUpper},
         {"toLower", &char_toLower}};
@@ -737,7 +748,7 @@ void installPrimitives(ProtoContext* ctx, const RuntimeLayout& L) {
         {"*", &string_times}, {"+", &string_plus}, {"concat", &string_concat},
         {"toInt", &string_toInt}, {"toDouble", &string_toDouble}};
     static constexpr MethodEntry lists[] = {
-        {"length", &list_length}, {"size", &list_length}, {"isEmpty", &list_isEmpty},
+        {"length", &list_length}, {"size", &list_size}, {"isEmpty", &list_isEmpty},
         {"nonEmpty", &list_nonEmpty}, {"apply", &list_apply}, {"head", &list_head},
         {"foreach", &list_foreach}, {"mkString", &list_mkString}};
     static constexpr MethodEntry functions[] = {{"apply", &function_apply}};
