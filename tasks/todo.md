@@ -2,7 +2,7 @@
 
 ## Phase 0 — Skeleton (2026-09-22)
 - [x] Design spec, language reference, roadmap, status, interop docs
-- [x] Platform spec `ProtoSparseListObject`
+- [x] Platform spec `ProtoMap`
 - [x] CMake build against protoCore; `--version`, `--help`
 - [x] Unit / conformance / CLI harnesses; hello-world XFAIL
 - [x] Plans for Phase P1 and Phase 1

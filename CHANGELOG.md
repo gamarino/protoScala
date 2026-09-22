@@ -30,8 +30,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   tutorial chapters 1–5 and 14.
 - Design specification (`docs/DESIGN.md`), language reference
   (`docs/LANGUAGE.md`), roadmap, status tracker and interop design.
-- Platform specifications for protoCore: `ProtoSparseListObject`
-  (`docs/platform/PSLO-SPEC.md`) and `ProtoMPSCQueue`
+- Platform specifications for protoCore: `ProtoMap`
+  (`docs/platform/PROTOMAP-SPEC.md`) and `ProtoMPSCQueue`
   (`docs/platform/PMQ-SPEC.md`).
 - Actor model on protoClojure's design with the `actor-bench.sh` suite
   (DESIGN §8).

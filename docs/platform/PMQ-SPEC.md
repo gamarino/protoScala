@@ -97,7 +97,7 @@ constraints, not the algorithm.
 ## 4. Tagged-pointer budget
 
 - `ProtoMPSCQueue` consumes **one** pointer tag for its public handle
-  (PSLO-SPEC §3 rules; after P1 and P2, 35 of 64 tags remain free).
+  (PROTOMAP-SPEC §3 rules; after P1 and P2, 35 of 64 tags remain free).
 - Queue nodes are internal cells with their own `CellType`; they take no tag
   and are never exposed as `ProtoObject*` words.
 - There is no iterator: `takeAll` returns an ordinary `ProtoList`.

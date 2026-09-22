@@ -19,16 +19,16 @@ version; a unit test creates a `ProtoSpace` and exercises SmallInteger
 promotion, proving protoCore links and runs; the conformance runner registers fixtures,
 including one `XFAIL` that pins the first Phase 1 program.
 
-## Phase P1 — `ProtoSparseListObject` in protoCore *(platform)* — implemented on protoCore branch `feature/pslo-p1`, pending maintainer merge
+## Phase P1 — `ProtoMap` in protoCore *(platform)* — implemented on protoCore branch `feature/pslo-p1`, pending maintainer merge
 
 **Goal:** a persistent map whose keys are GC-traced objects
-([platform/PSLO-SPEC.md](platform/PSLO-SPEC.md)).
+([platform/PROTOMAP-SPEC.md](platform/PROTOMAP-SPEC.md)).
 **Done when:** the type and (if the maintainer adopts it) the hashed-collection
-helper are merged in protoCore with the tests of PSLO-SPEC §5; protoCore's
+helper are merged in protoCore with the tests of PROTOMAP-SPEC §5; protoCore's
 full suite passes; every embedder was rebuilt from clean and passes its suite.
 **Prerequisite for:** Phase 3 (`Map`/`Set`), tracks C and S.
 **Plan:** [plans/2026-09-22-phase-p1-protosparselistobject.md](plans/2026-09-22-phase-p1-protosparselistobject.md).
-**Decided (2026-09-22):** iterator option (a) (PSLO-SPEC §3.3); the
+**Decided (2026-09-22):** iterator option (a) (PROTOMAP-SPEC §3.3); the
 hashed-collection helper lives in protoCore (§4).
 
 ## Phase P2 — `ProtoMPSCQueue` in protoCore *(platform)*
@@ -73,7 +73,7 @@ pattern matching (all DESIGN §5.3 patterns) pass their fixtures.
 **Done when:** SmallInteger fast paths with LargeInteger promotion are
 covered by boundary fixtures (±2^53); `List`, `Vector`, `Range`, `Option`,
 `Either`, `Try`, tuples and string interpolation pass their fixtures;
-`Map`/`Set` pass on `ProtoSparseListObject` (requires P1); benchmark suite
+`Map`/`Set` pass on `ProtoMap` (requires P1); benchmark suite
 v1 (`fib`, `tak`, `sum-loop`, `list-ops`, `map-build`) self-reports and is
 recorded in `benchmarks/RESULTS.md`.
 
@@ -132,7 +132,7 @@ reflect the phase.
 
 **Goal:** remove protoClojure's custom map/set layout, its `ProtoTuple`
 vectors (DESIGN R2) and its unrooted actor mailboxes.
-**Done when:** protoClojure maps and sets use `ProtoSparseListObject` (via the
+**Done when:** protoClojure maps and sets use `ProtoMap` (via the
 shared helper if adopted); vectors no longer retain memory perennially; the
 full protoClojure suite passes; no ordering guarantee beyond Clojure's is
 introduced; actor mailboxes use three `ProtoMPSCQueue`s per actor, with
@@ -143,7 +143,7 @@ maintainer decision on R2.
 
 **Goal:** one mechanism for protoST's `Dictionary` and `Set`, and GC-traced
 lock-free mailboxes.
-**Done when:** both use `ProtoSparseListObject`; protoST's D32 is resolved by
+**Done when:** both use `ProtoMap`; protoST's D32 is resolved by
 the protoST language decision it is waiting for; actor mailboxes use
 `ProtoMPSCQueue` with actor benchmark tables recorded before and after; the
 full protoST suite passes. Requires P1 and P2.

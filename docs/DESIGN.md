@@ -326,7 +326,7 @@ sequence patterns with `_*`, and guards.
 |---|---|
 | `List[T]` | `ProtoList` (persistent AVL) — maintainer decision. `::` prepends in O(log n); `h :: t` extracts head and tail slice in O(log n). Scala `List` methods are installed on protoCore's list prototype, so a raw `ProtoList` *is* a Scala `List` |
 | `Vector[T]` | an object (prototype `Vector`) holding a `ProtoList` in one attribute, so `List` and `Vector` stay distinguishable |
-| `Map[K,V]`, `Set[T]` | objects (prototypes `Map`, `Set`) holding a **`ProtoSparseListObject`** (§6.1) |
+| `Map[K,V]`, `Set[T]` | objects (prototypes `Map`, `Set`) holding a **`ProtoMap`** (§6.1) |
 | `TupleN` | case classes (§4.6) |
 | `Option`/`Some`/`None`, `Either`, `Try` | written in protoScala in `lib/` |
 | `Range` | an object with `start/end/step` and lazy iteration |
@@ -334,15 +334,15 @@ sequence patterns with `_*`, and guards.
 `List(1,2) == Vector(1,2)` is `true` (Scala `Seq` equality) — implemented in
 the `equals` of both.
 
-### 6.1 Map and Set on `ProtoSparseListObject` *(platform)*
+### 6.1 Map and Set on `ProtoMap` *(platform)*
 
 protoCore's `ProtoSparseList` keys are untraced `unsigned long`s and
 `ProtoSet` keys by `getHash` without collision handling, so neither gives
 Scala's semantics alone. The maintainer's design adds a **new protoCore type,
-`ProtoSparseListObject`**, identical to `ProtoSparseList` except that **the key
+`ProtoMap`**, identical to `ProtoSparseList` except that **the key
 is a `ProtoObject*` the GC traces**. `ProtoSparseList` is not changed. The
 full specification, including the tagged-pointer budget, is in
-[platform/PSLO-SPEC.md](platform/PSLO-SPEC.md). protoScala uses it as follows:
+[platform/PROTOMAP-SPEC.md](platform/PROTOMAP-SPEC.md). protoScala uses it as follows:
 
 - **Identity-equality keys** — objects whose `==` is `eq` (instances of
   classes with the default `equals`, `object`s, `case object`s, enum cases,
@@ -607,7 +607,7 @@ Summarised here; milestones, done-when criteria and tracks are in
 | Phase | Content |
 |---|---|
 | 0 | Repository skeleton, build against protoCore, test harnesses, `--version` |
-| P1 *(platform)* | `ProtoSparseListObject` in protoCore (+ hashed-collection helper), tests, full rebuild of every embedder |
+| P1 *(platform)* | `ProtoMap` in protoCore (+ hashed-collection helper), tests, full rebuild of every embedder |
 | P2 *(platform)* | `ProtoMPSCQueue` in protoCore (GC-traced lock-free mailbox), tests, microbenchmarks, full rebuild of every embedder |
 | 1 | Lexer (with offside rule), parser, AST, core compiler + VM (expressions, `val`/`var`/`def`, `if`/`while`, lambdas), `println`, REPL |
 | 2 | Classes, objects, traits + linearization, case classes, universal `apply`, for-comprehensions, pattern matching |
@@ -615,5 +615,5 @@ Summarised here; milestones, done-when criteria and tracks are in
 | 4 | Exceptions, `super` in stackable traits, enums and sealed hierarchies, named/default arguments |
 | 5 | Actors, priority bands, cooperative futures |
 | 6 | UMD provider and prefix routing, CPack `.deb`/`.tgz` |
-| C *(platform)* | protoClojure: maps/sets onto `ProtoSparseListObject`; vectors off `ProtoTuple` (R2); actor mailboxes onto `ProtoMPSCQueue` |
-| S *(platform)* | protoST: `Dictionary`/`Set` onto `ProtoSparseListObject` (unblocks its D32 decision); actor mailboxes onto `ProtoMPSCQueue` |
+| C *(platform)* | protoClojure: maps/sets onto `ProtoMap`; vectors off `ProtoTuple` (R2); actor mailboxes onto `ProtoMPSCQueue` |
+| S *(platform)* | protoST: `Dictionary`/`Set` onto `ProtoMap` (unblocks its D32 decision); actor mailboxes onto `ProtoMPSCQueue` |

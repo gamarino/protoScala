@@ -1,4 +1,4 @@
-# Platform spec: `ProtoSparseListObject` (protoCore)
+# Platform spec: `ProtoMap` (protoCore)
 
 > **Status:** implemented on protoCore branch `feature/pslo-p1` (not merged). This is protoCore work
 > carried out as part of the protoScala project (roadmap Phase P1) and reused
@@ -32,7 +32,7 @@ semantics and different GC exposure.
 
 ## 2. Design (maintainer decision)
 
-Add a **new object type**, `ProtoSparseListObject`, **identical to
+Add a **new object type**, `ProtoMap`, **identical to
 `ProtoSparseList` in every respect except that the key is a
 `const ProtoObject*` traced by the GC**.
 
@@ -53,17 +53,17 @@ Add a **new object type**, `ProtoSparseListObject`, **identical to
 ### 2.1 Public API (mirrors `ProtoSparseList`)
 
 ```cpp
-class ProtoSparseListObject {
+class ProtoMap {
 public:
     bool has(ProtoContext*, const ProtoObject* key) const;
     const ProtoObject* getAt(ProtoContext*, const ProtoObject* key) const;      // nullptr when absent
-    const ProtoSparseListObject* setAt(ProtoContext*, const ProtoObject* key, const ProtoObject* value) const;
-    const ProtoSparseListObject* removeAt(ProtoContext*, const ProtoObject* key) const;
-    bool isEqual(ProtoContext*, const ProtoSparseListObject* other) const;
+    const ProtoMap* setAt(ProtoContext*, const ProtoObject* key, const ProtoObject* value) const;
+    const ProtoMap* removeAt(ProtoContext*, const ProtoObject* key) const;
+    bool isEqual(ProtoContext*, const ProtoMap* other) const;
     unsigned long getSize(ProtoContext*) const;
 
     const ProtoObject* asObject(ProtoContext*) const;
-    const ProtoSparseListObjectIterator* getIterator(ProtoContext*) const;
+    const ProtoMapIterator* getIterator(ProtoContext*) const;
     unsigned long getHash(ProtoContext*) const;
 
     void processElements(ProtoContext*, void* self,
@@ -73,11 +73,11 @@ public:
 };
 
 // ProtoContext
-const ProtoSparseListObject* newSparseListObject();
+const ProtoMap* newMap();
 
 // ProtoObject
-bool isSparseListObject(ProtoContext*) const;
-const ProtoSparseListObject* asSparseListObject(ProtoContext*) const;
+bool isMap(ProtoContext*) const;
+const ProtoMap* asMap(ProtoContext*) const;
 ```
 
 `getAt` returns `nullptr` for an absent key so that a stored `PROTO_NONE`
@@ -103,14 +103,14 @@ values). Usage in protoCore 1.3.0 (`headers/proto_internal.h`):
 
 | Space | Used | Free |
 |---|---|---|
-| Pointer tags | 0–26, plus 27 = `ProtoSparseListObject` (28 values) | 28–63 (36 values) |
+| Pointer tags | 0–26, plus 27 = `ProtoMap` (28 values) | 28–63 (36 values) |
 | Embedded types | 0, 2, 3, 4, 5 (5 values) | 1, 6–15 (11 values) |
 
 Every language added to the platform will want new types, so tags are a
 scarce, platform-wide resource. (`ProtoMPSCQueue`, PMQ-SPEC, takes one more
 tag under the same rules.) Rules for this work:
 
-1. `ProtoSparseListObject` consumes **at most one new pointer tag**, for its
+1. `ProtoMap` consumes **at most one new pointer tag**, for its
    public handle.
 2. Its internal node classes (AVL node, Small form) need **no tag of their
    own**. The GC discriminates cells through the `Cell` virtual interface
@@ -120,7 +120,7 @@ tag under the same rules.) Rules for this work:
 3. The iterator **does not take a second tag**. **Decided (2026-09-22):
    option (a).** The two options considered:
    - **(a, recommended)** expose iteration only through `processElements` /
-     `processValues` and a `ProtoSparseListObjectIterator` C++ handle that is
+     `processValues` and a `ProtoMapIterator` C++ handle that is
      never boxed as a `ProtoObject*` word (runtimes wrap it in their own
      iterator objects when a language needs one);
    - **(b)** share `POINTER_TAG_SPARSE_LIST_ITERATOR` and discriminate the two
@@ -137,7 +137,7 @@ The key-classification scheme every runtime needs is the same; only the
 language's equality and hash differ (Scala: cooperative numeric equality,
 `1 == 1.0`; Clojure: `(= 1 1.0)` is false; Smalltalk: `1 = 1.0` is true). To
 avoid three copies, protoCore may provide a small helper on top of
-`ProtoSparseListObject`:
+`ProtoMap`:
 
 ```cpp
 struct KeySemantics {
@@ -149,18 +149,18 @@ struct KeySemantics {
     bool (*equals)(ProtoContext*, const ProtoObject* a, const ProtoObject* b);
 };
 
-// Persistent hashed map / set operations over a ProtoSparseListObject:
+// Persistent hashed map / set operations over a ProtoMap:
 //  - identity key      -> slot key = the key object itself, slot value = v
 //  - value-equality key -> slot key = SmallInteger(hash & 54-bit mask),
 //                          slot value = entry ProtoList[k, v], or a ProtoList of
 //                          entries on a real hash collision
-const ProtoSparseListObject* hashedPut(ProtoContext*, const ProtoSparseListObject*,
+const ProtoMap* hashedPut(ProtoContext*, const ProtoMap*,
                                        const KeySemantics&, const ProtoObject* k, const ProtoObject* v);
-const ProtoObject* hashedGet(ProtoContext*, const ProtoSparseListObject*,
+const ProtoObject* hashedGet(ProtoContext*, const ProtoMap*,
                              const KeySemantics&, const ProtoObject* k);   // nullptr when absent
-const ProtoSparseListObject* hashedRemove(ProtoContext*, const ProtoSparseListObject*,
+const ProtoMap* hashedRemove(ProtoContext*, const ProtoMap*,
                                           const KeySemantics&, const ProtoObject* k);
-void hashedForEach(ProtoContext*, const ProtoSparseListObject*, void* self,
+void hashedForEach(ProtoContext*, const ProtoMap*, void* self,
                    void (*fn)(ProtoContext*, void*, const ProtoObject* k, const ProtoObject* v));
 ```
 
@@ -223,7 +223,7 @@ maintainer's authorisation for the overnight run, and are **pending review**.
 | D2c | Put with an existing equal key keeps the stored key and replaces the value (Scala `HashMap.updated` behaviour) | agent, pending review |
 | D3 | `nullptr` key is ignored silently: `has` → false, `getAt` → nullptr, `setAt`/`removeAt` return the receiver | agent, pending review |
 | D4 | `isEqual`: same size, same key words, values compared by word identity | agent, pending review |
-| D5 | Own prototype `ProtoSpace::sparseListObjectPrototype` (layout change covered by the mandatory rebuild) | agent, pending review |
+| D5 | Own prototype `ProtoSpace::mapPrototype` (layout change covered by the mandatory rebuild) | agent, pending review |
 | D6 | Small vs AVL distinguished by `CellType` under the single tag 27 | agent, pending review |
 | D7 | Keep `SOVERSION 1`; version 1.2.0 → 1.3.0 | agent, pending review |
 | — | Overnight run: work in the worktree `../protoCore-pslo` on branch `feature/pslo-p1`, build in its own build directory, not merged; Task 12 (embedder rebuild) deferred until the maintainer reviews the branch | maintainer (scope) |
