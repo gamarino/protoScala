@@ -159,22 +159,30 @@ const ProtoObject* product_copy(ProtoContext* ctx, const ProtoObject* self, cons
         scope.setAutomaticLocal(static_cast<unsigned>(i), v);
     }
     if (keywords && named != keywords->getSize(&scope)) {
-        // Report a keyword that is not a field; the keyword list's keys are
-        // the interned names (ProtoSparseList::processElements, protoCore.h).
-        struct Unknown {
+        // A keyword that named no parameter, or one a positional argument had
+        // already given (scalac: "parameter a ... is already instantiated").
+        // The keyword list's keys are the interned names
+        // (ProtoSparseList::processElements, protoCore.h).
+        struct Rejected {
             const ProtoList* fields;
             unsigned long n;
-            std::string name;
-        } unknown{fields, n, {}};
-        keywords->processElements(&scope, &unknown,
+            unsigned long positional;
+            std::string message;
+        } rejected{fields, n, positional, {}};
+        keywords->processElements(&scope, &rejected,
             [](ProtoContext* c, void* receiver, unsigned long key, const ProtoObject*) {
-                auto* u = static_cast<Unknown*>(receiver);
-                if (!u->name.empty()) return;
-                for (unsigned long i = 0; i < u->n; ++i)
-                    if (reinterpret_cast<unsigned long>(keyAt(c, u->fields, i)) == key) return;
-                u->name = reinterpret_cast<const ProtoString*>(key)->toStdString(c);
+                auto* r = static_cast<Rejected*>(receiver);
+                if (!r->message.empty()) return;
+                const std::string name = reinterpret_cast<const ProtoString*>(key)->toStdString(c);
+                for (unsigned long i = 0; i < r->n; ++i)
+                    if (reinterpret_cast<unsigned long>(keyAt(c, r->fields, i)) == key) {
+                        if (i < r->positional)
+                            r->message = "parameter " + name + " of copy is already instantiated";
+                        return;
+                    }
+                r->message = "copy has no parameter named " + name;
             });
-        throw ScalaError("IllegalArgumentException", "copy has no parameter named " + unknown.name);
+        throw ScalaError("IllegalArgumentException", rejected.message);
     }
     const ProtoObject* r = activeCallContext()->engine->construct(
         &scope, self->getPrototype(&scope), scope.getAutomaticLocals(), static_cast<unsigned>(n));
