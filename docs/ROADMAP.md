@@ -28,8 +28,8 @@ helper are merged in protoCore with the tests of PSLO-SPEC §5; protoCore's
 full suite passes; every embedder was rebuilt from clean and passes its suite.
 **Prerequisite for:** Phase 3 (`Map`/`Set`), tracks C and S.
 **Plan:** [plans/2026-09-22-phase-p1-protosparselistobject.md](plans/2026-09-22-phase-p1-protosparselistobject.md).
-**Opens with:** maintainer review of PSLO-SPEC §3.3 (iterator) and §4 (helper
-location).
+**Decided (2026-09-22):** iterator option (a) (PSLO-SPEC §3.3); the
+hashed-collection helper lives in protoCore (§4).
 
 ## Phase P2 — `ProtoMPSCQueue` in protoCore *(platform)*
 

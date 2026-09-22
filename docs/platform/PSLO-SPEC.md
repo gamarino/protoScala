@@ -117,8 +117,8 @@ tag under the same rules.) Rules for this work:
    (`processReferences`, `getType`), not through tags; internal nodes are
    never exposed as `ProtoObject*` words. They get new `CellType` enum values,
    which are not a scarce resource.
-3. The iterator **does not take a second tag**. Two options, to be settled
-   when P1 starts (maintainer review):
+3. The iterator **does not take a second tag**. **Decided (2026-09-22):
+   option (a).** The two options considered:
    - **(a, recommended)** expose iteration only through `processElements` /
      `processValues` and a `ProtoSparseListObjectIterator` C++ handle that is
      never boxed as a `ProtoObject*` word (runtimes wrap it in their own
@@ -174,9 +174,8 @@ Properties:
 - No global table, no lock, no interning: the structure is as GC-friendly as
   any other persistent protoCore structure.
 
-Whether the helper lives in protoCore or each runtime keeps its own copy is a
-maintainer decision at the start of P1; the recommendation is protoCore,
-because the three runtimes need exactly the same mechanism.
+**Decided (2026-09-22): the helper lives in protoCore**, because the three
+runtimes need exactly the same mechanism.
 
 ## 5. Tests (protoCore, GoogleTest)
 
