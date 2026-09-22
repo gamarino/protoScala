@@ -4,6 +4,43 @@ All notable changes to protoScala are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+Fixes from the final Phase 1 review.
+
+### Fixed
+
+- REPL: an indented construct typed line by line (`while i < 3 do`, then
+  its body lines) is read to its end instead of running after its first
+  body line; the input ends on a blank line or when a line returns to the
+  first column without continuing the construct (`else`, `end`, ...).
+- REPL redefinitions shadow as in the Scala REPL: earlier code keeps the
+  binding it saw (per-definition global keys), a change of kind never breaks
+  it, and an input that fails defines nothing (D25).
+- Value discarding: a method declared `: Unit` (also `return e` in it, the
+  innermost body of a curried one), `val v: Unit = e` and `(e: Unit)` yield
+  `()`; `if` without `else` yields `()` when the condition is true (D26 for
+  expected types from function types).
+- Forward references follow Scala's block rule ("forward reference to value
+  y extends over the definition of value x"); lazy vals are hoisted, so legal
+  forward references to them work.
+- `return` inside a method with several parameter lists.
+- `@main` rejects non-String repeated parameters and curried methods; typed
+  parameters are rejected as D27.
+- Deeply nested source raises `StackOverflowError` instead of crashing; the
+  lambda look-ahead is linear.
+- `Char` supports `*`, `/`, `%`, `max`, `min`, bitwise, shift and unary
+  operators like `Int`; string literals keep an embedded NUL.
+- REPL: failed and Unit-valued inputs no longer use up a `resN`; String
+  results are echoed in quotes; a UTF-8 byte-order mark is accepted.
+- `benchmarks/cold-start.sh` formats numbers in the C locale.
+
+### Changed
+
+- The `ProtoSparseListObject` platform type is now called `ProtoMap`
+  (`docs/platform/PROTOMAP-SPEC.md`).
+- D1 also covers integer literals (no range limit).
+
 ## [0.1.0] - 2026-09-22
 
 ### Added

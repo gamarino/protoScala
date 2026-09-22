@@ -178,16 +178,26 @@ Prints:
 
 A `def` inside another `def` is local to it and can see the enclosing
 parameters (`loop` reads `n`). Local definitions may call each other in either
-order, so `even` and `odd` are mutually recursive. Integers never overflow
+order, so `even` and `odd` are mutually recursive. As in Scala, a reference
+may not reach forward past a strict `val` or `var` of the same block: in
+`def f = y; val y = 1` the use of `y` is reported as `forward reference to
+value y extends over the definition of value y`. Forward references to local
+`def`s and `lazy val`s are fine when no strict `val` or `var` lies between. Integers never overflow
 (D1), so `factorial` works for any `n`; `BigInt` as the result type is only an
 annotation.
 
 Recursion uses the native stack. Tens of thousands of nested calls are fine
 (the fixture `tests/conformance/06-recursion/deep-recursion-ok.scala` recurses
 10,000 deep); recursion that goes deeper than the stack allows raises
-`StackOverflowError: calls nested too deeply for the 32 MiB thread stack`
-instead of crashing; the message suggests a `while` loop for deep iteration.
-protoScala does not yet eliminate tail calls.
+
+```text
+StackOverflowError: calls nested too deeply for the 32 MiB thread stack (use a while loop for deep iteration)
+```
+
+instead of crashing. protoScala does not yet eliminate tail calls. Source
+code nested deeper than the stack allows (tens of thousands of nested
+parentheses or braces) is reported the same way, as
+`StackOverflowError: source nested too deeply for the 32 MiB thread stack`.
 
 ## 5.7 `lazy val`
 

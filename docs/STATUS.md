@@ -7,9 +7,10 @@
 > Scala 3 offside rule, parser, compiler and VM for values, `val`/`var`/
 > `lazy val`/`def`, `if`/`while`, lambdas and closures, recursion with
 > `StackOverflowError`, `println`, readline REPL.
-> **Tests:** 307 total (`ctest --test-dir build_release -N`) — 199 unit
-> (GoogleTest), 94 conformance fixtures, 14 CLI checks. All green. Last
-> verified 2026-09-22.
+> **Tests:** 327 total (`ctest --test-dir build_release -N`) — 204 unit
+> (GoogleTest), 105 conformance fixtures, 18 CLI checks. All green, also
+> under `PROTOCORE_HEAP_LIMIT_CELLS=20000`. Last verified 2026-09-22 (after
+> the final Phase 1 review fixes).
 
 ## Implemented
 
@@ -37,8 +38,11 @@ Per [LANGUAGE.md](LANGUAGE.md) §1–§2, the rows delivered in Phase 1:
 - [x] `println`, `print`, and the methods of `Int`, `Double`, `Boolean`,
       `Char`, `String`, `List` (varargs) and functions (DESIGN §5.1 universal
       `apply`).
-- [x] REPL: readline history, multi-line continuation, `:help`, `:quit`,
-      `:load`.
+- [x] REPL: readline history, multi-line continuation (braces and
+      line-by-line indented input), shadowing redefinitions (D25), `:help`,
+      `:quit`, `:load`.
+- [x] Value discarding for `Unit` (D26), `if` without `else` yields `()`,
+      Scala's block forward-reference rule, `return` in curried methods.
 - [x] `--disassemble`; conformance, unit and CLI test suites; tutorial
       chapters 1–5 and 14.
 
@@ -104,7 +108,7 @@ their reserved ranges.
 
 | Id | Deviation | Track |
 |---|---|---|
-| D1 | `Int`/`Long` promote to arbitrary precision instead of wrapping | (perm) |
+| D1 | `Int`/`Long` promote to arbitrary precision instead of wrapping; integer literals are not range-checked either: `0xFFFFFFFF` is `4294967295` (Scala: `-1`), and `2147483648` or `99999999999999999999` are accepted without `L` (Scala: a compile error) | (perm) |
 | D2 | `Float` is `Double` | (perm) |
 | D3 | No implicits / givens resolution | later |
 | D4 | No static type checking or exhaustiveness checks | (perm) |
@@ -169,7 +173,7 @@ See DESIGN §11 for the full table. Unchanged this phase: R2, R4, R5, R8.
 
 ## Open bugs
 
-None known. 307/307 tests pass (`ctest --test-dir build_release`).
+None known. 327/327 tests pass (`ctest --test-dir build_release`).
 
 ## History
 

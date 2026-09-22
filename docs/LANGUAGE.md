@@ -76,7 +76,7 @@
 
 | Id | Departure | Reason |
 |---|---|---|
-| D1 | `Int`/`Long` never overflow: results promote to arbitrary precision | protoCore integer model |
+| D1 | `Int`/`Long` never overflow: results promote to arbitrary precision; integer literals have no range limit (`0xFFFFFFFF` is `4294967295`, `2147483648` needs no `L`) | protoCore integer model |
 | D2 | `Float` is `Double` | protoCore has one floating type |
 | D3 | No implicits / givens / `using` resolution (parsed, rejected with a clear error if used) | resolution needs static types |
 | D4 | No exhaustiveness or static type checking; type errors surface at run time | types are erased |

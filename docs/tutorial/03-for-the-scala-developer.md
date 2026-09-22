@@ -69,6 +69,9 @@ Prints:
 Code that relies on wrap-around (hash mixing, `Int.MaxValue + 1` sentinels)
 behaves differently; `<<` does not wrap either (`1 << 60` is 2^60, where the
 JVM gives `1 << 28`).
+Integer literals have no range limit either: `0xFFFFFFFF` is `4294967295`
+(the JVM reads it as the `Int` `-1`), and `2147483648` is accepted without an
+`L` suffix.
 
 **D2 — `Float` is `Double`.** protoCore has one floating-point type, so `Float`
 literals and arithmetic are carried out in double precision:
@@ -221,6 +224,23 @@ multi-statement body there must be written `xs.foreach { x => ... }` or
 **`:` at the end of a line always opens an indented region (D18, provisional —
 see STATUS.md).** `val x:` followed by `Int = 1` on the next line is rejected;
 keep a type ascription on the same line as its `:`.
+
+**Top-level redefinitions (D25, provisional — see STATUS.md).** A second
+top-level definition of a name in the same file replaces the first (Scala 3
+rejects it). In the REPL a redefinition shadows the earlier one, as in the
+Scala REPL: code compiled before keeps the binding it saw.
+
+**Value discarding needs a written `Unit` (D26, provisional — see
+STATUS.md).** `def f(): Unit = 5` returns `()`, as do `return e` inside it,
+`val v: Unit = e`, `(e: Unit)` and an `if` without `else`. When `Unit` comes
+only from a function type — `val f: Int => Unit = x => x + 1`, or a lambda
+passed where an `A => Unit` is expected — protoScala does not know it (D4)
+and the lambda returns its last value.
+
+**`@main` takes no typed parameters (D27, provisional — see STATUS.md).** An
+`@main` method takes no parameters or one `args: String*`; Scala 3's typed
+parameters (`@main def m(n: Int, s: String)`, parsed from the command line)
+are rejected. Convert the strings yourself (`args(0).toInt`).
 
 By-name parameters (`x: => Int`) are parsed and rejected with
 `by-name parameters are not supported yet`, and `import` is parsed and
