@@ -159,6 +159,22 @@ private:
     void compileTuple(const Tuple& t);
     void compileSuperSend(const std::string& name, const std::vector<NodePtr>& args, SourcePos pos);
     void compileNamedSend(const Select& sel, const std::vector<NodePtr>& args, SourcePos pos);
+
+    // --- Pattern matching (CompilePatterns.cpp) ---------------------------
+    void compileMatch(const Match& m);
+    void compilePattern(const Pattern& p, int slot, std::vector<std::size_t>& fail);
+    void compileExtractor(const Pattern& p, int slot, std::vector<std::size_t>& fail);
+    void compileListPattern(const Pattern& p, int slot, std::vector<std::size_t>& fail);
+    void extractInto(const std::vector<std::string>& keys, int slot, const std::vector<PatternPtr>& subs,
+                     std::vector<std::size_t>& fail, SourcePos pos);
+    void emitProtoTest(const std::string& typeKey, int slot, SourcePos pos,
+                       std::vector<std::size_t>& fail);
+    void bindPattern(const std::string& name, int slot, SourcePos pos);
+    void checkNoVariables(const Pattern& p) const;
+    // Pushes a Boolean: is the value in `slot` a T? Returns false (emitting
+    // nothing) when every value matches, which only `Any` in a pattern does.
+    bool compileTypeTest(const TypeTree& t, int slot, SourcePos pos, bool inPattern);
+    void compileInstanceOf(const Node& value, const TypeTree& t, bool cast, SourcePos pos);
 };
 
 } // namespace protoScala

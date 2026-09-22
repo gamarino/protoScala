@@ -228,8 +228,15 @@ private:
                 const auto& m = as<Match>(n);
                 walk(m.scrutinee.get(), depth);
                 for (const CaseDef& c : m.cases) {
+                    walkPatternPaths(*c.pattern, depth);  // stable identifiers and extractor objects
+                    scopes_.emplace_back();
+                    std::vector<std::string> vars;
+                    patternVariables(*c.pattern, vars);
+                    for (const auto& v : vars)
+                        scopes_.back().names[v] = Decl{nullptr, depth, DeclKind::Param, -1};
                     walk(c.guard.get(), depth);
                     walk(c.body.get(), depth);
+                    scopes_.pop_back();
                 }
                 return;
             }
@@ -237,6 +244,17 @@ private:
             case NodeKind::For:
                 return;  // templates are compiled on their own; For never survives Desugar
         }
+    }
+
+    // The expressions a pattern evaluates: the path of a stable identifier or
+    // of an extractor object, and the value of a literal. Pattern variables
+    // themselves are never boxed — like parameters they are bound once,
+    // before any closure over them is created.
+    void walkPatternPaths(const Pattern& p, int depth) {
+        if (p.expr && (p.kind == Pattern::Kind::Stable || p.kind == Pattern::Kind::Extractor ||
+                       p.kind == Pattern::Kind::Literal))
+            walk(*p.expr, depth);
+        for (const auto& a : p.args) walkPatternPaths(*a, depth);
     }
 
     // The initialiser of a val (a lazy one runs in a thunk) or a def body.
@@ -406,7 +424,18 @@ void Compiler::compileExpr(const Node& n) {
         case NodeKind::Ident: compileIdent(as<Ident>(n)); return;
         case NodeKind::Select: compileSelect(as<Select>(n)); return;
         case NodeKind::Apply: compileApply(as<Apply>(n)); return;
-        case NodeKind::TypeApply: compileExpr(*as<TypeApply>(n).fn); return;  // erased
+        case NodeKind::TypeApply: {
+            const auto& ta = as<TypeApply>(n);
+            if (ta.fn->kind == NodeKind::Select && ta.types.size() == 1) {
+                const auto& sel = as<Select>(*ta.fn);
+                if (sel.name == "isInstanceOf" || sel.name == "asInstanceOf") {
+                    compileInstanceOf(*sel.qualifier, *ta.types[0], sel.name == "asInstanceOf", n.pos);
+                    return;
+                }
+            }
+            compileExpr(*ta.fn);  // other type arguments are erased
+            return;
+        }
         case NodeKind::Assign: compileAssign(as<Assign>(n)); return;
         case NodeKind::If: compileIf(as<If>(n)); return;
         case NodeKind::While: compileWhile(as<While>(n)); return;
@@ -428,7 +457,7 @@ void Compiler::compileExpr(const Node& n) {
             throw CompileError("classes, traits and objects must be defined at the top level "
                                "of a file", n.pos);
         case NodeKind::New: compileNew(as<New>(n)); return;
-        case NodeKind::Match: throw CompileError("match is not implemented yet", n.pos);
+        case NodeKind::Match: compileMatch(as<Match>(n)); return;
         case NodeKind::For: throw std::logic_error("compiler: for-comprehension not desugared");
         case NodeKind::Infix:
         case NodeKind::Prefix:

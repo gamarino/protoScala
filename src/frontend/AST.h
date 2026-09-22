@@ -287,6 +287,11 @@ struct For : Node {
 
 std::string dump(const Pattern& p);
 
+// The variables `p` binds, appended to `out` in source order. An alternative
+// (`p1 | p2`) contributes none: binding a variable in one is illegal, and the
+// compiler reports it (CompilePatterns.cpp).
+void patternVariables(const Pattern& p, std::vector<std::string>& out);
+
 // Deep copies used by Desugar (a for-comprehension pattern appears in the
 // withFilter lambda and in the map lambda). cloneSimpleExpr copies literal,
 // Ident and Select trees only (what a pattern contains) and throws

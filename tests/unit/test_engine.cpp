@@ -473,3 +473,14 @@ TEST(Prelude, OptionIsDefinedInEverySession) {
     EXPECT_EQ(h.eval("Some(2).map(_ + 1).getOrElse(0)"), "3");
     EXPECT_EQ(h.eval("None.get"), "error: NoSuchElementException: None.get");
 }
+
+TEST(EnginePatterns, MatchBindsGuardsAndFails) {
+    EvalHarness h;
+    EXPECT_EQ(h.eval("List(1, 2, 3) match { case h :: t => h + t.length; case Nil => 0 }"), "3");
+    EXPECT_EQ(h.eval("(1, \"a\") match { case (n, s) => s * (n + 1) }"), "aa");
+    EXPECT_EQ(h.eval("Some(4) match { case Some(n) if n > 3 => n; case _ => 0 }"), "4");
+    EXPECT_EQ(h.eval("3 match { case 1 => 1 }"), "error: MatchError: 3 (of class Int)");
+    EXPECT_EQ(h.eval("(1, 2).isInstanceOf[Product]"), "true");
+    EXPECT_EQ(h.eval("\"x\".asInstanceOf[Int]"), "error: ClassCastException: String cannot be cast to Int");
+    EXPECT_EQ(h.eval("null.asInstanceOf[String] == null"), "true");
+}

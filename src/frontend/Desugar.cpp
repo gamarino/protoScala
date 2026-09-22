@@ -414,20 +414,6 @@ private:
         return p;
     }
 
-    // The variables a pattern binds, in source order (Alt contributes none:
-    // the compiler rejects variables in alternatives).
-    static void patternVariables(const Pattern& p, std::vector<std::string>& out) {
-        switch (p.kind) {
-            case Pattern::Kind::Var: if (p.name != "_") out.push_back(p.name); return;
-            case Pattern::Kind::Bind: out.push_back(p.name); patternVariables(*p.args[0], out); return;
-            case Pattern::Kind::SeqWildcard: if (!p.name.empty()) out.push_back(p.name); return;
-            case Pattern::Kind::Alt: return;
-            default:
-                for (const auto& a : p.args) patternVariables(*a, out);
-                return;
-        }
-    }
-
     // Patterns that always match (types are erased, so a tuple pattern is
     // trusted to meet tuples; a non-tuple element raises MatchError).
     static bool irrefutable(const Pattern& p) {

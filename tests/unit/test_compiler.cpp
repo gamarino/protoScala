@@ -1,6 +1,7 @@
 #include "compiler/Compiler.h"
 #include "frontend/Desugar.h"
 #include "frontend/Parser.h"
+#include "runtime/Primitives.h"
 
 #include <gtest/gtest.h>
 
@@ -15,17 +16,22 @@ CompiledUnit compile(const std::string& src, GlobalTable& g, UnitMode mode = Uni
     return c.compileUnit(*unit, mode, 0);
 }
 
-std::string listing(const std::string& src, UnitMode mode = UnitMode::Script) {
+// The globals and types a real session starts with (Session.cpp): `println`
+// alone is not enough for `List`, `Nil` and the TupleN companions.
+GlobalTable sessionGlobals() {
     GlobalTable g;
-    g.declare("println", BindingKind::Builtin);
+    for (const auto& n : builtinGlobalNames()) g.declare(n, BindingKind::Builtin);
     for (ClassInfo& t : builtinTypes()) g.defineBuiltinType(std::move(t));
+    return g;
+}
+
+std::string listing(const std::string& src, UnitMode mode = UnitMode::Script) {
+    GlobalTable g = sessionGlobals();
     return compile(src, g, mode).module->disassemble();
 }
 
 std::string compileError(const std::string& src) {
-    GlobalTable g;
-    g.declare("println", BindingKind::Builtin);
-    for (ClassInfo& t : builtinTypes()) g.defineBuiltinType(std::move(t));
+    GlobalTable g = sessionGlobals();
     try {
         compile(src, g);
     } catch (const CompileError& e) {
@@ -217,8 +223,22 @@ TEST(Compiler, AssignmentTargetsAndVarWrites) {
     EXPECT_FALSE(has(l, "MAKE_CELL"));
 }
 
-TEST(Compiler, Phase2NodesAreRejectedUntilImplemented) {
-    EXPECT_TRUE(has(compileError("val r = 1 match { case 1 => 2 }"), "match is not implemented yet"));
+TEST(CompilerPatterns, CascadeShape) {
+    const auto l = listing("case class P(x: Int)\ndef f(v: Any) = v match { case P(1) => 1; case s: String => 2; case _ => 3 }");
+    EXPECT_TRUE(has(l, "TEST_PROTO"));
+    EXPECT_TRUE(has(l, "UNAPPLY_FIELDS"));
+    EXPECT_TRUE(has(l, "TEST_TYPE 4 ; String"));
+    EXPECT_TRUE(has(l, "MATCH_ERROR"));
+    EXPECT_TRUE(has(listing("def f(xs: List[Int]) = xs match { case h :: t => h; case Nil => 0 }"), "UNCONS"));
+}
+
+TEST(CompilerPatterns, Errors) {
+    EXPECT_TRUE(has(compileError("def f(v: Any) = v match { case x: Int | x: String => 1 }"),
+                    "Illegal variable x in pattern alternative"));
+    EXPECT_TRUE(has(compileError("case class P(x: Int)\ndef f(v: Any) = v match { case P(a, b) => 1 }"),
+                    "wrong number of arguments for pattern P"));
+    EXPECT_TRUE(has(compileError("def f(v: Any) = v match { case q: Nope => 1 }"), "Not found: type Nope"));
+    EXPECT_TRUE(has(compileError("def f(v: Any) = v match { case Zork(a) => 1 }"), "Not found: Zork"));
 }
 
 TEST(CompilerTemplates, ClassesCompileToMakeClassNewAndMethods) {

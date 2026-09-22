@@ -570,6 +570,21 @@ std::string dump(const TypeTree& t) {
     return out;
 }
 
+// The variables a pattern binds, in source order (Alt contributes none: the
+// compiler rejects variables in alternatives). Used by Desugar (pattern value
+// definitions) and by the compiler (capture analysis, alternative checking).
+void patternVariables(const Pattern& p, std::vector<std::string>& out) {
+    switch (p.kind) {
+        case Pattern::Kind::Var: if (p.name != "_") out.push_back(p.name); return;
+        case Pattern::Kind::Bind: out.push_back(p.name); patternVariables(*p.args[0], out); return;
+        case Pattern::Kind::SeqWildcard: if (!p.name.empty()) out.push_back(p.name); return;
+        case Pattern::Kind::Alt: return;
+        default:
+            for (const auto& a : p.args) patternVariables(*a, out);
+            return;
+    }
+}
+
 std::string dump(const Pattern& p) {
     std::string out;
     renderPattern(out, p);
