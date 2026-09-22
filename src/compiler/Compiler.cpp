@@ -697,7 +697,8 @@ void Compiler::compileStats(const std::vector<NodePtr>& stats, std::size_t from,
 // ---------------------------------------------------------------------------
 
 void Compiler::compileFunction(const std::string& name, const std::vector<Param>& params,
-                               const Node& body, FnShape shape, SourcePos pos) {
+                               const Node& body, FnShape shape, SourcePos pos,
+                               bool paramless) {
     for (const Param& p : params) {
         if (p.defaultValue)
             throw CompileError("default parameter values are not implemented yet", p.pos);
@@ -707,6 +708,7 @@ void Compiler::compileFunction(const std::string& name, const std::vector<Param>
     auto mod = std::make_unique<BytecodeModule>();
     mod->setName(name);
     mod->setMethod(method);
+    mod->setParamless(paramless);
     FunctionState fs;
     fs.mod = mod.get();
     fs.parent = method ? nullptr : fn_;  // methods capture nothing (Design note 9)

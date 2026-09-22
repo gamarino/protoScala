@@ -253,6 +253,28 @@ TEST(CompilerTemplates, PrivateMemberSendCarriesAPlainFallback) {
     EXPECT_TRUE(has(l, "B::value/0 or value"));
 }
 
+// A named-argument send on a private member carries the same fallback.
+TEST(CompilerTemplates, PrivateKeywordSendCarriesAPlainFallback) {
+    const auto l = listing("class B { private def m(a: Int) = a\n def f(o: B) = o.m(a = 1) }");
+    EXPECT_TRUE(has(l, "B::m/0(a=) or m"));
+}
+
+// `def p = e` is paramless: the module records it so `obj.p()` can be rejected.
+TEST(CompilerTemplates, ParamlessMethodsAreMarked) {
+    GlobalTable g;
+    g.declare("println", BindingKind::Builtin);
+    for (ClassInfo& t : builtinTypes()) g.defineBuiltinType(std::move(t));
+    const auto cu = compile("class H { def p = 1\n def q() = 2 }", g);
+    bool sawParamless = false, sawEmptyParens = false;
+    for (std::size_t k = 0; k < cu.module->blockCount(); ++k) {
+        const BytecodeModule& b = cu.module->block(k);
+        if (b.name() == "p") sawParamless = b.isParamless();
+        if (b.name() == "q") sawEmptyParens = !b.isParamless();
+    }
+    EXPECT_TRUE(sawParamless);
+    EXPECT_TRUE(sawEmptyParens);
+}
+
 TEST(CompilerTemplates, StaticErrors) {
     EXPECT_TRUE(has(compileError("trait T\nval t = new T"), "T is a trait; it cannot be instantiated"));
     EXPECT_TRUE(has(compileError("abstract class A\nval a = new A"), "A is abstract; it cannot be instantiated"));

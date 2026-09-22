@@ -179,11 +179,15 @@ std::size_t BytecodeModule::addSuperSite(const std::string& name, std::uint32_t 
 }
 
 std::size_t BytecodeModule::addKwSendSite(const std::string& name, std::uint32_t positional,
-                                          const std::vector<std::string>& keywords) {
+                                          const std::vector<std::string>& keywords,
+                                          const std::string& fallback) {
     Const c{ConstKind::KwSendSite, 0, 0.0, name};
     c.argc = positional;
     c.names = keywords;
-    return findOrAdd(kwIndex_, name + "/" + std::to_string(positional) + "/" + joined(keywords),
+    c.key = fallback;
+    return findOrAdd(kwIndex_,
+                     name + "/" + std::to_string(positional) + "/" + joined(keywords) + "/" +
+                         fallback,
                      consts_, std::move(c));
 }
 
@@ -313,7 +317,7 @@ std::string formatConst(const BytecodeModule::Const& c) {
                 if (i) out += ",";
                 out += c.names[i] + "=";
             }
-            return out + ")";
+            return out + ")" + (c.key.empty() ? "" : " or " + c.key);
         }
     }
     return "?";

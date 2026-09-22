@@ -122,7 +122,8 @@ private:
     // Compiles a function body into a new block of the current module and emits
     // the capture pushes and MAKE_FN. Def and Method bodies allow `return`.
     void compileFunction(const std::string& name, const std::vector<Param>& params,
-                         const Node& body, FnShape shape, SourcePos pos);
+                         const Node& body, FnShape shape, SourcePos pos,
+                         bool paramless = false);
     void compileLazyThunk(const Node& rhs, SourcePos pos);  // thunk + MAKE_LAZY
     void compileStats(const std::vector<NodePtr>& stats, std::size_t from, SourcePos pos);
     void storeLocal(const LocalInfo& info, SourcePos pos);
@@ -137,6 +138,8 @@ private:
     // A SendSite constant for `recv.name(...)`: the private key when `name` is a
     // private member here, with the plain name as the runtime fallback (D5).
     std::size_t sendSite(const std::string& name, std::uint32_t argc);
+    std::size_t kwSendSite(const std::string& name, std::uint32_t positional,
+                           const std::vector<std::string>& keywords);
     void loadThis(SourcePos pos);
     std::vector<const TemplateDef*> sortTemplates(const std::vector<const TemplateDef*>& ts) const;
     ClassInfo buildClassInfo(const TemplateDef& t, const std::string& typeKey) const;

@@ -35,6 +35,14 @@ const char* opSymbol(Op op) {
     }
 }
 
+// "Box::value" -> "value": a private member's class-qualified key (D5) is an
+// implementation detail and never appears in a message.
+std::string plainName(std::string n) {
+    const auto sep = n.rfind("::");
+    if (sep != std::string::npos && sep > 0 && sep + 2 < n.size()) n = n.substr(sep + 2);
+    return n;
+}
+
 [[noreturn, gnu::cold]] void throwNotBoolean(proto::ProtoContext* ctx, const RuntimeLayout& L,
                                              const proto::ProtoObject* v) {
     throw ScalaError("ClassCastException", typeName(ctx, L, v) + " cannot be cast to Boolean");
@@ -136,7 +144,7 @@ const proto::ProtoObject* ExecutionEngine::dispatch(proto::ProtoContext* ctx,
     const proto::ProtoObject* receiver = base[0];
     if (receiver == PROTO_NONE)
         throw ScalaError("NullPointerException",
-                         "cannot invoke '" + name->toStdString(ctx) + "' on null");
+                         "cannot invoke '" + plainName(name->toStdString(ctx)) + "' on null");
     const proto::ProtoObject* m = receiver->getAttribute(ctx, name);
     if (!m || m == PROTO_NONE) {
         // PROTO_NONE is also a stored null: probe presence (DESIGN §4.1).
@@ -144,6 +152,24 @@ const proto::ProtoObject* ExecutionEngine::dispatch(proto::ProtoContext* ctx,
         if (argc == 0 && !applied) return PROTO_NONE;
         throw ScalaError("NullPointerException", "cannot call null");
     }
+    // `obj.p()` where `p` is written without a parameter list: Scala applies the
+    // *result* of the member (`def g = () => n; c.g()` is `c.g.apply()`), and
+    // rejects the call when the result takes no arguments ("method p in class H
+    // does not take parameters"). `def p() = e` is arity-1 too but not
+    // paramless, so it is called directly.
+    if (applied && argc == 0)
+        if (const BytecodeModule* mod = compiledModuleOf(ctx, layout_, m))
+            if (mod->isMethod() && mod->isParamless() &&
+                !m->getOwnAttributeDirect(ctx, layout_.selfKey)) {
+                const proto::ProtoObject* r = execute(ctx, *mod, base, 1, nullptr);
+                base[0] = r;  // the receiver is no longer needed; keep r rooted
+                if (r != PROTO_NONE &&
+                    (compiledModuleOf(ctx, layout_, r) || r->isMethod(ctx) ||
+                     r->hasAttribute(ctx, layout_.applyName) == PROTO_TRUE))
+                    return invoke(ctx, r, base + 1, 0);
+                throw ScalaError("NoSuchMethodError", "method " + plainName(name->toStdString(ctx)) +
+                                                          " does not take parameters");
+            }
     return callMember(ctx, m, base, argc, applied);
 }
 
@@ -337,7 +363,8 @@ const proto::ProtoObject* ExecutionEngine::sendKeywords(proto::ProtoContext* ctx
                                                         const BytecodeModule::Const& site) {
     const proto::ProtoObject* receiver = base[0];
     if (receiver == PROTO_NONE)
-        throw ScalaError("NullPointerException", "cannot invoke '" + site.sval + "' on null");
+        throw ScalaError("NullPointerException",
+                         "cannot invoke '" + plainName(site.sval) + "' on null");
     const proto::ProtoString* name = siteName(ctx, receiver, site);
     const proto::ProtoObject* m = receiver->getAttribute(ctx, name);
     if (!m || m == PROTO_NONE) throwMissingMember(ctx, receiver, name);
@@ -383,10 +410,8 @@ bool ExecutionEngine::testType(proto::ProtoContext* ctx, TypeCode code,
 
 void ExecutionEngine::throwMissingMember(proto::ProtoContext* ctx, const proto::ProtoObject* receiver,
                                          const proto::ProtoString* name) const {
-    std::string n = name->toStdString(ctx);
     // A private member's key is "<Class>::<name>": report the name.
-    const auto sep = n.rfind("::");
-    if (sep != std::string::npos && sep > 0 && sep + 2 < n.size()) n = n.substr(sep + 2);
+    std::string n = plainName(name->toStdString(ctx));
     // `x_=` on an object that has `x`: an assignment to a val.
     if (n.size() > 2 && n.compare(n.size() - 2, 2, "_=") == 0) {
         const std::string field = n.substr(0, n.size() - 2);

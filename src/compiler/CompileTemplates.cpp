@@ -54,6 +54,13 @@ std::size_t Compiler::sendSite(const std::string& name, std::uint32_t argc) {
     return fn_->mod->addSendSite(key, argc, key == name ? std::string() : name);
 }
 
+std::size_t Compiler::kwSendSite(const std::string& name, std::uint32_t positional,
+                                 const std::vector<std::string>& keywords) {
+    const std::string key = selectKey(name);
+    return fn_->mod->addKwSendSite(key, positional, keywords,
+                                   key == name ? std::string() : name);
+}
+
 void Compiler::loadThis(SourcePos pos) {
     bool found = false;
     const LocalInfo info = captureInto(fn_, "this", pos, &found);
@@ -196,13 +203,15 @@ ClassInfo Compiler::buildClassInfo(const TemplateDef& t, const std::string& type
 
     // Own members.
     std::unordered_set<std::string> own;
-    // `declaredPrivate`: written `private`. A plain constructor parameter is not
-    // declared private - Scala makes it a private[this] local that is not a
-    // member at all - so it may shadow an inherited public member (scalac
-    // accepts `class T(v: Int) extends Node(v)` over `class Node(val v: Int)`),
-    // and only a member the user marked private is checked below.
+    // A plain constructor parameter is not a member: Scala makes it a
+    // private[this] local, so it may shadow an inherited public member without
+    // `override` and without weakening its access (scalac accepts
+    // `class T(v: Int) extends Node(v)` over `class Node(val v: Int)`).
+    // `declaredPrivate` is "written private"; `declaredMember` is "declares a
+    // member of the template". Both checks below apply only to real members.
     auto addOwn = [&](const std::string& name, MemberKind kind, bool isPublic, bool concrete,
-                      bool declaredPrivate, SourcePos pos) {
+                      bool declaredPrivate, bool isOverride, bool declaredMember,
+                      SourcePos pos) {
         if (!own.insert(name).second)
             throw CompileError(name + " is already defined in " + t.name, pos);
         auto inherited = c.members.find(name);
@@ -215,6 +224,13 @@ ClassInfo Compiler::buildClassInfo(const TemplateDef& t, const std::string& type
                                    " inherited by " + t.name +
                                    ": it has weaker access privileges",
                                pos);
+        // Redefining a member an ancestor already implements needs `override`
+        // (implementing an abstract one does not). scalac: "error overriding
+        // value v in class A ...; value v needs `override` modifier".
+        if (declaredMember && !isOverride && inheritedConcrete)
+            throw CompileError("error overriding " + name + " inherited by " + t.name + ": " +
+                                   name + " needs an `override` modifier",
+                               pos);
         c.members[name] =
             MemberInfo{kind, isPublic ? name : privateKey(c.key, name), concrete || inheritedConcrete};
     };
@@ -226,10 +242,12 @@ ClassInfo Compiler::buildClassInfo(const TemplateDef& t, const std::string& type
             throw CompileError("default parameter values are not implemented yet", p.pos);
         // Plain parameters are private fields (reachable from the methods).
         const bool isPublic = (p.isVal || p.isVar || c.isCase) && !p.mods.isPrivate;
+        const bool paramIsMember = p.isVal || p.isVar || c.isCase;
         addOwn(p.name, p.isVar ? MemberKind::Var : MemberKind::Val, isPublic, true,
-               p.mods.isPrivate, p.pos);
+               p.mods.isPrivate, p.mods.isOverride, paramIsMember, p.pos);
         if (p.isVar) {
-            addOwn(setterName(p.name), MemberKind::Def, isPublic, true, p.mods.isPrivate, p.pos);
+            addOwn(setterName(p.name), MemberKind::Def, isPublic, true, p.mods.isPrivate,
+                   p.mods.isOverride, paramIsMember, p.pos);
             ownVar = true;
         }
         c.ctorParams.push_back(p.name);
@@ -249,10 +267,11 @@ ClassInfo Compiler::buildClassInfo(const TemplateDef& t, const std::string& type
                        v.isLazy  ? MemberKind::LazyVal
                        : v.isVar ? MemberKind::Var
                                  : MemberKind::Val,
-                       !v.mods.isPrivate, v.rhs != nullptr, v.mods.isPrivate, v.pos);
+                       !v.mods.isPrivate, v.rhs != nullptr, v.mods.isPrivate, v.mods.isOverride,
+                       true, v.pos);
                 if (v.isVar) {
                     addOwn(setterName(v.name), MemberKind::Def, !v.mods.isPrivate, true,
-                           v.mods.isPrivate, v.pos);
+                           v.mods.isPrivate, v.mods.isOverride, true, v.pos);
                     ownVar = true;
                 }
                 if (v.rhs) hasStatements = true;
@@ -277,7 +296,8 @@ ClassInfo Compiler::buildClassInfo(const TemplateDef& t, const std::string& type
                     break;
                 }
                 addOwn(d.name, d.paramLists.empty() ? MemberKind::ParamlessDef : MemberKind::Def,
-                       !d.mods.isPrivate, d.body != nullptr, d.mods.isPrivate, d.pos);
+                       !d.mods.isPrivate, d.body != nullptr, d.mods.isPrivate, d.mods.isOverride,
+                       true, d.pos);
                 break;
             }
             case NodeKind::TemplateDef:
@@ -374,7 +394,8 @@ void Compiler::compileTemplate(const TemplateDef& t, const ClassInfo& info) {
         const auto& d = as<DefDef>(*s);
         if (d.name == "this" || !d.body) continue;
         keys.push_back(info.members.at(d.name).key);
-        compileFunction(d.name, paramsOfDef(d), *d.body, FnShape::Method, d.pos);
+        compileFunction(d.name, paramsOfDef(d), *d.body, FnShape::Method, d.pos,
+                        /*paramless=*/d.paramLists.empty());
     }
     auto setterFor = [&](const std::string& name, SourcePos pos) {
         keys.push_back(info.members.at(setterName(name)).key);
@@ -492,6 +513,24 @@ void Compiler::compileConstructor(const TemplateDef& t, const ClassInfo& info) {
                                    t.pos);
             compileInitCall(*tr, ref && ref->hasArgs ? ref->args : noArgs, t.pos);
         }
+    }
+    // A parameter field that overrides an inherited member is stored twice: once
+    // before the chain (so an inherited initialiser sees it, as scalac does) and
+    // once after it, because the ancestor's own initialiser writes the same
+    // attribute key and the override must win afterwards.
+    for (std::size_t k = 0; k < t.ctorParams.size(); ++k) {
+        const std::string& name = t.ctorParams[k].name;
+        if (info.members.at(name).key != name) continue;  // a private field: no clash
+        bool inherited = false;
+        for (std::size_t j = 1; j < info.linearization.size() && !inherited; ++j) {
+            const ClassInfo* a = globals_.findTypeByKey(info.linearization[j]);
+            if (!a) continue;
+            auto it = a->members.find(name);
+            inherited = it != a->members.end() && it->second.key == name && it->second.concrete;
+        }
+        if (!inherited) continue;
+        emit(Op::PUSH_LOCAL, 1 + k, t.pos, +1);
+        emit(Op::STORE_FIELD, fn_->mod->addSymbol(info.members.at(name).key), t.pos, -1);
     }
     for (const NodePtr& s : t.body) {  // lazy holders: a thunk method per member (Q12)
         if (s->kind != NodeKind::ValDef || !as<ValDef>(*s).isLazy) continue;
@@ -687,10 +726,8 @@ void Compiler::compileNamedSend(const Select& sel, const std::vector<NodePtr>& a
     }
     for (const auto& arg : args)
         compileExpr(arg->kind == NodeKind::NamedArg ? *as<NamedArg>(*arg).value : *arg);
-    emit(Op::SEND_KW,
-         fn_->mod->addKwSendSite(selectKey(sel.name), static_cast<std::uint32_t>(positional),
-                                 keywords),
-         pos, -static_cast<int>(args.size()));
+    emit(Op::SEND_KW, kwSendSite(sel.name, static_cast<std::uint32_t>(positional), keywords), pos,
+         -static_cast<int>(args.size()));
 }
 
 } // namespace protoScala

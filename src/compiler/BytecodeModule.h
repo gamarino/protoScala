@@ -93,7 +93,8 @@ public:
     std::size_t addClassSpec(const ClassSpecData& spec);              // never de-duplicated
     std::size_t addSuperSite(const std::string& name, std::uint32_t argc, const std::string& ownerKey);
     std::size_t addKwSendSite(const std::string& name, std::uint32_t positional,
-                              const std::vector<std::string>& keywords);
+                              const std::vector<std::string>& keywords,
+                              const std::string& fallback = {});
 
     // Emits `op operand` (with an EXTEND prefix when operand > kMaxOperand) and
     // returns the position of the `op` word. Throws std::length_error beyond
@@ -126,6 +127,10 @@ public:
     // A method: the receiver is argument 0 (`this`); arity() counts it.
     bool isMethod() const { return method_; }
     void setMethod(bool m) { method_ = m; }
+    // A member written without a parameter list (`def p = e`, a val, a lazy
+    // val): `obj.p()` is an error, unlike `def p() = e` (SEND_APPLY).
+    bool isParamless() const { return paramless_; }
+    void setParamless(bool p) { paramless_ = p; }
 
     void addCapture(int parentSlot, int localSlot) { captures_.push_back({parentSlot, localSlot}); }
     const std::vector<CaptureSpec>& captureSpecs() const { return captures_; }
@@ -164,6 +169,7 @@ private:
     int localCount_ = 0;
     int maxStack_ = 0;
     bool method_ = false;
+    bool paramless_ = false;
 };
 
 } // namespace protoScala
