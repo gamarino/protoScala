@@ -1,0 +1,101 @@
+/*
+ * StackGuard — native stack checks and the stack size of runtime threads.
+ *
+ * The bytecode VM runs every non-tail call as a nested
+ * ExecutionEngine::execute on the native stack, and the printer, value
+ * equality and value hashing recurse natively over nested collections. A
+ * recursion deeper than the thread's stack would crash the process with
+ * SIGSEGV; checkNativeStack turns it into a StackOverflowError, the analogue
+ * of the JVM's java.lang.StackOverflowError, which the script driver and the
+ * REPL handle like any other Scala runtime error. The parser and the
+ * compiler recurse once per level of nested source constructs and check with
+ * StackUse::Source; their callers report the error as a compile error.
+ *
+ * The check compares the address of a local variable with a per-thread
+ * limit: the lowest address of the thread's stack, as the thread library
+ * reports it (pthread_getattr_np), plus kStackReserveBytes. The limit is
+ * computed on the first check a thread makes, so the check needs no
+ * per-thread set-up and adapts to any stack size: the evaluator thread,
+ * threads created by protoCore, the main thread under any `ulimit -s`. No
+ * guard page and no signal handler are involved.
+ *
+ * Depth. The script runner and the REPL run on the evaluator thread, whose
+ * stack holds kThreadStackBytes; later phases' worker threads get the same
+ * stack size through configureThreadStacks, so a recursion reaches the same
+ * depth on every kind of thread. Stack pages are committed only when a
+ * recursion touches them.
+ */
+#pragma once
+
+#include "runtime/Errors.h"
+
+#include <cstddef>
+#include <cstdint>
+#include <string>
+
+namespace protoScala {
+
+// Raised when a recursion reaches the end of the thread's native stack;
+// what() starts with "StackOverflowError: ".
+class StackOverflowError : public ScalaError {
+public:
+    explicit StackOverflowError(const std::string& message)
+        : ScalaError("StackOverflowError", message) {}
+};
+
+// Stack size of the evaluator thread and minimum default stack size of the
+// threads the process creates after configureThreadStacks.
+inline constexpr std::size_t kThreadStackBytes = 32u << 20;
+
+// Stack kept free below the point where checkNativeStack raises: room for
+// the work done between two checks (a primitive, protoCore internals, the
+// C++ exception machinery unwinding the error). A stack smaller than four
+// times this keeps a quarter of its size free instead.
+inline constexpr std::size_t kStackReserveBytes = 256u << 10;
+
+// What recursion a check guards, which selects the wording of the error.
+enum class StackUse {
+    // Calls, and printing or comparing nested data (the VM and the runtime).
+    Evaluation,
+    // Nested source constructs being parsed or compiled (the parser, the compiler).
+    Source,
+};
+
+namespace detail {
+// The lowest stack address a check accepts on this thread; UINTPTR_MAX until
+// the thread's first check computes it.
+extern constinit thread_local std::uintptr_t tl_stackLimit;
+
+// First check of a thread (computes tl_stackLimit), or an exhausted stack
+// (throws StackOverflowError worded for `use`).
+[[gnu::cold, gnu::noinline]]
+void checkNativeStackSlow(std::uintptr_t frameAddress, StackUse use);
+} // namespace detail
+
+// Throws StackOverflowError when the calling function's frame lies within
+// kStackReserveBytes of the end of the thread's stack. Cost: one
+// thread-local load and one compare; `use` only reaches the cold path.
+inline void checkNativeStack(StackUse use = StackUse::Evaluation) {
+    const char probe = 0;
+    const auto frameAddress = reinterpret_cast<std::uintptr_t>(&probe);
+    if (__builtin_expect(frameAddress < detail::tl_stackLimit, 0))
+        detail::checkNativeStackSlow(frameAddress, use);
+}
+
+// Raises the default stack size of threads created from now on without an
+// explicit size (std::thread, protoCore's newThread) to kThreadStackBytes,
+// unless it is already larger. Call once at start-up, before any thread is
+// created. Only effective with glibc; elsewhere threads keep the platform
+// default and checkNativeStack still guards them.
+void configureThreadStacks();
+
+// Runs `body(arg)` on a new thread whose stack holds kThreadStackBytes (or
+// the default stack size, if larger), waits for it and returns its result;
+// an exception escaping `body` is rethrown on the calling thread. While
+// waiting, the calling thread blocks asynchronous signals, so they are
+// delivered to the thread running `body` as they would be to a
+// single-threaded program. If the thread cannot be created, `body` runs on
+// the calling thread.
+int runOnEvaluatorThread(int (*body)(void*), void* arg);
+
+} // namespace protoScala

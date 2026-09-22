@@ -81,6 +81,17 @@ add_library(protoscala_compiler STATIC
 target_link_libraries(protoscala_compiler PUBLIC protoscala_frontend protoscala_support)
 target_compile_options(protoscala_compiler PRIVATE -Wall -Wextra -Wpedantic)
 
+# --- Runtime: VM, values, primitives, stack guard --------------------------------
+add_library(protoscala_runtime STATIC
+    src/runtime/StackGuard.cpp
+    src/runtime/Runtime.cpp
+    src/runtime/Values.cpp
+    src/runtime/ExecutionEngine.cpp
+)
+target_link_libraries(protoscala_runtime PUBLIC protoscala_compiler protoscala_support
+    ${PROTOCORE_LIBRARY} pthread)
+target_compile_options(protoscala_runtime PRIVATE -Wall -Wextra -Wpedantic)
+
 # --- protoscala binary ----------------------------------------------------------
 add_executable(protoscala
     src/main.cpp

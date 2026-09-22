@@ -10,10 +10,13 @@ add_executable(protoscala_unit_tests
     test_desugar.cpp
     test_bytecode.cpp
     test_compiler.cpp
+    test_values.cpp
+    test_stackguard.cpp
+    test_engine.cpp
 )
 
 target_link_libraries(protoscala_unit_tests
-    PRIVATE protoscala_compiler protoscala_frontend protoscala_support gtest gtest_main)
+    PRIVATE protoscala_runtime protoscala_compiler protoscala_frontend protoscala_support gtest gtest_main)
 
 target_compile_options(protoscala_unit_tests PRIVATE -Wall -Wextra -Wpedantic)
 
