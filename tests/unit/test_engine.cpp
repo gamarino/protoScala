@@ -465,3 +465,11 @@ TEST(EngineObjectModel, AMethodWithCapturesIsNeverRunWithoutThem) {
         EXPECT_NE(std::string(e.what()).find("captured value"), std::string::npos) << e.what();
     }
 }
+
+TEST(Prelude, OptionIsDefinedInEverySession) {
+    EvalHarness h;
+    EXPECT_EQ(h.eval("Some(1)"), "Some(1)");
+    EXPECT_EQ(h.eval("None"), "None");
+    EXPECT_EQ(h.eval("Some(2).map(_ + 1).getOrElse(0)"), "3");
+    EXPECT_EQ(h.eval("None.get"), "error: NoSuchElementException: None.get");
+}

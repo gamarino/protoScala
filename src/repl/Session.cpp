@@ -3,6 +3,7 @@
 #include "frontend/Desugar.h"
 #include "frontend/Parser.h"
 #include "runtime/Errors.h"
+#include "runtime/Prelude.h"
 #include "runtime/Primitives.h"
 #include "runtime/Values.h"
 
@@ -46,6 +47,8 @@ Session::Session() : runtime_(space_), engine_(runtime_.layout()) {
     installPrimitives(runtime_.rootContext(), runtime_.layout());
     for (const auto& n : builtinGlobalNames()) globals_.declare(n, BindingKind::Builtin);
     for (ClassInfo& t : builtinTypes()) globals_.defineBuiltinType(std::move(t));
+    proto::ProtoContext ctx(&space_, runtime_.rootContext());
+    loadPrelude(&ctx, engine_, globals_, modules_);
 }
 
 Session::~Session() { std::fflush(stdout); }

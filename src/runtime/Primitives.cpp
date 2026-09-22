@@ -109,6 +109,14 @@ PRIM(prim_print) {
     return layoutOf().unit;
 }
 
+// __raise(className, message): raises a Scala error. The prelude's stand-in
+// for `throw` until exceptions exist; not part of the language.
+PRIM(prim_raise) {
+    const std::string cls = stringArg(ctx, arg(ctx, args, 0, "__raise", 2), "__raise");
+    const std::string msg = stringArg(ctx, args->getAt(ctx, 1), "__raise");
+    throw ScalaError(cls, msg);
+}
+
 // ---------------------------------------------------------------------------
 // Any
 // ---------------------------------------------------------------------------
@@ -846,7 +854,6 @@ void installAll(ProtoContext* ctx, proto::ProtoObject* target, const MethodEntry
 const std::vector<std::string>& builtinGlobalNames() {
     // The TupleN companions are globals too: `Tuple2(1, 2)` is `(1, 2)`.
     static const std::vector<std::string> names = [] {
-        // `__raise` is installed by Task 11; naming it here is harmless.
         std::vector<std::string> v = {"println", "print", "List", "Nil", "__raise"};
         for (unsigned n = 2; n <= kMaxTupleArity; ++n) v.push_back("Tuple" + std::to_string(n));
         return v;
@@ -855,7 +862,8 @@ const std::vector<std::string>& builtinGlobalNames() {
 }
 
 void installPrimitives(ProtoContext* ctx, const RuntimeLayout& L) {
-    static constexpr MethodEntry globals[] = {{"println", &prim_println}, {"print", &prim_print}};
+    static constexpr MethodEntry globals[] = {
+        {"println", &prim_println}, {"print", &prim_print}, {"__raise", &prim_raise}};
     static constexpr MethodEntry any[] = {
         {"toString", &any_toString}, {"equals", &any_equals}, {"==", &any_eqeq},
         {"!=", &any_noteq}, {"eq", &any_eq}, {"ne", &any_ne},

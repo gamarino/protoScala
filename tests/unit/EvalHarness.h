@@ -7,6 +7,7 @@
 #include "frontend/Parser.h"
 #include "runtime/Errors.h"
 #include "runtime/ExecutionEngine.h"
+#include "runtime/Prelude.h"
 #include "runtime/Primitives.h"
 #include "runtime/Runtime.h"
 #include "runtime/Values.h"
@@ -24,6 +25,8 @@ public:
         installPrimitives(runtime_.rootContext(), runtime_.layout());
         for (const auto& n : builtinGlobalNames()) globals_.declare(n, BindingKind::Builtin);
         for (ClassInfo& t : builtinTypes()) globals_.defineBuiltinType(std::move(t));
+        proto::ProtoContext ctx(&space_, runtime_.rootContext());
+        loadPrelude(&ctx, engine_, globals_, modules_);
     }
 
     Runtime& runtime() { return runtime_; }

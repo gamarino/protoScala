@@ -61,6 +61,17 @@ endif()
 configure_file(src/support/Version.h.in
     ${CMAKE_CURRENT_BINARY_DIR}/generated/protoScala/Version.h @ONLY)
 
+# --- Prelude (lib/prelude.scala, embedded in the binary) -------------------------
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/lib/prelude.scala" PROTOSCALA_PRELUDE_SOURCE)
+string(FIND "${PROTOSCALA_PRELUDE_SOURCE}" ")proto_prelude" PROTOSCALA_PRELUDE_DELIMITER)
+if(NOT PROTOSCALA_PRELUDE_DELIMITER EQUAL -1)
+    message(FATAL_ERROR "lib/prelude.scala must not contain the raw-string delimiter")
+endif()
+configure_file(src/support/PreludeSource.cpp.in
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/PreludeSource.cpp @ONLY)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/lib/prelude.scala")
+
 # --- Support library ------------------------------------------------------------
 # Shared by every later library (frontend, compiler, runtime, repl). Phase 1
 # adds protoscala_frontend, protoscala_compiler, protoscala_runtime and
@@ -103,6 +114,8 @@ add_library(protoscala_runtime STATIC
     src/runtime/ExecutionEngine.cpp
     src/runtime/Primitives.cpp
     src/runtime/ProductPrimitives.cpp
+    src/runtime/Prelude.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/PreludeSource.cpp
 )
 target_link_libraries(protoscala_runtime PUBLIC protoscala_compiler protoscala_support
     ${PROTOCORE_LIBRARY} pthread)
