@@ -1,0 +1,313 @@
+#include "frontend/Layout.h"
+#include "frontend/Lexer.h"
+
+namespace protoScala {
+
+namespace {
+
+enum class RegionKind : uint8_t { TopLevel, Braces, Parens, Brackets, Indented };
+
+struct Region {
+    RegionKind kind;
+    int width = 0;
+    bool widthKnown = true;
+    TokenKind opener = TokenKind::EndOfFile;  // Indented: the token that opened it
+    bool condition = false;                   // Parens/Braces right after if/while/for
+};
+
+bool canEndStatement(TokenKind k) {
+    switch (k) {
+        case TokenKind::IntLit: case TokenKind::FloatLit: case TokenKind::CharLit:
+        case TokenKind::StringLit: case TokenKind::InterpolatedString:
+        case TokenKind::Identifier: case TokenKind::KwThis: case TokenKind::KwNull:
+        case TokenKind::KwTrue: case TokenKind::KwFalse: case TokenKind::KwReturn:
+        case TokenKind::KwType: case TokenKind::Underscore: case TokenKind::RParen:
+        case TokenKind::RBracket: case TokenKind::RBrace: case TokenKind::EndMarker:
+        case TokenKind::Outdent:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool canBeginStatement(TokenKind k) {
+    switch (k) {
+        case TokenKind::KwCatch: case TokenKind::KwElse: case TokenKind::KwExtends:
+        case TokenKind::KwFinally: case TokenKind::KwMatch: case TokenKind::KwWith:
+        case TokenKind::KwYield: case TokenKind::KwThen: case TokenKind::KwDo:
+        case TokenKind::Comma: case TokenKind::Dot: case TokenKind::Semicolon:
+        case TokenKind::Colon: case TokenKind::ColonEol: case TokenKind::Equals:
+        case TokenKind::Arrow: case TokenKind::CtxArrow: case TokenKind::TypeLambdaArrow:
+        case TokenKind::LeftArrow: case TokenKind::Subtype: case TokenKind::Supertype:
+        case TokenKind::Hash: case TokenKind::LBracket: case TokenKind::RParen:
+        case TokenKind::RBracket: case TokenKind::RBrace: case TokenKind::EndOfFile:
+            return false;
+        default:
+            return true;
+    }
+}
+
+bool opensRegion(TokenKind k) {
+    switch (k) {
+        case TokenKind::Equals: case TokenKind::Arrow: case TokenKind::CtxArrow:
+        case TokenKind::LeftArrow: case TokenKind::KwCatch: case TokenKind::KwDo:
+        case TokenKind::KwElse: case TokenKind::KwFinally: case TokenKind::KwFor:
+        case TokenKind::KwIf: case TokenKind::KwMatch: case TokenKind::KwReturn:
+        case TokenKind::KwThen: case TokenKind::KwThrow: case TokenKind::KwTry:
+        case TokenKind::KwWhile: case TokenKind::KwYield: case TokenKind::KwWith:
+        case TokenKind::ColonEol:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// The previous line ends with a token that says the statement continues.
+bool continuesStatement(TokenKind k) {
+    switch (k) {
+        case TokenKind::KwThen: case TokenKind::KwElse: case TokenKind::KwDo:
+        case TokenKind::KwCatch: case TokenKind::KwFinally: case TokenKind::KwYield:
+        case TokenKind::KwMatch:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// Legacy rule: a closing keyword on the same line closes an Indented region
+// opened by its partner. RParen/RBrace stand for an old-style condition.
+bool closesRegionOpenedBy(TokenKind closer, TokenKind opener) {
+    switch (closer) {
+        case TokenKind::KwThen:    return opener == TokenKind::KwIf;
+        case TokenKind::KwElse:    return opener == TokenKind::KwThen || opener == TokenKind::RParen;
+        case TokenKind::KwDo:      return opener == TokenKind::KwWhile || opener == TokenKind::KwFor;
+        case TokenKind::KwYield:   return opener == TokenKind::KwFor || opener == TokenKind::RParen ||
+                                          opener == TokenKind::RBrace;
+        case TokenKind::KwCatch:   return opener == TokenKind::KwTry;
+        case TokenKind::KwFinally: return opener == TokenKind::KwTry || opener == TokenKind::KwCatch;
+        default:                   return false;
+    }
+}
+
+bool isCloser(TokenKind k) {
+    return k == TokenKind::RParen || k == TokenKind::RBracket || k == TokenKind::RBrace;
+}
+
+bool isEndDesignator(TokenKind k) {
+    switch (k) {
+        case TokenKind::Identifier: case TokenKind::KwIf: case TokenKind::KwWhile:
+        case TokenKind::KwFor: case TokenKind::KwMatch: case TokenKind::KwTry:
+        case TokenKind::KwNew: case TokenKind::KwThis: case TokenKind::KwVal:
+        case TokenKind::KwGiven:
+            return true;
+        default:
+            return false;
+    }
+}
+
+class LayoutPass {
+public:
+    explicit LayoutPass(const std::vector<Token>& raw) : raw_(raw) {}
+
+    std::vector<Token> run() {
+        regions_.push_back(Region{RegionKind::TopLevel, raw_.front().lineIndent});
+        for (std::size_t i = 0; i < raw_.size(); ++i) {
+            const Token& t = raw_[i];
+            if (t.kind == TokenKind::Error)
+                throw LexError(t.text, t.pos, t.errorAtEof);
+            if (t.kind == TokenKind::EndOfFile) {
+                while (regions_.back().kind == RegionKind::Indented) {
+                    regions_.pop_back();
+                    synth(TokenKind::Outdent, t);
+                }
+                if (regions_.size() > 1)
+                    throw LexError(std::string("unclosed '") + openerName(regions_.back().kind) +
+                                   "'", t.pos, /*atEof=*/true);
+                out_.push_back(t);
+                break;
+            }
+            if (t.firstOnLine && !out_.empty()) lineBreak(i);
+            if (t.kind == TokenKind::Identifier && t.text == "end" && t.firstOnLine &&
+                tryEndMarker(i)) {
+                continue;
+            }
+            if (!t.firstOnLine) closeByKeyword(t);
+            bool closesCondition = false;
+            switch (t.kind) {
+                case TokenKind::LParen:
+                    regions_.push_back(Region{RegionKind::Parens, 0, true, TokenKind::EndOfFile,
+                                              isConditionKeyword(prevKind_)});
+                    break;
+                case TokenKind::LBracket:
+                    regions_.push_back(Region{RegionKind::Brackets});
+                    break;
+                case TokenKind::LBrace: {
+                    // `{` followed by a token on the same line (`{ x =>`): the
+                    // region's width is the width of this line. `{` at the end of
+                    // a line: the width of the first line inside (set by lineBreak).
+                    const bool sameLine = !raw_[i + 1].firstOnLine;
+                    regions_.push_back(Region{RegionKind::Braces, sameLine ? t.lineIndent : 0,
+                                              sameLine, TokenKind::EndOfFile,
+                                              prevKind_ == TokenKind::KwFor});
+                    break;
+                }
+                case TokenKind::RParen: case TokenKind::RBracket: case TokenKind::RBrace:
+                    closesCondition = closeBracket(t);
+                    break;
+                default:
+                    break;
+            }
+            Token copy = t;
+            if (t.kind == TokenKind::Colon && raw_[i + 1].firstOnLine)
+                copy.kind = TokenKind::ColonEol;
+            out_.push_back(copy);
+            prevKind_ = copy.kind;
+            prevClosesCondition_ = closesCondition;
+        }
+        return std::move(out_);
+    }
+
+private:
+    const std::vector<Token>& raw_;
+    std::vector<Token> out_;
+    std::vector<Region> regions_;
+    TokenKind prevKind_ = TokenKind::EndOfFile;
+    bool prevClosesCondition_ = false;
+
+    static bool isConditionKeyword(TokenKind k) {
+        return k == TokenKind::KwIf || k == TokenKind::KwWhile || k == TokenKind::KwFor;
+    }
+
+    static const char* openerName(RegionKind k) {
+        switch (k) {
+            case RegionKind::Parens:   return "(";
+            case RegionKind::Brackets: return "[";
+            case RegionKind::Braces:   return "{";
+            default:                   return "?";
+        }
+    }
+
+    void synth(TokenKind k, const Token& at) {
+        Token s;
+        s.kind = k;
+        s.pos = at.pos;
+        s.end = at.pos;
+        s.lineIndent = at.lineIndent;
+        out_.push_back(s);
+    }
+
+    void lineBreak(std::size_t i) {
+        const Token& t = raw_[i];
+        if (regions_.back().kind == RegionKind::Parens ||
+            regions_.back().kind == RegionKind::Brackets)
+            return;  // DESIGN §3.2: no layout tokens inside (...) and [...]
+        const int w = t.lineIndent;
+        if (regions_.back().kind == RegionKind::Braces && !regions_.back().widthKnown) {
+            regions_.back().width = w;
+            regions_.back().widthKnown = true;
+        }
+        const bool conditionOpener =
+            prevClosesCondition_ && t.kind != TokenKind::KwThen &&
+            t.kind != TokenKind::KwDo && t.kind != TokenKind::KwYield;
+        if ((opensRegion(prevKind_) || conditionOpener) && w > regions_.back().width) {
+            // An old-style condition is recorded as RParen whether it closed
+            // with `)` or (for `for {...}`) with `}`: closesRegionOpenedBy
+            // treats both alike.
+            const TokenKind opener = conditionOpener ? TokenKind::RParen : prevKind_;
+            regions_.push_back(Region{RegionKind::Indented, w, true, opener});
+            synth(TokenKind::Indent, t);
+            return;
+        }
+        if (w < regions_.back().width) {
+            if (continuesStatement(prevKind_)) return;
+            bool popped = false;
+            while (regions_.back().kind == RegionKind::Indented && w < regions_.back().width) {
+                regions_.pop_back();
+                synth(TokenKind::Outdent, t);
+                popped = true;
+            }
+            const Region& cur = regions_.back();
+            // After the pops the line must sit exactly on an enclosing width:
+            // deeper than an Indented region it returned to, or shallower than
+            // the top level (whose width is the first line's), matches none.
+            const bool between = popped && cur.kind == RegionKind::Indented && w > cur.width;
+            const bool belowTop = cur.kind == RegionKind::TopLevel && w != cur.width;
+            if ((between || belowTop) && !isCloser(t.kind))
+                throw LexError("unindent does not match any outer indentation level",
+                               t.pos, false);
+            const bool widthOk = (w == cur.width) ||
+                                 (cur.kind == RegionKind::Braces && w < cur.width);
+            if (widthOk && (popped || canEndStatement(prevKind_)) &&
+                canBeginStatement(t.kind) && !isLeadingInfix(i))
+                synth(TokenKind::Newline, t);
+            return;
+        }
+        if (w == regions_.back().width && canEndStatement(prevKind_) &&
+            canBeginStatement(t.kind) && !isLeadingInfix(i))
+            synth(TokenKind::Newline, t);
+        // w > width after a non-opener: a continuation line, nothing inserted.
+    }
+
+    // Scala 3 leading infix operator: an operator identifier followed by a
+    // blank and an operand on the same line.
+    bool isLeadingInfix(std::size_t i) const {
+        const Token& t = raw_[i];
+        if (t.kind != TokenKind::Identifier || !t.isOperator || t.backquoted) return false;
+        const Token& n = raw_[i + 1];
+        if (n.kind == TokenKind::EndOfFile || n.firstOnLine) return false;
+        if (n.pos.column <= t.end.column) return false;  // no blank after the operator
+        return canBeginStatement(n.kind) && !isCloser(n.kind);
+    }
+
+    void closeByKeyword(const Token& t) {
+        while (regions_.back().kind == RegionKind::Indented &&
+               closesRegionOpenedBy(t.kind, regions_.back().opener)) {
+            regions_.pop_back();
+            synth(TokenKind::Outdent, t);
+        }
+    }
+
+    // Returns whether the closed bracket was an old-style condition.
+    bool closeBracket(const Token& t) {
+        while (regions_.back().kind == RegionKind::Indented) {
+            regions_.pop_back();
+            synth(TokenKind::Outdent, t);
+        }
+        const RegionKind want = t.kind == TokenKind::RParen   ? RegionKind::Parens
+                              : t.kind == TokenKind::RBracket ? RegionKind::Brackets
+                                                              : RegionKind::Braces;
+        if (regions_.back().kind != want)
+            throw LexError("unbalanced '" + t.text + "'", t.pos, false);
+        const bool condition = regions_.back().condition;
+        regions_.pop_back();
+        return condition;
+    }
+
+    bool tryEndMarker(std::size_t& i) {
+        const Token& designator = raw_[i + 1];
+        if (designator.firstOnLine || !isEndDesignator(designator.kind)) return false;
+        const Token& after = raw_[i + 2 < raw_.size() ? i + 2 : raw_.size() - 1];
+        if (!(after.firstOnLine || after.kind == TokenKind::EndOfFile)) return false;
+        Token m = raw_[i];
+        m.kind = TokenKind::EndMarker;
+        m.text = designator.text;
+        m.end = designator.end;
+        out_.push_back(m);
+        prevKind_ = TokenKind::EndMarker;
+        prevClosesCondition_ = false;
+        i += 1;  // the loop's ++i skips the designator
+        return true;
+    }
+};
+
+} // namespace
+
+std::vector<Token> applyLayout(const std::vector<Token>& raw) {
+    return LayoutPass(raw).run();
+}
+
+std::vector<Token> tokenize(const std::string& source) {
+    return applyLayout(Lexer(source).tokenizeAll());
+}
+
+} // namespace protoScala
