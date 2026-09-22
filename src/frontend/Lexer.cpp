@@ -457,7 +457,11 @@ std::string Lexer::readEscape(std::string& out) {
 
 // `0x`/`0X` -> base 16, `0b`/`0B` -> base 2, else base 10 (with a leading-zero
 // check). Digits may contain `_` between digits. Base 10 only: a fractional
-// part, an exponent and the `f`/`F`/`d`/`D`/`l`/`L` suffixes are recognised.
+// part, an exponent and the `f`/`F`/`d`/`D` (float) suffixes are recognised.
+// The `l`/`L` (long, accepted and ignored) suffix is recognised for every
+// base (docs/LANGUAGE.md §1); a hex/binary digit run absorbs any of
+// `f`/`F`/`d`/`D` that are valid digits in that base before this suffix
+// check ever sees them (e.g. `0xFFf` is the hex value 0xFFF, not a float).
 Token Lexer::lexNumber() {
     const SourcePos start{line_, column_};
     int base = 10;
@@ -526,9 +530,10 @@ Token Lexer::lexNumber() {
         if (cur() == 'f' || cur() == 'F' || cur() == 'd' || cur() == 'D') {
             isFloat = true;
             advance();
-        } else if (cur() == 'l' || cur() == 'L') {
-            advance();  // accepted and ignored
         }
+    }
+    if (!isFloat && (cur() == 'l' || cur() == 'L')) {
+        advance();  // accepted and ignored, for any base (docs/LANGUAGE.md §1)
     }
 
     if (identCharLength(pos_) > 0) {

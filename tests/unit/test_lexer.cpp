@@ -76,6 +76,28 @@ TEST(Lexer, IntegerBeyondLongKeepsDigits) {
     EXPECT_EQ(t[0].base, 10);
 }
 
+TEST(Lexer, LongSuffixAcceptedForEveryBase) {
+    // docs/LANGUAGE.md §1: "L suffix accepted and ignored" applies to
+    // decimal, hex and binary integers alike.
+    auto t = rawTokens("0xFFL 0b101L 0x1F");
+    EXPECT_EQ(t[0].kind, TokenKind::IntLit);
+    EXPECT_TRUE(t[0].fitsLong);
+    EXPECT_EQ(t[0].intValue, 255);
+    EXPECT_EQ(t[1].kind, TokenKind::IntLit);
+    EXPECT_EQ(t[1].intValue, 5);
+    EXPECT_EQ(t[2].kind, TokenKind::IntLit);
+    EXPECT_EQ(t[2].intValue, 31);
+}
+
+TEST(Lexer, HexDigitFIsConsumedNotMistakenForFloatSuffix) {
+    // `f` is a valid hex digit: 0xFFf is the hex integer 0xFFF (4095), not a
+    // float — the digit-consuming loop absorbs it before any suffix check
+    // ever sees it.
+    auto t = rawTokens("0xFFf");
+    EXPECT_EQ(t[0].kind, TokenKind::IntLit);
+    EXPECT_EQ(t[0].intValue, 0xFFF);
+}
+
 TEST(Lexer, LeadingZeroIsAnError) {
     auto t = rawTokens("012");
     EXPECT_EQ(t[0].kind, TokenKind::Error);
@@ -106,6 +128,29 @@ TEST(Lexer, CharLiterals) {
 
 TEST(Lexer, SymbolLiteralIsRejected) {
     EXPECT_EQ(rawTokens("'sym")[0].kind, TokenKind::Error);
+}
+
+TEST(Lexer, CharLiteralUnicodeEscapeIsProcessedByReadEscape) {
+    // Built by runtime concatenation, not written as a literal `A` in
+    // this source file: the earlier version of this test embedded the
+    // escape directly and it was silently pre-converted to the character
+    // 'A' before ever reaching the compiler, so the test passed without
+    // ever exercising Lexer::readEscape's 'u' branch. Concatenating two
+    // plain string literals means the six-character sequence `A` only
+    // exists in memory at run time, when the Lexer actually sees it.
+    const std::string src = std::string("'\\") + "u0041'";
+    auto t = rawTokens(src);
+    ASSERT_EQ(t[0].kind, TokenKind::CharLit);
+    EXPECT_EQ(t[0].charValue, U'A');
+}
+
+TEST(Lexer, StringLiteralUnicodeEscapeIsProcessedByReadEscape) {
+    // Same concatenation technique as above, for the string-literal path
+    // through the same Lexer::readEscape function.
+    const std::string src = std::string("\"") + "\\" + "u00e9\"";
+    auto t = rawTokens(src);
+    ASSERT_EQ(t[0].kind, TokenKind::StringLit);
+    EXPECT_EQ(t[0].stringValue, "\xC3\xA9");
 }
 
 TEST(Lexer, StringEscapes) {
@@ -143,6 +188,25 @@ TEST(Lexer, InterpolatedStringIsStructured) {
     EXPECT_EQ(t[0].parts[2].text, " b ");
     EXPECT_TRUE(t[0].parts[3].isHole);  EXPECT_EQ(t[0].parts[3].text, "y + 1");
     EXPECT_EQ(t[0].parts[4].text, " $");
+}
+
+TEST(Lexer, InterpolationHoleWithNestedString) {
+    auto t = rawTokens(R"(s"a${"nested"}b")");
+    ASSERT_EQ(t[0].kind, TokenKind::InterpolatedString);
+    ASSERT_EQ(t[0].parts.size(), 3u);
+    EXPECT_FALSE(t[0].parts[0].isHole); EXPECT_EQ(t[0].parts[0].text, "a");
+    EXPECT_TRUE(t[0].parts[1].isHole);  EXPECT_EQ(t[0].parts[1].text, "\"nested\"");
+    EXPECT_FALSE(t[0].parts[2].isHole); EXPECT_EQ(t[0].parts[2].text, "b");
+}
+
+TEST(Lexer, InterpolationHoleBracesInsideNestedStringDoNotAffectDepth) {
+    // The `}` inside `"}"` and the `{` inside `"{"` are part of nested
+    // string literals and must not be mistaken for the hole's own braces.
+    auto t = rawTokens(R"(s"${ if x then "}" else "{" }")");
+    ASSERT_EQ(t[0].kind, TokenKind::InterpolatedString);
+    ASSERT_EQ(t[0].parts.size(), 1u);
+    EXPECT_TRUE(t[0].parts[0].isHole);
+    EXPECT_EQ(t[0].parts[0].text, " if x then \"}\" else \"{\" ");
 }
 
 TEST(Lexer, NestedBlockComments) {
