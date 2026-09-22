@@ -171,6 +171,7 @@ private:
                        std::vector<std::size_t>& fail);
     void bindPattern(const std::string& name, int slot, SourcePos pos);
     void checkNoVariables(const Pattern& p) const;
+    void checkDistinctVariables(const Pattern& p) const;
     // Pushes a Boolean: is the value in `slot` a T? Returns false (emitting
     // nothing) when every value matches, which only `Any` in a pattern does.
     bool compileTypeTest(const TypeTree& t, int slot, SourcePos pos, bool inPattern);

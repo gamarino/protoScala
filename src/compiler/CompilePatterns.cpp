@@ -23,6 +23,7 @@ void Compiler::compileMatch(const Match& m) {
     emit(Op::STORE_LOCAL, static_cast<std::uint64_t>(scrutinee), m.pos, -1);
     std::vector<std::size_t> toEnd;
     for (const CaseDef& c : m.cases) {
+        checkDistinctVariables(*c.pattern);
         fn_->scopes.emplace_back();
         std::vector<std::size_t> fail;
         compilePattern(*c.pattern, scrutinee, fail);
@@ -56,10 +57,15 @@ void Compiler::emitProtoTest(const std::string& typeKey, int slot, SourcePos pos
 }
 
 // Reads the attributes `keys` of the value in `slot` into fresh slots and
-// matches `subs` against them.
+// matches `subs` against them. One sub-pattern per key: every caller has
+// already reported a mismatch as a user error (a constructor pattern of the
+// wrong arity), so a mismatch here is a compiler bug.
 void Compiler::extractInto(const std::vector<std::string>& keys, int slot,
                            const std::vector<PatternPtr>& subs, std::vector<std::size_t>& fail,
                            SourcePos pos) {
+    if (subs.size() != keys.size())
+        throw std::logic_error("compiler: extractInto with " + std::to_string(subs.size()) +
+                               " sub-patterns for " + std::to_string(keys.size()) + " fields");
     emit(Op::PUSH_LOCAL, static_cast<std::uint64_t>(slot), pos, +1);
     emit(Op::UNAPPLY_FIELDS, fn_->mod->addNames(keys), pos, static_cast<int>(keys.size()) - 1);
     std::vector<int> slots(keys.size());
@@ -75,6 +81,18 @@ void Compiler::checkNoVariables(const Pattern& p) const {
     patternVariables(p, vars);
     if (!vars.empty())
         throw CompileError("Illegal variable " + vars.front() + " in pattern alternative", p.pos);
+}
+
+// One pattern binds each name once (scalac 3.9.0: "duplicate pattern
+// variable: x"). Without the check the second binding would shadow the first
+// in the case's scope and the pattern would match any pair, not equal ones.
+void Compiler::checkDistinctVariables(const Pattern& p) const {
+    std::vector<std::string> vars;
+    patternVariables(p, vars);
+    std::unordered_set<std::string> seen;
+    for (const std::string& v : vars)
+        if (!seen.insert(v).second)
+            throw CompileError("duplicate pattern variable: " + v, p.pos);
 }
 
 void Compiler::compilePattern(const Pattern& p, int slot, std::vector<std::size_t>& fail) {
@@ -146,8 +164,15 @@ void Compiler::compileExtractor(const Pattern& p, int slot, std::vector<std::siz
         captureInto(fn_, name, p.pos, &found);
         shadowed = found || memberOf(name) != nullptr;
     }
+    const GlobalBinding* term = globals_.binding(name);
+    // A built-in extractor keeps its fast path only while nothing shadows it:
+    // no local or member of that name (`shadowed`) and no user global. `List`
+    // is one of the runtime's own globals; `::` is a method of the list
+    // prototype and has no global at all, so any global named `::` is a user
+    // definition and takes over.
+    const bool userDefined = shadowed || (term && term->kind != BindingKind::Builtin);
     // h :: t on a List: getAt(0) and the tail slice (DESIGN §5.3, §6).
-    if (name == "::" && !shadowed) {
+    if (name == "::" && !userDefined) {
         if (p.args.size() != 2) throw CompileError("the :: pattern takes two patterns", p.pos);
         emit(Op::PUSH_LOCAL, static_cast<std::uint64_t>(slot), p.pos, +1);
         emit(Op::TEST_TYPE, static_cast<std::uint64_t>(TypeCode::ConsList), p.pos, 0);
@@ -163,17 +188,13 @@ void Compiler::compileExtractor(const Pattern& p, int slot, std::vector<std::siz
         return;
     }
     // List(p1, ..., pn[, rest*]) on a List.
-    if (name == "List" && !shadowed) {
-        const GlobalBinding* g = globals_.binding("List");
-        if (g && g->kind == BindingKind::Builtin) {
-            compileListPattern(p, slot, fail);
-            return;
-        }
+    if (name == "List" && !userDefined && term) {
+        compileListPattern(p, slot, fail);
+        return;
     }
     // A case class whose companion keeps the synthesised unapply (or a tuple
     // class): its fields, read by key (DESIGN §5.3).
     const ClassInfo* cls = shadowed ? nullptr : globals_.findType(name);
-    const GlobalBinding* term = globals_.binding(name);
     const bool synthesised = cls && cls->isCase && cls->kind == ClassKind::Class &&
                              ((cls->builtin && cls->companionTermKey.empty()) ||
                               (!cls->companionHasUnapply && term && term->key == cls->companionTermKey));
@@ -237,12 +258,15 @@ void Compiler::compileListPattern(const Pattern& p, int slot, std::vector<std::s
         emit(Op::STORE_LOCAL, static_cast<std::uint64_t>(element), p.pos, -1);
         compilePattern(*p.args[k], element, fail);
     }
+    // `List(a, rest*)` binds the tail; `List(a, _*)` (no binder name) drops it.
+    // bindPattern applies the `_` rule, so no local is ever named `_`.
     if (seq && !p.args.back()->name.empty()) {
         emit(Op::PUSH_LOCAL, static_cast<std::uint64_t>(slot), p.pos, +1);
         emit(Op::PUSH_CONST, fn_->mod->addInt(static_cast<long long>(fixed)), p.pos, +1);
         emit(Op::SEND, fn_->mod->addSendSite("drop", 1), p.pos, -1);
-        const LocalInfo rest = declareLocal(p.args.back()->name, BindingKind::Val, false);
-        emit(Op::STORE_LOCAL, static_cast<std::uint64_t>(rest.slot), p.pos, -1);
+        const int rest = newSlot();
+        emit(Op::STORE_LOCAL, static_cast<std::uint64_t>(rest), p.pos, -1);
+        bindPattern(p.args.back()->name, rest, p.pos);
     }
 }
 
