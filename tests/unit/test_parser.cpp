@@ -259,3 +259,144 @@ TEST(Parser, OldStyleConditionFollowedByNestedNewStyleConstruct) {
               "(if a (apply (. xs map) (lambda (x) x)) b)");
     EXPECT_EQ(e("if (a) || b then c else d"), "(if (infix || (parens a) b) c d)");
 }
+
+namespace {
+std::string u(const std::string& src) { return dump(*protoScala::parseSource(src)); }
+
+std::string unitError(const std::string& src) {
+    try {
+        protoScala::parseSource(src);
+    } catch (const ParseError& err) {
+        return err.what();
+    }
+    return "";
+}
+} // namespace
+
+TEST(ParserDefs, ValVarLazy) {
+    EXPECT_EQ(u("val x: Int = 1"), "(unit (val x : Int (int 1)))");
+    EXPECT_EQ(u("var y = 2"), "(unit (var y (int 2)))");
+    EXPECT_EQ(u("lazy val z = f()"), "(unit (lazy-val z (apply f)))");
+}
+
+TEST(ParserDefs, DefShapes) {
+    EXPECT_EQ(u("def add(a: Int, b: Int): Int = a + b"),
+              "(unit (def add ((a:Int b:Int)) : Int (infix + a b)))");
+    EXPECT_EQ(u("def curried(a: Int)(b: Int) = a * b"),
+              "(unit (def curried ((a:Int) (b:Int)) (infix * a b)))");
+    EXPECT_EQ(u("def sum(xs: Int*): Int = 0"), "(unit (def sum ((xs:Int*)) : Int (int 0)))");
+    EXPECT_EQ(u("def id[A](x: A): A = x"), "(unit (def id [A] ((x:A)) : A x))");
+    EXPECT_EQ(u("def pi = 3.14"), "(unit (def pi (float 3.14)))");
+    EXPECT_EQ(u("def f() = 1"), "(unit (def f (()) (int 1)))");
+    EXPECT_EQ(u("def f(x: => Int) = x"), "(unit (def f ((x:=> Int)) x))");
+    EXPECT_EQ(u("def f(x: Int = 1) = x"), "(unit (def f ((x:Int = (int 1))) x))");
+}
+
+TEST(ParserDefs, MainAnnotationAndIndentedBody) {
+    EXPECT_EQ(u("@main def hello(): Unit =\n  println(\"hi\")"),
+              "(unit (def @main hello (()) : Unit (block (apply println (str \"hi\")))))");
+}
+
+TEST(ParserDefs, BraceAndIndentedBodiesAreEquivalent) {
+    const std::string braces =
+        u("def f(x: Int): Int = {\n  val y = x + 1\n  y * 2\n}");
+    const std::string indented =
+        u("def f(x: Int): Int =\n  val y = x + 1\n  y * 2");
+    EXPECT_EQ(braces, indented);
+    EXPECT_EQ(indented,
+              "(unit (def f ((x:Int)) : Int (block (val y (infix + x (int 1))) "
+              "(infix * y (int 2)))))");
+}
+
+TEST(ParserDefs, EndMarkers) {
+    EXPECT_EQ(u("def f(x: Int): Int =\n  val y = x\n  y\nend f\nf(1)"),
+              "(unit (def f ((x:Int)) : Int (block (val y x) y)) (apply f (int 1)))");
+    EXPECT_EQ(u("def g =\n  if a then\n    b\n  else\n    c\n  end if\nend g"),
+              "(unit (def g (block (if a (block b) (block c)))))");
+    EXPECT_NE(unitError("def f =\n  1\nend g").find("misaligned end marker"),
+              std::string::npos);
+}
+
+TEST(ParserDefs, LocalDefinitionsInBlocks) {
+    EXPECT_EQ(e("{ val a = 1; def f(x: Int) = x + a; f(2) }"),
+              "(block (val a (int 1)) (def f ((x:Int)) (infix + x a)) (apply f (int 2)))");
+}
+
+TEST(ParserDefs, ScriptModeTopLevelStatements) {
+    EXPECT_EQ(u("println(1)\nprintln(2)"), "(unit (apply println (int 1)) (apply println (int 2)))");
+    EXPECT_EQ(u("val a = 1; val b = 2"), "(unit (val a (int 1)) (val b (int 2)))");
+}
+
+TEST(ParserDefs, ModifiersAndOtherAnnotationsAreKeptOrIgnored) {
+    EXPECT_EQ(u("private final def f = 1"), "(unit (def f (int 1)))");
+    EXPECT_EQ(u("@tailrec def f(n: Int): Int = n"), "(unit (def @tailrec f ((n:Int)) : Int n))");
+}
+
+TEST(ParserDefs, Imports) {
+    EXPECT_EQ(u("import scala.math.*"), "(unit (import scala.math.*))");
+    EXPECT_EQ(u("import a.{b, c as d}"), "(unit (import a.{b, c as d}))");
+}
+
+TEST(ParserDefs, UnsupportedDefinitionsAreReportedClearly) {
+    EXPECT_NE(unitError("class A").find("not implemented yet"), std::string::npos);
+    EXPECT_NE(unitError("object O").find("not implemented yet"), std::string::npos);
+    EXPECT_NE(unitError("val (a, b) = p").find("patterns in val definitions"), std::string::npos);
+    EXPECT_NE(unitError("given x: Int = 1").find("(D3)"), std::string::npos);
+    EXPECT_NE(unitError("def f(using x: Int) = x").find("(D3)"), std::string::npos);
+    EXPECT_NE(unitError("def f() { 1 }").find("procedure syntax"), std::string::npos);
+}
+
+TEST(ParserDefs, IncompleteDefinitionsAskForMoreInput) {
+    try {
+        protoScala::parseSource("def f(x: Int) =");
+        FAIL();
+    } catch (const ParseError& err) {
+        EXPECT_TRUE(err.atEof);
+    }
+}
+
+TEST(ParserDefs, AnnotationsModifiersAndEndMarkerVariants) {
+    EXPECT_EQ(u("@main\ndef run(args: String*): Unit = ()"),
+              "(unit (def @main run ((args:String*)) : Unit ()))");
+    EXPECT_EQ(u("@deprecated(\"old\", \"1.0\") def f = 1"), "(unit (def @deprecated f (int 1)))");
+    EXPECT_EQ(u("inline transparent def f = 1"), "(unit (def f (int 1)))");
+    EXPECT_EQ(u("private[this] val x = 1"), "(unit (val x (int 1)))");
+    EXPECT_EQ(u("def f(using: Int) = using"), "(unit (def f ((using:Int)) using))");
+    EXPECT_EQ(u("open(1)"), "(unit (apply open (int 1)))");
+    EXPECT_EQ(u("val x =\n  1\nend val"), "(unit (val x (block (int 1))))");
+    EXPECT_EQ(u("val x =\n  1\nend x"), "(unit (val x (block (int 1))))");
+    EXPECT_NE(unitError("while a do\n  b\nend if").find("misaligned end marker"),
+              std::string::npos);
+}
+
+TEST(ParserDefs, ImportsInsideBlocksAndSelectors) {
+    EXPECT_EQ(e("{ import a.b; b }"), "(block (import a.b) b)");
+    EXPECT_EQ(u("import a.{given, b => c}"), "(unit (import a.{given, b => c}))");
+}
+
+TEST(ParserDefs, MoreUnsupportedAndInvalidDefinitions) {
+    EXPECT_NE(unitError("case class P(x: Int)").find("'case class' definitions are not implemented yet"),
+              std::string::npos);
+    EXPECT_NE(unitError("trait T").find("'trait' definitions are not implemented yet"),
+              std::string::npos);
+    EXPECT_NE(unitError("extension (x: Int) def y = x").find("not implemented yet"),
+              std::string::npos);
+    EXPECT_NE(unitError("implicit val x: Int = 1").find("(D3)"), std::string::npos);
+    EXPECT_NE(unitError("def f(implicit x: Int) = x").find("(D3)"), std::string::npos);
+    EXPECT_NE(unitError("val a, b = 1").find("patterns in val definitions are not implemented yet"),
+              std::string::npos);
+    EXPECT_NE(unitError("lazy var x = 1").find("lazy"), std::string::npos);
+    EXPECT_NE(unitError("def f: Int").find("'=' expected"), std::string::npos);
+}
+
+TEST(ParserDefs, TruncatedDefinitionsAskForMoreInput) {
+    for (const char* src : {"val", "val x", "val x =", "def", "def f(", "def f(x: Int",
+                            "@main", "import", "def f =\n  val y = 1\n  y +"}) {
+        try {
+            protoScala::parseSource(src);
+            ADD_FAILURE() << src;
+        } catch (const ParseError& err) {
+            EXPECT_TRUE(err.atEof) << src << ": " << err.what();
+        }
+    }
+}

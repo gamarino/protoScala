@@ -98,7 +98,15 @@ bool Parser::atIdent(const char* text) const {
 }
 
 void Parser::fail(const std::string& msg, const Token& at) const {
-    const bool eof = at.kind == TokenKind::EndOfFile;
+    // Layout closes open blocks with synthetic Newline/Outdent tokens before
+    // EndOfFile; an error on one of those is still "the input ended too early",
+    // which the REPL answers by asking for more input.
+    bool eof = at.kind == TokenKind::EndOfFile;
+    if (!eof && &at >= toks_.data() && &at < toks_.data() + toks_.size()) {
+        std::size_t j = static_cast<std::size_t>(&at - toks_.data());
+        while (toks_[j].kind == TokenKind::Newline || toks_[j].kind == TokenKind::Outdent) ++j;
+        eof = toks_[j].kind == TokenKind::EndOfFile;
+    }
     throw ParseError(eof ? "unexpected end of input" + (msg.empty() ? "" : ": " + msg) : msg,
                      at.pos, eof);
 }
@@ -164,7 +172,7 @@ NodePtr Parser::parseSingleExpression() {
 }
 
 std::unique_ptr<CompilationUnit> Parser::parseCompilationUnit() {
-    // Task 3: top-level expressions only; Task 4 adds definitions in parseBlockStat.
+    // Script mode (Q2): definitions and expressions, in order.
     auto body = parseBlockBody(TokenKind::EndOfFile, SourcePos{1, 1});
     auto unit = std::make_unique<CompilationUnit>();
     unit->stats = std::move(body->stats);
@@ -631,6 +639,7 @@ std::unique_ptr<Block> Parser::parseBlockBody(TokenKind terminator, SourcePos po
 }
 
 NodePtr Parser::parseBlockStat(TokenKind terminator) {
+    if (atDefinitionStart()) return parseDefinition({});
     if (lambdaAhead()) {
         // Block lambda: `{ x => stats }`; the body is the rest of the block
         // (ResultExpr ::= Bindings '=>' Block).
@@ -658,6 +667,258 @@ void Parser::checkEndMarker(const Node& previous, const Token& marker) const {
     if (!ok)
         fail("misaligned end marker: 'end " + d + "' does not close the preceding construct",
              marker);
+}
+
+// ---------------------------------------------------------------------------
+// Definitions
+
+namespace {
+
+// Soft modifiers (Token.h): identifiers that act as modifiers only when a
+// definition follows them. They are parsed and ignored (D5).
+bool isSoftModifier(const Token& t) {
+    if (t.kind != TokenKind::Identifier || t.backquoted) return false;
+    const std::string& s = t.text;
+    return s == "open" || s == "inline" || s == "transparent" || s == "infix" ||
+           s == "opaque";
+}
+
+bool isHardModifier(TokenKind k) {
+    switch (k) {
+        case TokenKind::KwPrivate: case TokenKind::KwProtected: case TokenKind::KwFinal:
+        case TokenKind::KwOverride: case TokenKind::KwAbstract: case TokenKind::KwSealed:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// Keywords that begin a definition (after any modifiers).
+bool isDefinitionKeyword(TokenKind k) {
+    switch (k) {
+        case TokenKind::KwVal: case TokenKind::KwVar: case TokenKind::KwDef:
+        case TokenKind::KwLazy: case TokenKind::KwImport: case TokenKind::KwImplicit:
+        case TokenKind::KwGiven: case TokenKind::KwClass: case TokenKind::KwObject:
+        case TokenKind::KwTrait: case TokenKind::KwEnum: case TokenKind::KwCase:
+        case TokenKind::KwType: case TokenKind::KwPackage: case TokenKind::KwExport:
+            return true;
+        default:
+            return isHardModifier(k);
+    }
+}
+
+bool isExtensionStart(const Token& t, const Token& next) {
+    return t.kind == TokenKind::Identifier && !t.backquoted && t.text == "extension" &&
+           (next.kind == TokenKind::LParen || next.kind == TokenKind::LBracket);
+}
+
+[[noreturn]] void notImplemented(const std::string& what, const Token& at) {
+    throw ParseError(what + " are not implemented yet", at.pos, false);
+}
+
+const char* const kImplicitsUnsupported = "implicits and givens are not supported (D3)";
+
+} // namespace
+
+bool Parser::atDefinitionStart() const {
+    if (at(TokenKind::At) || isDefinitionKeyword(peek().kind)) return true;
+    if (isExtensionStart(peek(), peek(1))) return true;
+    // Soft modifiers count only when a definition follows them.
+    std::size_t j = 0;
+    while (isSoftModifier(peek(j))) ++j;
+    return j > 0 && isDefinitionKeyword(peek(j).kind);
+}
+
+// {Annotation} {Modifier} (val | var | lazy val | def | import), or one of
+// the definition forms reported as not implemented yet.
+NodePtr Parser::parseDefinition(std::vector<std::string> annotations) {
+    while (at(TokenKind::At)) {
+        advance();
+        std::string name = expect(TokenKind::Identifier, "annotation name").text;
+        while (at(TokenKind::Dot) && peek(1).kind == TokenKind::Identifier) {
+            advance();
+            name += '.';
+            name += advance().text;
+        }
+        annotations.push_back(std::move(name));
+        if (at(TokenKind::LParen) && !peek().firstOnLine) {  // arguments are skipped
+            int depth = 0;
+            do {
+                if (at(TokenKind::EndOfFile)) fail("')' expected", peek());
+                if (at(TokenKind::LParen)) ++depth;
+                if (at(TokenKind::RParen)) --depth;
+                advance();
+            } while (depth > 0);
+        }
+        while (at(TokenKind::Newline)) advance();
+    }
+    bool isLazy = false;
+    for (;;) {  // modifiers: advisory, ignored (D5)
+        const Token& t = peek();
+        if (t.kind == TokenKind::KwImplicit || t.kind == TokenKind::KwGiven)
+            fail(kImplicitsUnsupported, t);
+        if (t.kind == TokenKind::KwLazy) {
+            isLazy = true;
+            advance();
+            continue;
+        }
+        if (!isHardModifier(t.kind) && !isSoftModifier(t)) break;
+        const bool qualifiable =
+            t.kind == TokenKind::KwPrivate || t.kind == TokenKind::KwProtected;
+        advance();
+        if (qualifiable && at(TokenKind::LBracket)) {  // private[pkg]
+            advance();
+            if (!at(TokenKind::KwThis)) expect(TokenKind::Identifier, "access qualifier");
+            else advance();
+            expect(TokenKind::RBracket, "']'");
+        }
+    }
+    const Token& t = peek();
+    switch (t.kind) {
+        case TokenKind::KwVal:
+            advance();
+            return parseValDef(t.pos, false, isLazy);
+        case TokenKind::KwVar:
+            if (isLazy) fail("'lazy' is not allowed on a var", t);
+            advance();
+            return parseValDef(t.pos, true, false);
+        case TokenKind::KwDef:
+            if (isLazy) fail("'lazy' is not allowed on a def", t);
+            advance();
+            return parseDefDef(t.pos, std::move(annotations));
+        case TokenKind::KwImport:
+            if (isLazy || !annotations.empty()) fail("an import takes no modifiers", t);
+            return parseImport();
+        case TokenKind::KwCase:
+            if (peek(1).kind == TokenKind::KwClass || peek(1).kind == TokenKind::KwObject)
+                notImplemented("'case " + peek(1).text + "' definitions", t);
+            notImplemented("'case' clauses (pattern matching)", t);
+        case TokenKind::KwClass: case TokenKind::KwObject: case TokenKind::KwTrait:
+        case TokenKind::KwEnum: case TokenKind::KwType: case TokenKind::KwPackage:
+        case TokenKind::KwExport:
+            notImplemented("'" + t.text + "' definitions", t);
+        default:
+            if (isExtensionStart(t, peek(1))) notImplemented("'extension' definitions", t);
+            fail("definition expected but '" + spelling(t) + "' found", t);
+    }
+}
+
+// After `val` / `var`: name [: T] = rhs. Only a single name is supported.
+NodePtr Parser::parseValDef(SourcePos pos, bool isVar, bool isLazy) {
+    auto node = std::make_unique<ValDef>(pos);
+    node->isVar = isVar;
+    node->isLazy = isLazy;
+    if (at(TokenKind::EndOfFile)) fail("value name expected", peek());
+    if (!at(TokenKind::Identifier) || peek().isOperator || peek(1).kind == TokenKind::Comma ||
+        peek(1).kind == TokenKind::At || peek(1).kind == TokenKind::LParen)
+        notImplemented("patterns in val definitions", peek());
+    node->name = advance().text;
+    if (at(TokenKind::Colon)) {
+        advance();
+        node->type = parseType();
+    }
+    if (!at(TokenKind::Equals))
+        fail("'=' expected: a value definition needs an initialiser", peek());
+    advance();
+    if (isVar && at(TokenKind::Underscore))
+        fail("default initialisation 'var x: T = _' is not supported", peek());
+    node->rhs = parseExprOrIndented();
+    return node;
+}
+
+// `(` [param {`,` param}] `)`; a `using` / `implicit` clause is rejected (D3).
+std::vector<Param> Parser::parseParamClause() {
+    expect(TokenKind::LParen, "'('");
+    if (at(TokenKind::KwImplicit) ||
+        (atIdent("using") && peek(1).kind != TokenKind::Colon))
+        fail(kImplicitsUnsupported, peek());
+    std::vector<Param> params;
+    while (!at(TokenKind::RParen)) {
+        Param p;
+        p.pos = peek().pos;
+        p.name = expect(TokenKind::Identifier, "parameter name").text;
+        expect(TokenKind::Colon, "':' and a parameter type");
+        p.type = parseType();  // `=> T` yields a ByName type
+        p.byName = p.type->kind == TypeTree::Kind::ByName;
+        if (atIdent("*")) {
+            advance();
+            p.repeated = true;
+        }
+        if (at(TokenKind::Equals)) {
+            advance();
+            p.defaultValue = parseExpr();
+        }
+        params.push_back(std::move(p));
+        if (!at(TokenKind::Comma)) break;
+        advance();
+    }
+    expect(TokenKind::RParen, "')'");
+    return params;
+}
+
+// After `def`: name [TypeParams] {ParamClause} [: T] = body.
+NodePtr Parser::parseDefDef(SourcePos pos, std::vector<std::string> annotations) {
+    auto node = std::make_unique<DefDef>(pos);
+    node->annotations = std::move(annotations);
+    node->name = expect(TokenKind::Identifier, "method name").text;
+    if (at(TokenKind::LBracket)) {  // type parameters: names kept, bounds parsed and dropped
+        advance();
+        while (!at(TokenKind::RBracket)) {
+            node->typeParams.push_back(expect(TokenKind::Identifier, "type parameter").text);
+            while (at(TokenKind::Subtype) || at(TokenKind::Supertype) || at(TokenKind::Colon)) {
+                advance();
+                parseType();
+            }
+            if (!at(TokenKind::Comma)) break;
+            advance();
+        }
+        expect(TokenKind::RBracket, "']'");
+    }
+    while (at(TokenKind::LParen) && !peek().firstOnLine)
+        node->paramLists.push_back(parseParamClause());
+    if (at(TokenKind::Colon)) {
+        advance();
+        node->resultType = parseType();
+    }
+    if (at(TokenKind::LBrace))
+        fail("procedure syntax is not supported in Scala 3; write `def " + node->name +
+                 "(): Unit = ...`",
+             peek());
+    if (!at(TokenKind::Equals))
+        fail("'=' expected: abstract methods are not supported outside classes", peek());
+    advance();
+    node->body = parseExprOrIndented();
+    return node;
+}
+
+// `import` selectors: parsed as raw text and ignored by the compiler (Q8).
+// Tokens are concatenated without blanks, except `, ` after a comma and
+// blanks around `as` and `=>`, so `import a.{b, c as d}` round-trips.
+NodePtr Parser::parseImport() {
+    auto node = std::make_unique<Import>(expect(TokenKind::KwImport, "'import'").pos);
+    int depth = 0;
+    for (;;) {
+        const Token& t = peek();
+        const TokenKind k = t.kind;
+        if (k == TokenKind::EndOfFile) {
+            if (depth > 0 || node->text.empty()) fail("import selector expected", t);
+            break;
+        }
+        if (depth == 0 && (k == TokenKind::Newline || k == TokenKind::Semicolon ||
+                           k == TokenKind::Outdent || k == TokenKind::RBrace ||
+                           k == TokenKind::EndMarker))
+            break;
+        if (k == TokenKind::LBrace) ++depth;
+        if (k == TokenKind::RBrace) --depth;
+        if (k == TokenKind::Comma) node->text += ", ";
+        else if ((k == TokenKind::Identifier && !t.backquoted && t.text == "as") ||
+                 k == TokenKind::Arrow)
+            node->text += " " + t.text + " ";
+        else node->text += t.backquoted ? "`" + t.text + "`" : spelling(t);
+        advance();
+    }
+    if (node->text.empty()) fail("import selector expected", peek());
+    return node;
 }
 
 // ---------------------------------------------------------------------------
