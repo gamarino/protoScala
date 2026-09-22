@@ -76,6 +76,7 @@ target_compile_options(protoscala_frontend PRIVATE -Wall -Wextra -Wpedantic)
 # --- Compiler: opcodes, bytecode modules, AST -> bytecode ------------------------
 add_library(protoscala_compiler STATIC
     src/compiler/BytecodeModule.cpp
+    src/compiler/Compiler.cpp
 )
 target_link_libraries(protoscala_compiler PUBLIC protoscala_frontend protoscala_support)
 target_compile_options(protoscala_compiler PRIVATE -Wall -Wextra -Wpedantic)

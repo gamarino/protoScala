@@ -9,6 +9,7 @@ add_executable(protoscala_unit_tests
     test_parser.cpp
     test_desugar.cpp
     test_bytecode.cpp
+    test_compiler.cpp
 )
 
 target_link_libraries(protoscala_unit_tests
