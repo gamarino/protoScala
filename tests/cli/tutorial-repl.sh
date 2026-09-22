@@ -22,7 +22,7 @@ out=$(printf '%s\n' \
     ':quit' | timeout 60s "$P" 2>&1)
 rc=$?
 [[ $rc -eq 0 ]] || { echo "FAIL: exit $rc"; echo "$out"; exit 1; }
-for piece in "val greeting = Hello" "def shout" "val res0 = HELLO!" "def fact" \
+for piece in 'val greeting = "Hello"' "def shout" 'val res0 = "HELLO!"' "def fact" \
              "val res1 = 2432902008176640000" "def sumTo" "val res2 = 5050"; do
     grep -qF -- "$piece" <<<"$out" || { echo "FAIL: no '$piece' in:"; echo "$out"; exit 1; }
 done

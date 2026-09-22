@@ -18,11 +18,11 @@ A short session. Each input is typed at `scala>`; the lines starting with
 
 ```text
 scala> val greeting = "Hello"
-val greeting = Hello
+val greeting = "Hello"
 scala> def shout(s: String) = s.toUpperCase + "!"
 def shout
 scala> shout(greeting)
-val res0 = HELLO!
+val res0 = "HELLO!"
 scala> def fact(n: Int): BigInt = if n <= 1 then 1 else n * fact(n - 1)
 def fact
 scala> fact(20)
@@ -53,25 +53,72 @@ The echo format:
 | an expression | `val resN = <value>`, numbered from `res0`; the result can be used later as `resN` |
 | an expression of value `()` | nothing |
 
-Unlike the Scala REPL, echoes carry no types: types are erased (D4).
+A `String` value is shown in double quotes (`val res0 = "HELLO!"`), as the
+Scala 3 REPL does; other values print as `toString` does. Only inputs that
+bind a result use up a number: an input that fails, or whose value is `()`,
+leaves the next `resN` free. Unlike the Scala REPL, echoes carry no types:
+types are erased (D4).
+
+*Redefinitions.* Defining a name again shadows the earlier definition, as in
+the Scala REPL: code compiled before keeps the binding it saw.
+
+```text
+scala> val x = 1
+val x = 1
+scala> def f = x
+def f
+scala> val x = 2
+val x = 2
+scala> f
+val res0 = 1
+```
+
+The new definition may be of another kind (a `def` redefined as a `val`, a
+`val` as a `lazy val`) without affecting earlier code. An input that fails
+defines nothing: after `val z = 1 / 0` reports its `ArithmeticException`, `z`
+is still undefined (or keeps its earlier value).
 
 ## 14.3 Multi-line input
 
 An input is evaluated as soon as it is complete. The REPL keeps reading
-continuation lines while it is not:
+continuation lines, at the `     |` prompt, while:
 
-- a line ending in `=` (or another token that cannot end an expression, such
-  as `+` or `=>`) continues on the next line, and the indented lines that
-  follow form the body;
-- an open brace, parenthesis or bracket continues until it is closed, as with
-  `sumTo` above;
-- an empty line at the continuation prompt forces evaluation of what has been
-  typed so far.
+- the input is not complete yet: a line ending in `=` (or another token that
+  cannot end an expression, such as `+` or `=>`), an open brace, parenthesis
+  or bracket, a `then` or `do` still waiting for its body;
+- the last line is indented deeper than the input's first line, or ends with
+  a token that opens a block (`=`, `then`, `do`, `else`, `:`, ...), so more
+  indented lines may follow.
 
-One pitfall: `if … then …` is already a complete expression at the end of a
-line, so the REPL evaluates it before you can type `else` on the next line
-(the `else` then fails to parse on its own). Put `else` on the same line, or
-wrap the whole `if` in braces.
+The input ends on an empty line, at the end of input, or when a line returns
+to the first line's column. A line at that column that continues the
+construct — `else`, `end while`, `then`, `do`, a closing brace — is part of
+the input; any other line starts the next input. So a loop can be typed line
+by line:
+
+```text
+scala> var i = 0
+var i = 0
+scala> while i < 3 do
+     |   println(i)
+     |   i += 1
+     |
+0
+1
+2
+scala> def next(x: Int) =
+     |   val y = x
+     |   y + 1
+     |
+def next
+```
+
+An empty line at the continuation prompt also forces evaluation of an input
+that is not complete, which then reports the parse error.
+
+One pitfall remains: `if c then a` written on one line is already a complete
+expression, so the REPL evaluates it before you can type `else` on the next
+line. Put `else` on the same line, or break the line after `then`.
 
 ## 14.4 Commands
 

@@ -163,7 +163,8 @@ TEST(Compiler, ReplModeBindsResult) {
     auto cu = compile("val a = 1\na + 1", g, UnitMode::Repl);
     EXPECT_EQ(cu.resultName, "res0");
     ASSERT_EQ(cu.definitions.size(), 1u);
-    EXPECT_EQ(cu.definitions[0], "val a");
+    EXPECT_EQ(cu.definitions[0].text, "val a");
+    EXPECT_EQ(cu.definitions[0].key, "a");
     EXPECT_EQ(g.find("res0"), BindingKind::Val);
 }
 
@@ -335,4 +336,21 @@ TEST(Compiler, MaxStackOfNestedShortCircuitsIsExact) {
     // x stays on the stack under the condition: 1 + (x < y) = 3 at the deepest point.
     auto cu = compile("def f(x: Int, y: Int) = x + (if x < y && (y < x || x == y) then 1 else 2)", g);
     EXPECT_EQ(cu.module->block(0).maxStack(), 3);
+}
+
+TEST(Compiler, ReplRedefinitionGetsAFreshGlobalKey) {
+    GlobalTable g;
+    compile("val x = 1\ndef f = x", g, UnitMode::Repl);
+    const auto cu = compile("val x = 2", g, UnitMode::Repl);
+    ASSERT_EQ(cu.definitions.size(), 1u);
+    EXPECT_EQ(cu.definitions[0].key, "x#1");
+    EXPECT_EQ(g.binding("x")->key, "x#1");
+    EXPECT_EQ(g.binding("f")->key, "f");
+    // Within one unit a repeated definition keeps the unit's key (D25).
+    const auto cu2 = compile("val y = 1\nval y = 2", g, UnitMode::Repl);
+    ASSERT_EQ(cu2.definitions.size(), 2u);
+    EXPECT_EQ(cu2.definitions[1].key, "y");
+    EXPECT_EQ(GlobalTable::nameOfKey("x#1"), "x");
+    EXPECT_EQ(GlobalTable::nameOfKey("##"), "##");
+    EXPECT_EQ(GlobalTable::nameOfKey("##12"), "#");
 }

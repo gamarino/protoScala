@@ -43,6 +43,9 @@ public:
     // as a parse error instead (the REPL uses this to force evaluation on a
     // blank continuation line).
     EvalOutcome evalReplInput(const std::string& source, bool forceComplete = false);
+    // True when `source` ends inside a construct (an unclosed bracket, a
+    // missing body, ...): parsing fails at end of input. Parses only.
+    bool needsMoreInput(const std::string& source) const;
     // :load — runs a file in this session (its definitions stay visible).
     bool loadFile(const std::string& path);
     // --disassemble: prints the compiled bytecode of a file; exit code.
@@ -63,7 +66,7 @@ private:
     EvalStatus evaluate(const std::string& source, const std::string& sourceName,
                         UnitMode mode, const std::vector<std::string>* mainArgs,
                         EvalOutcome* outcome, bool allowIncomplete);
-    void callMain(proto::ProtoContext* ctx, const std::string& name, bool takesArgs,
+    void callMain(proto::ProtoContext* ctx, const std::string& mainKey, bool takesArgs,
                   const std::vector<std::string>& args);
 };
 

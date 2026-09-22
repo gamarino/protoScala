@@ -27,6 +27,14 @@ bool readFile(const std::string& path, std::string* out) {
     return true;
 }
 
+// A value as the REPL echoes it: Scala's toString, with a String in quotes
+// (the Scala 3 REPL shows `val res0: String = "hi"`).
+std::string showResult(proto::ProtoContext* ctx, const RuntimeLayout& L,
+                       const proto::ProtoObject* v) {
+    const std::string shown = show(ctx, L, v);
+    return proto::ProtoObject::isStringTagFast(v) ? "\"" + shown + "\"" : shown;
+}
+
 void reportAt(const std::string& name, SourcePos pos, const std::string& msg) {
     std::fflush(stdout);
     std::fprintf(stderr, "%s:%d:%d: error: %s\n", name.c_str(), pos.line, pos.column, msg.c_str());
@@ -51,8 +59,15 @@ EvalStatus Session::evaluate(const std::string& source, const std::string& sourc
         if (mode == UnitMode::Repl && e.atEof && allowIncomplete) return EvalStatus::Incomplete;
         reportAt(sourceName, e.pos, e.what());
         return EvalStatus::Error;
+    } catch (const ScalaError& e) {  // StackOverflowError: source nested too deeply
+        std::fflush(stdout);
+        std::fprintf(stderr, "%s: error: %s\n", sourceName.c_str(), e.what());
+        return EvalStatus::Error;
     }
-    GlobalTable trial = globals_;  // committed only if compilation succeeds
+    // Globals are committed only when the unit compiles and runs without
+    // error: a REPL input that fails defines nothing, and earlier bindings
+    // stay as they were (GlobalTable.h: every definition has its own key).
+    GlobalTable trial = globals_;
     CompiledUnit cu;
     try {
         desugar(*unit);
@@ -64,9 +79,11 @@ EvalStatus Session::evaluate(const std::string& source, const std::string& sourc
     } catch (const std::length_error& e) {  // bytecode limits
         reportAt(sourceName, SourcePos{}, e.what());
         return EvalStatus::Error;
+    } catch (const ScalaError& e) {  // StackOverflowError: source nested too deeply
+        std::fflush(stdout);
+        std::fprintf(stderr, "%s: error: %s\n", sourceName.c_str(), e.what());
+        return EvalStatus::Error;
     }
-    globals_ = std::move(trial);
-    if (!cu.resultName.empty()) ++resultCounter_;
 
     proto::ProtoContext ctx(&space_, runtime_.rootContext());
     cu.module->linkSymbols(&ctx);
@@ -75,36 +92,44 @@ EvalStatus Session::evaluate(const std::string& source, const std::string& sourc
     try {
         engine_.run(&ctx, mod);
         if (!cu.mainName.empty() && mainArgs)
-            callMain(&ctx, cu.mainName, cu.mainTakesArgs, *mainArgs);
+            callMain(&ctx, cu.mainKey, cu.mainTakesArgs, *mainArgs);
     } catch (const ScalaError& e) {
         std::fflush(stdout);
         std::fprintf(stderr, "%s:%d: error: %s\n", sourceName.c_str(), e.line, e.what());
         return EvalStatus::Error;
     }
+    const RuntimeLayout& L = runtime_.layout();
+    auto global = [&](const std::string& key) {
+        const auto* sym = proto::ProtoString::createSymbol(&ctx, key.c_str());
+        const proto::ProtoObject* v = L.globals->getOwnAttributeDirect(&ctx, sym);
+        return v ? v : PROTO_NONE;
+    };
+    // A Unit-valued REPL expression binds no resN (Scala REPL): its name
+    // and number stay free for the next result.
+    bool bindsResult = !cu.resultName.empty();
+    if (bindsResult && global(cu.resultKey) == L.unit) {
+        trial.restore(cu.resultName, globals_);
+        bindsResult = false;
+    }
+    if (bindsResult) ++resultCounter_;
+    globals_ = std::move(trial);
     if (outcome) {
-        const RuntimeLayout& L = runtime_.layout();
-        auto valueOf = [&](const std::string& name) {
-            const auto* key = proto::ProtoString::createSymbol(&ctx, name.c_str());
-            const proto::ProtoObject* v = L.globals->getOwnAttributeDirect(&ctx, key);
-            return show(&ctx, L, v ? v : PROTO_NONE);
-        };
-        for (const std::string& d : cu.definitions) {
-            if (d.rfind("val ", 0) == 0 || d.rfind("var ", 0) == 0)
-                outcome->echo.push_back(d + " = " + valueOf(d.substr(4)));
+        for (const ReplDefinition& d : cu.definitions) {
+            if (d.text.rfind("val ", 0) == 0 || d.text.rfind("var ", 0) == 0)
+                outcome->echo.push_back(d.text + " = " + showResult(&ctx, L, global(d.key)));
             else
-                outcome->echo.push_back(d);  // "def f", "lazy val x"
+                outcome->echo.push_back(d.text);  // "def f", "lazy val x"
         }
-        if (!cu.resultName.empty()) {
-            const std::string shown = valueOf(cu.resultName);
-            if (shown != "()") outcome->echo.push_back("val " + cu.resultName + " = " + shown);
-        }
+        if (bindsResult)
+            outcome->echo.push_back("val " + cu.resultName + " = " +
+                                    showResult(&ctx, L, global(cu.resultKey)));
     }
     return EvalStatus::Ok;
 }
 
-void Session::callMain(proto::ProtoContext* ctx, const std::string& name, bool takesArgs,
+void Session::callMain(proto::ProtoContext* ctx, const std::string& mainKey, bool takesArgs,
                        const std::vector<std::string>& args) {
-    const auto* key = proto::ProtoString::createSymbol(ctx, name.c_str());
+    const auto* key = proto::ProtoString::createSymbol(ctx, mainKey.c_str());
     const unsigned n = takesArgs ? static_cast<unsigned>(args.size()) : 0;
     // One scope for the call: slots [0, n) hold the argument Strings, slot n the
     // @main function, so every value stays rooted while the next one is allocated.
@@ -131,6 +156,16 @@ EvalOutcome Session::evalReplInput(const std::string& source, bool forceComplete
     EvalOutcome out;
     out.status = evaluate(source, "<console>", UnitMode::Repl, nullptr, &out, !forceComplete);
     return out;
+}
+
+bool Session::needsMoreInput(const std::string& source) const {
+    try {
+        parseSource(source);
+    } catch (const ParseError& e) {
+        return e.atEof;
+    } catch (const ScalaError&) {  // StackOverflowError: reported when evaluated
+    }
+    return false;
 }
 
 bool Session::loadFile(const std::string& path) {
@@ -163,6 +198,8 @@ int Session::disassemble(const std::string& path) {
         reportAt(path, e.pos, e.what());
     } catch (const std::length_error& e) {  // bytecode limits
         reportAt(path, SourcePos{}, e.what());
+    } catch (const ScalaError& e) {  // StackOverflowError: source nested too deeply
+        std::fprintf(stderr, "%s: error: %s\n", path.c_str(), e.what());
     }
     return 1;
 }

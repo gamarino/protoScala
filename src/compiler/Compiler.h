@@ -30,12 +30,20 @@ struct CompileError : std::runtime_error {
 
 enum class UnitMode { Script, Repl };
 
+// A top-level definition of a REPL input, for the echo.
+struct ReplDefinition {
+    std::string text;  // "val x", "var y", "lazy val z", "def f"
+    std::string key;   // its global key (GlobalTable.h)
+};
+
 struct CompiledUnit {
     std::unique_ptr<BytecodeModule> module;  // arity 0: the top-level code
     std::string mainName;                    // empty when the unit has no @main
+    std::string mainKey;                     // global key of the @main method
     bool mainTakesArgs = false;              // @main def f(args: String*)
     std::string resultName;                  // Repl: "res<N>" or empty
-    std::vector<std::string> definitions;    // Repl echo: "val x", "def f", ...
+    std::string resultKey;                   // global key of resultName
+    std::vector<ReplDefinition> definitions; // Repl echo, in source order
 };
 
 class Compiler {
@@ -67,6 +75,7 @@ private:
         RefKind ref;
         LocalInfo local;    // RefKind::Local
         BindingKind kind;   // binding kind in both cases
+        std::string key;    // RefKind::Global: the global's key
     };
 
     GlobalTable& globals_;
@@ -82,6 +91,7 @@ private:
     int newSlot() { return fn_->nextSlot++; }
     LocalInfo declareLocal(const std::string& name, BindingKind kind, bool boxed);
     Resolution resolve(const std::string& name, SourcePos pos);
+    const std::string& globalKey(const std::string& name) const;
     const LocalInfo* findInFunction(FunctionState* f, const std::string& name);
     LocalInfo captureInto(FunctionState* f, const std::string& name, SourcePos pos, bool* found);
 

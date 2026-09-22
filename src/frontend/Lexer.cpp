@@ -198,7 +198,11 @@ const char* tokenKindName(TokenKind k) {
     return "?";
 }
 
-Lexer::Lexer(std::string source) : source_(std::move(source)) { computeLineIndents(); }
+Lexer::Lexer(std::string source) : source_(std::move(source)) {
+    // A UTF-8 byte-order mark at the start of the source is not part of it.
+    if (source_.compare(0, 3, "\xEF\xBB\xBF") == 0) source_.erase(0, 3);
+    computeLineIndents();
+}
 
 bool Lexer::isOpChar(char c) {
     return c != '\0' && std::strchr("!#%&*+-/:<=>?@\\^|~", c) != nullptr;

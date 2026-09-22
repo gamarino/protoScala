@@ -321,9 +321,14 @@ Compiler::LocalInfo Compiler::captureInto(FunctionState* f, const std::string& n
 Compiler::Resolution Compiler::resolve(const std::string& name, SourcePos pos) {
     bool found = false;
     LocalInfo info = captureInto(fn_, name, pos, &found);
-    if (found) return Resolution{RefKind::Local, info, info.kind};
-    if (auto g = globals_.find(name)) return Resolution{RefKind::Global, {}, *g};
+    if (found) return Resolution{RefKind::Local, info, info.kind, {}};
+    if (const GlobalBinding* g = globals_.binding(name))
+        return Resolution{RefKind::Global, {}, g->kind, g->key};
     throw CompileError("Not found: " + name, pos);
+}
+
+const std::string& Compiler::globalKey(const std::string& name) const {
+    return globals_.binding(name)->key;  // declared in compileUnit step 1
 }
 
 void Compiler::loadLocal(const LocalInfo& info, SourcePos pos) {
@@ -405,7 +410,7 @@ void Compiler::compileExpr(const Node& n) {
 void Compiler::compileIdent(const Ident& id) {
     const Resolution r = resolve(id.name, id.pos);
     if (r.ref == RefKind::Local) loadLocal(r.local, id.pos);
-    else emit(Op::PUSH_GLOBAL, fn_->mod->addSymbol(id.name), id.pos, +1);
+    else emit(Op::PUSH_GLOBAL, fn_->mod->addSymbol(r.key), id.pos, +1);
     if (r.kind == BindingKind::ParamlessDef) emit(Op::CALL, 0, id.pos, 0);
     else if (r.kind == BindingKind::LazyVal) emit(Op::FORCE, 0, id.pos, 0);
 }
@@ -497,7 +502,7 @@ void Compiler::compileAssign(const Assign& a) {
             throw std::logic_error("compiler: captured var is not boxed");
         storeLocal(r.local, a.pos);
     } else {
-        emit(Op::STORE_GLOBAL, fn_->mod->addSymbol(id.name), a.pos, -1);
+        emit(Op::STORE_GLOBAL, fn_->mod->addSymbol(r.key), a.pos, -1);
     }
     emit(Op::PUSH_UNIT, 0, a.pos, +1);
 }
@@ -659,23 +664,25 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
         top.scopes.emplace_back();
         fn_ = &top;
         boxed_.clear();
+        globals_.beginUnit();
         // 1. Declare every top-level name; validate @main.
         const DefDef* main = nullptr;
         for (const auto& s : unit.stats) {
             if (s->kind == NodeKind::DefDef) {
                 const auto& d = as<DefDef>(*s);
-                globals_.declare(d.name, kindOf(d));
+                const std::string& key = globals_.declare(d.name, kindOf(d));
                 if (d.isMain()) {
                     if (main) throw CompileError("only one @main method is allowed per file", d.pos);
                     main = &d;
                 }
-                if (mode == UnitMode::Repl) out.definitions.push_back("def " + d.name);
+                if (mode == UnitMode::Repl) out.definitions.push_back({"def " + d.name, key});
             } else if (s->kind == NodeKind::ValDef) {
                 const auto& v = as<ValDef>(*s);
-                globals_.declare(v.name, kindOf(v));
+                const std::string& key = globals_.declare(v.name, kindOf(v));
                 if (mode == UnitMode::Repl)
                     out.definitions.push_back(
-                        std::string(v.isLazy ? "lazy val " : v.isVar ? "var " : "val ") + v.name);
+                        {std::string(v.isLazy ? "lazy val " : v.isVar ? "var " : "val ") + v.name,
+                         key});
             }
         }
         if (main) {
@@ -702,6 +709,7 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
                 throw CompileError("@main methods take no parameters or a single repeated "
                                    "String parameter", main->pos);
             out.mainName = main->name;
+            out.mainKey = globalKey(main->name);
             out.mainTakesArgs = varargs;
         }
         // 2. Hoisted top-level defs and lazy vals (their thunks), in order.
@@ -709,11 +717,11 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
             if (s->kind == NodeKind::DefDef) {
                 const auto& d = as<DefDef>(*s);
                 compileFunction(d.name, paramsOf(d), bodyOf(d), /*isDef=*/true, d.pos);
-                emit(Op::STORE_GLOBAL, top.mod->addSymbol(d.name), d.pos, -1);
+                emit(Op::STORE_GLOBAL, top.mod->addSymbol(globalKey(d.name)), d.pos, -1);
             } else if (s->kind == NodeKind::ValDef && as<ValDef>(*s).isLazy) {
                 const auto& v = as<ValDef>(*s);
                 compileLazyThunk(rhsOf(v), v.pos);
-                emit(Op::STORE_GLOBAL, top.mod->addSymbol(v.name), v.pos, -1);
+                emit(Op::STORE_GLOBAL, top.mod->addSymbol(globalKey(v.name)), v.pos, -1);
             }
         }
         // 3. Boxing analysis for code that runs in the top-level frame (top-level
@@ -734,14 +742,14 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
                 const auto& v = as<ValDef>(s);
                 if (v.isLazy) continue;  // hoisted (step 2)
                 compileExpr(rhsOf(v));
-                emit(Op::STORE_GLOBAL, top.mod->addSymbol(v.name), v.pos, -1);
+                emit(Op::STORE_GLOBAL, top.mod->addSymbol(globalKey(v.name)), v.pos, -1);
                 continue;
             }
             compileExpr(s);
             if (mode == UnitMode::Repl && last) {
                 out.resultName = "res" + std::to_string(replResultIndex);
-                globals_.declare(out.resultName, BindingKind::Val);
-                emit(Op::STORE_GLOBAL, top.mod->addSymbol(out.resultName), s.pos, -1);
+                out.resultKey = globals_.declare(out.resultName, BindingKind::Val);
+                emit(Op::STORE_GLOBAL, top.mod->addSymbol(out.resultKey), s.pos, -1);
             } else {
                 emit(Op::POP, 0, s.pos, -1);
             }

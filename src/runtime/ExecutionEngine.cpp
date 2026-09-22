@@ -1,4 +1,5 @@
 #include "runtime/ExecutionEngine.h"
+#include "compiler/GlobalTable.h"
 #include "compiler/BytecodeModule.h"
 #include "runtime/Errors.h"
 #include "runtime/StackGuard.h"
@@ -201,7 +202,8 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                     if ((!v || v == PROTO_NONE) &&
                         L.globals->hasOwnAttribute(&frame, key) != PROTO_TRUE) [[unlikely]]
                         throw ScalaError("UninitializedFieldError",
-                                         mod.constAt(operand).sval + " is used before it is initialised");
+                                         GlobalTable::nameOfKey(mod.constAt(operand).sval) +
+                                             " is used before it is initialised");
                     *sp++ = v ? v : PROTO_NONE;
                     continue;
                 }

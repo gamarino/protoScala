@@ -44,7 +44,7 @@ public:
             return std::string("error: ") + e.what();
         }
         if (cu.resultName.empty()) return "";
-        const auto* key = proto::ProtoString::createSymbol(&ctx, cu.resultName.c_str());
+        const auto* key = proto::ProtoString::createSymbol(&ctx, cu.resultKey.c_str());
         const proto::ProtoObject* v = runtime_.layout().globals->getOwnAttributeDirect(&ctx, key);
         return show(&ctx, runtime_.layout(), v ? v : PROTO_NONE);
     }
