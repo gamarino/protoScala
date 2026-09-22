@@ -1,6 +1,6 @@
 # Platform spec: `ProtoSparseListObject` (protoCore)
 
-> **Status:** specified, not implemented (2026-09-22). This is protoCore work
+> **Status:** implemented on protoCore branch `feature/pslo-p1` (not merged). This is protoCore work
 > carried out as part of the protoScala project (roadmap Phase P1) and reused
 > by protoClojure (track C) and protoST (track S).
 
