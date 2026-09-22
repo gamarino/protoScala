@@ -1,8 +1,11 @@
-# Platform spec: `ProtoObject::isDescendantOf` (protoCore)
+# Platform fix: `isInstanceOf` / `hasParent` (protoCore)
 
-> **Status:** specified 2026-09-22 (maintainer decision on Phase 2 Q2). Small,
-> additive protoCore API; implemented on its own protoCore branch
-> (`feature/descendant-of`), reviewed and merged by the maintainer.
+> **Status:** 2026-09-22. Maintainer decision (Phase 2 Q2, refined): **no new
+> API — correct the existing `isInstanceOf` and `hasParent` implementations**
+> ("corregir en lo posible"), keeping their contracts. Implemented on its own
+> protoCore branch, reviewed and merged by the maintainer. §2 below was the
+> first proposal (a new `isDescendantOf`) and is kept only as the behavioural
+> target of the fix.
 
 ## 1. Problem
 
@@ -53,9 +56,18 @@ bool isDescendantOf(ProtoContext* context, const ProtoObject* ancestor) const;
 - Mutable object after `setParents`.
 - No regression: the full protoCore suite.
 
+## 3b. Chosen approach
+
+`isInstanceOf` keeps its contract (starts from `getPrototype()`, returns
+`PROTO_TRUE` / `PROTO_NONE`) but walks the flattened chain without the 50-step
+cap, the DFS stack or any allocation; `hasParent` keeps its contract (true also
+for `target == this`) without building a list. Where a construction path leaves
+the chain unflattened, results must stay identical to today's, except that deep
+hierarchies beyond the old cap now answer correctly.
+
 ## 4. Rollout
 
-Additive API: minor version bump, no layout change. protoScala Phase 2 uses a
+Implementation fix, no API or layout change. protoScala Phase 2 uses a
 per-class marker attribute until this merges, then switches its type tests to
-`isDescendantOf` (one call site). protoST (`isKindOf:`) and protoPython may
+`isInstanceOf` (one call site). protoST (`isKindOf:`) and protoPython may
 adopt it independently.
