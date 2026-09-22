@@ -73,12 +73,24 @@ hierarchies, named and default arguments, extension methods pass.
 
 ## Phase 5 — Actors and futures
 
-**Goal:** GIL-free concurrency.
-**Done when:** `Actor.spawn`, `!`, `?`, `await`, three priority bands,
-cooperative suspension inside actors, handler failure → `Failure`, clean
-shutdown; stress fixtures run under GC pressure without leaks or crashes;
-`benchmarks/actor-bench.sh` reports throughput for MPSC, fan-out and ping-pong
-and verifies message counts.
+**Goal:** GIL-free concurrency on protoClojure's actor model (DESIGN §8).
+**Opens with:** maintainer decision on R9 (GC-visible mailbox: anchored C++
+stacks, protoST CAS list, or a new protoCore MPSC queue type).
+**Done when:**
+- `Actor.spawn`, `!`, `?`, `send`/`ask` with `Priority`, `value`,
+  `Actor.isActor`, `Actor.stats`, `Future` (`await`, `map`, `flatMap`,
+  `recover`, `Future.apply`) pass their fixtures;
+- the single-method invariant holds under a concurrent-senders race fixture
+  (protoClojure `concurrent-sends-no-race` shape), priorities are observable,
+  a handler exception yields `Failure` and leaves the actor alive;
+- `await` inside an actor suspends cooperatively (the `await` benchmark
+  completes with one worker);
+- every queued payload is GC-reachable (GC-pressure fixtures pass under a low
+  memory limit), and shutdown joins all workers on every exit path;
+- `benchmarks/actor-bench.sh` runs all seven modes of DESIGN §8.5, verifies
+  message counts, and `RESULTS.md` records the table next to protoClojure's
+  numbers on the same machine and date;
+- tutorial chapter 12 (actors and futures) is written.
 
 ## Phase 6 — UMD and packaging
 

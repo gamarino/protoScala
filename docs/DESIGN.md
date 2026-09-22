@@ -386,60 +386,142 @@ Until the protoCore work lands, `Map`/`Set` conformance fixtures are `XFAIL`.
 
 ## 8. Concurrency: native actors
 
-The model is protoST's (lock-free, protoCore-native state), with protoClojure's
-Scala-friendly surface. protoClojure's C++-heap mailbox (unrooted pointers,
-swallowed handler exceptions, silently dropped arguments) is **not** copied.
+**Model: protoClojure's actor system** (`protoClojure/src/runtime/ActorScheduler.*`,
+`docs/tutorial/13-actors.md`, `benchmarks/actor-bench.sh`) — a worker pool, a
+single-method invariant, three priority bands and a lock-free per-actor
+mailbox — with a Scala surface, cooperative `await`, and the corrections listed
+in §8.4. protoClojure's own design follows protoST's mailbox, so the three
+runtimes share one actor model.
 
-### 8.1 Semantics
+### 8.1 Surface
 
 ```scala
-val worker = Actor.spawn(initialState) { (state, msg) =>
+case class Increment(by: Int)
+case object GetValue
+
+// An actor owns a state and a handler (state, msg) => (newState, reply).
+val counter = Actor.spawn(0) { (state, msg) =>
   msg match
     case Increment(by) => (state + by, state + by)
     case GetValue      => (state, state)
 }
 
-worker ! Increment(10)            // fire-and-forget
-val f = worker ? GetValue         // ask: returns a Future
-val result = f.await              // cooperative inside an actor; parks the main thread
+counter ! Increment(10)                    // fire-and-forget, Medium band
+val f: Future[Int] = counter ? GetValue    // ask: Future of the reply, Medium band
+println(f.await)                           // 10
+
+counter.send(Increment(1), Priority.High)  // explicit band: High / Medium / Low
+counter.ask(GetValue, Priority.Low)        // Future, explicit band
+counter.value                              // current state, no message (like protoClojure's @actor)
+Actor.isActor(counter)                     // true
+Actor.stats                                // ActorStats(workers = N, messagesProcessed = K)
 ```
 
-The handler receives `(state, msg)` and returns `(newState, reply)`; the
-reply completes the `Future` of an ask. Priority bands: `!` and `?` use
-`Medium`; `actor.send(msg, Priority.High)` / `Priority.Low` and
-`actor.ask(msg, priority)` select the others.
+| protoClojure | protoScala |
+|---|---|
+| `(actor v)` | `Actor.spawn(v)(handler)` — the handler is fixed at spawn (Scala idiom: behaviour + messages) |
+| `(send a f & args)` → promise | `a ! msg` (Unit) / `a ? msg` → `Future` |
+| `send-h` / `send` / `send-l` | `Priority.High` / `Medium` (default) / `Low` via `send` / `ask` |
+| `@a` | `a.value` |
+| `(actor? x)` | `Actor.isActor(x)` |
+| `(actor-stats)` → `{:workers :messages-processed}` | `Actor.stats` → `ActorStats(workers, messagesProcessed)` |
+| `@promise` blocks the thread (1 ms polls) | `future.await` — cooperative inside an actor (§8.3) |
 
-### 8.2 Implementation
+The printed form is distinct from other objects: `Actor(10)`.
 
-- **Actor** — an object with `__state__`, `__handler__`, per-band
-  `__mailbox__` attributes (immutable `ProtoList`s) and a `__sched__` flag.
-- **Send** — builds an immutable envelope `(msg, future?)` and appends it to
-  the band's mailbox with a `setAttributeIfEqual` CAS loop (O(1) message
-  passing by pointer; no copies). The sender that moves `__sched__` 0→1
-  enqueues the actor; the 0/1/2 state machine (idle / queued-or-running /
-  wakeup-pending) guarantees one message at a time per actor. `finishDrain`
-  CASes the state before re-checking the mailbox (protoST 0.2.0 fix).
-- **Ready queues** — one lock-free Treiber stack per band with ABA-tagged
-  heads; nodes pooled; each live actor is anchored once in a protoCore
-  structure (`__live_actors__`) because the stack is invisible to the GC.
-  Workers drain High, then Medium, then Low.
-- **Worker pool** — `protoCore::newThread` workers (so they join the GC
-  quorum), one per physical core by default, overridable with
-  `PROTOSCALA_WORKERS`; spin-before-park, then park on a semaphore inside
-  `UnmanagedScope`.
-- **Futures** — a lock-free state machine on a `__state__` attribute.
-  `await` inside an actor throws `FutureYield`: the engine snapshots the actor
-  frames into `__suspended_frame__`, registers the actor as a waiter and the
-  worker proceeds with other work; completing the future reschedules the
-  actor, which resumes from the snapshot. On a non-actor thread `await` parks
-  on a semaphore inside `UnmanagedScope`.
-- **Handler failures** complete the ask's `Future` with the exception
-  (`Failure`) and are reported on stderr; the actor keeps its previous state
-  and stays alive. Supervision trees are out of scope for v0.1.
-- **Shutdown** — every worker is joined before the `ProtoSpace` is destroyed,
-  on every exit path, including errors and `sys.exit`.
+### 8.2 Scheduler (protoClojure architecture)
 
----
+- **Single-method invariant** — at any instant at most one message per actor
+  is being processed. One `claimed` flag per actor is the single source of
+  truth: the worker that claims the actor drains a batch (up to 8 messages,
+  protoClojure's value), then the end-of-batch release CAS races the senders'
+  claim CAS and at most one wins, so no concurrent sender can schedule the
+  actor on a second worker (the protoClojure session-19 race and its fix).
+- **Per-actor mailbox** — three lock-free MPSC stacks, one per band. Senders
+  push with a CAS loop; the claiming worker takes a whole band with one
+  exchange and reverses it to FIFO. Bands drain High, then Medium, then Low.
+- **Global ready queues** — one per band; workers take the highest non-empty
+  band first. protoClojure's ready queues sit behind one mutex + condition
+  variable and its README records them as the MPMC bottleneck; protoScala uses
+  lock-free per-band ready stacks with ABA-tagged heads (protoST
+  `ReadyStack.h`) and spin-before-park (protoST: −91 % parks).
+- **Worker pool** — workers created with `ProtoSpace::newThread` so they join
+  the GC quorum; `PROTOSCALA_ACTOR_WORKERS`, default `max(2, cores − 2)`,
+  cap 16 (protoClojure). Parked workers wait inside `UnmanagedScope`, so a
+  parked worker never delays a GC pause.
+- **Worker context** — each worker re-installs the thread-local active call
+  context captured when the scheduler starts, so a handler sees the full
+  runtime; each message runs in its own `ProtoContext` (P2).
+- **Shutdown** — `ActorScheduler::shutdown(ctx)` joins every worker before the
+  `ProtoSpace` is destroyed, on every exit path (normal end, uncaught
+  exception, `sys.exit`).
+
+### 8.3 Futures and cooperative `await`
+
+- `Future` is a protoCore object with a lock-free state machine on a
+  `__state__` attribute (pending → success | failure), completed with a single
+  CAS (protoClojure `deliverPromise`).
+- **Inside an actor**, `await` on a pending future throws the control signal
+  `FutureYield` (not a `std::exception`); the engine snapshots the actor's
+  frames into `__suspended_frame__`, registers the actor as a waiter of the
+  future and releases the worker to other actors. Completing the future
+  re-enqueues the actor, which resumes from the snapshot. The actor stays
+  claimed while suspended, so the single-method invariant holds across the
+  suspension (protoST `FutureYield`).
+- **Outside an actor** (main thread, plain threads) `await` parks on a
+  semaphore inside `UnmanagedScope` and is woken by the completing CAS — no
+  polling.
+- `Future.apply { ... }` runs a computation on the worker pool;
+  `map`/`flatMap`/`recover` chain without blocking; for-comprehensions over
+  futures work through the ordinary desugaring.
+
+### 8.4 Corrections to protoClojure's implementation
+
+protoClojure's STATUS and code record defects that protoScala must not
+inherit:
+
+| protoClojure defect | protoScala requirement |
+|---|---|
+| `ActorMessage` (fn, args, promise) and `ActorState::value` live on the C++ heap, unrooted (`ActorScheduler.h:61-89`) | every message payload, reply future and actor state is reachable from a protoCore structure while queued or in flight (P1). How the lock-free stacks are made GC-visible is platform question R9 |
+| handler exceptions are swallowed and the result becomes nil | a handler exception completes the ask's future with `Failure(e)`, is reported on stderr, and the actor keeps its previous state; supervision trees are out of scope for v0.1 |
+| send arguments beyond 15 silently dropped | a message is one object (any size); no argument limit exists |
+| `deref` polls every 1 ms | parking on a semaphore; cooperative suspension inside actors |
+| one OS thread per future / per `pmap` element | futures run on the worker pool |
+
+### 8.5 Actor benchmarks
+
+Harness `benchmarks/actor-bench.sh`, modelled on protoClojure's: each mode is a
+`.scala` script that fires about 1,000,000 messages (runs of 1–4 s, well above
+noise) and ends by printing `Actor.stats`. The runner **verifies the
+self-reported `messagesProcessed` against the expected count before computing a
+rate** — a silent failure never reads as infinite throughput. Every mode runs
+with `PROTOSCALA_ACTOR_WORKERS` = 1, 2, 4, 6, 8, 16.
+
+| Mode | Script | What it measures |
+|---|---|---|
+| `single` | `actor-throughput.scala` | 1 sender × 1 actor, 1M trivial messages — per-actor pipeline floor |
+| `fan-out` | `actor-fanout.scala` | 1 sender × 1000 actors × 1000 messages — ready-queue stress |
+| `MPSC` | `actor-mpsc.scala` | 4 sender threads × 250K → 1 actor — sender contention on one mailbox |
+| `MPMC` | `actor-mpmc.scala` | 4 senders × 4 actors round-robin — both contention paths |
+| `ping-pong` | `actor-pingpong.scala` | 2 actors exchanging asks, 200K round trips — ask/reply latency |
+| `await` | `actor-await.scala` | 1000 actors each awaiting an ask to another actor — cooperative suspension (must finish with `workers = 1`; a blocking `await` would deadlock) |
+| `priority` | `actor-priority.scala` | Low-band flood of 1M messages plus 1000 High-band probes — reports High-band latency p50/p99 |
+
+Reporting rules:
+
+- `benchmarks/RESULTS.md` records machine, date, commit, worker count at the
+  peak and the full table; the README shows the peak table, as protoClojure's
+  does.
+- **Comparison baseline:** protoClojure's `actor-bench.sh` on the same machine
+  and date (identical `single`/`fan-out`/`MPSC`/`MPMC` shapes, so the rows are
+  directly comparable), and, when a JVM is available, an equivalent Scala 3 +
+  Akka Typed program as an external reference (reported with its JVM version
+  and warm-up policy, never mixed into the protoCore rows).
+- Any claimed improvement is backed by `perf stat -r 3` cycles; any change in
+  the mailbox or scheduler re-runs the whole table.
+- GC-pressure variants of `single` and `fan-out` run under a low `ProtoSpace`
+  memory limit in the conformance suite (correctness, not speed): message
+  counts must match and no crash or leak may occur.
 
 ## 9. Modules and polyglot interop (UMD)
 
@@ -510,6 +592,7 @@ project raises them and does not decide them unilaterally.
 | R5 | One runtime per process (process-global UMD module cache, protoST K1) | multi-runtime tests | maintainer |
 | R6 | `super` is O(n) per call (§4.4); a protoCore "lookup after parent" API is the escape hatch | performance | protoScala, later |
 | R7 | No public API to attach a foreign OS thread | embedding | maintainer |
+| R9 | Actor mailboxes must be GC-visible (§8.4). Options: (a) protoClojure's atomic C++ MPSC stacks with every queued payload also anchored in a per-actor protoCore list; (b) protoST's mailbox as an immutable `ProtoList` updated with `setAttributeIfEqual`; (c) a new protoCore type — a lock-free MPSC queue with GC-traced nodes — shared by protoScala, protoClojure and protoST (P3). Decided at the start of Phase 5; the benchmarks of §8.5 compare the candidates | correctness / throughput | maintainer |
 | R8 | Tagged-pointer budget: 37 of 64 pointer tags and 11 of 16 embedded types are free; every new protoCore type must justify a tag | platform longevity | platform spec |
 
 ---
