@@ -397,7 +397,7 @@ It is rejected with:
 
 Scala compiles it. Auxiliary constructors *may* share the name `this`, but
 only when they differ in their **number** of parameters
-(`auxiliary constructors of C must differ in their number of parameters`).
+(`constructors of Calc must differ in their number of parameters (D31)`).
 Give the alternatives distinct names, or take an `Any` and `match` on it.
 
 **D32 — tuples stop at 22.** A tuple literal or a tuple pattern of more than

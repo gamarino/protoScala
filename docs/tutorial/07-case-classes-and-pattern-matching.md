@@ -374,16 +374,18 @@ sniffing becomes one `match`.
 - **`isInstanceOf`/`asInstanceOf` test the class only.** Type arguments are
   erased, so `xs.isInstanceOf[List[String]]` tests `List`, exactly as the JVM
   does, but without the unchecked warning.
-- **D32 — tuples stop at 22.** `Tuple23` and a tuple pattern of more than 22
-  elements are compile errors (`tuples of more than 22 elements are not
-  supported`), where Scala 3 uses `TupleXXL`.
+- **D32 — tuples stop at 22.** A 23-element tuple literal is
+  `tuples of more than 22 elements are not supported (D32)` and a 23-element
+  tuple pattern is `tuple patterns of more than 22 elements are not supported
+  (D32)`; there is no `Tuple23` companion. Scala 3 uses `TupleXXL`.
 - **D34 — `{ case … }` takes exactly one argument.** In Scala 3 a
   pattern-matching function literal adapts to the expected arity, so
   `val add: (Int, Int) => Int = { case (a, b) => a + b }` compiles and `add(1,
   2)` is `3`. Here the literal is always a one-parameter function, and calling
   it with two arguments raises `IllegalArgumentException: wrong number of
-  arguments`. Write `{ (a: Int, b: Int) => a + b }`, or pass the pair as a
-  tuple. Chapter 3 has the fixture.
+  arguments for <lambda>: expected 1, got 2`. Write
+  `{ (a: Int, b: Int) => a + b }`, or pass the pair as a tuple. Chapter 3 has
+  the fixture.
 - **No exhaustiveness check** on a `sealed` hierarchy (D4), and no `enum`
   until Phase 4.
 - **Named arguments only in `copy`** until Phase 4.

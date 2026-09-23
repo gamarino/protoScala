@@ -203,7 +203,8 @@ members — the template-method pattern, with no ceremony. A class that extends
 `Shape` and forgets `area` is rejected before it runs
 (`class Circle needs to be abstract, since def area is not defined`), and a
 trait or abstract class cannot be instantiated
-(`Shape is abstract; it cannot be instantiated`).
+(`Shape is a trait; it cannot be instantiated`, and `A is abstract; it cannot
+be instantiated` for an abstract class).
 
 Implementing an abstract member needs no `override`. Redefining a member that
 already has a body *does*, exactly as in Scala 3 — that is what `override def
