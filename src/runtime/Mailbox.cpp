@@ -45,7 +45,15 @@ void Mailbox::push(proto::ProtoContext* ctx, const proto::ProtoObject* q,
     auto* target = const_cast<proto::ProtoObject*>(q);
     for (;;) {
         proto::ProtoContext scope(ctx->space, ctx);   // the rebuilt list stays rooted here
+        scope.resizeAutomaticLocals(2);
         const proto::ProtoObject* cur = target->getOwnAttributeDirect(&scope, key);
+        // The snapshot MUST be rooted before appendLast allocates: another
+        // producer may win the compare-and-swap meanwhile, which makes the list
+        // we are still walking unreachable from `__items__` and therefore
+        // collectable under the concurrent GC (P1). Holding it only in a C++
+        // local crashes inside the AVL insert under a small heap.
+        scope.setAutomaticLocal(0, cur);
+        scope.setAutomaticLocal(1, item);
         const proto::ProtoObject* next =
             cur->asList(&scope)->appendLast(&scope, item)->asObject(&scope);
         scope.returnValue = next;
@@ -57,11 +65,24 @@ const proto::ProtoList* Mailbox::takeAll(proto::ProtoContext* ctx, const proto::
     const proto::ProtoString* key = itemsKey(ctx);
     auto* target = const_cast<proto::ProtoObject*>(q);
     for (;;) {
-        const proto::ProtoObject* cur = target->getOwnAttributeDirect(ctx, key);
-        const proto::ProtoList* items = cur->asList(ctx);
-        if (items->getSize(ctx) == 0) return items;
-        const proto::ProtoObject* empty = ctx->newList()->asObject(ctx);
-        if (target->setAttributeIfEqual(ctx, key, cur, empty)) return items;
+        proto::ProtoContext scope(ctx->space, ctx);
+        scope.resizeAutomaticLocals(1);
+        const proto::ProtoObject* cur = target->getOwnAttributeDirect(&scope, key);
+        scope.setAutomaticLocal(0, cur);   // rooted across newList's allocation
+        const proto::ProtoList* items = cur->asList(&scope);
+        if (items->getSize(&scope) == 0) {
+            scope.returnValue = cur;
+            ctx->returnValue = cur;        // the caller keeps the empty list
+            return items;
+        }
+        const proto::ProtoObject* empty = scope.newList()->asObject(&scope);
+        if (target->setAttributeIfEqual(&scope, key, cur, empty)) {
+            scope.returnValue = cur;
+            // From here `__items__` no longer refers to the batch, so the
+            // caller's context is what keeps it alive.
+            ctx->returnValue = cur;
+            return items;
+        }
     }
 }
 

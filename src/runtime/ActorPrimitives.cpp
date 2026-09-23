@@ -417,8 +417,10 @@ PRIM(threadObject_start) {
     // body through the handle, so nothing may collect it.
     auto* reg = const_cast<ProtoObject*>(L.actorRegistry);
     for (;;) {
-        const ProtoObject* cur = reg->getOwnAttributeDirect(&scope, L.threadsKey);
         proto::ProtoContext one(scope.space, &scope);
+        one.resizeAutomaticLocals(1);
+        const ProtoObject* cur = reg->getOwnAttributeDirect(&one, L.threadsKey);
+        one.setAutomaticLocal(0, cur);   // rooted across appendLast (P1)
         const ProtoObject* next = cur->asList(&one)->appendLast(&one, handle)->asObject(&one);
         one.returnValue = next;
         if (reg->setAttributeIfEqual(&one, L.threadsKey, cur, next)) break;

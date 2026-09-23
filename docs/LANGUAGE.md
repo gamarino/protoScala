@@ -101,7 +101,42 @@ The full target surface:
   `toVector`, `toMap`, `toSet`, `reverse`, `++`, `+:`, `:+`, `updated`,
   `getOrElse`, `get`, `keys`, `values`.
 - `println`, `print`, `sys.exit`, `scala.math` basics.
-- `Actor`, `Future`, `Priority` (Phase 5).
+- `Actor`, `Future`, `Priority`, `Thread`, `System` (Phase 5, §4.1).
+
+### 4.1 Concurrency (Phase 5)
+
+Actors and futures are ordinary values with ordinary methods; the dialect adds
+no syntax and no opcode for them.
+
+```
+ActorExpr    ::= 'Actor' '.' 'spawn' '(' Expr ')' '(' Expr ')'   -- two argument lists
+Tell         ::= Expr '!' Expr                                   -- infix, returns Unit
+Ask          ::= Expr '?' Expr                                   -- infix, returns Future
+```
+
+| Receiver | Member | Meaning |
+|---|---|---|
+| `Actor` | `spawn(state)(handler)` | a new actor; `handler(state, msg)` must return `(newState, reply)` (D45) |
+| `Actor` | `isActor(x)`, `stats` | a predicate; `ActorStats(workers, messagesProcessed)` |
+| `Priority` | `High`, `Medium`, `Low` | the fields `0`, `1`, `2` (D52) |
+| an actor | `! msg` | tell, on the Medium band; `Unit` |
+| an actor | `? msg` | ask, on the Medium band; a `Future` of the reply |
+| an actor | `send(msg, p)`, `ask(msg, p)` | the same on an explicit band |
+| an actor | `value` | the current state, read without a message (D51) |
+| a future | `await` | the value; raises the error of a failed future |
+| a future | `isCompleted`, `value` | `Boolean`; `Option[Try[T]]` (`None` while pending) |
+| a future | `map`, `flatMap`, `recover`, `onComplete` | combinators; the continuation runs on the completing thread (D48) |
+| `Future` | `apply(() => e)`, `successful(v)`, `failed(e)` | `apply` runs its body on the worker pool (D47) |
+| `Thread` | `start(() => e)`; a thread's `join()` | a real OS thread in the collector's quorum (D49) |
+| `System` | `nanoTime()`, `currentTimeMillis()`, `getenv(name)` | `Long`, `Long`, `String` (D49) |
+
+`await` inside an actor handler suspends the handler cooperatively: the worker
+is released, the actor stays claimed and its queued messages wait until the
+handler finishes (DESIGN §8.3). Outside an actor it blocks the calling thread.
+The chains it can suspend are limited by D43.
+
+The prelude gains `Try`/`Success`/`Failure` and `RuntimeError(className,
+message)` ahead of Phase 3 (D44).
 
 ## 5. Departures from Scala (stable ids; mirrored in STATUS.md)
 
@@ -133,7 +168,17 @@ The full target surface:
 | D40 | Diagnostic wording: a `var` that redefines a concrete inherited `var` without `override` is reported as "cannot override a mutable variable", where scalac says it "needs `override` modifier". protoScala rejects `override` on a `var` outright, so the two messages describe the same rejected program from opposite ends | `override` is never accepted on a `var` |
 | D41 | Scala 3's universal apply (a creator application: `C(args)` standing for `new C(args)`) is **not** synthesised for a plain class. `class C(val a: Int); C(1)` fails with `Not found: C`, where scalac 3.9 compiles it and prints `1`. Write `new C(1)`, or give `C` a companion with an `apply`. Case classes and case objects are unaffected: their companion `apply` is synthesised, so `C(args)` works | no static expected type to place the creator application |
 | D42 | A `MatchError` names the Scala class of the unmatched value: `MatchError: 5 (of class Int)`, where the JVM names the boxed class (`scala.MatchError: 5 (of class java.lang.Integer)`). Consistent with D14 (unqualified class names) and D29 (one integer type) | types are erased; there is no boxed class to name |
+| D43 | `await` suspends only a chain of protoScala frames each stopped at a call instruction. Inside a native higher-order method (`map`, `foreach`, `withFilter`, a `Future` continuation), or under an instruction that calls back into Scala without being a call site, it raises `UnsupportedOperationException` | a recursive VM cannot snapshot a C++ frame |
+| D44 | Until Phase 4 there are no exception values: a failed `Future` carries `RuntimeError(className, message)`, and `Try`/`Success`/`Failure` wrap it | exceptions arrive in Phase 4 |
+| D45 | An actor handler must return `(newState, reply)`; any other result raises `IllegalArgumentException` and fails that message | no static types to infer the intent |
+| D46 | An actor lives as long as the session (it is anchored so the collector can reach it while only the C++ ready stacks refer to it); `Future.apply` creates one actor per call | a removable registry needs `ProtoMap` |
+| D47 | `Future.apply` takes a function, not a by-name parameter: `Future(() => expr)` | no by-name parameters |
+| D48 | `map`/`flatMap`/`recover`/`onComplete` run their continuation on the thread that completes the future, or on the caller when it is already complete; there is no `ExecutionContext`, and a continuation may not `await` | one scheduling entity |
+| D49 | `Thread` and `System` are runtime facilities, not the JVM's; `nanoTime` is monotonic, only differences are meaningful | no JVM |
+| D50 | Awaiting a future that fails, inside an actor, abandons the rest of the handler and that message's future inherits the failure | no `try`/`catch` until Phase 4 |
+| D51 | `actor.value` reads the state without sending a message, so it may observe a state older than a queued send | a lock-free read |
+| D52 | `Priority.High` / `Medium` / `Low` are the integers `0` / `1` / `2` on an object, not an `enum` | `enum` arrives in Phase 4 |
 
-D9–D25 are the provisional Phase 1 departures and D28–D42 the provisional
-Phase 2 departures listed in
+D9–D25 are the provisional Phase 1 departures, D28–D42 the provisional
+Phase 2 departures and D43–D52 the provisional Phase 5 departures listed in
 [STATUS.md](STATUS.md#intentional-deviations), pending maintainer review.

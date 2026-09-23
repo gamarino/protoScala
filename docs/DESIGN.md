@@ -495,9 +495,15 @@ The printed form is distinct from other objects: `Actor(10)`.
   `__state__` attribute (pending → success | failure), completed with a single
   CAS (protoClojure `deliverPromise`).
 - **Inside an actor**, `await` on a pending future throws the control signal
-  `FutureYield` (not a `std::exception`); the engine snapshots the actor's
-  frames into `__suspended_frame__`, registers the actor as a waiter of the
-  future and releases the worker to other actors. Completing the future
+  `FutureYield` (not a `std::exception`); **each recursive
+  `ExecutionEngine::execute` frame catches it, prepends its own record
+  (module, instruction offset, the in-flight call's base slot and the live
+  slots below it) to the `__snapshot__` list on the actor, and rethrows**, so
+  the list reads outermost-first and the recursive VM stays recursive
+  (implemented 2026-09-23; the limits it imposes are D43). `await` registers
+  the actor as a waiter of the future and releases the worker to other actors.
+  Resuming re-materialises the frames by recursion, writing the awaited value
+  where the in-flight call would have left its result. Completing the future
   re-enqueues the actor, which resumes from the snapshot. The actor stays
   claimed while suspended, so the single-method invariant holds across the
   suspension (protoST `FutureYield`).
@@ -625,7 +631,7 @@ project raises them and does not decide them unilaterally.
 | R5 | One runtime per process (process-global UMD module cache, protoST K1) | multi-runtime tests | maintainer |
 | R6 | `super` is O(n) per call (§4.4); a protoCore "lookup after parent" API is the escape hatch. **Now exercised**: Phase 2 ships `SEND_SUPER`, so every `super.m` walks the receiver's linearization | performance | protoScala, later |
 | R7 | No public API to attach a foreign OS thread | embedding | maintainer |
-| R9 | Actor mailboxes must be GC-visible (§8.4). **Decided (2026-09-22): a new protoCore type, `ProtoMPSCQueue`** — lock-free MPSC queue with GC-traced items, shared by protoScala, protoClojure and protoST ([platform/PMQ-SPEC.md](platform/PMQ-SPEC.md)). Its GC strategy is settled with the maintainer in the P2 plan's Task 0 | correctness / throughput | decided; P2 |
+| R9 | Actor mailboxes must be GC-visible (§8.4). **Decided (2026-09-22): a new protoCore type, `ProtoMPSCQueue`** — lock-free MPSC queue with GC-traced items, shared by protoScala, protoClojure and protoST ([platform/PMQ-SPEC.md](platform/PMQ-SPEC.md)). Its GC strategy is settled with the maintainer in the P2 plan's Task 0. **Consumed since 0.3.0 through the `Mailbox` seam** (`src/runtime/Mailbox.h`), which compiles onto `ProtoMPSCQueue` when the linked protoCore provides it and onto a CAS'd `ProtoList` otherwise; protoCore 2.0.0 does not, so 0.3.0 ships the fallback and `protoscala --version` names the backend in use | correctness / throughput | decided; P2 |
 | R8 | Tagged-pointer budget: 37 of 64 pointer tags and 11 of 16 embedded types are free today; P1 and P2 take one tag each (35 left); every new protoCore type must justify a tag | platform longevity | platform specs |
 
 ---

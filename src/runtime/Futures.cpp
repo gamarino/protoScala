@@ -161,8 +161,10 @@ bool addWaiter(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::Pr
     auto* fut = const_cast<proto::ProtoObject*>(f);
     for (;;) {
         if (state(ctx, L, f) != kPending) return false;
-        const proto::ProtoObject* cur = fut->getOwnAttributeDirect(ctx, L.waitersKey);
         proto::ProtoContext scope(ctx->space, ctx);
+        scope.resizeAutomaticLocals(1);
+        const proto::ProtoObject* cur = fut->getOwnAttributeDirect(&scope, L.waitersKey);
+        scope.setAutomaticLocal(0, cur);   // rooted across appendLast (P1)
         const proto::ProtoObject* next =
             cur->asList(&scope)->appendLast(&scope, actor)->asObject(&scope);
         scope.returnValue = next;
@@ -181,15 +183,19 @@ namespace {
 void runContinuations(proto::ProtoContext* ctx, const RuntimeLayout& L,
                       const proto::ProtoObject* f) {
     auto* fut = const_cast<proto::ProtoObject*>(f);
-    const proto::ProtoObject* conts = fut->getOwnAttributeDirect(ctx, L.contsKey);
-    if (!conts || conts == PROTO_NONE || conts->asList(ctx)->getSize(ctx) == 0) return;
+    proto::ProtoContext held(ctx->space, ctx);
+    held.resizeAutomaticLocals(1);
+    const proto::ProtoObject* conts = fut->getOwnAttributeDirect(&held, L.contsKey);
+    if (!conts || conts == PROTO_NONE || conts->asList(&held)->getSize(&held) == 0) return;
+    held.setAutomaticLocal(0, conts);   // rooted across newList and after the CAS (P1)
     // Take the list once: a continuation registered after this point is run by
     // onComplete itself, because the future is already completed.
-    if (!fut->setAttributeIfEqual(ctx, L.contsKey, conts, ctx->newList()->asObject(ctx))) return;
-    const proto::ProtoList* list = conts->asList(ctx);
+    if (!fut->setAttributeIfEqual(&held, L.contsKey, conts, held.newList()->asObject(&held)))
+        return;
+    const proto::ProtoList* list = conts->asList(&held);
     ActorTurnPause pause;
-    for (unsigned long i = 0; i < list->getSize(ctx); ++i) {
-        proto::ProtoContext scope(ctx->space, ctx);
+    for (unsigned long i = 0; i < list->getSize(&held); ++i) {
+        proto::ProtoContext scope(held.space, &held);
         const proto::ProtoObject* arg = tryOf(&scope, L, f);
         scope.returnValue = arg;
         try {
@@ -220,8 +226,10 @@ void onComplete(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::P
             }
             return;
         }
-        const proto::ProtoObject* cur = fut->getOwnAttributeDirect(ctx, L.contsKey);
         proto::ProtoContext scope(ctx->space, ctx);
+        scope.resizeAutomaticLocals(1);
+        const proto::ProtoObject* cur = fut->getOwnAttributeDirect(&scope, L.contsKey);
+        scope.setAutomaticLocal(0, cur);   // rooted across appendLast (P1)
         const proto::ProtoObject* next =
             cur->asList(&scope)->appendLast(&scope, fn)->asObject(&scope);
         scope.returnValue = next;

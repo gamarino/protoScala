@@ -4,6 +4,71 @@ All notable changes to protoScala are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] - 2026-09-23
+
+Phase 5: actors, priority bands and cooperative futures. Built against
+protoCore `bf972d3f` (2.0.0). Phase 5 was implemented before Phases 3 and 4,
+so the minor version goes from 0.2.0 straight to 0.3.0.
+
+### Added
+
+- **Actors** (DESIGN §8.1, §8.2): `Actor.spawn(state)(handler)` where a handler
+  returns `(newState, reply)` (D45); `a ! msg`, `a ? msg`,
+  `a.send(msg, priority)`, `a.ask(msg, priority)`, `a.value`,
+  `Actor.isActor`, `Actor.stats`, the printed form `Actor(<state>)`.
+- **Three priority bands** per actor (`Priority.High`/`Medium`/`Low`, D52),
+  drained in strict priority order, eight messages per turn.
+- **A GIL-free worker pool** of protoCore threads (`PROTOSCALA_ACTOR_WORKERS`,
+  default `max(2, cores − 2)` capped at 16) over three lock-free ready stacks
+  with ABA-tagged heads and a type-stable node pool, with spin-before-park
+  inside a `ProtoContext::UnmanagedScope`. The pool starts on the first
+  `Actor.spawn`, so a script that uses no actor pays nothing at start-up.
+- **The single-method invariant**: one atomic per actor across claim, wake and
+  suspension, so an actor never runs twice at once however many threads send
+  to it. Checked by 8 threads × 25 000 sends at 1, 2, 8 and 16 workers.
+- **Futures** (DESIGN §8.3): `await`, `isCompleted`, `value: Option[Try[T]]`,
+  `map`, `flatMap`, `recover`, `onComplete`, `Future(() => e)` (D47),
+  `Future.successful`, `Future.failed`. Continuations run on the thread that
+  completes the future (D48).
+- **Cooperative `await` inside an actor**: the handler's call chain is
+  snapshotted frame by frame during unwinding and rebuilt on resume, so the
+  worker is released while the actor waits and the `await` workloads complete
+  with a single worker. An `await` whose chain cannot be snapshotted is
+  refused instead of corrupting the frame (D43).
+- `Try`/`Success`/`Failure` and `RuntimeError(className, message)` in the
+  prelude, moved up from Phase 3 (D44).
+- `Thread.start(() => …)`, `t.join()`, `System.nanoTime()`,
+  `System.currentTimeMillis()`, `System.getenv(name)` (D49).
+- The seven actor benchmark modes of DESIGN §8.5
+  (`benchmarks/actor-bench.sh`), each self-reporting the work it did and
+  verified by the runner before any rate is computed, with a protoClojure
+  comparison measured on the same machine and day.
+- Tutorial chapter 13, "Actors and futures", with every snippet as a fixture.
+
+### Changed
+
+- `protoscala --version` now names the actor mailbox backend, so a benchmark
+  report cannot misattribute its numbers:
+  `protoScala 0.3.0 (actor mailboxes: CAS list)`.
+- `~Session` joins every actor worker before the `ProtoSpace` is destroyed, on
+  every exit path.
+- `ExecutionEngine::execute` is split into a prologue and `runLoop`, and every
+  re-entrant opcode records the in-flight call's base slot. No new opcodes: the
+  128..159 range stays reserved (plan Task 0 A0-11).
+
+### Known limitations
+
+- The actor mailbox is the **CAS'd `ProtoList` fallback**, not protoCore's
+  `ProtoMPSCQueue`: protoCore 2.0.0 does not carry `newMPSCQueue` yet. The
+  `Mailbox` seam switches to it in one file once Phase P2 merges.
+- No supervision trees, no `ExecutionContext`, no actor timeouts and no
+  `Await.result(f, duration)`: an `await` waits forever, and the shutdown
+  reports any actor still parked on a future that never completed.
+- An actor lives as long as the session (D46), and `Future.apply` creates one
+  actor per call.
+- D43–D52 are recorded in `docs/STATUS.md` as provisional, pending the
+  maintainer's review.
+
 ## [0.2.0] - 2026-09-23
 
 Phase 2: object model, apply, for, match. Built against protoCore `e43fa2e4`.

@@ -3,15 +3,16 @@
 > Living tracker of the gap between [LANGUAGE.md](LANGUAGE.md) and the
 > implementation. Update it with every change.
 >
-> **Current state (2026-09-23):** Phase 2 complete (0.2.0): everything Phase 1
-> delivered, plus classes, objects, companions, traits with Scala's
-> linearization, case classes and case objects, tuples, the universal `apply`
-> rule, `match` with every DESIGN §5.3 pattern, for-comprehensions, placeholder
-> syntax, an `Option` prelude written in protoScala and a minimal `List`.
-> **Tests:** 646 total (`ctest --test-dir build_release -N`) — 265 unit
-> (GoogleTest), 352 conformance fixtures, 19 CLI checks, 10 benchmark smoke
-> checks. All green, also under `PROTOCORE_HEAP_LIMIT_CELLS=20000` (the whole
-> suite, unfiltered). Last verified 2026-09-23.
+> **Current state (2026-09-23):** Phase 5 complete (0.3.0): everything Phases 1
+> and 2 delivered, plus **actors with three priority bands, futures with a
+> cooperative `await`, `Try`/`Success`/`Failure`, `Thread` and `System`**.
+> Phases 3 and 4 are still ahead: Phase 5 was implemented out of order, so the
+> minor version went from 0.2.0 to 0.3.0.
+> **Tests:** 694 total (`ctest --test-dir build_release -N`) — 274 unit
+> (GoogleTest, including the separate `unit/actors` binary), 388 conformance
+> fixtures, 22 CLI checks, 10 benchmark smoke checks. All green, also under
+> `PROTOCORE_HEAP_LIMIT_CELLS=20000` (the whole suite, unfiltered) and at
+> `PROTOSCALA_ACTOR_WORKERS=1` and `=16`. Last verified 2026-09-23.
 
 ## Implemented
 
@@ -94,6 +95,47 @@ Per LANGUAGE.md §2–§3, the rows delivered in Phase 2:
       object graphs; tutorial chapters 6, 7 and 9 (chapters 2, 3, 5 and 14
       extended).
 
+Delivered in Phase 5 (DESIGN §8), the concurrency block:
+
+- [x] `Actor.spawn(state)(handler)`; a handler returns `(newState, reply)`
+      (D45). Actors are mutable protoCore objects anchored in a registry
+      pinned in a root slot, so the collector reaches every queued payload
+      (D46).
+- [x] `a ! msg` (tell), `a ? msg` (ask, a `Future` of the reply),
+      `a.send(msg, priority)`, `a.ask(msg, priority)`, `a.value`,
+      `Actor.isActor`, `Actor.stats` (`ActorStats(workers, messagesProcessed)`),
+      the printed form `Actor(<state>)`.
+- [x] `Priority.High` / `Medium` / `Low`: three per-actor mailboxes, drained
+      in strict priority order, a batch of eight messages per turn.
+- [x] The **single-method invariant**: one atomic per actor across claim, wake
+      and suspension, so one actor never runs twice at once however many
+      threads send to it.
+- [x] A worker pool of protoCore threads (`PROTOSCALA_ACTOR_WORKERS`, default
+      `max(2, cores − 2)` capped at 16), three lock-free ready stacks with
+      ABA-tagged heads and a type-stable node pool, spin-before-park inside a
+      `ProtoContext::UnmanagedScope`. The pool starts on the first
+      `Actor.spawn`, so a script that uses no actor pays nothing.
+- [x] `Future`: `await`, `isCompleted`, `value: Option[Try[T]]`, `map`,
+      `flatMap`, `recover`, `onComplete`, `Future(() => e)` (D47),
+      `Future.successful`, `Future.failed`, the printed forms
+      `Future(<pending>)` / `Future(10)` / `Future(<failed: …>)`.
+- [x] **Cooperative `await` inside an actor**: the handler's call chain is
+      snapshotted frame by frame, the worker is released and the actor stays
+      claimed; the completion re-enqueues it and the chain is rebuilt
+      (DESIGN §8.3). An `await` whose chain cannot be snapshotted is refused
+      (D43). Outside an actor, `await` blocks on a condition variable inside
+      an `UnmanagedScope`.
+- [x] `Try` / `Success` / `Failure` and `RuntimeError(className, message)` in
+      the prelude, moved up from Phase 3 (D44).
+- [x] `Thread.start(() => …)`, `t.join()`, `System.nanoTime()`,
+      `System.currentTimeMillis()`, `System.getenv(name)` (D49).
+- [x] The mailbox seam: protoCore's `ProtoMPSCQueue` when the linked protoCore
+      provides it, a CAS'd `ProtoList` otherwise. **This build ships the
+      fallback**: protoCore 2.0.0 carries no `newMPSCQueue`.
+      `protoscala --version` names the backend in use.
+- [x] The seven benchmark modes of DESIGN §8.5, each self-reporting and
+      verified by the runner; tutorial chapter 13.
+
 ## Not yet implemented
 
 - Nested, local and anonymous classes (`new T { ... }`) — Q6; nested
@@ -105,7 +147,12 @@ Per LANGUAGE.md §2–§3, the rows delivered in Phase 2:
 - Exceptions (`try`/`catch`/`finally`/`throw`) — Phase 4.
 - The Phase 3 collections (`Vector`, `Map`, `Set`, `Range`, `Either`, `Try`,
   the full `List` surface) and string-interpolation execution — Phase 3.
-- Actors and futures — Phase 5. UMD and packaging — Phase 6.
+- UMD and packaging — Phase 6.
+- Supervision trees, `ExecutionContext`, actor timeouts and
+  `Await.result(f, duration)` — not scheduled. An `await` waits forever; the
+  shutdown reports any actor still parked on a future that never completed.
+- Actor mailboxes on protoCore's `ProtoMPSCQueue` — Phase P2 (the `Mailbox`
+  seam is in place; switching is a one-file change once protoCore merges it).
 
 See [ROADMAP.md](ROADMAP.md).
 
@@ -175,7 +222,7 @@ their reserved ranges.
 | 79 | `SEND_APPLY` | `[recv a1..an] -> [r]` | operand: SendSite (name, n); `recv.m(args)` written with an argument list: calls the member when it is a method, else applies its value (D10) |
 | 80..95 | reserved | | object model |
 | 96..127 | reserved | | exceptions, Phase 4: `THROW` (+ per-module handler table) |
-| 128..159 | reserved | | actors, Phase 5: `SEND_ASYNC`, `ASK`, `AWAIT` |
+| 128..159 | reserved | | still reserved; Phase 5 shipped the actor surface as ordinary sends to native methods (plan Task 0 A0-11), so `SEND_ASYNC`, `ASK` and `AWAIT` were not needed. A dedicated opcode is a later optimisation to be justified by `perf stat -r 3` |
 
 ## Intentional deviations
 
@@ -250,10 +297,60 @@ while implementing the phase and has no numbered question.
 | D41 | Scala 3's universal apply (a creator application: `C(args)` standing for `new C(args)`) is **not** synthesised for a plain class. `class C(val a: Int); C(1)` fails with `Not found: C`, where scalac 3.9 compiles it and prints `1`. Write `new C(1)`, or give `C` a companion with an `apply`. Case classes and case objects are unaffected: their companion `apply` is synthesised, so `C(args)` works | — |
 | D42 | A `MatchError` names the Scala class of the unmatched value: `MatchError: 5 (of class Int)`, where the JVM names the boxed class (`scala.MatchError: 5 (of class java.lang.Integer)`). Consistent with D14 (unqualified class names) and D29 (one integer type) | — |
 
+### Provisional deviations (Phase 5) — pending maintainer decision
+
+Decided by the implementing agent under the maintainer's standing
+authorisation and recorded in [DECISIONS-LOG.md](DECISIONS-LOG.md) as
+"agent, pending review".
+
+| Id | Deviation | Track |
+|---|---|---|
+| D43 | `await` suspends only a chain of protoScala frames each stopped at a call instruction. Inside a native higher-order method (`map`, `foreach`, `withFilter`, a `Future` continuation), or under an instruction that calls back into Scala without being a call site (`==` reaching a user `equals`, a `MatchError`'s `toString`), it raises `UnsupportedOperationException` instead of suspending; the ask's future receives that failure and the actor stays alive | later |
+| D44 | Until Phase 4 there are no exception values: a failed `Future` carries `RuntimeError(className, message)`, and `Try`/`Success`/`Failure` (moved up from Phase 3) wrap it. `await` on a failed future raises the same error on the awaiting thread, which no user code can catch yet | Phase 4 |
+| D45 | An actor handler must return `(newState, reply)`; any other result raises `IllegalArgumentException` and fails that message, leaving the actor's state unchanged | (perm) |
+| D46 | An actor lives as long as the session: it is anchored in a registry so the GC can reach it and everything it holds while it is only referenced by the (C++) ready stacks. `Future.apply` creates one actor per call | P1 |
+| D47 | `Future.apply` takes a function, not a by-name parameter: write `Future(() => expr)` (by-name parameters need callee signatures at compile time, which a dynamic dialect has not) | later |
+| D48 | `map`/`flatMap`/`recover`/`onComplete` run their continuation on the thread that completes the future, or immediately on the caller when it is already complete — there is no `ExecutionContext`. A continuation may not `await` (D43) | later |
+| D49 | `Thread` and `System` are runtime facilities, not the JVM's: `Thread.start(() => …)`, `t.join()`, `System.nanoTime()`, `System.currentTimeMillis()`, `System.getenv(name)` (`""` when unset). `nanoTime` is a monotonic clock; only differences are meaningful | (perm) |
+| D50 | Awaiting a future that fails, inside an actor, abandons the rest of the handler and the message's own future inherits the failure (there is no `try`/`catch` to resume into until Phase 4) | Phase 4 |
+| D51 | `actor.value` reads the state without sending a message, so it may observe a state older than a send that is still queued (protoClojure's `@actor`) | (perm) |
+| D52 | `Priority.High` / `Medium` / `Low` are the integers `0` / `1` / `2` on an object, not an `enum` (enums arrive in Phase 4) | Phase 4 |
+
 ## Known issues / platform dependencies
 
 See DESIGN §11 for the full table. Unchanged this phase: R2, R4, R5, R8.
 
+- **Phase 5 / R1.** A C++ thread that polls an actor's state must reach a
+  safepoint between polls, or a stop-the-world pause waits for it and every
+  worker stalls; a Scala spin loop gets this for free because `JUMP_BACK`
+  calls `ProtoContext::safepoint()` at every back-edge (Q21). The scheduler
+  unit test's polling loop learned this the hard way under
+  `PROTOCORE_HEAP_LIMIT_CELLS=20000`.
+- **Phase 5 / cold start — at or just above target, not confirmed.** The
+  < 25 ms budget (DESIGN §1) measured 24.20 ms (script) and 23.58 ms (REPL) at
+  load average ~4, and 25.11 ms / 26.57 ms at load average ~8.7 on the same
+  build. **The host was shared with three other builds all night, so this is
+  not a clean measurement and the target is not claimed as met.** The cause is
+  not eager worker creation — a script with no actor makes 2 `clone3` calls and
+  one with an actor makes 12, so the pool really does start only at the first
+  `Actor.spawn` — but the prelude did grow by the `Try`/`Success`/`Failure`,
+  `RuntimeError` and `ActorStats` definitions plus six constructor `def`s
+  (D44), and the prelude is compiled at every start-up. Re-measure on a quiet
+  host before the release is called done.
+- **Phase 5 / mailbox size.** With the CAS-list fallback, a backlog of N
+  messages on one actor is an N-element `ProtoList` plus N envelopes, and every
+  push rebuilds an O(log N) path. `tests/cli/actors-stress.sh` queues 200000
+  messages into one actor and needs a ceiling between 1000000 and 1500000
+  cells to complete; it therefore pins its own
+  `PROTOCORE_HEAP_LIMIT_CELLS=8000000`, as `benchmarks/object_tree.scala` does,
+  so the low-heap sweep stays meaningful for every other test. A real
+  `ProtoMPSCQueue` (Phase P2) removes the rebuild.
+- **Phase 5.** The ready stacks retain their node high-water mark for the
+  session (the type-stable pool is never shrunk). An actor parked on a future
+  that never completes keeps itself and its queued messages alive until exit,
+  where the shutdown prints a diagnostic naming how many are parked. Actors are
+  never collected (D46). `PROTOSCALA_ACTOR_WORKERS` above the physical core
+  count measured no gain (`benchmarks/RESULTS.md`).
 - **R1** — Allocation-free loops have no GC poll: a tight `while` can stall a
   stop-the-world pause. Phase 1 makes a provisional choice (Q21): `JUMP_BACK`
   calls the existing public `ProtoContext::safepoint()` at every loop
@@ -332,8 +429,14 @@ Smaller notes:
 
 ## Open bugs
 
-None known. 646/646 tests pass (`ctest --test-dir build_release`), and 646/646
-under `PROTOCORE_HEAP_LIMIT_CELLS=20000`.
+None known. 694/694 tests pass (`ctest --test-dir build_release`), 694/694
+under `PROTOCORE_HEAP_LIMIT_CELLS=20000`, and 693/693 at
+`PROTOSCALA_ACTOR_WORKERS=1` and `=16`.
+
+Not run in this phase, and therefore not claimed: the ThreadSanitizer build of
+the plan's Task 8 Step 4. The machine was shared with other builds while
+Phase 5 was implemented and a TSan run would have invalidated the benchmark
+table measured on it; it is the first thing to run on a quiet host.
 
 ## History
 

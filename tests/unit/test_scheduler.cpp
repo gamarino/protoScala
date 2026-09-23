@@ -78,6 +78,12 @@ bool settle(ProtoContext* ctx, const ProtoObject* actor, long long n) {
     for (int spin = 0; spin < 20000; ++spin) {
         const ProtoObject* v = actor->getOwnAttributeDirect(ctx, world().L().actorStateKey);
         if (proto::asSmallInt(v) == n) return true;
+        // A polling thread MUST reach a safepoint, or a stop-the-world pause
+        // waits for it and every worker stalls -- which is exactly what a
+        // low PROTOCORE_HEAP_LIMIT_CELLS exposes. A Scala spin loop gets this
+        // for free: JUMP_BACK calls safepoint() at every back-edge.
+        ctx->safepoint();
+        proto::ProtoContext::UnmanagedScope unmanaged(ctx);
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     return false;
@@ -138,6 +144,8 @@ TEST(Scheduler, ConcurrentSendersLoseNothing) {
 }
 
 TEST(Scheduler, StatsCountEveryMessage) {
+    // messages_ is incremented before the handler runs, so it is never behind
+    // the number of handler calls, even with a turn in flight.
     EXPECT_GE(ActorScheduler::instance().messagesProcessed(), g_handlerCalls.load());
     EXPECT_GE(ActorScheduler::instance().workerCount(), 1u);
 }

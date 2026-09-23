@@ -11,3 +11,5 @@ build-dbg/
 .superpowers/
 build_bench/
 build_jvm/
+build_tsan/
+__pycache__/

@@ -35,8 +35,9 @@ println(List.range(1, 101).map(BigInt(_)).product.toString.length)  // 158 — n
 
 ## Project status
 
-**Phase 2 complete (version 0.2.0) — not production ready, open for community
-review.** The binary runs Scala 3 scripts and offers a REPL, in both brace and
+**Phase 5 complete (version 0.3.0) — not production ready, open for community
+review.** Phase 5 was implemented before Phases 3 and 4, so 0.2.0 is followed
+by 0.3.0. The binary runs Scala 3 scripts and offers a REPL, in both brace and
 significant-indentation syntax:
 
 - `val`/`var`/`lazy val`/`def`, `if`/`while`, lambdas and closures, placeholder
@@ -62,14 +63,56 @@ significant-indentation syntax:
   `yield` and `do`) over `List`, `Option` and any class with
   `map`/`flatMap`/`withFilter`/`foreach`, with a lazy `withFilter`;
 - `Option`/`Some`/`None` from a prelude written in protoScala, and a minimal
-  `List`.
+  `List`;
+- **actors and futures, without a GIL**: `Actor.spawn(state)(handler)`, `!`,
+  `?`, three priority bands, `Actor.stats`; `Future` with `await`, `map`,
+  `flatMap`, `recover` and `Future(() => e)`; a worker pool of real OS threads
+  with lock-free mailboxes and ready stacks; and an `await` inside a handler
+  that **suspends cooperatively** — the worker is released, so an actor that
+  asks another actor completes even with a single worker;
+- `Try`/`Success`/`Failure`, `Thread.start`/`join` and
+  `System.nanoTime`/`currentTimeMillis`/`getenv`.
+
+```scala
+val counter = Actor.spawn(0) { (state, msg) => (state + msg, state + msg) }
+counter ! 1                      // tell: queue a message, return at once
+println((counter ? 41).await)    // ask:  a Future of the reply  ->  42
+```
 
 Exceptions, `enum`, extension methods, the Phase 3 collections, string
-interpolation, actors and UMD are not implemented yet — see
+interpolation and UMD are not implemented yet — see
 [docs/STATUS.md](docs/STATUS.md) for the exact boundary and
 [docs/ROADMAP.md](docs/ROADMAP.md) for what each later phase brings.
 
 ## Performance
+
+### Actors (0.3.0)
+
+First measured actor run: 2026-09-23, same machine, **CAS-list mailboxes**
+(protoCore 2.0.0 has no `ProtoMPSCQueue` yet), load average 3.59 at start and
+9.09 at end — a shared machine, so these are a lower bound. All 42 cells
+(7 modes × 6 worker counts) verified their own message counts before any rate
+was computed. Full report:
+[benchmarks/reports/2026-09-23-actors.md](benchmarks/reports/2026-09-23-actors.md).
+
+| Mode | peak msg/s | at | protoClojure, same day |
+|---|---:|---|---:|
+| single | 126,950 | 1 worker | 331,565 |
+| fan-out | 97,516 | 1 worker | 526,039 |
+| MPSC | 166,983 | 1 worker | 296,121 |
+| MPMC | 250,212 | 4 workers | 334,898 |
+| ping-pong | 22,092 | 2 workers | no twin |
+| await | 44,736 | 4 workers | no twin |
+| priority | 115,890 | 1 worker | no twin |
+
+`await` completes at every worker count **including one**, which is the point
+of the cooperative suspension. `fan-out` currently regresses as workers are
+added, where protoClojure improves; the cause and the plan are in
+[benchmarks/RESULTS.md](benchmarks/RESULTS.md). protoScala's actors carry
+protoCore objects that the collector traces, which is a deliberate cost of the
+design (DESIGN §8.4), not an accident.
+
+
 
 Latest measured run: 2026-09-23, AMD Ryzen 5 5500U (6 cores, 12 logical CPUs),
 Linux 7.0, protoScala commit `6e6837f` (0.2.0; the working tree held Phase 2's

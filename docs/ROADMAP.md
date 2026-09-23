@@ -103,10 +103,10 @@ stackable traits work today — the classic
 phase is `super[T].m`, which names the ancestor explicitly instead of taking
 the next one in the linearization, and its done-when fixture.
 
-## Phase 5 — Actors and futures
+## Phase 5 — Actors and futures ✅ (2026-09-23, 0.3.0)
 
 **Goal:** GIL-free concurrency on protoClojure's actor model (DESIGN §8).
-**Requires:** Phase P2 (`ProtoMPSCQueue` mailboxes; R9 decided 2026-09-22).
+**Requires:** Phase P2 (`ProtoMPSCQueue` mailboxes; R9 decided 2026-09-22) — shipped without it, through the `Mailbox` seam on a CAS'd `ProtoList`, because protoCore 2.0.0 does not carry `newMPSCQueue` yet.
 **Done when:**
 - `Actor.spawn`, `!`, `?`, `send`/`ask` with `Priority`, `value`,
   `Actor.isActor`, `Actor.stats`, `Future` (`await`, `map`, `flatMap`,
@@ -121,7 +121,7 @@ the next one in the linearization, and its done-when fixture.
 - `benchmarks/actor-bench.sh` runs all seven modes of DESIGN §8.5, verifies
   message counts, and `RESULTS.md` records the table next to protoClojure's
   numbers on the same machine and date;
-- tutorial chapter 12 (actors and futures) is written.
+- tutorial chapter 13 (actors and futures) is written — 13, not 12: TUTORIAL.md's chapter table is the live list and numbers it 13.
 
 ## Phase 6 — UMD and packaging
 

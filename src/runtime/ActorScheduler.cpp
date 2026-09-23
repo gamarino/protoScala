@@ -115,8 +115,10 @@ const proto::ProtoObject* ActorScheduler::spawn(proto::ProtoContext* ctx,
     // mailboxes and everything they hold from a root slot (D46).
     auto* reg = const_cast<proto::ProtoObject*>(L.actorRegistry);
     for (;;) {
-        const proto::ProtoObject* cur = reg->getOwnAttributeDirect(&scope, L.actorsKey);
         proto::ProtoContext one(scope.space, &scope);
+        one.resizeAutomaticLocals(1);
+        const proto::ProtoObject* cur = reg->getOwnAttributeDirect(&one, L.actorsKey);
+        one.setAutomaticLocal(0, cur);   // rooted across appendLast (P1)
         const proto::ProtoObject* next = cur->asList(&one)->appendLast(&one, actor)->asObject(&one);
         one.returnValue = next;
         if (reg->setAttributeIfEqual(&one, L.actorsKey, cur, next)) break;
@@ -226,8 +228,10 @@ const proto::ProtoObject* ActorScheduler::nextMessage(proto::ProtoContext* ctx, 
     const proto::ProtoList* batch =
         Mailbox::takeAll(ctx, a->actor->getOwnAttributeDirect(ctx, L.mailboxKey[band]));
     if (batch->getSize(ctx) == 0) return nullptr;
-    // The batch is stored on the actor before anything else allocates, so the
-    // GC never sees it only from this C++ frame (P1).
+    // The batch left the mailbox, so nothing in the heap refers to it: root it
+    // in this context before setAttribute allocates, then store it on the
+    // actor, so the GC never sees it only from this C++ frame (P1).
+    ctx->returnValue = batch->asObject(ctx);
     const_cast<proto::ProtoObject*>(a->actor)->setAttribute(ctx, L.pendingKey[band],
                                                             batch->asObject(ctx));
     a->pendingIdx[band] = 1;
@@ -363,8 +367,11 @@ bool ActorScheduler::runTurn(proto::ProtoContext* ctx, ActorState* a) {
         for (unsigned band = 0; band < kBands && !env; ++band) env = nextMessage(&turn, a, band);
         if (!env) break;  // nothing queued: the turn is over
         turn.returnValue = env;
-        deliver(&turn, a, env, &suspended);
+        // Counted before the handler runs, not after: an ask's future is
+        // completed inside `deliver`, so a caller that has its reply must
+        // already see the message in Actor.stats.
         messages_.fetch_add(1, std::memory_order_relaxed);
+        deliver(&turn, a, env, &suspended);
         if (suspended) return true;
     }
     return false;

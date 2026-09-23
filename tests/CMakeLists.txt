@@ -28,6 +28,19 @@ foreach(cli_test disassemble gc-pressure actor-bench-smoke)
 endforeach()
 
 set_tests_properties(cli/actors-shutdown cli/actors-stress PROPERTIES TIMEOUT 600)
+# `actors-stress` deliberately builds the largest live set in the tree: 8
+# threads queue 200000 messages into ONE actor's mailbox, and the run is timed
+# from the moment the last worker could start draining, so the backlog is held
+# in full. With the CAS-list mailbox that backlog is a 200000-element ProtoList
+# plus 200000 envelopes; measured, it needs a ceiling between 1000000 and
+# 1500000 cells to complete at all. Below that protoCore reports out of memory,
+# which is honest arithmetic, not a rooting defect -- the same situation
+# `benchmarks/object_tree.scala` is in. This test therefore pins its own
+# ceiling (8000000 cells, ~5x the measured floor) so it is independent of the
+# ambient `PROTOCORE_HEAP_LIMIT_CELLS=20000` sweep, which stays meaningful for
+# every other test.
+set_tests_properties(cli/actors-stress PROPERTIES
+    ENVIRONMENT "PROTOCORE_HEAP_LIMIT_CELLS=8000000")
 set_tests_properties(cli/gc-pressure cli/actor-bench-smoke PROPERTIES TIMEOUT 600)
 
 add_test(NAME cli/examples
