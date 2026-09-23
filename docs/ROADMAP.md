@@ -72,7 +72,7 @@ pattern matching (all DESIGN §5.3 patterns) pass their fixtures.
 `List` moved up from Phase 3 (Q7, Q8), `SEND_KW` for named arguments to native
 methods (Q9), tuples `Tuple2`..`Tuple22` as case classes, REPL definitions of
 classes, traits, objects and case classes, and the `attr_lookup` and
-`object_tree` benchmarks. Provisional deviations D28–D40 are recorded in
+`object_tree` benchmarks. Provisional deviations D28–D42 are recorded in
 [STATUS.md](STATUS.md#provisional-deviations-phase-2--pending-maintainer-decision).
 
 ## Phase 3 — Fast paths, collections, prelude

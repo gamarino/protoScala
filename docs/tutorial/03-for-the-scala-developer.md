@@ -461,9 +461,11 @@ without a plan question of their own:
   file**; local, nested and anonymous classes (`new T { … }`), multiple
   constructor parameter lists and `super[T].m` are rejected with
   "not implemented yet" and arrive in Phase 4.
-- Scala 3's **universal apply** is not synthesised for a plain class: `C(args)`
-  needs an explicit companion `apply`, or use `new`. Case classes are
-  unaffected.
+- **D41** — Scala 3's **universal apply** (a creator application, `C(args)`
+  standing for `new C(args)`) is not synthesised for a plain class:
+  `class C(val a: Int); C(1)` fails with `Not found: C`, where scalac prints
+  `1`. Write `new C(1)`, or give `C` a companion with an `apply`. Case classes
+  and case objects are unaffected — their companion `apply` is synthesised.
 - **Named arguments** work only in a case class's `copy`; elsewhere they are
   rejected with `named arguments are not implemented yet` until Phase 4.
 - **D35** — a refutable pattern in a `for` generator is accepted **without**
@@ -485,8 +487,9 @@ without a plan question of their own:
 - **D38** — the default `toString` of a plain instance is
   `Name@<identity hash>`; an `object` prints `O@…` where the JVM prints
   `O$@…`, and `println(Tuple2)` prints `Tuple2@<hash>`.
-- A `match` that finds no case raises `MatchError: 5 (of class Int)`, naming
-  the Scala class; the JVM names the boxed one (`java.lang.Integer`).
+- **D42** — a `match` that finds no case raises `MatchError: 5 (of class Int)`,
+  naming the Scala class; the JVM names the boxed one
+  (`scala.MatchError: 5 (of class java.lang.Integer)`).
 - **D40** — a `var` that shadows a concrete inherited `var` without `override`
   is reported as `cannot override a mutable variable`, where scalac says
   "needs `override` modifier".

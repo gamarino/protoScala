@@ -68,9 +68,12 @@ Per LANGUAGE.md §2–§3, the rows delivered in Phase 2:
       `_1`..`_N`.
 - [x] Tuples `Tuple2`..`Tuple22` as case classes, never protoCore tuples
       (DESIGN §4.6, R2).
-- [x] The universal `apply` rule (`C(args)`, `obj(args)`, `f(args)`),
-      `update` (`a(i) = v`), generated setters (`c.value = v`,
-      `c.value += 3`), method values (eta-expansion, D10).
+- [x] The universal `apply` rule for a receiver that *has* an `apply`
+      member — `C(args)` where `C` is a case class or an `object`/companion
+      with an `apply`, `obj(args)`, `f(args)` — plus `update` (`a(i) = v`),
+      generated setters (`c.value = v`, `c.value += 3`) and method values
+      (eta-expansion, D10). `C(args)` on a **plain** class with no companion
+      `apply` is not rewritten to `new C(args)`: D41.
 - [x] `match` with every DESIGN §5.3 pattern: literals, wildcards, variables,
       typed patterns, constructor and tuple patterns, `::`,
       `List(a, rest*)`, alternatives `|`, binders `x @ p`, stable
@@ -244,6 +247,8 @@ while implementing the phase and has no numbered question.
 | D38 | The default `toString` of an object with no user-written `toString` is `Name@<identity hash>`: a singleton `object O` prints `O@…` where the JVM prints `O$@…`, and printing a companion or a tuple companion directly (`println(Tuple2)`) prints `Tuple2@<hash>` | — |
 | D39 | `List` hash codes differ from the JVM's, while staying consistent with `==` (equal lists have equal hash codes). Case classes, case objects, tuples and strings hash bit-identically to the JVM | — |
 | D40 | Diagnostic wording: a `var` that redefines a concrete inherited `var` without `override` is reported as "cannot override a mutable variable", where scalac says it "needs `override` modifier". protoScala rejects `override` on a `var` outright, so the two messages describe the same rejected program from opposite ends | — |
+| D41 | Scala 3's universal apply (a creator application: `C(args)` standing for `new C(args)`) is **not** synthesised for a plain class. `class C(val a: Int); C(1)` fails with `Not found: C`, where scalac 3.9 compiles it and prints `1`. Write `new C(1)`, or give `C` a companion with an `apply`. Case classes and case objects are unaffected: their companion `apply` is synthesised, so `C(args)` works | — |
+| D42 | A `MatchError` names the Scala class of the unmatched value: `MatchError: 5 (of class Int)`, where the JVM names the boxed class (`scala.MatchError: 5 (of class java.lang.Integer)`). Consistent with D14 (unqualified class names) and D29 (one integer type) | — |
 
 ## Known issues / platform dependencies
 
@@ -279,6 +284,19 @@ See DESIGN §11 for the full table. Unchanged this phase: R2, R4, R5, R8.
   no protoCore change was needed.
 - **R8** — Tagged-pointer budget: 37 of 64 pointer tags and 11 of 16
   embedded types are free today; P1 and P2 take one tag each (35 left).
+
+**Platform state at the time of this release.** 0.2.0 was built and verified
+against protoCore `e43fa2e4` (the 646/646 figures above are from that
+pairing). protoCore **2.0.0** — the `ProtoMap` type plus the parent-chain
+lookup fixes, with `SOVERSION 2` — was released in the sibling repository
+immediately afterwards. protoScala has **not** been rebuilt from clean against
+it yet: that is the scheduled embedder-migration step (DECISIONS-LOG,
+2026-09-22: "rebuild, check and fix protoPython, protoJS, protoST,
+protoClojure and protoScala"). Until it runs, a protoScala build that picks up
+the new headers while linking the old shared library crashes, as the ABI rule
+in CLAUDE.md warns; rebuild **both** projects from clean, in that order. Once
+protoScala runs on protoCore 2.0.0, the marker-attribute workaround behind
+`TEST_PROTO` can be reconsidered (R3 below).
 
 Smaller notes:
 

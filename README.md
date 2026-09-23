@@ -51,7 +51,8 @@ significant-indentation syntax:
   `_1`..`_N`;
 - **traits** with Scala's linearization installed as protoCore parent chains,
   trait parameters, and `super` — stackable traits included;
-- **tuples** `Tuple2`..`Tuple22`, the universal `apply` rule, `update`,
+- **tuples** `Tuple2`..`Tuple22`, the universal `apply` rule for receivers that
+  have an `apply` (a case class, or a companion that defines one), `update`,
   generated setters and method values;
 - **pattern matching** with every pattern of the design (literals, wildcards,
   variables, typed, constructor, tuple, `::`, `List(a, rest*)`, alternatives,

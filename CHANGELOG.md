@@ -99,7 +99,7 @@ Fixes from the final Phase 1 review, which had not been released yet:
 
 ### Deviations (provisional, pending maintainer review)
 
-- D28–D40 ([docs/STATUS.md](docs/STATUS.md)); D5 and D10 extended.
+- D28–D42 ([docs/STATUS.md](docs/STATUS.md)); D5 and D10 extended.
 
 ## [0.1.0] - 2026-09-22
 
