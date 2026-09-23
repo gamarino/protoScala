@@ -3,10 +3,12 @@
 > **Implementation status.** Everything in this chapter runs today, except
 > the forms listed here. Named and default arguments arrive in Phase 4;
 > by-name parameters (`x: => T`) are parsed and rejected with
-> `by-name parameters are not supported yet`; collection methods such as
-> `map` and `filter` arrive with the collections in Phase 3 (chapter 8). A
-> varargs parameter supports `length`, `isEmpty`, `head`, `apply(i)`,
-> `foreach` and `mkString` today.
+> `by-name parameters are not supported yet`. Since Phase 2, `List` carries
+> `map`, `flatMap`, `filter`, `withFilter`, `foreach`, `head`, `tail`, `drop`,
+> `length`/`size`, `isEmpty`, `nonEmpty`, `apply`, `mkString` and `::`
+> (chapter 9); the rest of the collection API, and the other collection types,
+> arrive in Phase 3 (chapter 8). A varargs parameter is a `List`, so it
+> supports all of those.
 
 Functions are the centre of Scala. This chapter covers methods (`def`),
 function values (lambdas), closures, recursion and the two ways of deferring a

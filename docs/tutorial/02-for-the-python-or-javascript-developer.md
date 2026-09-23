@@ -1,10 +1,12 @@
 # 2. For the Python or JavaScript Developer
 
 > **Implementation status.** This chapter uses only what protoScala runs
-> today. Classes and objects (chapter 6), collections such as `List` and
-> `Map` literals (chapter 8) and string interpolation such as `s"Hi $name"`
-> (chapter 10) are not implemented yet and are left to their own chapters.
-> See [STATUS.md](../STATUS.md) for the exact list.
+> today. Classes, objects and traits (chapter 6), case classes and pattern
+> matching (chapter 7) and for-comprehensions (chapter 9) now run, and §§2.9
+> to 2.11 introduce them. `Vector`, `Map` and `Set` (chapter 8) and string
+> interpolation such as `s"Hi $name"` (chapter 10) are not implemented yet and
+> are left to their own chapters. See [STATUS.md](../STATUS.md) for the exact
+> list.
 
 Scala looks like a cross between the languages you know. From JavaScript it
 takes braces, arrow functions and `val`/`var` that feel like `const`/`let`;
@@ -291,11 +293,124 @@ compiler would reject is reported when the offending line runs instead —
 chapter 3 shows one. Most local `val`s need no annotation at all; `val total =
 add(2, 3)` is just as good.
 
-## 2.9 Where to go next
+## 2.9 Classes and traits
+
+Fixture: [`tests/conformance/tutorial/02-python-js-classes.scala`](../../tests/conformance/tutorial/02-python-js-classes.scala)
+
+```scala
+trait Animal:
+  def name: String
+  def sound: String
+  def speak = name + " says " + sound
+
+class Dog(val name: String) extends Animal:
+  def sound = "woof"
+
+class Cat(val name: String) extends Animal:
+  def sound = "meow"
+
+@main def run(): Unit =
+  println(new Dog("Rex").speak + "; " + new Cat("Tom").speak)
+```
+
+Prints:
+
+```text
+Rex says woof; Tom says meow
+```
+
+Two things are compressed here that Python and JavaScript spell out.
+
+`class Dog(val name: String)` is the constructor **and** the field
+declaration: no `def __init__(self, name): self.name = name`, no
+`constructor(name) { this.name = name }`. The `val` in front of the parameter
+is what makes it a public field.
+
+`trait Animal` is an interface that may also contain code. `name` and `sound`
+are declared without a body — every animal must supply them — while `speak`
+has one and calls both. Python gets this with an abstract base class or a
+mixin, JavaScript with a mixin function over `prototype`; Scala has one
+keyword for it. A class can extend one class and any number of traits.
+
+Chapter 6 covers the rest: singletons (`object`), companions, `apply`,
+mutable fields, privacy and what happens when two traits define the same
+method.
+
+## 2.10 Pattern matching
+
+Fixture: [`tests/conformance/tutorial/02-python-js-match.scala`](../../tests/conformance/tutorial/02-python-js-match.scala)
+
+```scala
+case class Circle(r: Double)
+case class Rect(w: Double, h: Double)
+
+def describe(shape: Any): String = shape match
+  case Circle(r) => "circle:" + r
+  case Rect(w, h) => "rect:" + w + "x" + h
+  case _ => "unknown"
+
+@main def run(): Unit =
+  println(describe(Circle(3.0)) + " " + describe(Rect(2.0, 5.0)) + " " + describe(42))
+```
+
+Prints:
+
+```text
+circle:3.0 rect:2.0x5.0 unknown
+```
+
+A `case class` is a data shape. You get the constructor without `new`
+(`Circle(3.0)`), a readable `toString`, and — unlike any JavaScript object and
+unlike an ordinary Python class — `==` that compares the *contents*. It is
+Python's `@dataclass(frozen=True)`, in one word.
+
+`match` then takes the shape apart. `case Rect(w, h)` checks the kind and
+binds both fields in one line. Python 3.10's `match`/`case` was modelled on
+this; JavaScript has no equivalent and you write
+`if (s instanceof Rect) { const {w, h} = s; … }`.
+
+Two rules to carry away: a `match` is an **expression**, so it *is* the body
+of `describe`, and only the first matching case runs — there is no
+fall-through and no `break`. Chapter 7 has every pattern form.
+
+## 2.11 Comprehensions
+
+Fixture: [`tests/conformance/tutorial/02-python-js-comprehension.scala`](../../tests/conformance/tutorial/02-python-js-comprehension.scala)
+
+```scala
+@main def run(): Unit =
+  val xs = List(0, 1, 2, 3, 4)
+  println(for (x <- xs if x % 2 == 0) yield x * x)
+```
+
+Prints:
+
+```text
+List(0, 4, 16)
+```
+
+This is Python's `[x * x for x in xs if x % 2 == 0]`, with the source first
+and the result last, and it is JavaScript's
+`xs.filter(x => x % 2 === 0).map(x => x * x)` — literally, because the
+compiler rewrites the `for` into that chain (chapter 9, §9.3). `yield` is not
+Python's generator `yield`: here it simply names the expression that produces
+each element.
+
+A `for` without `yield` needs `do` and is a plain loop:
+`for (x <- xs) do println(x)`. Chapter 9 covers nesting, guards, patterns and
+what happens when you iterate over an `Option` instead of a `List`.
+
+## 2.12 Where to go next
 
 - [Chapter 4](04-values-and-expressions.md): literals, operators (which are
   methods), strings, equality, `if` and `while` in detail.
 - [Chapter 5](05-functions-and-closures.md): everything about `def`, lambdas,
   closures, recursion and `lazy val`.
+- [Chapter 6](06-classes-objects-and-traits.md): classes, constructors,
+  singletons and companions, traits and how they stack.
+- [Chapter 7](07-case-classes-and-pattern-matching.md): case classes, tuples,
+  `Option`, and every form of pattern.
+- [Chapter 9](09-for-comprehensions.md): `for … yield`, what it is rewritten
+  into, and the placeholder `_`.
 - [Chapter 14](14-repl-and-tooling.md): the REPL, for trying each idea
   interactively.

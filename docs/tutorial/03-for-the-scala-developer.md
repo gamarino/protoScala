@@ -12,13 +12,17 @@ library-compatible with the JVM. Where JVM-specific behaviour would not earn
 its keep on protoCore, protoScala diverges — and every divergence has a stable
 `D<n>` id in [LANGUAGE.md §5](../LANGUAGE.md) and [STATUS.md](../STATUS.md).
 
-> **Implementation status.** protoScala today implements the Phase 1 core:
+> **Implementation status.** protoScala today implements the Phase 1 core —
 > definitions, expressions, `if`/`while`, lambdas, closures, recursion,
 > `Int`/`Long`/`BigInt`/`Double`/`String`/`Char`/`Boolean` values, `println`,
-> `@main` and the REPL. Classes, objects, traits, case classes, pattern
-> matching, for-comprehensions, collections, string interpolation, exceptions,
-> extension methods and actors are not implemented yet (§3.3 gives the phase
-> for each). D5, D6 and D7 below describe features that do not exist yet.
+> `@main` and the REPL — and the Phase 2 object model: classes, objects and
+> companions, traits with Scala's linearization and stackable `super`, case
+> classes and case objects, tuples, `Option`, `match` with the full pattern
+> vocabulary, user extractors, `List`, and for-comprehensions. Not implemented
+> yet: collections beyond `List` (`Vector`, `Range`, `Map`, `Set`), string
+> interpolation, exceptions, `enum`, extension methods, actors, and modules
+> (§3.3 gives the phase for each). D6 and D7 below describe features that do
+> not exist yet.
 
 ## 3.1 What is identical
 
@@ -41,6 +45,25 @@ These behave as in Scala 3:
   the enclosing scope; a `val` declared inside a loop body is a fresh binding
   per iteration.
 - **`@main`** as the entry point, with no parameters or `args: String*`.
+- **The object model.** Classes with constructor-parameter fields, auxiliary
+  constructors, `object` singletons created on first access, companions that
+  see each other's `private` members, traits with parameters, abstract
+  members, Scala's right-to-left linearization and stackable `super`,
+  `override` exactly where Scala 3 requires it, trait initialisation order.
+- **Case classes.** `apply`, `unapply`, `copy`, structural `equals` with
+  `canEqual`, `toString`, the `Product` members, and a `hashCode` that is
+  **bit-identical to the JVM's** (Scala 3's MurmurHash3 with the same seed):
+  `Point(1, 2).hashCode` is `-694993394` on both. Tuples `Tuple2`…`Tuple22`
+  are case classes and hash the same way.
+- **Pattern matching.** Literals, wildcards, variables, typed patterns, type
+  tests, constructor patterns, tuples, `::`, sequence patterns with `_*`,
+  alternatives, binders (`x @ p`), stable identifiers, back-quoted names,
+  guards, and user `unapply` returning `Option` or `Boolean`. Patterns in
+  `val` definitions and in `for` generators.
+- **For-comprehensions.** The rewrite to `flatMap`/`withFilter`/`map`/
+  `foreach`, lazy guards, value definitions (`y = e`), `case` generators, and
+  `for` over any type that provides the methods.
+- **The universal `apply` rule** and `a(i) = v` as `a.update(i, v)`.
 
 ## 3.2 Departures
 
@@ -120,7 +143,24 @@ Calling a function with the wrong number of arguments is likewise an
 `IllegalArgumentException` at run time instead of a compile error.
 
 **D5 — Access modifiers are advisory**, except `private` on the defining
-class. Applies from Phase 2, when classes arrive.
+class. In force since Phase 2. `private` is enforced: a `private` member is
+reachable from the class that defines it, from another instance of that class,
+and from its companion, and nowhere else. `protected` and the qualified forms
+(`private[p]`, `protected[p]`) are parsed and treated as public. Because types
+are erased (D4), a violation is a **run-time** `NoSuchMethodError`, not a
+compile error:
+
+```text
+06-classes-private.scala:8: error: NoSuchMethodError: value balance is not a member of Account
+```
+
+The program is
+[`tests/conformance/tutorial/06-classes-private.scala`](../../tests/conformance/tutorial/06-classes-private.scala),
+shown in full in [chapter 6, §6.5](06-classes-objects-and-traits.md).
+
+Since the check runs on the receiver rather than on a static type, a foreign
+object that happens to expose a member of the same name resolves to it instead
+of failing.
 
 **D6 — Extension methods dispatch on the runtime prototype**, not the static
 type. Applies from Phase 4.
@@ -179,7 +219,11 @@ The program prints `init` and then `main`; Scala 3 prints only `main`.
 **Bare reference to a method (D10, provisional — see STATUS.md).** A reference to a
 `def` with a parameter list and no arguments is its function value, as with
 Scala 3 eta-expansion. For `def f()` (an empty parameter list) Scala 3 would
-insist on `f()`; protoScala yields the function value.
+insist on `f()`; protoScala yields the function value. Since Phase 2 the same
+rule applies to members: `obj.m` for a method that declares parameters is a
+*bound* function value that remembers its receiver, while `obj.m` for a
+parameterless `def m` calls it. A `lazy val` member is a per-instance holder
+whose initialiser runs, with the receiver of the first access, at most once.
 
 **Varargs arrive as a `List` (D12, provisional — see STATUS.md).** Inside
 `def f(xs: Int*)`, `xs` is a protoScala `List`, so `xs.toString` prints
@@ -246,22 +290,216 @@ By-name parameters (`x: => Int`) are parsed and rejected with
 `by-name parameters are not supported yet`, and `import` is parsed and
 ignored until modules arrive in Phase 6.
 
+### Provisional deviations (Phase 2)
+
+The object model brought seven more. They are provisional in the same sense as
+the Phase 1 list — recorded in STATUS.md, open to review — and each has a
+fixture that runs with the test suite. The comment on each fixture states what
+Scala 3.9 prints for the same program; all of them were checked against it.
+
+**D28 — construction of immutable instances.** An instance of a class that
+declares no `var` field is an immutable protoCore object, rebuilt as each
+field is stored. A `this` that escapes the constructor before the last field
+is initialised therefore denotes an *earlier version*: it lacks the fields
+stored after it and is neither `==` nor `eq` to the finished instance.
+
+Fixture: [`tests/conformance/tutorial/03-scala-dev-d28-construction.scala`](../../tests/conformance/tutorial/03-scala-dev-d28-construction.scala)
+
+```scala
+class Node(val id: Int):
+  Registry.last = this
+  val label = "n" + id
+
+object Registry:
+  var last: Any = null
+
+@main def run(): Unit =
+  val n = new Node(1)
+  println(n.label + " " + (Registry.last == n))
+```
+
+Prints:
+
+```text
+n1 false
+```
+
+Scala prints `n1 true`. The same applies to a lambda in the class body that
+captures `this`. The remedy is the one you would want anyway: do not publish
+`this` from a constructor. Declaring any `var` field makes the instance
+mutable and removes the effect.
+
+**D29 — type tests follow the runtime representation.** There is one integer
+type and one floating type (D1, D2), so the numeric type tests give different
+answers from the JVM's.
+
+Fixture: [`tests/conformance/tutorial/03-scala-dev-d29-type-tests.scala`](../../tests/conformance/tutorial/03-scala-dev-d29-type-tests.scala)
+
+```scala
+@main def run(): Unit =
+  println(3L.isInstanceOf[Int].toString + " " + (1L << 40).isInstanceOf[Int])
+```
+
+Prints:
+
+```text
+true true
+```
+
+Scala prints `false false` (and warns that the test is always false).
+`Int`, `Long`, `Short`, `Byte` and `BigInt` are one class, `Float` and
+`Double` another, so `case n: Int` matches any integer. `asInstanceOf` never
+converts — `(1: Any).asInstanceOf[Double]` raises
+`ClassCastException: Int cannot be cast to Double` rather than widening — and
+`null.asInstanceOf[Int]` is `null`. An extractor's `unapply` is called without
+the type test its parameter type would imply.
+
+**D30 — reading an uninitialised field.** Reading a field of the instance
+under construction before its initialiser has run raises `NoSuchMethodError`,
+where Scala yields the default value (`0`, `null`).
+
+Fixture: [`tests/conformance/tutorial/03-scala-dev-d30-uninitialised-field.scala`](../../tests/conformance/tutorial/03-scala-dev-d30-uninitialised-field.scala)
+
+```scala
+class A:
+  val a = b + 1
+  val b = 1
+
+@main def run(): Unit = println(new A().a)
+```
+
+It stops with:
+
+```text
+03-scala-dev-d30-uninitialised-field.scala:3: error: NoSuchMethodError: value b is not a member of A
+```
+
+Scala prints `1`, because `b` is still `0` when `a` is computed. The
+protoScala behaviour surfaces the initialisation-order bug instead of hiding
+it behind a zero, which is why it is kept.
+
+**D31 — no method overloading.** Two members of one template may not share a
+name. With types erased there is nothing to dispatch on.
+
+Fixture: [`tests/conformance/tutorial/03-scala-dev-d31-no-overloading.scala`](../../tests/conformance/tutorial/03-scala-dev-d31-no-overloading.scala)
+
+```scala
+class Calc:
+  def f(x: Int) = x
+  def f(x: String) = x.length
+```
+
+It is rejected with:
+
+```text
+03-scala-dev-d31-no-overloading.scala:4:3: error: f is already defined in Calc
+```
+
+Scala compiles it. Auxiliary constructors *may* share the name `this`, but
+only when they differ in their **number** of parameters
+(`auxiliary constructors of C must differ in their number of parameters`).
+Give the alternatives distinct names, or take an `Any` and `match` on it.
+
+**D32 — tuples stop at 22.** A tuple literal or a tuple pattern of more than
+22 elements is a compile error
+(`tuples of more than 22 elements are not supported (D32)`), and there is no
+`Tuple23` companion to fall back on. Scala 3 uses `TupleXXL`. Nothing else
+about tuples differs: they are case classes here as they are there, with
+identical `==`, `hashCode` and `toString`.
+
+**D33 — `Option.getOrElse` is eager.** By-name parameters do not exist yet, so
+the default is evaluated before the call.
+
+Fixture: [`tests/conformance/tutorial/03-scala-dev-d33-getorelse-eager.scala`](../../tests/conformance/tutorial/03-scala-dev-d33-getorelse-eager.scala)
+
+```scala
+var log = ""
+def fallback(): Int =
+  log = "evaluated"
+  0
+
+@main def run(): Unit =
+  val x = Some(1).getOrElse(fallback())
+  println(x.toString + " " + log)
+```
+
+Prints:
+
+```text
+1 evaluated
+```
+
+Scala prints `1 ` — the trailing empty `log` shows that `fallback()` never
+ran. The same applies to `orElse`. Until by-name parameters arrive (Phase 4),
+keep expensive or effectful defaults out of `getOrElse`.
+
+**D34 — `{ case … }` takes exactly one argument.** A pattern-matching function
+literal is always a one-parameter function here; Scala 3 also accepts it where
+a function of several parameters is expected, matching the argument tuple.
+
+Fixture: [`tests/conformance/tutorial/03-scala-dev-d34-case-lambda-arity.scala`](../../tests/conformance/tutorial/03-scala-dev-d34-case-lambda-arity.scala)
+
+```scala
+@main def run(): Unit =
+  val add: (Int, Int) => Int = { case (a, b) => a + b }
+  println(add(1, 2))
+```
+
+It stops with:
+
+```text
+03-scala-dev-d34-case-lambda-arity.scala:4: error: IllegalArgumentException: wrong number of arguments for <lambda>: expected 1, got 2
+```
+
+Scala prints `3`. Write `(a: Int, b: Int) => a + b`, or pass one tuple.
+
+**Smaller Phase 2 behaviours,** recorded in STATUS.md without a question of
+their own:
+
+- `class`, `trait` and `object` must be defined at the **top level of a
+  file**; local, nested and anonymous classes (`new T { … }`), multiple
+  constructor parameter lists and `super[T].m` are rejected with
+  "not implemented yet" and arrive in Phase 4.
+- Scala 3's **universal apply** is not synthesised for a plain class: `C(args)`
+  needs an explicit companion `apply`, or use `new`. Case classes are
+  unaffected.
+- **Named arguments** work only in a case class's `copy`; elsewhere they are
+  rejected with `named arguments are not implemented yet` until Phase 4.
+- A refutable pattern in a `for` generator is accepted **without** Scala 3.9's
+  `case` keyword and filters, as in Scala 2; and writing `case` in front of an
+  irrefutable pattern emits no filter, since the pattern cannot fail. Both
+  give the same results as Scala for programs Scala accepts.
+- `for (x <- xs; y = e)` compiles to two `map`s where dotty fuses them into
+  one; the values are identical.
+- `List` hash codes differ from the JVM's (they stay consistent with `==`);
+  case classes, tuples, strings and numbers are bit-identical.
+- The default `toString` of a plain instance is `Name@<identity hash>`; an
+  `object` prints `O@…` where the JVM prints `O$@…`.
+- A `match` that finds no case raises `MatchError: 5 (of class Int)`, naming
+  the Scala class; the JVM names the boxed one (`java.lang.Integer`).
+- A `var` that shadows a concrete inherited `var` without `override` is
+  reported as `cannot override a mutable variable`, where scalac says
+  "needs `override` modifier".
+
 ## 3.3 What is missing
 
 Out of scope by design: implicits and givens (D3), the static type checker
 (D4), the JVM and every Java library (D8), macros and inline metaprogramming,
 Java reflection.
 
+Delivered in Phase 2, so no longer on this list: classes, objects,
+companions, traits with linearization and stackable `super`, case classes and
+case objects, tuples, `Option`, the universal `apply` rule, `List`, pattern
+matching and for-comprehensions.
+
 Not implemented yet, with the phase that brings each (see
 [ROADMAP.md](../ROADMAP.md)):
 
 | Feature | Phase |
 |---|---|
-| Classes, objects, companions, traits, case classes, universal `apply` | 2 |
-| Pattern matching, for-comprehensions | 2 |
-| Collections (`List` construction, `Vector`, `Range`, `Map`, `Set`), `Option`, `Either`, `Try`, tuples | 3 |
+| Collections beyond `List` (`Vector`, `Range`, `Map`, `Set`), `Either`, `Try`, the rest of the `List` API | 3 |
 | String interpolation (`s"…"`, `f"…"`) | 3 |
-| Exceptions (`try`/`catch`/`finally`/`throw`), `super` in stackable traits, `enum`, sealed hierarchies, named and default arguments, extension methods | 4 |
+| Exceptions (`try`/`catch`/`finally`/`throw`), `enum`, exhaustiveness, named and default arguments, by-name parameters, extension methods, local/nested/anonymous classes, multiple constructor parameter lists, `super[T]` | 4 |
 | Actors and futures | 5 |
 | Modules and polyglot imports (UMD), packaging | 6 |
 

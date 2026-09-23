@@ -204,3 +204,44 @@ reads:
 
 It is the first thing to look at when a program behaves unexpectedly: it shows
 what the compiler understood, before any question of run-time behaviour.
+
+## 14.8 Classes at the REPL
+
+Classes, objects, traits and case classes can be defined at the prompt, and a
+template that spans several lines is read like any other multi-line input
+(§14.3): the indented lines continue it, and an empty line ends it.
+
+```text
+scala> case class Point(x: Int, y: Int)
+// defined case class Point
+scala> val p = Point(1, 2)
+val p = Point(1,2)
+scala> p.copy(y = 5)
+val res0 = Point(1,5)
+scala> trait Shape:
+     |   def area: Double
+     |
+// defined trait Shape
+scala> class Sq(s: Double) extends Shape:
+     |   def area = s * s
+     |
+// defined class Sq
+scala> new Sq(3.0).area
+val res1 = 9.0
+```
+
+This session is replayed by `tests/cli/tutorial-repl.sh` on every test run, so
+the echoes above are checked against the binary.
+
+A definition of a class, trait or object echoes `// defined <kind> <name>`
+rather than a value, as the Scala 3 REPL does, and the companion a case class
+synthesises is not announced separately. Values then print with the user's own
+`toString`, so `p` shows as `Point(1,2)`.
+
+Redefinition follows the rule of §14.2: a second `case class Point(x: Int)`
+shadows the first, and values created before it keep their original class, so
+an old `p` still prints `Point(1,2)`. A *pattern* typed afterwards, though,
+names the new class — `p match { case Point(a, b) => … }` then reports
+`wrong number of arguments for pattern Point: expected 1, found 2`. Re-create
+the value after redefining its class. The wider set of cases — `object` with a mutable field, `match` at the prompt,
+pattern `val`s, `for … yield` — is exercised by `tests/cli/repl-classes.sh`.

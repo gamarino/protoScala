@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# CLI check: the REPL session printed in docs/tutorial/14-repl-and-tooling.md
-# §14.2 produces exactly the echoes the chapter shows.
+# CLI check: the REPL sessions printed in docs/tutorial/14-repl-and-tooling.md
+# §14.2 and §14.8 produce exactly the echoes the chapters show.
 #
 # Usage: tutorial-repl.sh <path-to-protoscala>
 set -u
@@ -26,4 +26,35 @@ for piece in 'val greeting = "Hello"' "def shout" 'val res0 = "HELLO!"' "def fac
              "val res1 = 2432902008176640000" "def sumTo" "val res2 = 5050"; do
     grep -qF -- "$piece" <<<"$out" || { echo "FAIL: no '$piece' in:"; echo "$out"; exit 1; }
 done
+
+# --- §14.8 "Classes at the REPL": the transcript the chapter prints ------------
+# Its inputs are the first lines of tests/cli/repl-classes.sh, so the two checks
+# cannot drift apart. HOME is redirected so the real ~/.protoscala_history is
+# never touched.
+work=$(mktemp -d -p "$PWD" tutorial-repl.XXXXXX)
+trap 'rm -rf "$work"' EXIT
+mkdir "$work/home"
+classes_out=$(printf '%s\n' \
+    'case class Point(x: Int, y: Int)' \
+    'val p = Point(1, 2)' \
+    'p.copy(y = 5)' \
+    'trait Shape:' \
+    '  def area: Double' \
+    '' \
+    'class Sq(s: Double) extends Shape:' \
+    '  def area = s * s' \
+    '' \
+    'new Sq(3.0).area' \
+    ':quit' | HOME="$work/home" timeout 60s "$P" 2>"$work/err")
+rc=$?
+[[ $rc -eq 0 ]] || { echo "FAIL: §14.8 exit $rc"; echo "$classes_out"; cat "$work/err"; exit 1; }
+plain="${classes_out//scala> /}"
+plain="${plain//     | /}"
+for piece in '// defined case class Point' 'val p = Point(1,2)' 'val res0 = Point(1,5)' \
+             '// defined trait Shape' '// defined class Sq' 'val res1 = 9.0'; do
+    grep -qxF -- "$piece" <<<"$plain" || {
+        echo "FAIL: §14.8 has no '$piece' in:"; echo "$classes_out"; cat "$work/err"; exit 1; }
+done
+[[ ! -s "$work/err" ]] || { echo "FAIL: §14.8 unexpected stderr:"; cat "$work/err"; exit 1; }
+[[ -z "$(ls -A "$work/home")" ]] || { echo "FAIL: the REPL wrote to HOME"; ls -A "$work/home"; exit 1; }
 echo OK
