@@ -83,4 +83,31 @@ class Counter:
 SCALA
 out=$(PROTOCORE_HEAP_LIMIT_CELLS=2000000 timeout 90s "$P" "$work/objects.scala" 2>&1); rc=$?
 [[ $rc -eq 0 && "$out" == "123037 40" ]] || { echo "FAIL (objects): exit $rc, '$out'"; exit 1; }
+# Actors under a low heap: 200 actors, each receiving 200 case-class messages
+# whose only reference is the mailbox, plus 200 asks whose futures are the only
+# reference to the replies. 200 * 200 = 40000 messages; each actor ends at 200
+# and the ask replies with that state, so the total is 200 * 200 = 40000.
+# A lost message, a collected envelope or a collected reply gives a wrong
+# total, not a crash -- this is a correctness check (DESIGN §8.5).
+cat >"$work/actors.scala" <<'SCALA'
+case class Add(n: Int)
+var actors: List[Any] = Nil
+var k = 0
+while k < 200 do
+  actors = Actor.spawn(0) { (s, m) =>
+    m match
+      case Add(n) => (s + n, s + n)
+      case _      => (s, s)
+  } :: actors
+  k += 1
+var round = 0
+while round < 200 do
+  actors.foreach(a => a ! Add(1))
+  round += 1
+var total = 0
+actors.foreach(a => total += (a ? Add(0)).await)
+println(total)
+SCALA
+out=$(PROTOCORE_HEAP_LIMIT_CELLS=2000000 timeout 180s "$P" "$work/actors.scala" 2>&1); rc=$?
+[[ $rc -eq 0 && "$out" == "40000" ]] || { echo "FAIL (actors): exit $rc, '$out'"; exit 1; }
 echo OK

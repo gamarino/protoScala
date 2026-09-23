@@ -12,10 +12,12 @@ FetchContent_MakeAvailable(googletest)
 add_subdirectory(unit)
 
 # --- CLI checks -----------------------------------------------------------------
+# The actor CLI checks start worker pools and run for tens of seconds under
+# load, so they carry their own deadline.
 foreach(cli_test help version unknown-option script-errors main-args
                  repl-basic repl-multiline repl-errors repl-load repl-history-hygiene
                  repl-redefinition repl-results repl-indented-input repl-classes deep-source
-                 tutorial-repl)
+                 tutorial-repl actors-shutdown actors-stress)
     add_test(NAME cli/${cli_test}
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/cli/${cli_test}.sh" "$<TARGET_FILE:protoscala>")
 endforeach()
@@ -24,6 +26,9 @@ foreach(cli_test disassemble gc-pressure)
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/cli/${cli_test}.sh" "$<TARGET_FILE:protoscala>"
                 "${CMAKE_CURRENT_SOURCE_DIR}")
 endforeach()
+
+set_tests_properties(cli/actors-shutdown cli/actors-stress PROPERTIES TIMEOUT 600)
+set_tests_properties(cli/gc-pressure PROPERTIES TIMEOUT 600)
 
 add_test(NAME cli/examples
     COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/cli/examples.sh" "$<TARGET_FILE:protoscala>"
