@@ -49,3 +49,82 @@ maintainer review.
       INSTALL_RPATH $ORIGIN/../lib so no LD_LIBRARY_PATH is needed. Linux (.deb/.rpm/.tar.gz) built AND
       verified here (install into a scratch prefix, run the binary); macOS (.dmg) and Windows (NSIS/.zip)
       configured but explicitly marked unverified on this build host.
+
+## Overnight run 2026-09-23 — state of the closing sequence
+
+Status of each item above, as verified at the end of the unattended run.
+Everything below is **committed locally and nothing is pushed**.
+
+- [x] Merge protoCore `feature/pslo-p1` then `feature/descendant-of` into
+      master — 2.0.0, SOVERSION 2 (`ce529cfe`, `31cb9277`, `bf972d3f`),
+      plus `50342ceb` adding protoScala to the README ecosystem table.
+- [x] protoCore full suite 412/412, ASan clean, no perf regression.
+- [x] Clean rebuild + suites + fixes of every embedder:
+      - protoPython `f7557d5c` — 556/557; class chain is exactly the MRO.
+      - protoJS `7d28bd16e` — integrity levels moved to a per-object
+        `__integrity__` bitmask; test262 Object/Reflect/Proxy 3617 → 3619,
+        0 regressions.
+      - protoST `4b47b48` — 833/833, matching the README baseline exactly.
+      - protoClojure `4ea4e70` — 383/383 (the README's 382 was pre-existing drift).
+      - protoScala `3703759` — 694/694 in four configurations.
+- [x] Phase 5 (actors and futures) — complete, benchmarked.
+- [ ] **Phase P2 (`ProtoMPSCQueue`) — implemented but NOT merged. See below.**
+- [x] Re-measure the suite and cold start — done, interleaved (`646ff28`).
+      Cold start MET: every one of 21 samples per row under 25 ms.
+      Geomean vs CPython 0.86x (was 0.83x) — inside spread, not a real move.
+      Caught first: `build_bench` was linked against the stale protoCore 1.0.0
+      in `/usr/local/lib` and crashed on `--version`; rebuilt clean against 2.0.0.
+- [ ] Installers — plan written, not implemented:
+      `docs/plans/2026-09-23-phase-i-installers.md`.
+- [ ] Push everything; remove the temporary worktrees.
+
+### Blocking the P2 merge (maintainer decision required)
+
+`feature/mpsc-queue` (`b241ecab`, protoCore 2.1.0) is correct and fast:
+433/433, TSan clean in queue code, ASan clean, the 8 x 1M stress consumes
+exactly what it pushes, and a send at 8 producers costs 288 ns against
+protoST's 3 729 ns. The retain-chain GC design is validated by a test that
+**fails without it** (6 of 26 runs, 3 with real corruption), not by argument.
+
+It is nevertheless not merged, because decision **D3 is wrong as
+implemented**. `takeAll` guards its own critical section, but
+`ProtoContext::newList(n, items)` opens a `CriticalSection` across the whole
+list build, so a large batch leaves the consumer unparkable and P1 rises from
+~20 us to tens of milliseconds per cycle (A/B-isolated twice). That violates
+binding constraint 1 of `docs/platform/PMQ-SPEC.md` §3: no new stop-the-world
+work proportional to queue length. The fix belongs in protoCore's bulk list
+builder — an existing model — so it was recorded rather than taken.
+
+Also open on that branch: no "before" performance numbers on the base commit,
+and no embedder rebuilt against the added ABI field.
+
+### Decisions taken by agents, pending review
+
+Recorded as "[agent, pending review]" in `docs/DECISIONS-LOG.md` (D43-D52 and
+A0-1..A0-11 for Phase 5), in `docs/platform/PMQ-SPEC.md` §7 (D1-D10 for P2),
+and in `docs/plans/2026-09-23-phase-i-installers.md` Task 0 (D-I1..D-I7 for
+the installers). The installer premise worth challenging first is **D-I1**:
+protoCore never emits `install(EXPORT ...)`, so no consumer can check its
+version or ABI, and the stale `SOVERSION 1` copy in `/usr/local/lib` on this
+host would be accepted silently. Every runtime is proposed to move to
+`find_package(protoCore 2.0 REQUIRED CONFIG)`.
+
+### Bugs the implementation found in its own approved plan
+
+Phase 5's plan contained three defects that only surfaced in code:
+`Mailbox::push` held a CAS snapshot in a C++ local across `appendLast`
+(a use-after-free that segfaulted with 8 senders under a heap limit);
+`complete()` let a losing completer overwrite the winner's value; and
+`awaitBlocking` read the wake epoch after the state check, losing every
+wake-up (a `priority` run went from 7.4 s to 0.11 s once fixed). Plan
+pseudocode is not a specification of correctness.
+
+### Known incomplete
+
+- ThreadSanitizer was never run against protoScala's actors.
+- Cold start is not claimed: it straddled the 25 ms target depending on load.
+  D44 grew the prelude; it is not eager worker creation (verified: 2 vs 12
+  `clone3`).
+- `fan-out` gets *worse* with more workers, where protoClojure improves.
+  protoScala's mailboxes are still the CAS-list fallback rather than
+  `ProtoMPSCQueue` — a plausible but **unconfirmed** explanation.
