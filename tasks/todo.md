@@ -39,7 +39,10 @@ maintainer review.
 - [ ] Merge protoCore feature/pslo-p1 (ProtoMap) then feature/descendant-of (isInstanceOf/hasParent/setParents) into master; version 2.0.0, SOVERSION 2
 - [ ] protoCore: full suite, ASan, perf gate on a quiet host
 - [ ] Clean rebuild + suites + fixes: protoPython, protoJS (-j1, sequential test262), protoST, protoClojure, protoScala
-- [ ] Push everything; remove temporary worktrees (protoCore-pslo, protoCore-desc)
+- [ ] Re-measure the whole benchmark suite and cold start against protoCore 2.0.0 on a QUIET machine
+      (ruling: 0.2.0's published numbers move to the stack that ships; the e43fa2e4 run stays in the
+      report index as history), then rewrite the README Performance block from the generated report
+- [ ] Push everything; remove temporary worktrees (protoCore-pslo, protoCore-desc, protoCore-mpsc)
 - [ ] Installers for the whole family (Linux, macOS, Windows), protoCore installed on the same machine:
       protoCore 2.0.0 as the base package; protoScala, protoST, protoClojure, protoPython and protoJS
       each declaring it as a runtime dependency (deb Depends / rpm Requires), never bundling libprotoCore;
