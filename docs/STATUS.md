@@ -289,14 +289,34 @@ See DESIGN §11 for the full table. Unchanged this phase: R2, R4, R5, R8.
 against protoCore `e43fa2e4` (the 646/646 figures above are from that
 pairing). protoCore **2.0.0** — the `ProtoMap` type plus the parent-chain
 lookup fixes, with `SOVERSION 2` — was released in the sibling repository
-immediately afterwards. protoScala has **not** been rebuilt from clean against
-it yet: that is the scheduled embedder-migration step (DECISIONS-LOG,
-2026-09-22: "rebuild, check and fix protoPython, protoJS, protoST,
-protoClojure and protoScala"). Until it runs, a protoScala build that picks up
-the new headers while linking the old shared library crashes, as the ABI rule
-in CLAUDE.md warns; rebuild **both** projects from clean, in that order. Once
-protoScala runs on protoCore 2.0.0, the marker-attribute workaround behind
-`TEST_PROTO` can be reconsidered (R3 below).
+immediately afterwards. A first clean rebuild of protoScala against protoCore
+2.0.0 (2026-09-23 01:0x) builds with no warnings and runs: **644 of 646 tests
+pass**, and every behavioural test does — all 352 conformance fixtures, all 19
+CLI checks, all 10 benchmark smoke checks, and every unit test but two. The two
+failures are the unit tests that *pin protoCore's parent-chain contract*, and
+both changed deliberately in 2.0.0:
+
+- `ObjectModel.InstancesOfAnImmutableShapeWalkItsWholeChain` — `getParents` on
+  an instance now returns 6 entries where the test pins 4, because `setParents`
+  flattens the chain (explicit parents in order, then the missing ancestors
+  appended). Every semantic assertion in that test still passes: the
+  linearization order, `who` resolving to `T2`, the last parent still reachable
+  and the membership marker are unchanged.
+- `ObjectModel.SetParentsOnAMutableObjectIsInvisibleToItsChildren` — a child of
+  a mutable prototype now *does* see a later `setParents`, which is protoCore
+  2.0.0's C1 fix (`newChild` takes the chain from the mutable prototype's
+  current snapshot). The test's own comment prescribes the follow-up: "If this
+  starts failing, protoCore made parent chains live: update Design note 2 (the
+  immutable-shape construction stays correct)."
+
+Restating those two pins, and Design note 2 with them, belongs to the
+embedder-migration step (DECISIONS-LOG, 2026-09-22: "rebuild, check and fix
+protoPython, protoJS, protoST, protoClojure and protoScala") and has not been
+done here. Note also that a build which picks up the new headers while linking
+the old shared library crashes, as the ABI rule in CLAUDE.md warns: rebuild
+**both** projects from clean, in that order. Once protoScala runs on protoCore
+2.0.0, the marker-attribute workaround behind `TEST_PROTO` can be reconsidered
+(R3 below).
 
 Smaller notes:
 
