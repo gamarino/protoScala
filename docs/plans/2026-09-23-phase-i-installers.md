@@ -2504,3 +2504,80 @@ Every install rule, generator and discovery mechanism the survey found is accoun
 - **Naming consistency check across tasks.** `PROTOCORE_MIN_VERSION`, `PROTOCORE_MIN_VERSION_FULL`, `PROTOCORE_NEXT_MAJOR`, `PROTOCORE_ABI_SOVERSION`, `PROTOCORE_REQUIRE_PACKAGE`, `PROTOCORE_LIBRARY`, `PROTOCORE_INCLUDE_DIRS`, `PROTOCORE_DIR`, `protoCore::protoCore`, `protoCore_VERSION`, `protoCore_SOVERSION`, `protoCore_INCLUDE_DIR`, `protoCore_LIB_DIR`, `PROTOPYTHON_PROTOCORE_EXTERNAL`, `PROTOPYTHON_PROTOCORE_INCLUDE_DIR` are each used with one spelling and one meaning in every task, as tabulated in the "Interface contract" section. protoJS keeps its own pre-existing `PROTOCORE_LIBRARY_DIR` (as opposed to protoST's, protoClojure's and protoScala's `PROTOCORE_LIB_DIR`) because that is what its file already calls it at `:48`; both are local to their own file and neither crosses a task boundary.
 - **Gap found and fixed while writing:** the first draft of the runtime discovery block used a generator expression inside `message(FATAL_ERROR)` to name the prefix. Generator expressions are not evaluated by `message()`. Every task now builds a `_protoCore_where` string with a plain `if` first.
 - **Gap found and fixed while writing:** the first draft asserted the sibling protoCore's version by reading `protoCore_VERSION` after `add_subdirectory()`. `project()` sets that variable in the subdirectory's scope, not the parent's. Task 2 reads the `SOVERSION` target property instead, which is readable from the parent.
+
+---
+
+## Implementation status (2026-09-23)
+
+Implemented on the branch `feature/phase-i-installers` in all six repositories.
+Nothing was pushed. Where reality differed from the plan, reality won; the
+differences are listed below.
+
+### Verified on Linux
+
+| Item | Result |
+|---|---|
+| `protoCoreConfig.cmake`, `protoCoreConfigVersion.cmake`, `protoCoreTargets*.cmake`, `protoCore.pc` | Emitted and installed; `pkg-config --variable=soversion protoCore` prints `2` |
+| Version gate | `find_package(protoCore 2.0)` and `2.1` accept 2.1.0; `2.2` and `3.0` are refused; an ABI-file assertion fires when `libprotoCore.so.2` is missing from a prefix that still has the CMake files |
+| Six `.deb` packages | `protocore` 2.1.0, `protopython` 1.0.0, `protost` 0.3.0, `protoclojure` 0.0.1, `protoscala` 0.3.0, `protojs` 0.1.0, plus the hand-built `protoJS` 0.1.0 |
+| Dependencies | Five bounded relations; protoScala carries `>= 2.1.0`, the other four `>= 2.0.0`, all with `<< 3.0.0` |
+| `ldd` | All six binaries resolve `libprotoCore.so.2` inside the stage prefix, and again inside the extracted package root; none resolves to `/usr/local` |
+| Smoke tests | `protopy` imports `json` from the installed standard library; `protojs`, `protost` (importing `stream` from `share/protoST/lib`), `protoclj` and `protoscala` each run a program — from the stage prefix *and* from the extracted `.deb` payload |
+| D-I7 | A protoScala configure with `-DPROTO_CORE_PREFIX=/usr/local` now fails with a `FATAL_ERROR` naming the required version. The same discovery code from `main`, run against the same prefix, accepts `/usr/local/lib/libprotoCore.so.1.0.0` |
+| Suites | protoCore 438/438, protoPython 582/583 (pre-existing `protopy_import_site`), protoJS ctest 34/34 and test262 `built-ins/Object+Reflect+Proxy` 3619 passed, protoST 833/833, protoClojure 383/383, protoScala 694/694 |
+
+### Not verified
+
+Every macOS and every Windows artefact, and every RPM: no such host, and
+`rpmbuild` is not installed. The two "What a human must do" sections above list
+what remains, unchanged.
+
+### Where the plan was wrong, and what was done instead
+
+1. **protoCore is 2.1.0, not 2.0.0.** protoScala's floor is therefore **2.1**,
+   not the 2.0 the plan assumed for all five runtimes: its actor mailbox needs
+   `ProtoMPSCQueue`, which arrived in 2.1.0. The other four were checked for a
+   similar floor and have none — no other runtime references any 2.1 API — so
+   they stay at 2.0. protoCore's version is no longer left alone; the packaging
+   machinery is additive and the CHANGELOG entry went under the existing
+   `## [Unreleased]`.
+2. **R7 was fixed, not merely documented.** protoScala's `ProtoMPSCQueue`
+   substring probe is replaced by a version comparison, so the mailbox backend
+   cannot depend on which discovery mode was used.
+3. **protoCore's install block is inside `if(CMAKE_PROJECT_NAME STREQUAL
+   "protoCore")`**, which the plan's line numbers predate. The new
+   `install(EXPORT)` and package-config rules went inside that guard.
+4. **`set(protoCore_NOT_FOUND_MESSAGE a b c)` builds a list**, and CMake printed
+   it with `;` separators. Changed to `string(CONCAT ...)`.
+5. **protoPython's `install(TARGETS ...)` had one trailing `COMPONENT`**, which
+   in that signature binds to the `ARCHIVE` group alone, so `protopy` and
+   `libprotoPython` were in the default `Unspecified` component and no package
+   ever contained them. Fixed per artifact group. Pre-existing, and invisible
+   until a package was actually inspected.
+6. **protoPython's tests could not build in package mode**: `gtest_main` comes
+   from the `FetchContent` in protoCore's `test/` directory, which is only
+   processed when protoCore is a subdirectory. CPack builds `all` first, so
+   `cpack` was impossible. The GoogleTest-based tests are now guarded on
+   `TARGET gtest_main`.
+7. **protoJS included `"headers/protoCore.h"` in 89 files** — protoCore's source
+   layout, which no installed prefix has. It could not compile against an
+   installed protoCore at all. Normalised to `"protoCore.h"`, which resolves in
+   both discovery modes and matches the other three runtimes.
+8. **protoST's stdlib candidate order was wrong on Linux too.** `<exe>/../lib`
+   was probed before `<exe>/../share/protoST/lib`, and in an installation the
+   former is `<prefix>/lib` — the library directory. An installed `protost`
+   failed with "module not found: stream". The installed layouts are now probed
+   first. The plan's Task 7 Step 6 would have failed as written.
+9. **`CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON` was dropped** (Task 5 Step 4; risk R9
+   materialised). `dpkg-shlibdeps` resolves every `NEEDED` entry to the
+   distribution package that owns it, and no distribution owns
+   `libprotoCore.so.2`: it fails and takes the whole `.deb` down.
+10. **The Task 6 done-when grep is a false positive as written.** No `1.0.0`
+    protoCore reference survives under `packaging/templates/`, but the WiX
+    template's own product version `0.1.0.0` contains the substring `1.0.0`.
+11. **`packaging/PROCEDURES.md` and `packaging/DOCUMENTATION.md` were updated**
+    in the protoJS commit, as the plan's self-review said the executor should.
+12. **GitNexus impact analysis was not run** for protoJS: the `gitnexus_*` tools
+    are not available in this session. No symbol was edited — the source change
+    is one `#include` directive per file — and the full ctest and test262 subset
+    were re-run instead.
