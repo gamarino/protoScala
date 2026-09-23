@@ -17,20 +17,74 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 include(GNUInstallDirs)
 
 # --- protoCore ----------------------------------------------------------------
-# Either point at an installed protoCore via PROTO_CORE_PREFIX, or rely on the
-# sibling source tree at ../protoCore with one of its build directories
-# already populated (same logic as protoST and protoClojure).
+# Resolution order (Phase I, decision D-I1):
+#   1. An installed protoCore CMake package: find_package(protoCore 2.1 CONFIG).
+#      The only mode that checks protoCore's version and ABI, and therefore the
+#      only mode a distributable package may be built in. Name a prefix with
+#      -DPROTO_CORE_PREFIX=<prefix> or -DCMAKE_PREFIX_PATH=<prefix>.
+#   2. Developer fallback: the sibling source tree ../protoCore with one of its
+#      build directories already populated (same logic as protoST and
+#      protoClojure). Used only when no installed package was found and no
+#      prefix was named; refused by -DPROTOCORE_REQUIRE_PACKAGE=ON.
+#
+# The floor is 2.1, not the 2.0 the other four runtimes use: protoScala's actor
+# mailbox is built on protoCore's ProtoMPSCQueue, which protoCore gained in
+# 2.1.0. The ceiling is the next major, because protoCore's major version and
+# its soname move together.
+set(PROTOCORE_MIN_VERSION      "2.1")
+set(PROTOCORE_MIN_VERSION_FULL "2.1.0")
+set(PROTOCORE_NEXT_MAJOR       "3.0.0")
+set(PROTOCORE_ABI_SOVERSION    "2")
+# The protoCore release that introduced ProtoMPSCQueue. Kept separate from the
+# floor above so the two can be reasoned about independently.
+set(PROTOSCALA_PMQ_MIN_PROTOCORE "2.1.0")
+option(PROTOCORE_REQUIRE_PACKAGE
+    "Require an installed protoCore CMake package; never fall back to ../protoCore" OFF)
+
 if(DEFINED PROTO_CORE_PREFIX)
-    find_library(PROTOCORE_LIBRARY NAMES protoCore
-        HINTS "${PROTO_CORE_PREFIX}" PATH_SUFFIXES lib lib64)
-    find_path(PROTO_CORE_INCLUDE_DIR NAMES protoCore.h
-        HINTS "${PROTO_CORE_PREFIX}" PATH_SUFFIXES include headers)
-    if(NOT (PROTOCORE_LIBRARY AND PROTO_CORE_INCLUDE_DIR))
+    list(APPEND CMAKE_PREFIX_PATH "${PROTO_CORE_PREFIX}")
+endif()
+
+find_package(protoCore ${PROTOCORE_MIN_VERSION} QUIET CONFIG)
+
+if(protoCore_FOUND)
+    if(NOT protoCore_SOVERSION STREQUAL PROTOCORE_ABI_SOVERSION)
         message(FATAL_ERROR
-            "PROTO_CORE_PREFIX=${PROTO_CORE_PREFIX} set but protoCore not found.")
+            "protoCore package at ${protoCore_DIR} declares SOVERSION "
+            "${protoCore_SOVERSION}; protoScala is built against SOVERSION "
+            "${PROTOCORE_ABI_SOVERSION}. Install a matching protoCore.")
     endif()
-    set(PROTOCORE_INCLUDE_DIRS "${PROTO_CORE_INCLUDE_DIR}")
+    set(PROTOCORE_LIBRARY protoCore::protoCore)
+    set(PROTOCORE_INCLUDE_DIRS "${protoCore_INCLUDE_DIR}")
+    set(PROTOCORE_EFFECTIVE_VERSION "${protoCore_VERSION}")
+    message(STATUS "protoScala: installed protoCore ${protoCore_VERSION} "
+                   "(SOVERSION ${protoCore_SOVERSION}) from ${protoCore_DIR}")
 else()
+    set(_protoCore_where "")
+    if(DEFINED PROTO_CORE_PREFIX)
+        set(_protoCore_where " under ${PROTO_CORE_PREFIX}")
+    endif()
+    if(DEFINED PROTO_CORE_PREFIX OR PROTOCORE_REQUIRE_PACKAGE)
+        message(FATAL_ERROR
+            "No protoCore >= ${PROTOCORE_MIN_VERSION_FULL} CMake package was "
+            "found${_protoCore_where}.\n"
+            "  A prefix holding only libprotoCore and protoCore.h is no longer "
+            "accepted: without lib/cmake/protoCore/protoCoreConfig.cmake there "
+            "is no way to tell protoCore 1.x from 2.x, nor 2.0 from the 2.1 "
+            "that provides the ProtoMPSCQueue protoScala's actor mailbox is "
+            "built on. Install protoCore ${PROTOCORE_MIN_VERSION_FULL} or "
+            "later:\n"
+            "    cmake -S ../protoCore -B ../protoCore/build_release "
+            "-DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=<prefix>\n"
+            "    cmake --build ../protoCore/build_release --target protoCore\n"
+            "    cmake --install ../protoCore/build_release --component protoCore")
+    endif()
+    unset(_protoCore_where)
+    message(WARNING
+        "protoScala: no installed protoCore package found; using the developer "
+        "build in ../protoCore. This mode performs no package version check "
+        "and must not be used to produce a distributable package (configure "
+        "with -DPROTOCORE_REQUIRE_PACKAGE=ON to forbid it).")
     set(PROTOCORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../protoCore)
     find_library(PROTOCORE_LIBRARY NAMES protoCore
         PATHS ${PROTOCORE_DIR}/build_release ${PROTOCORE_DIR}/build ${PROTOCORE_DIR}/build_check
@@ -40,10 +94,51 @@ else()
             "protoCore shared library not found. Build it first:\n"
             "  cd ${PROTOCORE_DIR} && cmake -B build_release -S . && cmake --build build_release --target protoCore")
     endif()
-    set(PROTOCORE_INCLUDE_DIRS ${PROTOCORE_DIR} ${PROTOCORE_DIR}/headers)
     get_filename_component(PROTOCORE_LIB_DIR "${PROTOCORE_LIBRARY}" DIRECTORY)
+    if(APPLE)
+        set(_protoCore_abi_file "${PROTOCORE_LIB_DIR}/libprotoCore.${PROTOCORE_ABI_SOVERSION}.dylib")
+    else()
+        set(_protoCore_abi_file "${PROTOCORE_LIB_DIR}/libprotoCore.so.${PROTOCORE_ABI_SOVERSION}")
+    endif()
+    if(NOT EXISTS "${_protoCore_abi_file}")
+        message(FATAL_ERROR
+            "The protoCore build in ${PROTOCORE_LIB_DIR} does not provide "
+            "${_protoCore_abi_file}, so it is not SOVERSION "
+            "${PROTOCORE_ABI_SOVERSION}. Rebuild ../protoCore from clean.")
+    endif()
+    unset(_protoCore_abi_file)
+    set(PROTOCORE_INCLUDE_DIRS ${PROTOCORE_DIR} ${PROTOCORE_DIR}/headers)
     set(CMAKE_BUILD_RPATH "${PROTOCORE_LIB_DIR}")
     set(CMAKE_BUILD_RPATH_USE_LINK_PATH TRUE)
+
+    # The sibling tree declares no package version, so read it from its
+    # project() call. This is the developer-mode equivalent of the version the
+    # package config reports, and it is what selects the actor mailbox backend
+    # below -- a substring search for "newMPSCQueue" in whichever protoCore.h
+    # happened to be found would let the discovery mode silently decide which
+    # mailbox implementation is compiled in.
+    file(STRINGS "${PROTOCORE_DIR}/CMakeLists.txt" _protoCore_version_lines
+        REGEX "^[ \t]*VERSION[ \t]+[0-9]+\\.[0-9]+\\.[0-9]+[ \t]*$")
+    list(GET _protoCore_version_lines 0 _protoCore_version_line)
+    string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+"
+        PROTOCORE_EFFECTIVE_VERSION "${_protoCore_version_line}")
+    unset(_protoCore_version_lines)
+    unset(_protoCore_version_line)
+    if(NOT PROTOCORE_EFFECTIVE_VERSION)
+        message(FATAL_ERROR
+            "Could not read protoCore's version from "
+            "${PROTOCORE_DIR}/CMakeLists.txt. Install protoCore "
+            "${PROTOCORE_MIN_VERSION_FULL} and build against the package "
+            "instead (-DPROTO_CORE_PREFIX=<prefix>).")
+    endif()
+    if(PROTOCORE_EFFECTIVE_VERSION VERSION_LESS PROTOCORE_MIN_VERSION_FULL)
+        message(FATAL_ERROR
+            "The sibling protoCore at ${PROTOCORE_DIR} is "
+            "${PROTOCORE_EFFECTIVE_VERSION}; protoScala requires "
+            "${PROTOCORE_MIN_VERSION_FULL} or later for ProtoMPSCQueue.")
+    endif()
+    message(STATUS "protoScala: sibling protoCore ${PROTOCORE_EFFECTIVE_VERSION} "
+                   "from ${PROTOCORE_LIB_DIR}")
 endif()
 
 include_directories(${PROTOCORE_INCLUDE_DIRS} src ${CMAKE_CURRENT_BINARY_DIR}/generated)
@@ -127,22 +222,23 @@ target_link_libraries(protoscala_runtime PUBLIC protoscala_compiler protoscala_s
 target_compile_options(protoscala_runtime PRIVATE -Wall -Wextra -Wpedantic)
 
 # --- Actor mailbox backend (DESIGN §8.2, docs/platform/PMQ-SPEC.md) --------------
-# protoCore gains ProtoMPSCQueue in Phase P2. Until it merges, the Mailbox seam
-# falls back to a CAS'd ProtoList with identical semantics (plan Task 0 A0-8).
-set(PROTOSCALA_PMQ_FOUND -1)
-foreach(dir ${PROTOCORE_INCLUDE_DIRS})
-    if(EXISTS "${dir}/protoCore.h")
-        file(READ "${dir}/protoCore.h" PROTOSCALA_PROTOCORE_HEADER)
-        string(FIND "${PROTOSCALA_PROTOCORE_HEADER}" "newMPSCQueue" PROTOSCALA_PMQ_FOUND)
-        break()
-    endif()
-endforeach()
-if(PROTOSCALA_PMQ_FOUND GREATER -1)
-    message(STATUS "protoScala: actor mailboxes on protoCore ProtoMPSCQueue")
+# Selected by the protoCore *version*, never by grepping protoCore.h for the
+# substring "newMPSCQueue". The old probe read whichever header the discovery
+# happened to find first, so which mailbox implementation was compiled in
+# depended on the discovery mode: an installed protoCore 2.1 and a sibling
+# source tree could disagree, silently. ProtoMPSCQueue arrived in protoCore
+# 2.1.0, the version this repository's floor already requires, so with a
+# conforming protoCore the queue is always selected; the CAS'd ProtoList seam
+# (src/runtime/Mailbox.cpp) stays in place for a build against an older
+# protoCore, which only the developer fallback can produce.
+if(PROTOCORE_EFFECTIVE_VERSION VERSION_GREATER_EQUAL PROTOSCALA_PMQ_MIN_PROTOCORE)
+    message(STATUS "protoScala: actor mailboxes on protoCore ProtoMPSCQueue "
+                   "(protoCore ${PROTOCORE_EFFECTIVE_VERSION})")
     target_compile_definitions(protoscala_runtime PUBLIC PROTOSCALA_HAS_PMQ=1)
 else()
-    message(STATUS "protoScala: ProtoMPSCQueue not in protoCore yet -- "
-                   "actor mailboxes fall back to a CAS'd ProtoList")
+    message(STATUS "protoScala: protoCore ${PROTOCORE_EFFECTIVE_VERSION} is older "
+                   "than ${PROTOSCALA_PMQ_MIN_PROTOCORE} -- actor mailboxes fall "
+                   "back to a CAS'd ProtoList")
 endif()
 
 # --- REPL and session (script runner + interactive loop share Session) -----------
@@ -174,7 +270,7 @@ message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 
 # --- Installation ---------------------------------------------------------------
 # An installed bin/protoscala finds libprotoCore under <prefix>/lib without
-# LD_LIBRARY_PATH. CPack packaging (.deb / .tar.gz) is completed in Phase 6.
+# LD_LIBRARY_PATH.
 if(UNIX)
     if(APPLE)
         set_target_properties(protoscala PROPERTIES
@@ -191,3 +287,78 @@ install(TARGETS protoscala
 install(FILES LICENSE README.md
     DESTINATION ${CMAKE_INSTALL_DOCDIR}
     COMPONENT protoScala)
+
+# --- CPack configuration ---------------------------------------------------
+# protoScala ships one executable plus LICENSE and README.md. lib/prelude.scala
+# is compiled into the binary (see the Prelude section above), so the package
+# carries no runtime data file and there is no build-tree / install-tree path
+# that can differ.
+set(CPACK_PACKAGE_NAME "protoscala")
+set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
+    "protoScala - a dynamic Scala 3 dialect on the protoCore runtime")
+set(CPACK_PACKAGE_VENDOR "numaes")
+set(CPACK_PACKAGE_CONTACT "gamarino@gmail.com")
+set(CPACK_RESOURCE_FILE_README  "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+set(CPACK_COMPONENTS_ALL protoScala)
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "protoScala")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/gamarino/protoScala")
+
+# Platform-specific generators.
+if(APPLE)
+    # macOS drag-and-drop .dmg.
+    # UNVERIFIED: configured and reviewed, never built - no macOS host (D-I6).
+    set(CPACK_GENERATOR "DragNDrop")
+elseif(UNIX)
+    # Enable only the generators whose tools are present: cpack aborts the whole
+    # run when one of them is missing, which would take the TGZ down with it.
+    # Same pattern as protoCore's own CPack block.
+    set(CPACK_GENERATOR "TGZ")
+    find_program(PROTOSCALA_DPKG_EXECUTABLE dpkg)
+    find_program(PROTOSCALA_RPMBUILD_EXECUTABLE rpmbuild)
+    if(PROTOSCALA_DPKG_EXECUTABLE)
+        list(APPEND CPACK_GENERATOR "DEB")
+        message(STATUS "CPack: DEB generator enabled (dpkg found)")
+    else()
+        message(STATUS "CPack: DEB generator disabled (dpkg not found)")
+    endif()
+    if(PROTOSCALA_RPMBUILD_EXECUTABLE)
+        list(APPEND CPACK_GENERATOR "RPM")
+        message(STATUS "CPack: RPM generator enabled (rpmbuild found)")
+    else()
+        message(STATUS "CPack: RPM generator disabled (rpmbuild not found)")
+    endif()
+    # protoscala links libprotoCore. protoCore's package is named "protocore"
+    # for DEB and "protoCore" for RPM (both pinned in protoCore/CMakeLists.txt).
+    # The floor is 2.1.0 because the actor mailbox needs ProtoMPSCQueue; the
+    # ceiling is the next major, because protoCore's major version and its
+    # soname move together.
+    set(CPACK_DEBIAN_PACKAGE_NAME "protoscala")
+    set(CPACK_DEBIAN_PACKAGE_MAINTAINER "gamarino@gmail.com")
+    set(CPACK_DEBIAN_PACKAGE_SECTION "interpreters")
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS
+        "protocore (>= ${PROTOCORE_MIN_VERSION_FULL}), protocore (<< ${PROTOCORE_NEXT_MAJOR})")
+    # CPACK_DEBIAN_PACKAGE_SHLIBDEPS is deliberately NOT enabled. It would let
+    # dpkg-shlibdeps name libreadline's and libstdc++'s packages instead of
+    # hardcoding per-distribution SONAME packages, but dpkg-shlibdeps resolves
+    # every NEEDED entry to the distribution package that owns it and no
+    # distribution owns libprotoCore.so.2 -- it fails with "cannot find
+    # library" and takes the whole .deb down with it. The explicit protocore
+    # relation above is the one that matters; protoST and protoClojure declare
+    # their libreadline dependency the same way, which is to say not at all.
+    set(CPACK_RPM_PACKAGE_NAME "protoScala")
+    set(CPACK_RPM_PACKAGE_LICENSE "MIT")
+    set(CPACK_RPM_PACKAGE_GROUP "Development/Languages")
+    set(CPACK_RPM_PACKAGE_REQUIRES
+        "protoCore >= ${PROTOCORE_MIN_VERSION_FULL}, protoCore < ${PROTOCORE_NEXT_MAJOR}")
+elseif(WIN32)
+    # Windows NSIS installer + plain ZIP.
+    # UNVERIFIED: configured and reviewed, never built - no Windows host (D-I6).
+    set(CPACK_GENERATOR "NSIS;ZIP")
+    set(CPACK_NSIS_HELP_LINK      "https://github.com/gamarino/protoScala")
+    set(CPACK_NSIS_URL_INFO_ABOUT "https://github.com/gamarino/protoScala")
+    set(CPACK_NSIS_PACKAGE_NAME   "protoScala")
+endif()
+
+include(CPack)

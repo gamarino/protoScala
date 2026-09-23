@@ -74,3 +74,27 @@ it tomorrow"); the maintainer reviews them and may reverse any of them.
 | 2026-09-22 | Cold-start target raised from < 20 ms to < 25 ms (Phase 2: the embedded Scala prelude adds ~1.2 ms and the standard library will keep growing) | maintainer |
 | 2026-09-23 | Closing sequence gains a final step: installers for protoCore + the five runtimes (Linux verified here; macOS/Windows configured but unverified), each runtime depending on an installed protoCore rather than bundling it | maintainer |
 | 2026-09-23 | 0.2.0 benchmark numbers are re-measured against protoCore 2.0.0 (the shipped stack) on a quiet machine, not kept tied to e43fa2e4 | maintainer (agent, pending review) |
+
+## Phase I — native installers (2026-09-23) — agent rulings pending review
+
+Taken while implementing `docs/plans/2026-09-23-phase-i-installers.md`. Each one
+spans the whole family (protoCore plus the five runtimes), not protoScala alone.
+
+| ID | Decision | Taken by |
+|---|---|---|
+| **D-I1** | protoCore emits a real CMake package config (`install(EXPORT)` + `configure_package_config_file` + `write_basic_package_version_file` with `SameMajorVersion` + an explicit `SOVERSION` assertion) and a pkg-config `.pc`. Every runtime prefers `find_package(protoCore <floor> CONFIG)`; sibling-directory discovery is kept as an explicit developer fallback used only when no installed package is found, and refused by `-DPROTOCORE_REQUIRE_PACKAGE=ON` | agent, pending review |
+| **D-I2** | The unconditional `DEB;RPM;TGZ` CPack generators in protoPython, protoST, protoClojure and protoJS are guarded on `find_program(dpkg)` / `find_program(rpmbuild)`. `cpack` runs every configured generator in one pass and a missing tool is fatal, so on a host without `rpmbuild` the DEB and the TGZ went down with the RPM | agent, pending review |
+| **D-I3** | protoScala gains CPack **now** rather than "in Phase 6": the maintainer's scope is all five runtimes. `protoscala-0.3.0-Linux.deb` is this repository's first package | agent, pending review |
+| **D-I4** | protoJS keeps its standalone `packaging/` pipeline; it is not migrated to CPack. Its hardcoded protoCore `>= 1.0.0` checks are raised to the `[2.0.0, 3.0.0)` range and backed by a `libprotoCore.so.2` soname check | agent, pending review |
+| **D-I5** | protoST's stdlib self-location gains the macOS (`_NSGetExecutablePath`) and Windows (`GetModuleFileNameA`) branches, ported from protoPython's `getExecutablePath()` | agent, pending review |
+| **D-I6** | Linux packages are built, installed into a scratch prefix inside the workspace and smoke-tested there. macOS and Windows packaging is configured and reviewed but marked **UNVERIFIED** in the plan and in every repository's installation document | agent, pending review |
+| **D-I7** | The root-owned protoCore `1.0.0` at `/usr/local/lib` is left untouched. D-I1's version check is what protects a build from picking it up, and it is proved by configuring protoScala against `/usr/local` alone and getting a `FATAL_ERROR` where the same command used to succeed | agent, pending review |
+
+### protoScala-specific consequences
+
+| Decision | Taken by |
+|---|---|
+| protoScala's `find_package` floor is **2.1**, not the 2.0 the other four runtimes use, because the actor mailbox needs `ProtoMPSCQueue` (protoCore 2.1.0). The DEB and RPM relations carry the same floor | agent, pending review |
+| **A0-8 is superseded.** The mailbox seam no longer selects its backend by grepping `protoCore.h` for the substring `newMPSCQueue`; it compares the protoCore *version* against 2.1.0 (plan risk R7). The probe read whichever header the discovery found first, so which mailbox implementation was compiled in depended on the discovery mode, and an installed 2.1 package and a sibling tree could disagree silently. With the 2.1 floor, 0.3.0 now ships the `ProtoMPSCQueue` mailbox, not the CAS'd-`ProtoList` fallback. The fallback code stays in `src/runtime/Mailbox.cpp` for a developer build against an older protoCore | agent, pending review |
+| In developer-fallback mode the protoCore version is read from `../protoCore/CMakeLists.txt`'s `project()` call, and a version below 2.1.0 is a `FATAL_ERROR`. Without a package config there is nothing else authoritative to read | agent, pending review |
+| `CPACK_DEBIAN_PACKAGE_SHLIBDEPS` is **not** enabled (the plan's Task 5 Step 4 proposed it; plan risk R9 materialised). `dpkg-shlibdeps` resolves every `NEEDED` entry to the distribution package that owns it, and no distribution owns `libprotoCore.so.2`: it fails with "cannot find library" and takes the whole `.deb` down. `libreadline` is therefore not declared, matching protoST and protoClojure | agent, pending review |
