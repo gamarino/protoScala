@@ -115,12 +115,32 @@ add_library(protoscala_runtime STATIC
     src/runtime/ExecutionEngine.cpp
     src/runtime/Primitives.cpp
     src/runtime/ProductPrimitives.cpp
+    src/runtime/Mailbox.cpp
     src/runtime/Prelude.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/generated/PreludeSource.cpp
 )
 target_link_libraries(protoscala_runtime PUBLIC protoscala_compiler protoscala_support
     ${PROTOCORE_LIBRARY} pthread)
 target_compile_options(protoscala_runtime PRIVATE -Wall -Wextra -Wpedantic)
+
+# --- Actor mailbox backend (DESIGN §8.2, docs/platform/PMQ-SPEC.md) --------------
+# protoCore gains ProtoMPSCQueue in Phase P2. Until it merges, the Mailbox seam
+# falls back to a CAS'd ProtoList with identical semantics (plan Task 0 A0-8).
+set(PROTOSCALA_PMQ_FOUND -1)
+foreach(dir ${PROTOCORE_INCLUDE_DIRS})
+    if(EXISTS "${dir}/protoCore.h")
+        file(READ "${dir}/protoCore.h" PROTOSCALA_PROTOCORE_HEADER)
+        string(FIND "${PROTOSCALA_PROTOCORE_HEADER}" "newMPSCQueue" PROTOSCALA_PMQ_FOUND)
+        break()
+    endif()
+endforeach()
+if(PROTOSCALA_PMQ_FOUND GREATER -1)
+    message(STATUS "protoScala: actor mailboxes on protoCore ProtoMPSCQueue")
+    target_compile_definitions(protoscala_runtime PUBLIC PROTOSCALA_HAS_PMQ=1)
+else()
+    message(STATUS "protoScala: ProtoMPSCQueue not in protoCore yet -- "
+                   "actor mailboxes fall back to a CAS'd ProtoList")
+endif()
 
 # --- REPL and session (script runner + interactive loop share Session) -----------
 add_library(protoscala_repl STATIC
