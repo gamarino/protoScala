@@ -29,6 +29,7 @@ Every Phase 1 and Phase 2 constraint still holds (`plans/2026-09-22-phase-1-core
 - Nothing is written outside `/home/gamarino/Documentos/proyectos`: no `/tmp`, no `$HOME`; tests create temporaries in the CTest working directory; ad-hoc scratch goes to `../.agent_scratch/phase5/`.
 - All code comments, messages and documentation in professional English. User-facing messages never mention internal phase names.
 - Conformance fixtures: first line is a directive (`// EXPECT: <last stdout line>`, `// EXPECT-ERROR[: <substring>]`, `// XFAIL...`); one CTest case per file; files starting with `_` are helpers. **Every fixture whose syntax differs between braces and indentation exists in both variants** (`-braces` / `-indent` suffixes).
+- **Every concurrency fixture carries a CTest timeout.** A fixture that waits for an actor spins on the main thread (`while seen < n do seen = a.value`, `while !f.isCompleted do ()`), which has no deadline of its own: a scheduling bug would stall the suite instead of failing it. Every test added by this phase gets `set_tests_properties(... PROPERTIES TIMEOUT 120)`. The spins are GC-safe by construction — `JUMP_BACK` already calls `ProtoContext::safepoint()` at every loop back-edge (`ExecutionEngine.cpp:620-623`), so a spinning main thread never delays a collection.
 - **Every concurrency fixture is deterministic in its output.** A fixture never prints a value that depends on interleaving; it prints a count, a sum or a sorted result that the single-method invariant makes exact. A fixture that cannot be made deterministic belongs in the benchmark suite, not in the conformance suite.
 - Benchmarks self-report the work they did and the runner verifies it against the expected count **before** computing a rate; exit code alone never counts as success (DESIGN §10, §8.5).
 - Commits use the repository's configured git identity (never `-c user.*` or `--author`), end with `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`, go to `main` and are pushed (`git push origin main`; maintainer-authorised for this phase). Never force-push, never rewrite published history, never create the `v0.3.0` tag (the maintainer tags).
@@ -62,7 +63,7 @@ Run:
 git -C ../protoCore log --oneline | head -1
 grep -c "newMPSCQueue" ../protoCore/headers/protoCore.h
 ```
-Expected: one commit line (paste it into the Task 12 CHANGELOG entry: "built against protoCore `<hash>`"), and either `1` (Phase P2 merged — the real mailbox) or `0` (P2 not merged — the `Mailbox` seam falls back, Task 2, Task 0 decision A0-8). Record which, in the Task 2 notes; if it is `0`, also record `git -C ../protoCore branch --list` so the maintainer sees where P2 stands.
+Expected: one commit line (paste it into the Task 11 CHANGELOG entry: "built against protoCore `<hash>`"), and either a non-zero count (Phase P2 is in the tree protoScala links against — the real mailbox) or `0` (the `Mailbox` seam falls back, Task 2, Task 0 decision A0-8). P2 was implemented on the protoCore branch `feature/mpsc-queue` on 2026-09-23 and is pending the maintainer's merge, so also run `git -C ../protoCore branch --show-current` and record both in the Task 2 notes. **Never build protoScala against a protoCore working tree that differs from the one `build_release` was built from**: a stale binary against a new ABI crashes on the first `ProtoSpace` (Step 1).
 
 - [ ] **Step 3: Confirm the Phase 5 surface is still absent (the failing starting point)**
 
@@ -87,7 +88,7 @@ Expected: the DEV12 machine reports 12 logical / 6 physical cores. Task 10's tab
 
 ## Task 0: Maintainer decisions
 
-Each decision below is **decided by the agent, pending review** under the maintainer's standing authorisation, and is recorded in `docs/DECISIONS-LOG.md` by Task 12 with that marker. Where a decision creates a user-visible departure from Scala 3, Task 12 records it as a `D<n>` in `docs/STATUS.md` (Phase 5 uses **D43–D52**; D42 is the highest id in use today).
+Each decision below is **decided by the agent, pending review** under the maintainer's standing authorisation, and is recorded in `docs/DECISIONS-LOG.md` by Task 11 with that marker. Where a decision creates a user-visible departure from Scala 3, Task 11 records it as a `D<n>` in `docs/STATUS.md` (Phase 5 uses **D43–D52**; D42 is the highest id in use today).
 
 ### A0-1 — How cooperative `await` suspends the recursive VM
 
@@ -164,7 +165,9 @@ The ready stacks are C++ (`ActorState*`), invisible to the GC, so actors must be
 
 ### A0-8 — Building before Phase P2 merges
 
-**Decision:** Task 2 introduces a `Mailbox` seam with the exact `ProtoMPSCQueue` API of PMQ-SPEC §2.1. When CMake finds `newMPSCQueue` in `../protoCore/headers/protoCore.h` it compiles `Mailbox` onto the real type (`-DPROTOSCALA_HAS_PMQ=1`); otherwise it compiles the fallback — a mutable object holding a `ProtoList` updated by `setAttributeIfEqual`, which is GC-safe and correct but O(log n) per push (protoST's mailbox). Switching is a one-file change and the Task 2 unit tests run against whichever is compiled. Alternative — block Phase 5 on P2 — was rejected because P2's own plan is being written in parallel.
+Phase P2 was implemented on the protoCore branch `feature/mpsc-queue` (protoCore 2.1.0) on 2026-09-23 and is pending the maintainer's merge and the rebuild of every embedder (PMQ-SPEC §7). Until `../protoCore/build_release` is built from a tree that carries it, protoScala cannot link against it.
+
+**Decision:** Task 2 introduces a `Mailbox` seam with the exact `ProtoMPSCQueue` API of PMQ-SPEC §2.1. When CMake finds `newMPSCQueue` in the protoCore headers it compiles `Mailbox` onto the real type (`-DPROTOSCALA_HAS_PMQ=1`); otherwise it compiles the fallback — a mutable object holding a `ProtoList` updated by `setAttributeIfEqual`, which is GC-safe and correct but O(log n) per push (protoST's mailbox). Switching is a one-file change and the Task 2 unit tests run against whichever is compiled. Alternative — block Phase 5 on P2 — was rejected because P2's own plan is being written in parallel.
 
 ### A0-9 — Surface the benchmarks need beyond DESIGN §8
 
@@ -257,7 +260,7 @@ File:line references are to the trees of 2026-09-23.
 
 ### Opcodes added in this phase
 
-**None** (A0-11). The reserved range `128..159` stays reserved in `src/compiler/Opcodes.h` and in the `docs/STATUS.md` opcode table; Task 12 updates the comment to record that Phase 5 shipped without using it.
+**None** (A0-11). The reserved range `128..159` stays reserved in `src/compiler/Opcodes.h` and in the `docs/STATUS.md` opcode table; Task 11 updates the comment to record that Phase 5 shipped without using it.
 
 ---
 
@@ -825,7 +828,12 @@ struct World {
     proto::ProtoSpace space;
     Runtime runtime{space};
     ExecutionEngine engine{runtime.layout()};
-    World() { installPrimitives(runtime.rootContext(), runtime.layout()); }
+    World() {
+        installPrimitives(runtime.rootContext(), runtime.layout());
+        // No Scala surface yet: start the pool directly, as Actor.spawn will.
+        ActorScheduler::instance().ensureStarted(&space, runtime.rootContext(),
+                                                 runtime.layout(), &engine);
+    }
     ProtoContext* root() { return runtime.rootContext(); }
     const RuntimeLayout& L() { return runtime.layout(); }
 };
@@ -841,7 +849,9 @@ const ProtoObject* addHandler(ProtoContext* ctx, const ProtoObject*, const proto
     const long long m = proto::asSmallInt(args->getAt(ctx, 1));
     const ProtoObject* sum = proto::makeSmallInt(s + m);
     const ProtoObject* pair[2] = {sum, sum};
-    return world().engine.construct(ctx, world().L().tupleCompanion[2], pair, 2);
+    // (newState, reply) as a Scala Tuple2, built through the TupleN companion's
+    // native apply -- never a ProtoTuple (DESIGN §4.6).
+    return world().engine.send(ctx, world().L().tupleCompanion[2], world().L().applyName, pair, 2);
 }
 
 const ProtoObject* spawnAdder(ProtoContext* ctx) {
@@ -1169,21 +1179,18 @@ bool ActorScheduler::runTurn(proto::ProtoContext* ctx, ActorState* a) {
         resumeSuspendedTurn(ctx, a, &suspended);      // Task 6
         if (suspended) return true;
     }
-    unsigned budget = kBatchSize;
-    for (unsigned band = 0; band < kBands && budget > 0; ++band) {
-        while (budget > 0) {
-            proto::ProtoContext turn(ctx->space, ctx);   // one context per message (P2)
-            const proto::ProtoObject* env = nextMessage(&turn, a, band);
-            if (!env) break;
-            --budget;
-            deliver(&turn, a, env, &suspended);
-            messages_.fetch_add(1, std::memory_order_relaxed);
-            if (suspended) return true;
-            band = 0;   // a High-band message that arrived mid-turn wins the
-                        // next slot: restart the band scan (DESIGN §8.2)
-            break;
-        }
-        if (budget == 0) break;
+    // Up to kBatchSize messages, always taking the highest non-empty band
+    // first: the band scan restarts after every message, so a High-band
+    // message that arrives mid-turn wins the next slot (DESIGN §8.2).
+    for (unsigned budget = kBatchSize; budget > 0; --budget) {
+        proto::ProtoContext turn(ctx->space, ctx);   // one context per message (P2)
+        const proto::ProtoObject* env = nullptr;
+        for (unsigned band = 0; band < kBands && !env; ++band)
+            env = nextMessage(&turn, a, band);
+        if (!env) break;                              // nothing queued: the turn is over
+        deliver(&turn, a, env, &suspended);
+        messages_.fetch_add(1, std::memory_order_relaxed);
+        if (suspended) return true;
     }
     return false;
 }
@@ -1339,7 +1346,7 @@ Global bindings (`builtinGlobalNames()` gains `"Actor"`, `"Priority"`), each a m
 | an actor | `value` | 0 | the current state, read without a message (protoClojure's `@actor`) |
 | an actor | `toString` | 0 | `Actor(<state>)` |
 
-`RuntimeLayout` gains the prelude hooks (design note 14):
+`RuntimeLayout` gains `spawnPartialProto` (a root-slot prototype whose native `apply` finishes a curried `Actor.spawn`), `tuple2Key` (Step 1) and the prelude hooks (design note 14):
 ```cpp
     struct PreludeHooks {                  // filled by bindPreludeHooks, after the prelude runs
         const proto::ProtoObject* actorStats   = nullptr;  // the ActorStats companion
@@ -1392,7 +1399,7 @@ void ActorScheduler::deliver(proto::ProtoContext* ctx, ActorState* a,
     tl_currentActor = nullptr;
 }
 ```
-(`completeReply`/`completeFailure` are no-ops until Task 5; `isTuple2` tests `v->getAttribute(ctx, L.tupleKey) == PROTO_TRUE` and the arity-2 marker key.)
+(`completeReply`/`completeFailure` are no-ops until Task 5. `isTuple2` is the Phase 2 class-membership test on the `Tuple2` marker key — `v != PROTO_NONE && v->getAttribute(ctx, L.tuple2Key) == PROTO_TRUE`, where `tuple2Key` is the interned `tupleTypeKey(2)` added to `RuntimeLayout` here; `__tuple__` alone would accept any arity.)
 
 - [ ] **Step 2: Write the failing fixtures**
 
@@ -1488,15 +1495,17 @@ println(a.value)
 
 `tests/conformance/13-actors/many-actors.scala` (protoClojure's `many-actors.clj` shape):
 ```scala
-// EXPECT: 55
+// EXPECT: 65
+// Five actors, each holding a different number; each is told 10 and then asked
+// for its state. The ask is ordered behind the tell, so the sum is exact.
+// (1+2+3+4+5) + 5*10 = 65.
 val actors = List(1, 2, 3, 4, 5).map(n => Actor.spawn(n) { (s, m) => (s + m, s + m) })
 actors.foreach(a => a ! 10)
 var total = 0
-while total < 65 do
-  total = actors.map(a => a.value).foldLeft(0)((x, y) => x + y)
-println(total - 10)
+actors.foreach(a => total += (a ? 0).await)
+println(total)
 ```
-If `foldLeft` is not in the Phase 2 `List` surface, use `mkString` plus a manual loop; check `src/runtime/Primitives.cpp` before writing the fixture and adjust — never add a collection method to make a fixture pass (that is Phase 3's work).
+Phase 2's `List` has `map`, `flatMap`, `filter`, `foreach`, `length`, `head`, `tail`, `drop` and `mkString` but **no `foldLeft`** (verified: `xs.foldLeft(0)(...)` fails with `NoSuchMethodError: value foldLeft is not a member of List`), hence the `var` and `foreach` above. Never add a collection method to make a fixture pass — that is Phase 3's work.
 
 - [ ] **Step 3: Implement the primitives**
 
@@ -1688,7 +1697,7 @@ println((counter ? 1).await)
 
 `tests/conformance/14-futures/failed-ask.scala`:
 ```scala
-// EXPECT: RuntimeError(ArithmeticException,/ by zero)
+// EXPECT: ArithmeticException: / by zero
 val bad = Actor.spawn(0) { (s, m) => (s, s / 0) }
 val f = bad ? 1
 while !f.isCompleted do ()
@@ -1765,48 +1774,40 @@ bool addWaiter(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::Pr
     }
 }
 
-// One condition variable for every blocking waiter in the process, with a
-// counter so a completion pays nothing when nobody is blocked (protoST's
-// mainWaitingOn trick, generalised to any thread).
+// One condition variable for every blocking waiter in the process, plus an
+// epoch bumped by each completion and a counter of blocked threads, so a
+// completion pays nothing when nobody is blocked (protoST's mainWaitingOn
+// trick, generalised to any thread).
+//
+// The future's state is a ProtoObject attribute, which an unmanaged thread may
+// NOT read (the UnmanagedScope contract), so the predicate is the plain epoch
+// and the state is re-read after leaving the region on every wake.
 const proto::ProtoObject* awaitBlocking(proto::ProtoContext* ctx, const RuntimeLayout& L,
                                         const proto::ProtoObject* f) {
-    if (state(ctx, L, f) == kPending) {
+    while (state(ctx, L, f) == kPending) {           // managed: the read is legal here
         g_blocked.fetch_add(1, std::memory_order_seq_cst);
         {
-            proto::ProtoContext::UnmanagedScope unmanaged(ctx);   // before the lock (P6)
-            std::unique_lock<std::mutex> lk(g_waitMutex);
-            g_waitCv.wait(lk, [&] { return g_completions.load(std::memory_order_acquire) !=
-                                           g_seen || true; });
-        }
-        g_blocked.fetch_sub(1, std::memory_order_seq_cst);
-    }
-    ...
-}
-```
-**Care:** the predicate above is written out in full in the implementation as
-`g_waitCv.wait(lk, [&]{ return doneFlag; })` where `doneFlag` is read **without**
-touching any `ProtoObject*` (the unmanaged contract forbids it): the future's
-state is copied into a plain `std::atomic<int>` stored in a side table keyed by
-the future's identity hash, or — simpler and chosen here — the loop leaves the
-unmanaged region on every wake and re-reads `state(ctx, L, f)`:
-
-```cpp
-    while (true) {
-        if (state(ctx, L, f) != kPending) break;      // managed: ProtoObject reads are legal
-        g_blocked.fetch_add(1, std::memory_order_seq_cst);
-        {
-            proto::ProtoContext::UnmanagedScope unmanaged(ctx);
+            proto::ProtoContext::UnmanagedScope unmanaged(ctx);   // opened before the lock (P6)
             std::unique_lock<std::mutex> lk(g_waitMutex);
             const unsigned long long seen = g_epoch.load(std::memory_order_acquire);
+            // The 50 ms bound is a safety net, not a poll: it turns a lost
+            // wake-up into a 50 ms delay instead of a hung process.
             g_waitCv.wait_for(lk, std::chrono::milliseconds(50),
                               [&] { return g_epoch.load(std::memory_order_acquire) != seen; });
         }
         g_blocked.fetch_sub(1, std::memory_order_seq_cst);
     }
-```
-`complete` bumps `g_epoch` and calls `notify_all()` only when `g_blocked != 0`.
-The 50 ms `wait_for` is a safety net, not a poll: it bounds the damage of a lost
-wake-up instead of hanging the process, and a comment says exactly that.
+    return result(ctx, L, f);        // the value, or the failed future's error
+}
+
+// Called at the end of complete(), after the state CAS won.
+void wakeBlockedThreads() {
+    g_epoch.fetch_add(1, std::memory_order_release);
+    if (g_blocked.load(std::memory_order_seq_cst) != 0) {
+        std::lock_guard<std::mutex> lk(g_waitMutex);   // pairs with the waiter's lock
+        g_waitCv.notify_all();
+    }
+}
 
 - [ ] **Step 3: Implement the surface**
 
@@ -1847,7 +1848,7 @@ final case class Failure[+A](error: RuntimeError) extends Try[A]:
   def isSuccess: Boolean = false
   def get: A = __raise(error.className, error.message)
 ```
-Note: `Failure(e).toString` prints `Failure(ArithmeticException: / by zero)`, so the `failed-ask.scala` fixture above expects `RuntimeError(ArithmeticException,/ by zero)` only if `RuntimeError` keeps the synthesised `toString`. It does not — it overrides it. Write the fixture's `EXPECT` as `ArithmeticException: / by zero` and keep the two consistent; the implementer verifies by running the fixture, not by reading this plan.
+Note: `RuntimeError` overrides `toString`, so `e.toString` in `failed-ask.scala` prints `ArithmeticException: / by zero` (the wording protoScala already uses for a division by zero — verified: `1 / 0` reports `error: ArithmeticException: / by zero`), and `Failure(e).toString` prints `Failure(ArithmeticException: / by zero)`. The fixture's `EXPECT` matches the first; the implementer confirms by running it, not by reading this plan.
 
 - [ ] **Step 5: Run**
 
@@ -1871,3 +1872,934 @@ the actor alive (DESIGN §8.3, §8.4).
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 git push origin main
 ```
+
+---
+
+### Task 6: Cooperative `await` inside an actor — `FutureYield` and frame snapshots
+
+**Files:**
+- New: `src/runtime/FutureYield.h`
+- Modify: `src/runtime/ExecutionEngine.h`, `src/runtime/ExecutionEngine.cpp`, `src/runtime/ActorScheduler.h`, `src/runtime/ActorScheduler.cpp`, `src/runtime/ActorPrimitives.cpp`, `src/runtime/Runtime.h`, `src/runtime/Runtime.cpp`
+- Test: `tests/unit/test_yield.cpp` (in the `test_actors` binary), `tests/conformance/13-actors/await-*.scala`, `tests/CMakeLists.txt`
+
+**Interfaces:**
+```cpp
+// src/runtime/FutureYield.h
+// The cooperative-yield control signal: Future.await throws it when the
+// calling thread is inside an actor turn and the future is still pending.
+//
+// It derives from nothing -- in particular not from std::exception -- so no
+// generic handler can intercept it (DESIGN §7). ExecutionEngine::runLoop
+// catches it per frame, prepends that frame's record to the actor's snapshot
+// and rethrows; the scheduler's turn catches it last and parks the actor.
+namespace protoScala {
+class FutureYield {
+public:
+    explicit FutureYield(const proto::ProtoObject* future) noexcept : future_(future) {}
+    const proto::ProtoObject* future() const noexcept { return future_; }
+private:
+    const proto::ProtoObject* future_;
+};
+} // namespace protoScala
+```
+
+`RuntimeLayout` gains `frameProto` (a root slot) and the frame-record keys `__mod__`, `__ip__`, `__fbase__`, `__fslots__`.
+
+`ExecutionEngine` gains:
+```cpp
+    // Re-materialises a suspended call chain and continues it. `frames` is the
+    // actor's snapshot list, outermost first; `injected` is the value the
+    // await that suspended the chain must return. Frame `idx` is rebuilt, the
+    // inner frames run first, and their result is written where the in-flight
+    // call would have left it.
+    const proto::ProtoObject* resumeFrames(proto::ProtoContext* parent,
+                                           const proto::ProtoList* frames, unsigned idx,
+                                           const proto::ProtoObject* injected);
+private:
+    static constexpr unsigned kNoPendingCall = 0xFFFFFFFFu;
+    // The dispatch loop of one frame, entered fresh by execute() and again by
+    // resumeFrames() with a restored frame.
+    const proto::ProtoObject* runLoop(proto::ProtoContext& frame, const BytecodeModule& mod,
+                                      const proto::ProtoObject** slots,
+                                      const proto::ProtoObject** sp, const Instr* ip);
+```
+
+`ActorScheduler` gains `void resumeSuspendedTurn(proto::ProtoContext*, ActorState*, bool* suspended);` and the free functions `const proto::ProtoObject* currentActor();` / `void setCurrentActor(const proto::ProtoObject*);` over a `thread_local`.
+
+- [ ] **Step 1: Write the failing tests**
+
+`tests/conformance/13-actors/await-one-worker.scala` — the DESIGN §8.5 `await` shape in miniature; it **must** pass with a single worker, which a blocking `await` could never do:
+```scala
+// EXPECT: 84
+val adder = Actor.spawn(0) { (s, m) => (s, m * 2) }
+val caller = Actor.spawn(0) { (s, m) =>
+  val doubled = (adder ? m).await
+  (s + doubled, s + doubled)
+}
+println((caller ? 42).await)
+```
+Register it with one worker:
+```cmake
+set_tests_properties("conformance/13-actors/await-one-worker.scala" PROPERTIES
+    ENVIRONMENT "PROTOSCALA_ACTOR_WORKERS=1")
+```
+and add the brace variant with the same property.
+
+`tests/conformance/13-actors/await-deep-chain.scala` — the snapshot must span several bytecode frames:
+```scala
+// EXPECT: 30
+val echo = Actor.spawn(0) { (s, m) => (s, m) }
+def level3(f: Future[Int]): Int = f.await + 1
+def level2(f: Future[Int]): Int = level3(f) + 1
+def level1(f: Future[Int]): Int = level2(f) + 1
+val caller = Actor.spawn(0) { (s, m) =>
+  val r = level1(echo ? 27)
+  (r, r)
+}
+println((caller ? 0).await)
+```
+
+`tests/conformance/13-actors/await-in-a-loop.scala` — two suspensions in one message, so the resume path installs a second snapshot:
+```scala
+// EXPECT: 6
+val echo = Actor.spawn(0) { (s, m) => (s, m) }
+val caller = Actor.spawn(0) { (s, m) =>
+  var total = 0
+  var i = 1
+  while i <= 3 do
+    total += (echo ? i).await
+    i += 1
+  (total, total)
+}
+println((caller ? 0).await)
+```
+
+`tests/conformance/13-actors/await-refused-inside-map.scala` — D43's refusal, observable and harmless:
+```scala
+// EXPECT: true
+val echo = Actor.spawn(0) { (s, m) => (s, m) }
+val caller = Actor.spawn(0) { (s, m) =>
+  val r = List(1, 2).map(x => (echo ? x).await)
+  (r, r)
+}
+val f = caller ? 0
+while !f.isCompleted do ()
+val failed = f.value match
+  case Some(Failure(e)) => e.className == "UnsupportedOperationException"
+  case other            => false
+println(failed.toString)
+```
+
+`tests/unit/test_yield.cpp` covers what Scala cannot reach deterministically:
+- `addWaiter` on a future completed between the state read and the CAS returns `false`, and the actor is **not** parked (drive `futures::complete` from another thread with the waiter list pre-seeded);
+- an actor suspended on a future that is completed *before* `finishTurn` runs ends in state `Claimed` and on a ready stack, never in state `Suspended` (call `resume` while the turn still holds the claim, then `finishTurn(..., suspended=true)` and assert the state);
+- a snapshot round trip: build a two-frame chain by hand, `resumeFrames` it with an injected value, and check the result.
+
+- [ ] **Step 2: Split `execute` and track the in-flight call**
+
+In `ExecutionEngine.cpp`, move the whole `for (;;) { ... }` dispatch loop out of `execute` into `runLoop`, keeping every case unchanged except:
+
+```cpp
+const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
+                                                   const BytecodeModule& mod,
+                                                   const proto::ProtoObject** slots,
+                                                   const proto::ProtoObject** sp,
+                                                   const Instr* ip) {
+    const Instr* const code = mod.code().data();
+    const RuntimeLayout& L = layout_;
+    // The operand-stack index where the in-flight call will write its result,
+    // or kNoPendingCall when this frame is not inside a call. Two stores per
+    // call opcode; it is what makes a frame resumable after a cooperative
+    // yield (DESIGN §8.3, Design note 4).
+    unsigned pendingBase = kNoPendingCall;
+    try {
+        for (;;) {
+            ...
+                case Op::CALL: {
+                    const proto::ProtoObject** base = sp - operand - 1;
+                    pendingBase = static_cast<unsigned>(base - slots);
+                    const proto::ProtoObject* r =
+                        invoke(&frame, base[0], base + 1, static_cast<unsigned>(operand));
+                    pendingBase = kNoPendingCall;
+                    base[0] = r;
+                    sp = base + 1;
+                    continue;
+                }
+            ...
+        }
+    } catch (FutureYield&) {
+        // This frame is part of a suspended chain. Record it and rethrow; the
+        // frames prepend themselves, so the actor's list reads outermost-first
+        // (the innermost frame is the first to catch).
+        if (pendingBase == kNoPendingCall)
+            throw ScalaError("UnsupportedOperationException",
+                             "await is not supported here: " + mod.name() +
+                                 " cannot be suspended at this instruction");
+        appendSuspendedFrame(&frame, layout_, mod, static_cast<unsigned>(ip - code),
+                             pendingBase, slots);
+        throw;
+    } catch (ScalaError& e) {
+        ...unchanged...
+    } catch (const std::runtime_error& e) {
+        ...unchanged...
+    }
+}
+```
+`pendingBase` is set and cleared the same way in `CALL_SPREAD`, `SEND`, `SEND_APPLY`, `SEND_SUPER`, `SEND_KW`, `NEW`, `NEW_SPREAD`, `INVOKE_INIT` and `FORCE` (for `FORCE` the base is `sp - 1`, since the forced value replaces the operand). Every other opcode leaves it at `kNoPendingCall`, which is exactly what makes an `await` under `EQ`/`valuesEqual` or `MATCH_ERROR`/`show` refuse instead of corrupting the frame.
+
+`execute` keeps its prologue (arity check, frame, slots, varargs, captures) and ends with
+`return runLoop(frame, mod, slots, slots + stackBase, mod.code().data());`
+— the `FutureYield` clause is **first**, before `catch (ScalaError&)`, so the existing `catch (const std::runtime_error&)` can never swallow the signal (Design note 5).
+
+- [ ] **Step 3: The snapshot and the resume**
+
+```cpp
+namespace {
+// One frame of a suspended chain: where to continue, and the values that were
+// live below the in-flight call. Everything above the call's base is dead --
+// it was the callee's arguments, which the callee consumed.
+void appendSuspendedFrame(proto::ProtoContext* ctx, const RuntimeLayout& L,
+                          const BytecodeModule& mod, unsigned ipOffset, unsigned pendingBase,
+                          const proto::ProtoObject** slots) {
+    auto* actor = const_cast<proto::ProtoObject*>(currentActor());
+    proto::ProtoContext scope(ctx->space, ctx);
+    auto* rec = const_cast<proto::ProtoObject*>(L.frameProto->newChild(&scope, /*isMutable=*/true));
+    // The module address travels as a SmallInteger, as MAKE_FN already does;
+    // modules are owned by the Session for the whole session, so it cannot dangle.
+    rec->setAttribute(&scope, L.modKey, proto::makeSmallInt(reinterpret_cast<long long>(&mod)));
+    rec->setAttribute(&scope, L.ipKey, proto::makeSmallInt(ipOffset));
+    rec->setAttribute(&scope, L.fbaseKey, proto::makeSmallInt(pendingBase));
+    rec->setAttribute(&scope, L.fslotsKey, scope.newList(pendingBase, slots)->asObject(&scope));
+    const proto::ProtoObject* cur = actor->getOwnAttributeDirect(&scope, L.snapshotKey);
+    actor->setAttribute(&scope, L.snapshotKey,
+                        cur->asList(&scope)->appendFirst(&scope, rec)->asObject(&scope));
+}
+} // namespace
+
+const proto::ProtoObject* ExecutionEngine::resumeFrames(proto::ProtoContext* parent,
+                                                        const proto::ProtoList* frames,
+                                                        unsigned idx,
+                                                        const proto::ProtoObject* injected) {
+    checkNativeStack();
+    const RuntimeLayout& L = layout_;
+    const proto::ProtoObject* rec = frames->getAt(parent, static_cast<int>(idx));
+    const BytecodeModule& mod = *reinterpret_cast<const BytecodeModule*>(
+        proto::asSmallInt(rec->getOwnAttributeDirect(parent, L.modKey)));
+    const auto ipOffset = static_cast<std::size_t>(
+        proto::asSmallInt(rec->getOwnAttributeDirect(parent, L.ipKey)));
+    const auto base = static_cast<unsigned>(
+        proto::asSmallInt(rec->getOwnAttributeDirect(parent, L.fbaseKey)));
+    const proto::ProtoList* saved =
+        rec->getOwnAttributeDirect(parent, L.fslotsKey)->asList(parent);
+
+    const unsigned stackBase =
+        static_cast<unsigned>(mod.arity()) + static_cast<unsigned>(mod.localCount());
+    proto::ProtoContext frame(parent->space, parent);
+    frame.resizeAutomaticLocals(stackBase + static_cast<unsigned>(mod.maxStack()));
+    const proto::ProtoObject** slots = frame.getAutomaticLocals();
+    for (unsigned k = 0; k < base; ++k) slots[k] = saved->getAt(&frame, static_cast<int>(k));
+
+    // The inner frames finish first; their result is what this frame's
+    // in-flight call would have returned. The innermost frame receives the
+    // awaited value itself.
+    const proto::ProtoObject* r = (idx + 1 < frames->getSize(&frame))
+                                      ? resumeFrames(&frame, frames, idx + 1, injected)
+                                      : injected;
+    slots[base] = r;
+    const proto::ProtoObject* out =
+        runLoop(frame, mod, slots, slots + base + 1, mod.code().data() + ipOffset);
+    frame.returnValue = out;
+    return out;
+}
+```
+**Rooting:** the caller (`resumeSuspendedTurn`) holds the snapshot list in an automatic-local slot of the turn context *before* clearing the actor's attribute, so the list and every record stay reachable across the whole resume, which allocates.
+
+- [ ] **Step 4: The `await` primitive**
+
+```cpp
+PRIM(future_await) {
+    const RuntimeLayout& L = layoutOf();
+    if (futures::state(ctx, L, self) != futures::kPending)
+        return futures::result(ctx, L, self);          // raises a failed future's error
+    const ProtoObject* actor = currentActor();
+    if (!actor)                                        // the main thread, or Thread.start
+        return futures::awaitBlocking(ctx, L, self);
+    if (ExecutionEngine::nativeReentryDepth() > 1)
+        throw ScalaError("UnsupportedOperationException",
+                         "await is not supported inside a native higher-order method "
+                         "(map, foreach, a Future continuation): the call chain cannot "
+                         "be suspended");
+    auto* a = const_cast<ProtoObject*>(actor);
+    a->setAttribute(ctx, L.snapshotKey, ctx->newList()->asObject(ctx));  // frames prepend here
+    a->setAttribute(ctx, L.waitingOnKey, self);
+    if (!futures::addWaiter(ctx, L, self, actor)) {
+        // It completed between the state read and the registration: do not
+        // park, just answer now (design note 8).
+        a->removeAttribute(ctx, L.snapshotKey);
+        a->removeAttribute(ctx, L.waitingOnKey);
+        return futures::result(ctx, L, self);
+    }
+    throw FutureYield(self);
+}
+```
+
+- [ ] **Step 5: The resume turn**
+
+```cpp
+void ActorScheduler::resumeSuspendedTurn(proto::ProtoContext* ctx, ActorState* a,
+                                         bool* suspended) {
+    const RuntimeLayout& L = *layout_;
+    auto* actor = const_cast<proto::ProtoObject*>(a->actor);
+    proto::ProtoContext turn(ctx->space, ctx);
+    turn.resizeAutomaticLocals(3);
+    const proto::ProtoObject** slot = turn.getAutomaticLocals();
+    slot[0] = actor->getOwnAttributeDirect(&turn, L.snapshotKey);     // rooted before clearing
+    slot[1] = actor->getOwnAttributeDirect(&turn, L.waitingOnKey);
+    slot[2] = actor->getOwnAttributeDirect(&turn, L.turnFutureKey);
+    const long long st = futures::state(&turn, L, slot[1]);
+    if (st == futures::kPending) {
+        // Not the completion's wake-up: a message, or a wake marked while the
+        // suspension was in flight. Stay parked (protoST's S13).
+        *suspended = true;
+        return;
+    }
+    actor->removeAttribute(&turn, L.snapshotKey);
+    actor->removeAttribute(&turn, L.waitingOnKey);
+    actor->removeAttribute(&turn, L.turnFutureKey);
+    if (st == futures::kFailure) {
+        // The awaited future failed. Without exceptions (Phase 4) the handler
+        // cannot catch it, so the suspended chain is abandoned and the ask
+        // inherits the failure (D50).
+        completeFutureWithError(&turn, slot[2], futures::errorOf(&turn, L, slot[1]));
+        return;
+    }
+    setCurrentActor(actor);
+    bool yielded = false;
+    try {
+        const proto::ProtoObject* r = engine_->resumeFrames(
+            &turn, slot[0]->asList(&turn), 0, futures::valueOf(&turn, L, slot[1]));
+        applyHandlerResult(&turn, a, r, slot[2]);      // the (newState, reply) rule of D45
+    } catch (FutureYield&) {
+        if (slot[2] && slot[2] != PROTO_NONE)
+            actor->setAttribute(&turn, L.turnFutureKey, slot[2]);
+        yielded = true;
+    } catch (ScalaError& e) {
+        std::fflush(stdout);
+        std::fprintf(stderr, "protoscala: actor handler failed: %s\n", e.what());
+        completeFailureFor(&turn, slot[2], e);
+    }
+    setCurrentActor(nullptr);
+    *suspended = yielded;
+}
+```
+`deliver` gains the matching `catch (FutureYield&)`: it stores the message's future under `__turn_future__` and sets `*suspended = true` (the snapshot and `__waiting_on__` are already on the actor, written by `await` and the frames).
+
+- [ ] **Step 6: Run**
+
+```bash
+cmake --build build_release
+ctest --test-dir build_release -R "unit/actors|13-actors|14-futures" --output-on-failure
+PROTOSCALA_ACTOR_WORKERS=1 ctest --test-dir build_release -R "13-actors|14-futures" --output-on-failure
+PROTOSCALA_ACTOR_WORKERS=16 ctest --test-dir build_release -R "13-actors|14-futures" --output-on-failure
+```
+Expected: all green in every configuration; in particular `await-one-worker.scala` prints `84` with one worker, which is the proof that `await` suspends cooperatively rather than blocking.
+
+Run the whole suite once under the low heap, because a snapshot is a live object graph:
+`PROTOCORE_HEAP_LIMIT_CELLS=20000 ctest --test-dir build_release --output-on-failure`
+Expected: `100% tests passed`.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/runtime/FutureYield.h src/runtime/ExecutionEngine.h src/runtime/ExecutionEngine.cpp \
+        src/runtime/ActorScheduler.h src/runtime/ActorScheduler.cpp \
+        src/runtime/ActorPrimitives.cpp src/runtime/Runtime.h src/runtime/Runtime.cpp \
+        tests/unit/test_yield.cpp tests/conformance/13-actors tests/CMakeLists.txt
+git commit -m "actors: cooperative await through per-frame snapshots
+
+Future.await inside an actor throws FutureYield; every recursive execute()
+frame prepends its record (module, ip, the in-flight call's base and the live
+slots below it) to the actor's snapshot and rethrows, and the scheduler parks
+the actor while it stays claimed. Completing the future re-enqueues it and
+resumeFrames rebuilds the chain, writing the awaited value where the call
+would have left its result (DESIGN §8.3). An await whose chain cannot be
+snapshotted is refused instead of corrupting the frame (D43).
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
+git push origin main
+```
+
+---
+
+### Task 7: `Future.apply`, `map`, `flatMap`, `recover`
+
+**Files:**
+- Modify: `src/runtime/Futures.h`, `src/runtime/Futures.cpp`, `src/runtime/ActorPrimitives.cpp`, `src/runtime/Primitives.cpp`, `lib/prelude.scala`
+- Test: `tests/conformance/14-futures/*.scala`
+
+**Interfaces:**
+
+| Receiver | Member | Meaning |
+|---|---|---|
+| `Future` | `apply(body)` | runs `body: () => T` on the worker pool (a one-shot actor) and returns its `Future` (D47) |
+| `Future` | `successful(v)` / `failed(e)` | an already-completed future (used by `flatMap` and the tests) |
+| a future | `map(f)` | a new future completed with `f(value)`; a failure passes through |
+| a future | `flatMap(f)` | `f(value)` must return a `Future`; its completion completes the result |
+| a future | `recover(f)` | a failure becomes `f(error)`; a success passes through |
+| a future | `onComplete(f)` | `f(Try[T])`; the primitive the three above are built on |
+
+Continuations are stored in a `__conts__` `ProtoList` on the future (GC-safe) and run **on the thread that completes it**, or immediately on the caller when the future is already completed (D48).
+
+- [ ] **Step 1: Write the failing fixtures**
+
+`tests/conformance/14-futures/future-apply.scala`:
+```scala
+// EXPECT: 9
+val f = Future(() => 3 * 3)
+println(f.await)
+```
+`tests/conformance/14-futures/map-and-flatmap.scala`:
+```scala
+// EXPECT: 25
+val echo = Actor.spawn(0) { (s, m) => (s, m) }
+val f = (echo ? 4).map(x => x + 1).flatMap(x => Future(() => x * 5))
+println(f.await)
+```
+`tests/conformance/14-futures/recover.scala`:
+```scala
+// EXPECT: -1
+val bad = Actor.spawn(0) { (s, m) => (s, s / 0) }
+println((bad ? 1).recover(e => -1).await)
+```
+`tests/conformance/14-futures/map-on-a-completed-future.scala`:
+```scala
+// EXPECT: 8
+val f = Future.successful(4)
+println(f.map(x => x * 2).await)
+```
+
+- [ ] **Step 2: Implement**
+
+```cpp
+// Runs every continuation registered on a completed future. Called by
+// complete() on the completing thread and by onComplete() when the future is
+// already done (D48).
+//
+// A continuation must not suspend: it may run on a worker in the middle of
+// another actor's turn, so `await` inside one would park the wrong actor. The
+// current actor is cleared and the native depth raised for the duration, which
+// makes `await` refuse with the D43 message.
+void runContinuations(proto::ProtoContext* ctx, const RuntimeLayout& L,
+                      const proto::ProtoObject* f) {
+    auto* fut = const_cast<proto::ProtoObject*>(f);
+    const proto::ProtoObject* conts = fut->getOwnAttributeDirect(ctx, L.contsKey);
+    if (!conts || conts == PROTO_NONE || conts->asList(ctx)->getSize(ctx) == 0) return;
+    // Take the list once: a continuation registered after this point is run by
+    // onComplete itself, because the future is already completed.
+    if (!fut->setAttributeIfEqual(ctx, L.contsKey, conts, ctx->newList()->asObject(ctx))) return;
+    const proto::ProtoList* list = conts->asList(ctx);
+    ActorTurnPause pause;                 // clears currentActor, raises the native depth
+    for (unsigned long i = 0; i < list->getSize(ctx); ++i) {
+        proto::ProtoContext scope(ctx->space, ctx);
+        const proto::ProtoObject* arg = tryOf(&scope, L, f);     // Success(v) / Failure(e)
+        try {
+            activeCallContext()->engine->invoke(&scope, list->getAt(&scope, static_cast<int>(i)),
+                                                &arg, 1);
+        } catch (ScalaError& e) {
+            std::fflush(stdout);
+            std::fprintf(stderr, "protoscala: future continuation failed: %s\n", e.what());
+        }
+    }
+}
+```
+`map`/`flatMap`/`recover` are written on top of `onComplete` in **C++** (they must build `Success`/`Failure` through the prelude hooks anyway), each creating the derived future first so the continuation can complete it. `Future.apply(body)` spawns a one-shot actor whose handler ignores its state and calls `body()`, asks it once and returns that ask's future — one scheduling entity for the whole phase (A0-7), at the cost of one perennial actor per `Future.apply` (D46, noted in STATUS).
+
+- [ ] **Step 3: Run**
+
+Run: `cmake --build build_release && ctest --test-dir build_release -R "14-futures" --output-on-failure`, then with `PROTOSCALA_ACTOR_WORKERS=1`.
+Expected: all green — `Future.apply` with one worker works because the ask is fire-and-forget from the main thread and the main thread's `await` blocks outside any turn.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/runtime/Futures.h src/runtime/Futures.cpp src/runtime/ActorPrimitives.cpp \
+        src/runtime/Primitives.cpp lib/prelude.scala tests/conformance/14-futures
+git commit -m "futures: apply, map, flatMap, recover and onComplete
+
+Continuations live in a ProtoList on the future and run on the thread that
+completes it (or immediately, when it is already complete); they may not
+suspend, so the current actor is cleared while they run. Future.apply runs
+its body on the worker pool as a one-shot actor (DESIGN §8.3).
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
+git push origin main
+```
+
+---
+
+### Task 8: GC pressure, shutdown on every exit path, stress and race checks
+
+**Files:**
+- New: `tests/cli/actors-shutdown.sh`, `tests/cli/actors-stress.sh`
+- Modify: `tests/cli/gc-pressure.sh`, `tests/CMakeLists.txt`, `src/repl/Repl.cpp` (only if an exit path bypasses `~Session`)
+
+**Interfaces:** none (black-box checks of the binary).
+
+- [ ] **Step 1: Shutdown on every exit path**
+
+`tests/cli/actors-shutdown.sh` runs the binary five ways and requires a clean exit, no hang and no message from the protoCore teardown:
+
+```bash
+#!/usr/bin/env bash
+#
+# CLI check: the actor workers are joined before the ProtoSpace is destroyed,
+# on every exit path (DESIGN §8.2). A missed join shows up as a crash, a hang
+# or protoCore noise on stderr during teardown.
+set -u
+P="${1:?usage: actors-shutdown.sh <protoscala>}"
+work=$(mktemp -d -p "$PWD" actors-shutdown.XXXXXX)
+trap 'rm -rf "$work"' EXIT
+
+run_case() {   # name, expected-exit, expected-last-stdout-line, source
+    local name="$1" want_rc="$2" want_out="$3" src="$4"
+    printf '%s' "$src" > "$work/$name.scala"
+    local out rc
+    out=$(timeout 60s "$P" "$work/$name.scala" 2>"$work/$name.err"); rc=$?
+    local last; last=$(printf '%s' "$out" | tail -n 1)
+    [[ $rc -eq $want_rc && "$last" == "$want_out" ]] || {
+        echo "FAIL ($name): exit $rc (want $want_rc), last line '$last' (want '$want_out')"
+        cat "$work/$name.err"; exit 1; }
+}
+
+# 1. Normal end with live actors and a full mailbox.
+run_case normal 0 'done' '
+val a = Actor.spawn(0) { (s, m) => (s + 1, s + 1) }
+var i = 0
+while i < 1000 do
+  a ! 1
+  i += 1
+println("done")
+'
+# 2. An uncaught error after actors were started.
+run_case failing 1 '' '
+val a = Actor.spawn(0) { (s, m) => (s, s) }
+a ! 1
+println(1 / 0)
+'
+# 3. An actor left suspended on a future that never completes: the process
+#    still exits, and says so on stderr. An actor that asks *itself* builds
+#    exactly that: the ask is queued behind the handler that is waiting for it,
+#    and the single-method invariant means it can never be handled.
+cat >"$work/suspended.scala" <<'SCALA'
+var me: Any = null
+val stuck = Actor.spawn(0) { (s, m) =>
+  val v = (me ? m).await
+  (v, v)
+}
+me = stuck
+stuck ! 1
+// Give the worker time to reach the suspension, then end the program with the
+// actor still parked.
+val t = System.nanoTime()
+while System.nanoTime() - t < 200000000 do ()
+println("started")
+SCALA
+out=$(timeout 60s "$P" "$work/suspended.scala" 2>"$work/suspended.err"); rc=$?
+[[ $rc -eq 0 ]] || { echo "FAIL (suspended): exit $rc"; cat "$work/suspended.err"; exit 1; }
+grep -q "still waiting on a future" "$work/suspended.err" || {
+    echo "FAIL (suspended): no diagnostic for the parked actor"; exit 1; }
+# 4. The REPL: actors created at the prompt, then :quit.
+out=$(printf 'val a = Actor.spawn(0) { (s, m) => (s + 1, s + 1) }\na ! 1\n:quit\n' \
+      | timeout 60s "$P" 2>"$work/repl.err"); rc=$?
+[[ $rc -eq 0 ]] || { echo "FAIL (repl): exit $rc"; cat "$work/repl.err"; exit 1; }
+echo OK
+```
+If case 3 or 4 hangs, the bug is a missing `shutdown` on that path (`~Session`, or the REPL's exit), not a test problem.
+
+- [ ] **Step 2: Stress and race checks**
+
+`tests/cli/actors-stress.sh` — protoClojure's `concurrent-sends-no-race` shape at a size that actually races, run at both ends of the worker range:
+
+```bash
+#!/usr/bin/env bash
+# CLI check: the single-method invariant under contention (DESIGN §8.2).
+# Every number here is exact: N sends leave the counter at N whatever the
+# interleaving, so a lost, duplicated or concurrently-handled message shows up
+# as a wrong number rather than as flakiness.
+set -u
+P="${1:?usage: actors-stress.sh <protoscala>}"
+work=$(mktemp -d -p "$PWD" actors-stress.XXXXXX)
+trap 'rm -rf "$work"' EXIT
+
+cat >"$work/race.scala" <<'SCALA'
+val counter = Actor.spawn(0) { (s, m) => (s + m, s) }
+val ts = List(1, 2, 3, 4, 5, 6, 7, 8).map { _ =>
+  Thread.start { () =>
+    var i = 0
+    while i < 25000 do
+      counter ! 1
+      i += 1
+  }
+}
+ts.foreach(t => t.join())
+println((counter ? 0).await)
+SCALA
+cat >"$work/many.scala" <<'SCALA'
+var actors: List[Any] = Nil
+var k = 0
+while k < 1000 do
+  actors = Actor.spawn(0) { (s, m) => (s + 1, s + 1) } :: actors
+  k += 1
+var round = 0
+while round < 50 do
+  actors.foreach(a => a ! 1)
+  round += 1
+var total = 0
+actors.foreach(a => total += (a ? 0).await)
+println(total)
+SCALA
+for w in 1 2 8 16; do
+    out=$(PROTOSCALA_ACTOR_WORKERS=$w timeout 180s "$P" "$work/race.scala" 2>&1)
+    [[ "$out" == "200000" ]] || { echo "FAIL (race, workers=$w): '$out'"; exit 1; }
+    out=$(PROTOSCALA_ACTOR_WORKERS=$w timeout 180s "$P" "$work/many.scala" 2>&1)
+    [[ "$out" == "51000" ]] || { echo "FAIL (many, workers=$w): '$out'"; exit 1; }
+done
+echo OK
+```
+(`many.scala`'s expected value is 1000 actors × (50 sends + 1 ask) = 51000; the implementer recomputes it against the final `ask` semantics and writes the arithmetic in a comment, as `gc-pressure.sh` already does for its own numbers.)
+
+- [ ] **Step 3: GC pressure**
+
+Append an actor section to `tests/cli/gc-pressure.sh`, in its existing style (a program that reports the work it did, and an independently computed expected value):
+
+```bash
+# Actors under a low heap: 200 actors, each receiving 500 case-class messages
+# whose only reference is the mailbox, plus 200 asks whose futures are the only
+# reference to the replies. 200 * 500 = 100000 messages, 200 replies of 500.
+cat >"$work/actors.scala" <<'SCALA'
+case class Add(n: Int)
+var actors: List[Any] = Nil
+var k = 0
+while k < 200 do
+  actors = Actor.spawn(0) { (s, m) =>
+    m match
+      case Add(n) => (s + n, s + n)
+      case _      => (s, s)
+  } :: actors
+  k += 1
+var round = 0
+while round < 500 do
+  actors.foreach(a => a ! Add(1))
+  round += 1
+var total = 0
+actors.foreach(a => total += (a ? Add(0)).await)
+println(total)
+SCALA
+out=$(PROTOCORE_HEAP_LIMIT_CELLS=2000000 timeout 180s "$P" "$work/actors.scala" 2>&1); rc=$?
+[[ $rc -eq 0 && "$out" == "100000" ]] || { echo "FAIL (actors): exit $rc, '$out'"; exit 1; }
+```
+A lost message, a collected envelope or a collected reply gives a wrong total, not a crash — which is the point: this is a **correctness** check, as DESIGN §8.5 requires of the GC-pressure variants.
+
+- [ ] **Step 4: ThreadSanitizer**
+
+```bash
+cmake -B build_tsan -S . -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+      -DCMAKE_CXX_FLAGS="-fsanitize=thread -g" -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
+cmake --build build_tsan
+PROTOSCALA_ACTOR_WORKERS=4 ctest --test-dir build_tsan -R "unit/actors|13-actors|14-futures|cli/actors" --output-on-failure
+```
+Expected: green, with no `WARNING: ThreadSanitizer` in the output. TSan reports on protoCore's own internals that protoScala cannot fix are recorded in the task notes and reported to the maintainer, never suppressed silently. `build_tsan/` is not committed (add it to `.gitignore` if the existing pattern does not already cover `build_*`).
+
+- [ ] **Step 5: Register and run**
+
+Add `actors-shutdown` and `actors-stress` to the `foreach(cli_test ...)` list in `tests/CMakeLists.txt` that passes only the binary.
+
+Run: `ctest --test-dir build_release --output-on-failure`
+Expected: `100% tests passed`, with the new CLI checks included.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add tests/cli/actors-shutdown.sh tests/cli/actors-stress.sh tests/cli/gc-pressure.sh \
+        tests/CMakeLists.txt
+git commit -m "tests: actor shutdown, contention and GC-pressure checks
+
+Shutdown joins every worker on every exit path (normal, failing, a parked
+actor, the REPL); 8 threads x 25000 sends and 1000 actors give exact counts
+at 1, 2, 8 and 16 workers; 100000 messages and their replies survive a low
+protoCore heap, which is a correctness check, not a speed one.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
+git push origin main
+```
+
+---
+
+### Task 9: The seven benchmarks of DESIGN §8.5, the harness and the protoClojure comparison
+
+**Files:**
+- New: `benchmarks/actors/actor-throughput.scala`, `actor-fanout.scala`, `actor-mpsc.scala`, `actor-mpmc.scala`, `actor-pingpong.scala`, `actor-await.scala`, `actor-priority.scala`; `benchmarks/actor-bench.sh`; `benchmarks/run_actor_benchmarks.py`; `tests/cli/actor-bench-smoke.sh`
+- Modify: `benchmarks/README.md`, `benchmarks/RESULTS.md`, `benchmarks/run_benchmarks.py` (the `PENDING` table), `tests/CMakeLists.txt`
+- Generated: `benchmarks/reports/<date>-actors.md`
+
+**Interfaces:**
+- Every script sizes itself from `System.getenv("PROTOSCALA_BENCH_N")` (default 1_000_000 messages, so a run takes 1–4 s), prints one `mode=… messages=… <verification>` line, then `Actor.stats`, then `ok` or `FAILED`.
+- `run_actor_benchmarks.py` imports `machine_info`, `loadavg`, `fmt_load`, `wait_for_load`, `git_rev`, `build_type` from `run_benchmarks` (which guards its entry point with `if __name__ == "__main__"`), so the two reports carry identical machine headers.
+- `actor-bench.sh` is the thin wrapper, exactly as `bench.sh` wraps `run_benchmarks.py`.
+
+- [ ] **Step 1: Write the seven scripts**
+
+`benchmarks/actors/actor-throughput.scala` (mode `single` — the per-actor pipeline floor):
+```scala
+// 1 sender thread x 1 actor x N trivial messages (DESIGN §8.5).
+// Self-reporting: the final ask is ordered behind every send, so its reply is
+// the exact number of messages this actor processed.
+val N = { val e = System.getenv("PROTOSCALA_BENCH_N"); if e == "" then 1000000 else e.toInt }
+val a = Actor.spawn(0) { (s, m) => (s + 1, s + 1) }
+var i = 0
+while i < N do
+  a ! 1
+  i += 1
+val processed = (a ? 1).await
+println("mode=single messages=" + (N + 1).toString + " processed=" + processed.toString)
+println(Actor.stats)
+println(if processed == N + 1 then "ok" else "FAILED")
+```
+
+`actor-fanout.scala` (1000 actors × N/1000 messages — ready-queue stress), `actor-mpsc.scala` (4 `Thread.start` producers × N/4 → 1 actor — sender contention on one mailbox), `actor-mpmc.scala` (4 producers × 4 actors round-robin), `actor-pingpong.scala` (`ping`'s handler loops N/2 times over `(pong ? i).await`, so every round trip is two messages and the mode measures ask/reply latency *through* the cooperative suspension), `actor-await.scala` (1000 caller actors, each awaiting an ask to a shared `echo` actor N/2000 times; **it must complete with `PROTOSCALA_ACTOR_WORKERS=1`**, which a blocking `await` cannot), `actor-priority.scala` (a Low-band flood of N messages plus 1000 High-band asks, each timed with `System.nanoTime`, printed as a `latencies=` line of 1000 nanosecond samples that the runner turns into p50/p99).
+
+Each ends with the same three lines (`mode=…`, `Actor.stats`, `ok`/`FAILED`), and each states its arithmetic in a comment.
+
+- [ ] **Step 2: The runner**
+
+`benchmarks/run_actor_benchmarks.py`:
+- modes table: `(name, script, expected_messages(N), notes)`;
+- for each mode and each `PROTOSCALA_ACTOR_WORKERS` in `1, 2, 4, 6, 8, 16`: run the script as a cold process, time it with `time.perf_counter()`;
+- **verify before computing anything**: the run exited 0, the last line is `ok`, the `mode=` line's `processed` equals the expected count, and `ActorStats(<workers>,<messages>)` reports at least that many messages. A cell that fails any check is marked `FAILED` and is never turned into a rate (the protoClojure harness's 2026-06-14 lesson, and protoPython's sprint-9 lesson: a silent failure must never read as infinite throughput);
+- rate = `messagesProcessed / wall_seconds`;
+- the report header records machine, physical/logical cores, date, protoScala commit, build type, `Mailbox::implementationName()` (printed by `protoscala --version` after Task 11 adds it, or read from the CMake configure log), the load average at start and end, and the worker count at the peak of each mode;
+- the comparison section runs `../protoClojure/benchmarks/actor-bench.sh` on the same machine, the same day, and puts its `single`/`fan-out`/`MPSC`/`MPMC` rows next to protoScala's — the four modes whose shapes are identical. `ping-pong`, `await` and `priority` have no protoClojure twin and say so explicitly. If `protoclj` is missing, the section says "not available on this machine" and why.
+
+- [ ] **Step 3: The smoke check**
+
+`tests/cli/actor-bench-smoke.sh` runs all seven scripts with `PROTOSCALA_BENCH_N=2000` and requires `ok` from each, so a benchmark can never rot unnoticed between full runs. Register it in `tests/CMakeLists.txt` (it takes the binary and the source dir).
+
+- [ ] **Step 4: Run the full table**
+
+```bash
+benchmarks/actor-bench.sh --name actors
+```
+Expected: a table with 7 modes × 6 worker counts, every cell verified, and `benchmarks/reports/<date>-actors.md` written. Expectations to sanity-check before recording (not to enforce):
+- `single` barely improves beyond 1 worker (the single-method invariant serialises one actor);
+- `fan-out`, `MPMC` and `await` scale up to the physical-core count (6 on DEV12) and flatten or regress at 16 — protoST's measured worker-scaling ceiling;
+- `await` completes at every worker count **including 1**;
+- `priority` reports a High-band p99 far below the Low-band flood's mean service time.
+
+Run the comparison the same day:
+```bash
+../protoClojure/benchmarks/actor-bench.sh ../protoClojure/build_release/protoclj | tee \
+  ../.agent_scratch/phase5/protoclj-actor-bench.txt
+```
+and fold its four comparable rows into the report.
+
+- [ ] **Step 5: Record**
+
+Add a row to `benchmarks/RESULTS.md`'s report table pointing at the new dated report, plus an "Actors" section with the peak table (as protoClojure's README does); update `benchmarks/README.md` with how to run the actor suite; remove the `("actor benchmarks", …, "Phase 5 (actors)", …)` entry from `run_benchmarks.py`'s `PENDING` list.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add benchmarks/actors benchmarks/actor-bench.sh benchmarks/run_actor_benchmarks.py \
+        benchmarks/README.md benchmarks/RESULTS.md benchmarks/run_benchmarks.py \
+        benchmarks/reports tests/cli/actor-bench-smoke.sh tests/CMakeLists.txt
+git commit -m "benchmarks: the seven actor modes of DESIGN §8.5
+
+single, fan-out, MPSC, MPMC, ping-pong, await and priority, each self-reporting
+its message count and each verified by the runner before any rate is computed.
+Six worker counts per mode, a dated report with machine and load average, and
+protoClojure's four comparable rows measured on the same machine and day.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
+git push origin main
+```
+
+---
+
+### Task 10: Tutorial chapter 13 — Actors and futures
+
+**Files:**
+- New: `docs/tutorial/13-actors-and-futures.md`, `tests/conformance/tutorial/13-*.scala`
+- Modify: `docs/TUTORIAL.md`, `docs/tutorial/02-for-the-python-or-javascript-developer.md`, `docs/tutorial/03-for-the-scala-developer.md`
+
+**Note on the chapter number:** `docs/TUTORIAL.md`'s chapter table lists **13** as "Actors and futures" (12 is "Enums and sealed hierarchies", Phase 4), while `docs/ROADMAP.md`'s Phase 5 done-when says "tutorial chapter 12". The table is the live list, so the chapter is **13** and Task 11 corrects the ROADMAP line.
+
+**Interfaces:** every runnable snippet in the chapter is also a fixture under `tests/conformance/tutorial/`, byte-identical to the published snippet (the Documentation track's rule).
+
+- [ ] **Step 1: Write the chapter**
+
+Sections, in the dual-audience style of chapters 6, 7 and 9 (a Scala-first exposition, with a bridge box for Python/JavaScript readers and a closing "What differs from Scala 3" section keyed to the D-ids):
+
+1. **Why actors here** — no GIL, native threads, messages passed by pointer to immutable data (DESIGN §1, §8). For the Python reader: not `asyncio` (one thread, one loop) and not `multiprocessing` (copies); for the JavaScript reader: not a worker with `postMessage` (structured clone) — the same object graph, no copy.
+2. **An actor is a state and a handler** — `Actor.spawn(state)(handler)`, the `(newState, reply)` rule (D45), the printed form `Actor(10)`.
+3. **Telling and asking** — `!` (fire and forget) and `?` (a `Future` of the reply); why `!` returns `Unit`; the single-method invariant in one paragraph: "a counter that receives a thousand `!` from four threads ends at exactly a thousand — the actor never runs twice at once".
+4. **Priorities** — `send`/`ask` with `Priority.High` / `Medium` / `Low`, what a band guarantees (order within a band) and what it does not (no pre-emption of a message already being handled).
+5. **Futures** — `await`, `isCompleted`, `value: Option[Try[T]]`, `map`/`flatMap`/`recover`, `Future(() => …)` (D47) and where continuations run (D48).
+6. **`await` inside an actor is cooperative** — the worker is released, the actor stays claimed, the message that follows waits; the worked example is the `await-one-worker` fixture running with `PROTOSCALA_ACTOR_WORKERS=1`. The limits are stated plainly (D43): not inside `map`/`foreach`/a continuation.
+7. **When a handler fails** — `Failure(RuntimeError(...))`, the actor keeps its state and stays alive, the error is on stderr; no supervision trees in 0.3.0 (DESIGN §8.4).
+8. **Threads and time** — `Thread.start { () => … }`, `join()`, `System.nanoTime()` (D49), and when to prefer an actor.
+9. **Tuning** — `PROTOSCALA_ACTOR_WORKERS` (default `max(2, cores − 2)`, cap 16), `Actor.stats`, and the measured shape of the benchmark table (a pointer to `benchmarks/RESULTS.md`, not numbers copied by hand).
+10. **What differs from Scala 3** — D43–D52 in one table, plus "no `ExecutionContext`, no `Akka`, no supervision".
+
+- [ ] **Step 2: Fixtures**
+
+Every snippet that runs becomes `tests/conformance/tutorial/13-<topic>.scala` with an `// EXPECT:` first line, byte-identical to the chapter. The `await` snippet gets `PROTOSCALA_ACTOR_WORKERS=1` through `set_tests_properties`, so the text's claim ("this completes with a single worker") is the thing the suite checks.
+
+- [ ] **Step 3: Extend chapters 2 and 3**
+
+Chapter 2 gains a short "Concurrency without a GIL" section (for the Python/JavaScript reader) pointing at chapter 13; chapter 3 gains D43–D52 in its departures catalogue and a line in its "What is missing" list about supervision and `ExecutionContext`.
+
+- [ ] **Step 4: Run**
+
+Run: `ctest --test-dir build_release -R "tutorial" --output-on-failure`
+Expected: every tutorial fixture green, including the new ones.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add docs/tutorial/13-actors-and-futures.md docs/TUTORIAL.md \
+        docs/tutorial/02-for-the-python-or-javascript-developer.md \
+        docs/tutorial/03-for-the-scala-developer.md tests/conformance/tutorial tests/CMakeLists.txt
+git commit -m "docs: tutorial chapter 13, actors and futures
+
+Actors, telling and asking, priority bands, futures and cooperative await,
+handler failures, threads and tuning, for both audiences; every runnable
+snippet is a conformance fixture, and the cooperative-await snippet runs with
+a single worker so the text's claim is what the suite checks.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
+git push origin main
+```
+
+---
+
+### Task 11: Status, deviations, changelog and release 0.3.0
+
+**Files:**
+- Modify: `docs/STATUS.md`, `docs/LANGUAGE.md`, `docs/ROADMAP.md`, `docs/DECISIONS-LOG.md`, `docs/DESIGN.md`, `CHANGELOG.md`, `README.md`, `CMakeLists.txt`, `src/main.cpp`
+
+- [ ] **Step 1: `docs/STATUS.md`**
+
+- Header: "Phase 5 complete (0.3.0)", the new test totals (`ctest -N`), and "all green also under `PROTOCORE_HEAP_LIMIT_CELLS=20000` and under ThreadSanitizer".
+- **Implemented**: a concurrency block — actors, three priority bands, the single-method invariant, cooperative `await`, futures and their combinators, `Thread`, `System`, `Actor.stats`, the mailbox backend in use (`ProtoMPSCQueue` or the CAS-list fallback, naming Phase P2 as the switch).
+- **Not yet implemented**: remove "Actors and futures — Phase 5"; add "supervision trees, `ExecutionContext`, actor timeouts and `Await.result(f, duration)`", and — if the fallback mailbox is in use — "actor mailboxes on protoCore's `ProtoMPSCQueue` (Phase P2)".
+- **Opcode table**: leave 128..159 reserved and change its note to "reserved; Phase 5 shipped the actor surface as ordinary sends (plan Task 0 A0-11)".
+- **Intentional deviations**: a new "Provisional deviations (Phase 5)" table with **D43–D52**:
+
+| Id | Deviation |
+|---|---|
+| D43 | `await` suspends only a chain of protoScala frames each stopped at a call instruction. Inside a native higher-order method (`map`, `foreach`, `withFilter`, a `Future` continuation), or under an instruction that calls back into Scala without being a call site (`==` reaching a user `equals`, a `MatchError`'s `toString`), it raises `UnsupportedOperationException` instead of suspending; the ask's future receives that failure and the actor stays alive |
+| D44 | Until Phase 4 there are no exception values: a failed `Future` carries `RuntimeError(className, message)`, and `Try`/`Success`/`Failure` (moved up from Phase 3) wrap it. `await` on a failed future raises the same error on the awaiting thread, which no user code can catch yet |
+| D45 | An actor handler must return `(newState, reply)`; any other result raises `IllegalArgumentException` and fails that message, leaving the actor's state unchanged |
+| D46 | An actor lives as long as the session: it is anchored in a registry so the GC can reach it and everything it holds while it is only referenced by the (C++) ready stacks. `Future.apply` creates one actor per call |
+| D47 | `Future.apply` takes a function, not a by-name parameter: write `Future(() => expr)` (by-name parameters need callee signatures at compile time, which a dynamic dialect has not) |
+| D48 | `map`/`flatMap`/`recover`/`onComplete` run their continuation on the thread that completes the future, or immediately on the caller when it is already complete — there is no `ExecutionContext`. A continuation may not `await` (D43) |
+| D49 | `Thread` and `System` are runtime facilities, not the JVM's: `Thread.start(() => …)`, `t.join()`, `System.nanoTime()`, `System.currentTimeMillis()`, `System.getenv(name)` (`""` when unset). `nanoTime` is a monotonic clock; only differences are meaningful |
+| D50 | Awaiting a future that fails, inside an actor, abandons the rest of the handler and the message's own future inherits the failure (there is no `try`/`catch` to resume into until Phase 4) |
+| D51 | `actor.value` reads the state without sending a message, so it may observe a state older than a send that is still queued (protoClojure's `@actor`) |
+| D52 | `Priority.High` / `Medium` / `Low` are the integers `0` / `1` / `2` on an object, not an `enum` (enums arrive in Phase 4) |
+
+- **Known issues / platform dependencies**: the ready stacks retain their node high-water mark for the session; a handler parked on a future that never completes keeps its actor and its queued messages alive until exit, where the shutdown prints a diagnostic; `PROTOSCALA_ACTOR_WORKERS` above the physical core count measured no gain (Task 9's table).
+
+- [ ] **Step 2: `docs/LANGUAGE.md`, `docs/ROADMAP.md`, `docs/DESIGN.md`**
+
+- LANGUAGE.md: a concurrency section with the surface grammar (`!`, `?`, `send`, `ask`, `value`, `await`, `Priority`, `Future`, `Thread`, `System`) and D43–D52 in §5.
+- ROADMAP.md: mark **Phase 5 ✅ (date)**, and correct its done-when line "tutorial chapter 12" to **chapter 13** (the TUTORIAL.md chapter table's number, Task 10).
+- DESIGN.md: in §8.3, replace "the engine snapshots the actor's frames" with the one-sentence statement of what was built (per-frame records prepended during unwinding, resumed by recursion) and cross-reference D43; in §11, mark R9's mailbox as "consumed through the `Mailbox` seam; on `ProtoMPSCQueue` once P2 merges" if the fallback shipped. Nothing else in §8 changes — the phase implemented it as written.
+
+- [ ] **Step 3: `CHANGELOG.md`, `README.md`, version**
+
+`CHANGELOG.md` gains a `## [0.3.0] - <date>` section ("Phase 5: actors, priority bands and cooperative futures. Built against protoCore `<hash>`.") with Added / Changed / Known-limitations lists; `README.md` gains an actors section with a short example and the peak benchmark table, and its status line becomes 0.3.0; `CMakeLists.txt`'s `project(... VERSION 0.3.0)` is bumped; `protoscala --version` gains the mailbox backend, so a benchmark report can never misattribute its numbers:
+```
+protoScala 0.3.0 (actor mailboxes: ProtoMPSCQueue)
+```
+(`tests/cli/version.sh` is updated to accept the new line.)
+
+- [ ] **Step 4: `docs/DECISIONS-LOG.md`**
+
+One row per Task 0 decision (A0-1 … A0-11), each "agent, pending review", with the file that carries it; plus a row for the Phase 5 D-ids (D43–D52) and one for "Release 0.3.0 cut; the `v0.3.0` tag is left to the maintainer".
+
+- [ ] **Step 5: Full verification**
+
+```bash
+rm -rf build_release && cmake -B build_release -S . && cmake --build build_release
+ctest --test-dir build_release --output-on-failure
+PROTOCORE_HEAP_LIMIT_CELLS=20000 ctest --test-dir build_release --output-on-failure
+PROTOSCALA_ACTOR_WORKERS=1 ctest --test-dir build_release --output-on-failure
+PROTOSCALA_ACTOR_WORKERS=16 ctest --test-dir build_release --output-on-failure
+benchmarks/cold-start.sh build_release/protoscala 21
+```
+Expected: `100% tests passed` four times, and a cold start still under 25 ms (DESIGN §1: the scheduler must **not** start until the first `Actor.spawn`, so a script that uses no actor pays nothing — if cold start regressed, the cause is eager worker creation and it is a bug, not a new target).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add docs CHANGELOG.md README.md CMakeLists.txt src/main.cpp tests/cli/version.sh
+git commit -m "docs: Phase 5 status, deviations D43-D52 and release 0.3.0
+
+Actors, priority bands and cooperative futures are implemented and measured;
+STATUS records the ten provisional deviations, ROADMAP marks the phase done
+(and corrects the tutorial chapter number), DESIGN §8.3 records how the
+recursive VM suspends, and --version names the mailbox backend so a benchmark
+report cannot misattribute its numbers.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
+git push origin main
+```
+
+---
+
+## Open questions for the maintainer
+
+Each one is implemented as stated (the "provisional behaviour"), recorded in `docs/DECISIONS-LOG.md` as "agent, pending review", and cheap to reverse.
+
+| # | Question | Provisional behaviour | Cost if reversed |
+|---|---|---|---|
+| Q1 | Is the recursive VM plus per-frame snapshots the right answer, or should the engine become iterative before more phases build on it? (A0-1) | Per-frame snapshots; the VM stays recursive | The engine rewrite gets more expensive with every phase that adds opcodes |
+| Q2 | Should an `await` that cannot be snapshotted fail (D43) or block the worker? (A0-2) | It fails | A blocking fallback would deadlock small pools; changing later is a one-line switch plus fixtures |
+| Q3 | Is Phase 5 before Phases 3 and 4 the intended order, given that it forces `Try`/`RuntimeError` into the prelude early? (A0-3) | Phase 5 next, 0.3.0 | Phase 4 must re-point `Failure` at real exception values (one prelude edit plus the `await` raise path) |
+| Q4 | Must a handler always return `(newState, reply)`? (A0-4) | Yes (D45) | Relaxing it later is additive; tightening it later would break programs |
+| Q5 | May actors be collected when they are quiescent and unreferenced? (A0-5) | No: an actor lives as long as the session (D46) | Needs a removable registry, i.e. `ProtoMap` (P1) |
+| Q6 | `Future(() => e)` or a compiler special case for by-name? (A0-6) | The function form (D47) | A later by-name would deprecate the function form |
+| Q7 | Continuations on the completing thread, or a second scheduling entity? (A0-7) | The completing thread (D48) | A task queue is additive but needs its own GC anchor |
+| Q8 | Is the `Mailbox` seam acceptable as the way to ship before P2? (A0-8) | Yes; the fallback is correct, only slower | None: the switch is one file |
+| Q9 | Are `Thread` and `System` acceptable additions to the surface? (A0-9) | Yes, minimal forms (D49) | Removing them would leave the MPSC/MPMC/priority benchmarks unwritable |
+| Q10 | Batch of 8 with a pending list, or drain the whole band? (A0-10) | 8, per DESIGN §8.2 | A constant |
+| Q11 | Ship the actor surface as plain sends, with 128..159 still reserved? (A0-11) | Yes (A0-11) | Adding opcodes later is additive and must be justified by `perf stat -r 3` |
+| Q12 | Should `f.await` grow a timeout (`Await.result(f, d)`) so a program cannot hang forever? | No timeout in 0.3.0; the shutdown diagnostic reports parked actors | Additive |
+
+---
+
+## Self-review against the done-when criteria
+
+**ROADMAP Phase 5 "Done when":**
+
+| Criterion | Where it is met |
+|---|---|
+| `Actor.spawn`, `!`, `?`, `send`/`ask` with `Priority`, `value`, `Actor.isActor`, `Actor.stats`, `Future` (`await`, `map`, `flatMap`, `recover`, `Future.apply`) pass their fixtures | Tasks 4, 5, 7 — `tests/conformance/13-actors/`, `14-futures/` |
+| The single-method invariant holds under a concurrent-senders race fixture (protoClojure's `concurrent-sends-no-race` shape) | Task 3 (`Scheduler.ConcurrentSendersLoseNothing`), Task 5 (`threads-send-concurrently.scala`), Task 8 (`actors-stress.sh`: 8 threads × 25000, at 1/2/8/16 workers) |
+| Priorities are observable | Task 4 (`priority-bands.scala`), Task 9 (the `priority` benchmark's p50/p99) |
+| A handler exception yields `Failure` and leaves the actor alive | Task 5 (`failed-ask.scala`), Task 4 (`handler-must-return-a-pair.scala`) |
+| `await` inside an actor suspends cooperatively (the `await` benchmark completes with one worker) | Task 6 (`await-one-worker.scala`, run with `PROTOSCALA_ACTOR_WORKERS=1`), Task 9 (the `await` mode at every worker count) |
+| Every queued payload is GC-reachable (GC-pressure fixtures under a low limit) | Task 2 (`QueuedItemsSurviveCollections`), Task 3 (the unit binary under `PROTOCORE_HEAP_LIMIT_CELLS`), Task 8 (`gc-pressure.sh`'s actor section) |
+| Shutdown joins all workers on every exit path | Task 4 (`~Session`), Task 8 (`actors-shutdown.sh`: normal, failing, parked, REPL) |
+| `benchmarks/actor-bench.sh` runs all seven modes, verifies message counts, and `RESULTS.md` records the table next to protoClojure's on the same machine and date | Task 9 |
+| Tutorial chapter (13, not 12 — the ROADMAP line is corrected) is written | Task 10 |
+
+**DESIGN §8, clause by clause:** §8.1's whole surface is Tasks 4–7 (`Actor(10)` printed form included); §8.2's single-method invariant, per-actor three-band mailboxes on `ProtoMPSCQueue`, lock-free per-band ready stacks with ABA-tagged heads, spin-before-park, `ProtoSpace::newThread` workers, `PROTOSCALA_ACTOR_WORKERS` with protoClojure's default and cap, the per-worker re-installed call context, one `ProtoContext` per message and the shutdown join are Tasks 1–4 and 8; §8.3's `__fstate__` CAS, cooperative `FutureYield` with frame snapshots and a claimed-while-suspended actor, non-actor `await` parking inside `UnmanagedScope`, and `Future.apply`/`map`/`flatMap`/`recover` are Tasks 5–7; §8.4's five corrections are met — payloads and replies are GC-reachable (Tasks 2–3), a handler failure completes the ask with `Failure` and keeps the actor alive (Task 5), a message is one object with no argument limit (Task 4), nothing polls (Task 5's condition variable and Task 6's suspension), and futures run on the pool rather than one thread each (Task 7); §8.5's seven modes, verification rule, worker sweep, report contents and protoClojure comparison are Task 9, and its GC-pressure variants are Task 8.
+
+**Gaps found while reviewing, and closed inline:**
+- DESIGN §8.5's `priority` mode needs a clock and its `MPSC`/`MPMC` modes need non-worker sender threads; neither exists in the language. Closed by A0-9 (`System.nanoTime`, `Thread.start`), recorded as D49 rather than left implicit.
+- DESIGN §8.3's `Future.apply { ... }` cannot be written without by-name parameters. Closed by A0-6/D47 (`Future(() => e)`), with the compiler special case offered to the maintainer as Q6.
+- DESIGN §3.6 ("recursive VM") and §8.3 ("frame snapshots, protoST's model") are in tension, because protoST's snapshots exist only because its engine stopped being recursive. Closed by A0-1: per-frame records prepended during unwinding, which is protoST's own multi-engine coalescing rule applied one frame at a time — and DESIGN §8.3 is amended by Task 11 to say so.
+- ROADMAP names tutorial chapter 12; TUTORIAL.md's table says 13. Closed by Task 10's note and Task 11's ROADMAP correction.
+- Nothing in DESIGN says where `map`/`flatMap` continuations run, and a naive answer (a second ready-queue entry kind) would reintroduce the GC-anchor problem on a hot path. Closed by A0-7/D48.
