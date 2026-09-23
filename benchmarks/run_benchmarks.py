@@ -152,8 +152,6 @@ PENDING = [
      "workload folds with arrives in Phase 3."),
     ("exception_latency", "protoPython / protoST", "Phase 4 (exceptions)",
      "`throw` and `try`/`catch`."),
-    ("actor benchmarks", "protoST / protoClojure", "Phase 5 (actors)",
-     "actors and futures."),
 ]
 
 

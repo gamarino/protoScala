@@ -123,8 +123,47 @@ a REPL session that quits immediately, verifies every run's output and checks
 the median against the < 25 ms target (DESIGN §1). The suite harness runs it
 on each protoScala build and includes the result in its report.
 
+## Actor benchmarks — `actor-bench.sh`, `actors/`
+
+The seven modes of DESIGN §8.5, each a protoScala script in
+[`actors/`](actors/) that sizes itself from `PROTOSCALA_BENCH_N`:
+
+| Mode | Script | Shape |
+|---|---|---|
+| `single` | `actor-throughput.scala` | 1 sender thread × 1 actor: the per-actor pipeline floor |
+| `fan-out` | `actor-fanout.scala` | 1 sender thread × 1000 actors: ready-queue stress |
+| `MPSC` | `actor-mpsc.scala` | 4 OS producer threads → 1 actor |
+| `MPMC` | `actor-mpmc.scala` | 4 OS producer threads × 4 actors, round-robin |
+| `ping-pong` | `actor-pingpong.scala` | ask/reply through the cooperative suspension |
+| `await` | `actor-await.scala` | 100 caller actors awaiting one shared actor; must complete at 1 worker |
+| `priority` | `actor-priority.scala` | a Low-band flood plus 1000 timed High-band asks |
+
+Each script prints three lines — `mode=… messages=… processed=…`, then
+`Actor.stats`, then `ok` or `FAILED` — and the runner **verifies all of them
+before computing any rate**: the process must exit 0, the last line must be
+`ok`, `processed` must equal the count the runner computed independently, and
+`Actor.stats` must report at least as many messages. A cell that fails any
+check is printed as `FAILED` and is never turned into a number. A silent
+failure must never read as infinite throughput (the lesson of protoClojure's
+2026-06-14 harness and protoPython's sprint 9).
+
+```bash
+benchmarks/actor-bench.sh --name actors                 # 7 modes x 6 worker counts
+benchmarks/actor-bench.sh --only single,MPSC --size 100000
+benchmarks/actor-bench.sh --no-compare                  # skip the protoClojure run
+```
+
+The report is written to `reports/<date>-<name>.md` with the machine, the core
+count, the commit, the build type, **the mailbox backend the measured binary
+was built with** (read from `protoscala --version`, never guessed), the load
+average at start and end, the High-band latency percentiles, and the four rows
+protoClojure's `benchmarks/actor-bench.sh` also measures, run on the same
+machine on the same day. `ping-pong`, `await` and `priority` have no
+protoClojure twin and say so.
+
+`tests/cli/actor-bench-smoke.sh` runs all seven at `PROTOSCALA_BENCH_N=2000`
+with the test suite, so a benchmark cannot rot unnoticed between full runs.
+
 ## Later
 
-Phase 3 adds the collection workloads above; Phase 5 adds `actor-bench.sh`,
-modelled on protoClojure's (single, fan-out, MPSC, MPMC, ping-pong, await,
-priority — DESIGN §8.5).
+Phase 3 adds the collection workloads above.

@@ -12,7 +12,7 @@ if [[ $rc -ne 0 ]]; then
     echo "FAIL: --version exited $rc"
     exit 1
 fi
-if ! grep -qE '^protoScala [0-9]+\.[0-9]+\.[0-9]+$' <<<"$out"; then
+if ! grep -qE '^protoScala [0-9]+\.[0-9]+\.[0-9]+ \(actor mailboxes: .+\)$' <<<"$out"; then
     echo "FAIL: unexpected --version output: $out"
     exit 1
 fi

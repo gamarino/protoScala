@@ -239,12 +239,17 @@ const proto::ProtoObject* awaitBlocking(proto::ProtoContext* ctx, const RuntimeL
     // The future's state is a ProtoObject attribute, which an unmanaged thread
     // may NOT read (the UnmanagedScope contract), so the predicate is the plain
     // epoch and the state is re-read after leaving the region on every wake.
-    while (state(ctx, L, f) == kPending) {  // managed: the read is legal here
+    for (;;) {
+        // The epoch is read BEFORE the state, so a completion that lands
+        // between the two bumps it and the predicate below returns at once.
+        // Reading it after the state (inside the lock) loses exactly that
+        // wake-up and costs the full 50 ms bound on every ask.
+        const unsigned long long seen = g_epoch.load(std::memory_order_acquire);
+        if (state(ctx, L, f) != kPending) break;  // managed: the read is legal here
         g_blocked.fetch_add(1, std::memory_order_seq_cst);
         {
             proto::ProtoContext::UnmanagedScope unmanaged(ctx);  // opened before the lock (P6)
             std::unique_lock<std::mutex> lk(g_waitMutex);
-            const unsigned long long seen = g_epoch.load(std::memory_order_acquire);
             // The 50 ms bound is a safety net, not a poll: it turns a lost
             // wake-up into a 50 ms delay instead of a hung process.
             g_waitCv.wait_for(lk, std::chrono::milliseconds(50),

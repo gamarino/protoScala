@@ -17,6 +17,55 @@ average, per-runtime medians, the JVM compile times and the cold-start result:
 
 The latest table is also in the top-level README ("Performance").
 
+Actor runs (`benchmarks/actor-bench.sh`) are dated reports in the same folder:
+
+| Date | Report | Notes |
+|---|---|---|
+| 2026-09-23 | [2026-09-23-actors.md](reports/2026-09-23-actors.md) | **The 0.3.0 release run.** 7 modes × 6 worker counts, all 42 cells verified; CAS-list mailbox; load 3.59 → 9.09 on a shared machine; protoClojure measured the same day |
+
+## Actors (Phase 5)
+
+`benchmarks/actor-bench.sh --name actors`, 2026-09-23, AMD Ryzen 5 5500U
+(6 physical / 12 logical cores), `RelWithDebInfo`, protoScala `4fd06c4`,
+protoCore `bf972d3f`, **actor mailboxes: CAS list** (protoCore 2.0.0 has no
+`ProtoMPSCQueue`; the `Mailbox` seam switches to it when Phase P2 merges).
+Load average 3.59 at start and 9.09 at end — **the machine was shared with
+other builds**, so the absolute rates are a lower bound and the shape across
+worker counts is noisier than a quiet-host run would be. Every one of the 42
+cells was verified (message count, `Actor.stats`, `ok`) before any rate was
+computed; none failed. Full report, with the protoClojure comparison and the
+High-band latency percentiles:
+[reports/2026-09-23-actors.md](reports/2026-09-23-actors.md).
+
+Peak verified rate per mode (messages per second):
+
+| Mode | 1 worker | peak | at | protoClojure peak | ratio at protoScala's peak |
+|---|---:|---:|---|---:|---:|
+| single | 126,950 | 126,950 | w=1 | 331,565 | 0.45× (w=1) |
+| fan-out | 97,516 | 97,516 | w=1 | 526,039 | 0.32× (w=1) |
+| MPSC | 166,983 | 166,983 | w=1 | 296,121 | 0.56× (w=1) |
+| MPMC | 181,541 | 250,212 | w=4 | 334,898 | 0.89× (w=4) |
+| ping-pong | 21,247 | 22,092 | w=2 | — | no protoClojure twin |
+| await | 20,969 | 44,736 | w=4 | — | no protoClojure twin |
+| priority | 115,890 | 115,890 | w=1 | — | no protoClojure twin |
+
+What the run says, unadjusted:
+
+- `await` completes at **every** worker count, including one — the proof that
+  `await` inside an actor suspends cooperatively instead of blocking a worker.
+- `MPMC` is the mode that scales, peaking at four workers and flattening above
+  the physical core count (protoST's measured ceiling).
+- `single` is flat by construction: the single-method invariant serialises one
+  actor.
+- **`fan-out` regresses as workers are added** (97k → 54k from 1 to 8 workers)
+  where protoClojure improves. The fallback mailbox rebuilds a `ProtoList`
+  under a compare-and-swap on every push and retries under contention, and the
+  end-of-turn backlog check reads all three bands; with 1000 actors those two
+  costs meet. This row is the first thing to re-measure once `ProtoMPSCQueue`
+  lands. Recorded, not tuned away.
+- High-band ask latency under a 200k-message Low-band flood: p50 30–42 µs
+  across all worker counts, p99 ≈ 2.6 ms (the tail of a loaded host).
+
 ## Cold start (Phase 1)
 
 `benchmarks/cold-start.sh build_release/protoscala 21`, x86_64 (AMD Ryzen 5 5500U with

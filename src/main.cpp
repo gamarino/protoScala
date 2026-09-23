@@ -7,6 +7,7 @@
  */
 #include "protoScala/Version.h"
 #include "repl/Repl.h"
+#include "runtime/Mailbox.h"
 #include "repl/Session.h"
 #include "runtime/StackGuard.h"
 
@@ -18,7 +19,12 @@
 
 namespace {
 
-void printVersion() { std::printf("protoScala %s\n", protoScala::versionString()); }
+// The mailbox backend is part of the version line so a benchmark report can
+// never misattribute its numbers to the wrong queue (DESIGN §8.5).
+void printVersion() {
+    std::printf("protoScala %s (actor mailboxes: %s)\n", protoScala::versionString(),
+                protoScala::Mailbox::implementationName());
+}
 
 void printHelp() {
     std::printf(
