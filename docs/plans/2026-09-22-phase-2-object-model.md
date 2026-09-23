@@ -8132,7 +8132,7 @@ git push origin main
 - **Implemented**: LANGUAGE §3 items delivered (classes with `val`/`var`/plain parameters, auxiliary constructors, `extends`/`with`, `override`/`abstract`/`final`/`sealed`/`open`, `private` as D5, objects, companions, case classes, case objects, traits with concrete and abstract members, trait parameters, `super.m` including stackable traits, `this`, `isInstanceOf`/`asInstanceOf`), tuples, `Option`, the Phase 2 `List` surface, `match` with every DESIGN §5.3 pattern, for-comprehensions, placeholder syntax, universal `apply`, `update`, setters, method values.
 - **Not yet implemented**: nested/local/anonymous classes, multiple constructor parameter lists, `super[T]`, `enum`, extension methods, named/default arguments for Scala methods, the Phase 3 collections, interpolation, exceptions, actors, UMD.
 - **Opcode table**: rows 64–78 from this plan's table; "78..95 reserved" becomes "79..95 reserved".
-- **Provisional deviations (Phase 2)** — pending maintainer decision, each naming its plan question:
+- **Provisional deviations (Phase 2)** — since approved by the maintainer on 2026-09-23 — each naming its plan question:
 
 | Id | Deviation | Plan question |
 |---|---|---|
@@ -8151,7 +8151,7 @@ Extend **D5** ("Access modifiers advisory except `private`: a private member is 
 
 - LANGUAGE §2: placeholder syntax, for-comprehensions and `match` delivered in Phase 2; §3: mark what Phase 2 delivered and move "nested/local/anonymous classes" to a later phase (per the maintainer's answer to Q6; until then "not supported"); §5: add D28–D34 rows and the D5/D10 extensions (identical text to STATUS).
 - ROADMAP: `## Phase 2 — Object model, apply, for, match ✅ (<date>)` with the plan link; under Phase 4 note that `super` in stackable traits already works (Open question Q5) and that `super[T].m` remains.
-- DECISIONS-LOG: one row — "Phase 2 plan Q1–Q14: the plan's provisional behaviours adopted as written; D28–D34 recorded as provisional | agent, pending review | plans/2026-09-22-phase-2-object-model.md" — plus a row per question the maintainer has already answered by the time this task runs (with "maintainer" as the author).
+- DECISIONS-LOG: one row — "Phase 2 plan Q1–Q14: the plan's provisional behaviours adopted as written; D28–D34 recorded as provisional | agent, pending review | plans/2026-09-22-phase-2-object-model.md" (since closed: approved by the maintainer on 2026-09-23) — plus a row per question the maintainer has already answered by the time this task runs (with "maintainer" as the author).
 
 - [ ] **Step 4: CHANGELOG.md and README.md**
 
@@ -8188,7 +8188,7 @@ Phase 2: object model, apply, for, match. Built against protoCore `<hash from Pr
   object graph); GC-pressure checks for object graphs.
 - Tutorial chapters 6, 7 and 9; chapters 2, 3, 5 and 14 extended.
 
-### Deviations (provisional, pending maintainer review)
+### Deviations (provisional; approved by the maintainer on 2026-09-23)
 
 - D28–D34 (STATUS.md); D5 and D10 extended.
 ```
@@ -8250,6 +8250,10 @@ Conformance directories added: `07-classes`, `08-case-classes`, `09-apply`, `10-
 ## Open questions for the maintainer
 
 Each question states the provisional behaviour this plan implements (execution is not blocked; every choice is reversible) and a recommendation. Provisional deviations are recorded in STATUS.md by Task 17.
+
+> **Answered by the maintainer on 2026-09-23.** Q1–Q14 are **approved as
+> implemented**, and with them the provisional deviations D28–D42
+> (`docs/STATUS.md`). No Phase 2 decision was reversed.
 
 - **Q1 — Construction of immutable instances (D28).** DESIGN §4.2 makes instances of classes without `var` fields immutable, so each field store during construction yields a new version of the object; a `this` that escapes before the last field (registered in a global, captured by a lambda in the class body, passed to a method that stores it) is an earlier, incomplete version. Options: (a) as described (provisional); (b) create every instance mutable and never freeze it (costs a mutables-tree entry per instance, P6 snapshot size); (c) make an instance mutable only when the compiler sees `this` escape from the constructor (a conservative syntactic analysis: `this` used other than as a receiver of field reads before the last field). *Recommendation:* (a) now; (c) if real programs hit D28.
 - **Q2 — Class-membership tests use marker attributes, not protoCore `isInstanceOf`.** DESIGN §5.3 names `isInstanceOf`; protoCore's implementation stops after 50 visited objects and keeps 64 pending siblings (`core/ProtoObject.cpp:437-525`), which gives false negatives with flattened chains of about ten ancestors. Options: (a) a per-class marker attribute keyed by the type key, found with the cached `getAttribute` walk (provisional; exact, allocation-free, bounded by R3); (b) a new additive protoCore API that walks the receiver's own flattened chain (e.g. `ProtoObject::hasInChain`) — P3-compliant, needs a protoCore release and embedder rebuilds; (c) `getParents` + scan (allocates per test). *Recommendation:* (a) now, (b) as a platform item; also decide whether protoCore's `isInstanceOf` limits are a defect to fix for the other embedders.

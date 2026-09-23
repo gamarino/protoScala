@@ -212,4 +212,7 @@ message)` ahead of Phase 3 (D44).
 
 D9–D25 are the provisional Phase 1 departures, D28–D42 the provisional
 Phase 2 departures and D43–D53 the provisional Phase 5 departures listed in
-[STATUS.md](STATUS.md#intentional-deviations), pending maintainer review.
+[STATUS.md](STATUS.md#intentional-deviations). The maintainer reviewed all of
+them on 2026-09-23: approved as recorded, except D45 and D47, which were
+overturned (the rows above carry the replacement behaviour) and which brought
+D53 with them.

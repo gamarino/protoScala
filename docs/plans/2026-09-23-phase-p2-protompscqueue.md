@@ -46,7 +46,7 @@ The GC integration is *only* `processReferences`. The collector is not modified 
 
 ## Task 0: Maintainer decisions
 
-Decided by the agent on 2026-09-23 under the maintainer's explicit authorisation, **pending review**. The executor records each decision verbatim in a new section `## 7. Decisions (P2)` at the end of `protoScala/docs/platform/PMQ-SPEC.md` (Task 11) and commits that file in the protoScala repository. If the maintainer overturns one, stop and re-plan the affected tasks.
+Decided by the agent on 2026-09-23 under the maintainer's explicit authorisation and **approved by the maintainer on 2026-09-23**. The executor records each decision verbatim in a new section `## 7. Decisions (P2)` at the end of `protoScala/docs/platform/PMQ-SPEC.md` (Task 11) and commits that file in the protoScala repository.
 
 ### D1 — The GC design (PMQ-SPEC §3, the central problem) — **DECIDED: (b′)**
 
@@ -2290,7 +2290,7 @@ Add above the `[2.0.0]` entry:
 
 - [ ] **Step 3: PMQ-SPEC status and decisions**
 
-In `protoScala/docs/platform/PMQ-SPEC.md`: change the status line to `implemented (protoCore 2.1.0, branch feature/pmq-p2)` and append `## 7. Decisions (P2)` with D1-D8 verbatim from Task 0, each marked *decided by the agent on 2026-09-23 under maintainer authorisation, pending review*, plus the "Recorded, not asked" list — in particular the §3.4 deviation (nothing is captured under the pause; the lazy read is made safe instead).
+In `protoScala/docs/platform/PMQ-SPEC.md`: change the status line to `implemented (protoCore 2.1.0, branch feature/pmq-p2)` and append `## 7. Decisions (P2)` with D1-D8 verbatim from Task 0, each marked *decided by the agent on 2026-09-23 under maintainer authorisation* — since **approved by the maintainer on 2026-09-23** — plus the "Recorded, not asked" list — in particular the §3.4 deviation (nothing is captured under the pause; the lazy read is made safe instead).
 
 - [ ] **Step 4: Rebuild, re-run, commit both repositories separately**
 

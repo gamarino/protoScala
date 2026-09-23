@@ -163,16 +163,18 @@ constraints, not the algorithm.
 ## 7. Decisions (P2)
 
 Recorded 2026-09-23. Every decision below was taken by the implementing
-agent under the maintainer's authorisation for the overnight run, and is
-**pending review**. A decision the maintainer overturns is re-planned, not
-patched. The full argument for each is in
+agent under the maintainer's authorisation for the overnight run, and was
+**approved by the maintainer on 2026-09-23**. The full argument for each is in
 `docs/plans/2026-09-23-phase-p2-protompscqueue.md`, Task 0.
 
 **Implementation status: D1-D10 are all implemented and merged**, in protoCore
-2.1.0 via merge `f60baf11` on `master`. Their **review status is unchanged —
-every one is still `pending review`**, and only the maintainer clears that.
-"Implemented and merged" here means the code matches the decision as recorded,
-not that the decision has been accepted.
+2.1.0 via merge `f60baf11` on `master`, and their review status is now
+**approved**.
+
+One question the P2 work raised is *not* settled by that approval and stays open
+for the maintainer: whether protoCore's `[Unreleased]` CHANGELOG section folds
+into the 2.1.0 entry or becomes 2.1.1
+(see `protoScala/docs/DECISIONS-LOG.md`, "Still open").
 
 Verified against the merge for the whole family: protoCore 438/438; and, all
 rebuilt from clean against 2.1.0, protoPython 582/583 (the one failure is the
@@ -184,16 +186,16 @@ mailbox seam selects `ProtoMPSCQueue` (§6 step 3).
 
 | Id | Decision | Taken by |
 |---|---|---|
-| D1 | GC design **(b′)**: an atomic `head` of immutable CAS-prepended nodes inside the queue cell, made safe without any stop-the-world capture by a **retain chain**. `takeAll` publishes a retain cell holding the chain onto `retained` *before* it detaches the chain from `head`; `processReferences` loads `head` *before* `retained`. Both orderings are load-bearing. | agent, pending review |
-| D2 | `retained` is released by the consumer, at its first `takeAll` in a new GC cycle (`ProtoSpace::getGCCycleCount()` differs from the queue's `retainedEpoch`), inside the publish window. `processReferences` stays **non-destructive**: the young-chain walk is a second caller of it in the same cycle, so a destructive read there would be a silent second consumer. | agent, pending review |
-| D3 | Critical-section scope in `takeAll`: **the publish window only** (read epoch → maybe release → load `head` → fill and publish the retain cell → detach). The O(n) reversal and `ProtoList` construction run outside it, so a large batch never delays a pause. | agent, pending review |
-| D4 | Own prototype `ProtoSpace::mpscQueuePrototype` (one new field; layout change covered by the mandatory clean rebuild of every embedder). | agent, pending review |
-| D5 | protoCore `2.0.0` → `2.1.0`; `SOVERSION` stays `2` (minor bump, ABI addition, §6.1). | agent, pending review |
-| D6 | `implAsObject` for the internal node and retain cells returns the raw, untagged cell address (tag 0), exactly as `ProtoMapIteratorImplementation` does. Binding invariant: neither cell is ever handed to `newChild`, `addParent`, `getAttribute` or any other path that can reach the attribute chain. | agent, pending review |
-| D7 | Stress-test size: 8 producers × 1,000,000 pushes under a bounded heap, scalable through `PMQ_STRESS_PUSHES` for a smaller local run. The default stays 1,000,000 so the spec's test is the one that runs in CI. | agent, pending review |
-| D8 | `takeAll` on an empty queue returns a fresh empty `ProtoList` and allocates no retain cell (fast path: one atomic load before any allocation). | agent, pending review |
-| D9 | One fresh retain cell per `takeAll`. The stack link must **not** be folded into the detached chain's own head node: that node may already be marked, the marker never revisits a marked cell, and the link would then be invisible — losing every older retained chain. | agent, pending review |
-| D10 | Concurrency and GC tests spawn their producers with `ProtoSpace::newThread` (registered protoCore threads that park at stop-the-world), not raw `std::thread`s with an unregistered `ProtoContext`. An unregistered thread is not counted in `runningThreads`, so it never parks and the pause completes while it runs — which would make the tests weaker, not stronger, and silently invalidates the critical-section argument. | agent, pending review |
+| D1 | GC design **(b′)**: an atomic `head` of immutable CAS-prepended nodes inside the queue cell, made safe without any stop-the-world capture by a **retain chain**. `takeAll` publishes a retain cell holding the chain onto `retained` *before* it detaches the chain from `head`; `processReferences` loads `head` *before* `retained`. Both orderings are load-bearing. | agent; approved by the maintainer on 2026-09-23 |
+| D2 | `retained` is released by the consumer, at its first `takeAll` in a new GC cycle (`ProtoSpace::getGCCycleCount()` differs from the queue's `retainedEpoch`), inside the publish window. `processReferences` stays **non-destructive**: the young-chain walk is a second caller of it in the same cycle, so a destructive read there would be a silent second consumer. | agent; approved by the maintainer on 2026-09-23 |
+| D3 | Critical-section scope in `takeAll`: **the publish window only** (read epoch → maybe release → load `head` → fill and publish the retain cell → detach). The O(n) reversal and `ProtoList` construction run outside it, so a large batch never delays a pause. | agent; approved by the maintainer on 2026-09-23 |
+| D4 | Own prototype `ProtoSpace::mpscQueuePrototype` (one new field; layout change covered by the mandatory clean rebuild of every embedder). | agent; approved by the maintainer on 2026-09-23 |
+| D5 | protoCore `2.0.0` → `2.1.0`; `SOVERSION` stays `2` (minor bump, ABI addition, §6.1). | agent; approved by the maintainer on 2026-09-23 |
+| D6 | `implAsObject` for the internal node and retain cells returns the raw, untagged cell address (tag 0), exactly as `ProtoMapIteratorImplementation` does. Binding invariant: neither cell is ever handed to `newChild`, `addParent`, `getAttribute` or any other path that can reach the attribute chain. | agent; approved by the maintainer on 2026-09-23 |
+| D7 | Stress-test size: 8 producers × 1,000,000 pushes under a bounded heap, scalable through `PMQ_STRESS_PUSHES` for a smaller local run. The default stays 1,000,000 so the spec's test is the one that runs in CI. | agent; approved by the maintainer on 2026-09-23 |
+| D8 | `takeAll` on an empty queue returns a fresh empty `ProtoList` and allocates no retain cell (fast path: one atomic load before any allocation). | agent; approved by the maintainer on 2026-09-23 |
+| D9 | One fresh retain cell per `takeAll`. The stack link must **not** be folded into the detached chain's own head node: that node may already be marked, the marker never revisits a marked cell, and the link would then be invisible — losing every older retained chain. | agent; approved by the maintainer on 2026-09-23 |
+| D10 | Concurrency and GC tests spawn their producers with `ProtoSpace::newThread` (registered protoCore threads that park at stop-the-world), not raw `std::thread`s with an unregistered `ProtoContext`. An unregistered thread is not counted in `runningThreads`, so it never parks and the pause completes while it runs — which would make the tests weaker, not stronger, and silently invalidates the critical-section argument. | agent; approved by the maintainer on 2026-09-23 |
 
 ### Recorded, not asked (facts the maintainer should see)
 

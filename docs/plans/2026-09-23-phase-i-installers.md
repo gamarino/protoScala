@@ -38,17 +38,17 @@
 
 ## Task 0: Decisions
 
-Taken by the maintainer's delegate on 2026-09-23 and recorded here **pending the maintainer's review**. Each one is argued below the table. If the maintainer overturns one, stop and re-plan the affected tasks rather than patching around it.
+Taken by the maintainer's delegate on 2026-09-23 and **approved by the maintainer on 2026-09-23**. Each one is argued below the table.
 
 | ID | Decision | Status |
 |---|---|---|
-| **D-I1** | protoCore emits a real CMake package config (`install(EXPORT)` + `configure_package_config_file` + `write_basic_package_version_file` with `SameMajorVersion` + an explicit `SOVERSION` assertion) and a pkg-config `.pc`. Every runtime prefers `find_package(protoCore 2.0 REQUIRED CONFIG)`; sibling-directory discovery is kept as an explicit developer fallback used only when no installed package is found. | [agent, pending review] |
-| **D-I2** | The unconditional `DEB;RPM` CPack generators in protoPython, protoST and protoClojure (and protoJS, see below) are guarded on `find_program(dpkg)` / `find_program(rpmbuild)`, following protoCore's own pattern at `protoCore/CMakeLists.txt:229-247`. | [agent, pending review] |
-| **D-I3** | protoScala gains CPack **now**, not in a later phase as `protoScala/CMakeLists.txt:177` says, because the maintainer's scope is all five runtimes. | [agent, pending review] |
-| **D-I4** | protoJS keeps its standalone `packaging/` pipeline; it is not migrated to CPack. Its hardcoded protoCore `>= 1.0.0` checks are raised to `>= 2.0.0` with a `< 3.0.0` ceiling and a `SOVERSION 2` file check. | [agent, pending review] |
-| **D-I5** | protoST's stdlib self-location gains the macOS (`_NSGetExecutablePath`) and Windows (`GetModuleFileNameA`) branches, ported from protoPython's `getExecutablePath()`. | [agent, pending review] |
-| **D-I6** | Linux packages are built, installed into a scratch prefix inside the workspace and smoke-tested there. macOS and Windows packaging is configured and reviewed but marked **UNVERIFIED** in the plan and in each repo's installation documentation. | [agent, pending review] |
-| **D-I7** | The root-owned protoCore `1.0.0` at `/usr/local/lib` is left untouched. D-I1's version check is what protects a build from picking it up, and Task 8 Step 8 proves it by configuring a runtime against `/usr/local` alone and showing a clear version error instead of a silent link. | [agent, pending review] |
+| **D-I1** | protoCore emits a real CMake package config (`install(EXPORT)` + `configure_package_config_file` + `write_basic_package_version_file` with `SameMajorVersion` + an explicit `SOVERSION` assertion) and a pkg-config `.pc`. Every runtime prefers `find_package(protoCore 2.0 REQUIRED CONFIG)`; sibling-directory discovery is kept as an explicit developer fallback used only when no installed package is found. | [agent, approved by the maintainer on 2026-09-23] |
+| **D-I2** | The unconditional `DEB;RPM` CPack generators in protoPython, protoST and protoClojure (and protoJS, see below) are guarded on `find_program(dpkg)` / `find_program(rpmbuild)`, following protoCore's own pattern at `protoCore/CMakeLists.txt:229-247`. | [agent, approved by the maintainer on 2026-09-23] |
+| **D-I3** | protoScala gains CPack **now**, not in a later phase as `protoScala/CMakeLists.txt:177` says, because the maintainer's scope is all five runtimes. | [agent, approved by the maintainer on 2026-09-23] |
+| **D-I4** | protoJS keeps its standalone `packaging/` pipeline; it is not migrated to CPack. Its hardcoded protoCore `>= 1.0.0` checks are raised to `>= 2.0.0` with a `< 3.0.0` ceiling and a `SOVERSION 2` file check. | [agent, approved by the maintainer on 2026-09-23] |
+| **D-I5** | protoST's stdlib self-location gains the macOS (`_NSGetExecutablePath`) and Windows (`GetModuleFileNameA`) branches, ported from protoPython's `getExecutablePath()`. | [agent, approved by the maintainer on 2026-09-23] |
+| **D-I6** | Linux packages are built, installed into a scratch prefix inside the workspace and smoke-tested there. macOS and Windows packaging is configured and reviewed but marked **UNVERIFIED** in the plan and in each repo's installation documentation. | [agent, approved by the maintainer on 2026-09-23] |
+| **D-I7** | The root-owned protoCore `1.0.0` at `/usr/local/lib` is left untouched. D-I1's version check is what protects a build from picking it up, and Task 8 Step 8 proves it by configuring a runtime against `/usr/local` alone and showing a clear version error instead of a silent link. | [agent, approved by the maintainer on 2026-09-23] |
 
 ### D-I1 — protoCore emits a CMake package config. **This is a prerequisite, not scope creep.**
 
@@ -209,7 +209,7 @@ Nothing in this plan writes to, deletes from or reconfigures `/usr/local`. The s
 |---|---|---|
 | `CMakeLists.txt` | Modify | protoCore discovery (`:19-47`); the PMQ probe's include source (`:132-139`); a whole new CPack block after `:193`. |
 | `docs/INSTALLATION.md` | **Create** | Build, install, package, platform verification status. |
-| `docs/DECISIONS-LOG.md` | Modify | Record D-I1..D-I7 as agent-taken decisions pending review. |
+| `docs/DECISIONS-LOG.md` | Modify | Record D-I1..D-I7 as agent-taken decisions (approved by the maintainer on 2026-09-23). |
 
 **protoJS** (`/home/gamarino/Documentos/proyectos/protoJS`):
 
@@ -1633,7 +1633,7 @@ Cover: prerequisites (C++20, CMake ≥ 3.20, `libreadline`, protoCore ≥ 2.0.0 
 
 - [ ] **Step 7: Record the decisions**
 
-Append to `protoScala/docs/DECISIONS-LOG.md` an entry for this phase listing D-I1 through D-I7 with their one-line statements and the marker `[agent, pending review]`, following the file's existing format for agent-taken entries.
+Append to `protoScala/docs/DECISIONS-LOG.md` an entry for this phase listing D-I1 through D-I7 with their one-line statements and the marker `[agent, pending review]` — since closed as `[agent, approved by the maintainer on 2026-09-23]` — following the file's existing format for agent-taken entries.
 
 - [ ] **Step 8: Commit**
 

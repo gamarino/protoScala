@@ -549,6 +549,10 @@ with `PROTOSCALA_ACTOR_WORKERS` = 1, 2, 4, 6, 8, 16.
 | `saturation-8` | `actor-saturation-8.scala` | 8 actors × N/8 **CPU-bound** messages (a 20,000-iteration summation each, ~1.5 ms) — the actors-versus-workers axis |
 | `saturation-32` | `actor-saturation-32.scala` | 32 actors × N/32 CPU-bound messages, identical total work — separates scheduler limits from actor-count limits |
 
+> **Open for the maintainer (2026-09-23).** Whether this `saturation-*`
+> addition stays is still undecided — see DECISIONS-LOG, "Still open". It is
+> the only part of §8.5 that does not follow the section's own uniform rule.
+
 The two `saturation-*` modes **deviate from the 1,000,000-trivial-message rule
 above, deliberately**: they fire a few thousand expensive messages instead. The
 seven modes above are each capped by their own structural concurrency (1 or 4

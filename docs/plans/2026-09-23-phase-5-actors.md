@@ -88,7 +88,9 @@ Expected: the DEV12 machine reports 12 logical / 6 physical cores. Task 10's tab
 
 ## Task 0: Maintainer decisions
 
-Each decision below is **decided by the agent, pending review** under the maintainer's standing authorisation, and is recorded in `docs/DECISIONS-LOG.md` by Task 11 with that marker. Where a decision creates a user-visible departure from Scala 3, Task 11 records it as a `D<n>` in `docs/STATUS.md` (Phase 5 uses **D43–D52**; D42 is the highest id in use today).
+Each decision below was **decided by the agent** under the maintainer's standing authorisation and recorded in `docs/DECISIONS-LOG.md` by Task 11 as pending review. Where a decision creates a user-visible departure from Scala 3, Task 11 records it as a `D<n>` in `docs/STATUS.md` (Phase 5 uses **D43–D52**; D42 was the highest id in use when this plan was written).
+
+> **Maintainer review, 2026-09-23 — all approved except:** **A0-4/D45** and **A0-6/D47** are **overturned** on the ground of least surprise for the Scala programmer (a handler may return a bare `newState`; `Future` takes its body by name, which brought by-name parameters and the new **D53**), and **A0-3/D44** is **superseded** — Phases 3 and 4 are to be completed, so D44's version implication is to be revisited when they land. **A0-5/D46** stands, and its precondition is now met: `ProtoMap` shipped in protoCore 2.0.0 and is merged and released. **A0-8** was already superseded by Phase I. ThreadSanitizer (Task 8 Step 4) and the cold-start budget stay recorded as known gaps, not as approvals.
 
 ### A0-1 — How cooperative `await` suspends the recursive VM
 
@@ -2726,7 +2728,7 @@ protoScala 0.3.0 (actor mailboxes: ProtoMPSCQueue)
 
 - [ ] **Step 4: `docs/DECISIONS-LOG.md`**
 
-One row per Task 0 decision (A0-1 … A0-11), each "agent, pending review", with the file that carries it; plus a row for the Phase 5 D-ids (D43–D52) and one for "Release 0.3.0 cut; the `v0.3.0` tag is left to the maintainer".
+One row per Task 0 decision (A0-1 … A0-11), each "agent, pending review" — since closed as "approved by the maintainer on 2026-09-23", with the exceptions noted in Task 0 — with the file that carries it; plus a row for the Phase 5 D-ids (D43–D52) and one for "Release 0.3.0 cut; the `v0.3.0` tag is left to the maintainer".
 
 - [ ] **Step 5: Full verification**
 
@@ -2760,7 +2762,7 @@ git push origin main
 
 ## Open questions for the maintainer
 
-Each one is implemented as stated (the "provisional behaviour"), recorded in `docs/DECISIONS-LOG.md` as "agent, pending review", and cheap to reverse.
+Each one is implemented as stated (the "provisional behaviour"), recorded in `docs/DECISIONS-LOG.md` as "agent, pending review", and cheap to reverse. **Answered by the maintainer on 2026-09-23** — see the review note in Task 0 for the two reversals (D45, D47) and the one supersession (D44).
 
 | # | Question | Provisional behaviour | Cost if reversed |
 |---|---|---|---|

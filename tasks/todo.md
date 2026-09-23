@@ -98,7 +98,18 @@ builder — an existing model — so it was recorded rather than taken.
 Also open on that branch: no "before" performance numbers on the base commit,
 and no embedder rebuilt against the added ABI field.
 
-### Decisions taken by agents, pending review
+### Decisions taken by agents — reviewed 2026-09-23
+
+**Closed.** The maintainer ruled on every pending-review marker on 2026-09-23:
+all approved except **D45** and **D47**, overturned on the ground of least
+surprise for the Scala programmer, and **D44**, superseded (Phases 3 and 4 are to
+be completed). **D46** stands with its precondition now met (`ProtoMap` shipped
+in protoCore 2.0.0). Two items stay open — protoCore's `[Unreleased]` CHANGELOG
+section, and the DESIGN §8.5 saturation modes — and two stay visible as known
+gaps: ThreadSanitizer was never run against the actors, and the cold-start budget
+is not claimed. See `docs/DECISIONS-LOG.md`.
+
+The original note follows.
 
 Recorded as "[agent, pending review]" in `docs/DECISIONS-LOG.md` (D43-D52 and
 A0-1..A0-11 for Phase 5), in `docs/platform/PMQ-SPEC.md` §7 (D1-D10 for P2),
@@ -128,3 +139,41 @@ pseudocode is not a specification of correctness.
 - `fan-out` gets *worse* with more workers, where protoClojure improves.
   protoScala's mailboxes are still the CAS-list fallback rather than
   `ProtoMPSCQueue` — a plausible but **unconfirmed** explanation.
+
+---
+
+## 2026-09-23 — D47 and D45 rulings, and the decision-record close-out
+
+- [x] **D47 overturned.** By-name parameters implemented as a general language
+      feature: the parser records `=> T`, a call site that resolves to the
+      declaration compiles the argument into a thunk, and the callee forces it on
+      every read (new opcode `FORCE_THUNK`). `Future(expr)` and `Future { … }`
+      follow from the runtime declaring its own by-name signature; the compiler
+      has no built-in knowledge of `Future`. Behaviour checked against
+      scalac 3.9.0.
+- [x] **D53 added.** A by-name parameter is honoured only at a call site the
+      compiler can resolve; elsewhere the argument is evaluated once. Two
+      fixtures pin the divergence rather than hiding it.
+- [x] **D45 overturned.** A handler may return a bare `newState`; the ask's
+      future then completes with `()`. A `Tuple2` is still the pair form.
+- [x] Docs, tutorial (chapters 2, 3, 5, 13), README, CHANGELOG, DESIGN §8.1 and
+      the roadmap updated; the README's flavour snippet is now code that runs and
+      is pinned by a fixture.
+- [x] Every `pending review` marker closed across DECISIONS-LOG, STATUS,
+      PMQ-SPEC, PROTOMAP-SPEC and the four existing plan files, with the four
+      exceptions and the two known gaps recorded accurately.
+- [x] Suite 710/710 (baseline 694; 16 new fixtures, one removed).
+
+### Review
+
+The honest finding of the D47 work is that a *general* by-name parameter cannot
+exist in a dynamic dialect: the argument has to be thunked at the call site, and
+that needs the callee's signature, which a dynamic send does not carry. What is
+implementable is the resolvable subset — and it turns out to cover every shape
+real code uses: a `def`, a method called from inside its own class, a method on
+an `object`, a constructor, and the runtime's own signatures. The rest is D53,
+made visible by two fixtures and a tolerant `FORCE_THUNK` that keeps an eagerly
+passed argument working instead of crashing.
+
+Still owed, unchanged by this task: the ThreadSanitizer run against the actors,
+and a cold-start measurement on a quiet host.

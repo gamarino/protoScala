@@ -240,7 +240,7 @@ their reserved ranges.
 | D7 | `Map`/`Set` iteration order unspecified | (perm) |
 | D8 | No Java interop | (perm) |
 
-### Provisional deviations (Phase 1) — pending maintainer decision
+### Phase 1 deviations — approved by the maintainer on 2026-09-23
 
 Each entry names the plan question it answers
 ([plans/2026-09-22-phase-1-core-language.md](plans/2026-09-22-phase-1-core-language.md),
@@ -275,7 +275,7 @@ detail, not silently decided — recorded here for maintainer review):
 | D26 | Value discarding (`Unit` expected type) applies only where `Unit` is written on the definition (`def f(): Unit`, `return` in it, `val v: Unit`, `(e: Unit)`, `if` without `else`); an expected type `Unit` that comes from a function type (`val f: Int => Unit = x => x + 1`, a lambda passed to an `A => Unit` parameter) does not discard, so the lambda returns its last value (D4: no type checking) | `Desugar.cpp::discardValue` |
 | D27 | Typed `@main` parameters (`@main def m(n: Int, s: String)`, parsed from the command line in Scala 3 through `FromString`) are rejected; an `@main` method takes no parameters or one `String*` parameter | `Compiler.cpp::compileUnit` |
 
-### Provisional deviations (Phase 2) — pending maintainer decision
+### Phase 2 deviations — approved by the maintainer on 2026-09-23
 
 Each entry names the plan question it answers
 ([plans/2026-09-22-phase-2-object-model.md](plans/2026-09-22-phase-2-object-model.md),
@@ -300,11 +300,18 @@ while implementing the phase and has no numbered question.
 | D41 | Scala 3's universal apply (a creator application: `C(args)` standing for `new C(args)`) is **not** synthesised for a plain class. `class C(val a: Int); C(1)` fails with `Not found: C`, where scalac 3.9 compiles it and prints `1`. Write `new C(1)`, or give `C` a companion with an `apply`. Case classes and case objects are unaffected: their companion `apply` is synthesised, so `C(args)` works | — |
 | D42 | A `MatchError` names the Scala class of the unmatched value: `MatchError: 5 (of class Int)`, where the JVM names the boxed class (`scala.MatchError: 5 (of class java.lang.Integer)`). Consistent with D14 (unqualified class names) and D29 (one integer type) | — |
 
-### Provisional deviations (Phase 5) — pending maintainer decision
+### Phase 5 deviations — approved by the maintainer on 2026-09-23
 
-Decided by the implementing agent under the maintainer's standing
-authorisation and recorded in [DECISIONS-LOG.md](DECISIONS-LOG.md) as
-"agent, pending review".
+Decided by the implementing agent under the maintainer's standing authorisation
+and reviewed by the maintainer on 2026-09-23
+([DECISIONS-LOG.md](DECISIONS-LOG.md)). All are approved as recorded except
+**D45** and **D47**, which the maintainer **overturned** on the ground of least
+surprise for the Scala programmer; the rows below carry the replacement
+behaviour. **D53** was added by the D47 ruling. **D44** is superseded: Phases 3
+and 4 are to be completed, and D44's version implication is to be revisited when
+they land. **D46** stands, and its stated precondition is now met — `ProtoMap`
+shipped in protoCore 2.0.0 and is merged and released, so unanchoring is ready to
+revisit; the behaviour is unchanged.
 
 | Id | Deviation | Track |
 |---|---|---|

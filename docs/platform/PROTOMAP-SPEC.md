@@ -212,18 +212,19 @@ runtimes need exactly the same mechanism.
 
 Recorded 2026-09-22. D1 and D2 were taken by the maintainer (accepted
 recommendations). The rest were taken by the implementing agent under the
-maintainer's authorisation for the overnight run, and are **pending review**.
+maintainer's authorisation for the overnight run, and were **approved by the
+maintainer on 2026-09-23**.
 
 | Id | Decision | Taken by |
 |---|---|---|
 | D1 | Iterator option (a): `processElements`/`processValues` plus an unboxed C++ iterator handle; no second tag | maintainer |
 | D2 | The hashed-collection helper lives in protoCore (Task 9 runs) | maintainer |
-| D2a | Bucket encoding (ε): the slot value is one flat list `[k0, v0, k1, v1, …]`; `[k, v]` without collisions | agent, pending review |
-| D2b | Hashed slot key: the 54 hash bits written directly into an embedded `SmallInteger` word (never a cell) | agent, pending review |
-| D2c | Put with an existing equal key keeps the stored key and replaces the value (Scala `HashMap.updated` behaviour) | agent, pending review |
-| D3 | `nullptr` key is ignored silently: `has` → false, `getAt` → nullptr, `setAt`/`removeAt` return the receiver | agent, pending review |
-| D4 | `isEqual`: same size, same key words, values compared by word identity | agent, pending review |
-| D5 | Own prototype `ProtoSpace::mapPrototype` (layout change covered by the mandatory rebuild) | agent, pending review |
-| D6 | Small vs AVL distinguished by `CellType` under the single tag 27 | agent, pending review |
-| D7 | Keep `SOVERSION 1`; version 1.2.0 → 1.3.0 | agent, pending review |
+| D2a | Bucket encoding (ε): the slot value is one flat list `[k0, v0, k1, v1, …]`; `[k, v]` without collisions | agent; approved by the maintainer on 2026-09-23 |
+| D2b | Hashed slot key: the 54 hash bits written directly into an embedded `SmallInteger` word (never a cell) | agent; approved by the maintainer on 2026-09-23 |
+| D2c | Put with an existing equal key keeps the stored key and replaces the value (Scala `HashMap.updated` behaviour) | agent; approved by the maintainer on 2026-09-23 |
+| D3 | `nullptr` key is ignored silently: `has` → false, `getAt` → nullptr, `setAt`/`removeAt` return the receiver | agent; approved by the maintainer on 2026-09-23 |
+| D4 | `isEqual`: same size, same key words, values compared by word identity | agent; approved by the maintainer on 2026-09-23 |
+| D5 | Own prototype `ProtoSpace::mapPrototype` (layout change covered by the mandatory rebuild) | agent; approved by the maintainer on 2026-09-23 |
+| D6 | Small vs AVL distinguished by `CellType` under the single tag 27 | agent; approved by the maintainer on 2026-09-23 |
+| D7 | Keep `SOVERSION 1`; version 1.2.0 → 1.3.0 | agent; approved by the maintainer on 2026-09-23 |
 | — | Overnight run: work in the worktree `../protoCore-pslo` on branch `feature/pslo-p1`, build in its own build directory, not merged; Task 12 (embedder rebuild) deferred until the maintainer reviews the branch | maintainer (scope) |

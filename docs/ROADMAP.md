@@ -19,7 +19,7 @@ version; a unit test creates a `ProtoSpace` and exercises SmallInteger
 promotion, proving protoCore links and runs; the conformance runner registers fixtures,
 including one `XFAIL` that pins the first Phase 1 program.
 
-## Phase P1 — `ProtoMap` in protoCore *(platform)* — implemented on protoCore branch `feature/pslo-p1`, pending maintainer merge
+## Phase P1 — `ProtoMap` in protoCore *(platform)* ✅ — merged and released in protoCore 2.0.0
 
 **Goal:** a persistent map whose keys are GC-traced objects
 ([platform/PROTOMAP-SPEC.md](platform/PROTOMAP-SPEC.md)).
