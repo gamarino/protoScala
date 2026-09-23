@@ -41,6 +41,22 @@ Every comparable file is also a CTest case (`benchmarks/<file>`): it runs once
 through the conformance runner and must print its `EXPECT` value, so a broken
 benchmark fails `ctest`.
 
+`object_tree` keeps a 131071-object graph alive at once, so it is the one
+fixture in the tree that does not fit a small heap: under
+`PROTOCORE_HEAP_LIMIT_CELLS=20000` it reports `live set 252253 cells … out of
+memory` (about two cells per object — an honest out-of-memory, not a rooting
+defect), and it needs a ceiling of about 600000 cells to run, because protoCore
+defers collection until the limit is approached. The low-heap rooting sweep
+must therefore skip it:
+
+```bash
+PROTOCORE_HEAP_LIMIT_CELLS=20000 ctest --test-dir build_release \
+    -E "benchmarks/object_tree.scala" --output-on-failure
+```
+
+The GC-pressure stress test for object graphs is `tests/cli/gc-pressure.sh`,
+which runs its own case at a fixed, deliberately low ceiling.
+
 **Pending** (need later phases; not approximated): `list_append` and
 protoClojure's `sum-squares` (Phase 3 collections — Phase 1 has no
 list-building operation and no `map`/reduction), `exception_latency`
