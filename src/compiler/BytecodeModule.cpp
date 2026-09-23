@@ -34,6 +34,7 @@ const char* opName(Op op) {
         case Op::RETURN:        return "RETURN";
         case Op::MAKE_LAZY:     return "MAKE_LAZY";
         case Op::FORCE:         return "FORCE";
+        case Op::FORCE_THUNK:   return "FORCE_THUNK";
         case Op::JUMP:          return "JUMP";
         case Op::JUMP_IF_FALSE: return "JUMP_IF_FALSE";
         case Op::JUMP_IF_TRUE:  return "JUMP_IF_TRUE";

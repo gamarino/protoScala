@@ -185,7 +185,16 @@ TEST(Compiler, SemanticErrors) {
     EXPECT_TRUE(has(compileError("val s = s\"x\""), "string interpolation is not implemented yet"));
     EXPECT_TRUE(has(compileError("def f(x: Int) = x\nval y = f(x = 1)"), "named arguments"));
     EXPECT_TRUE(has(compileError("def f(x: Int = 1) = x"), "default parameter values"));
-    EXPECT_TRUE(has(compileError("def f(x: => Int) = x"), "by-name parameters"));
+    // A by-name parameter is thunked at a call site that names its declaration
+    // and forced on every read in the body (D47).
+    EXPECT_TRUE(has(listing("def f(x: => Int) = x\nval y = f(1)"), "function <by-name>"));
+    EXPECT_TRUE(has(listing("def f(x: => Int) = x\nval y = f(1)"), "FORCE_THUNK"));
+    // A call the compiler cannot resolve evaluates its argument (D53).
+    EXPECT_FALSE(has(listing("class C:\n  def f(x: => Int) = x\nval y = new C().f(1)"),
+                     "function <by-name>"));
+    EXPECT_TRUE(has(compileError("val g = (x: => Int) => x"), "not supported on a function literal"));
+    EXPECT_TRUE(has(compileError("case class W(v: => Int)"), "may not be by-name"));
+    EXPECT_TRUE(has(compileError("def f(xs: => Int*) = 1"), "repeated parameter cannot be by-name"));
 }
 
 // --- Additional coverage (Task 7 implementation) ----------------------------

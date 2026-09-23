@@ -142,6 +142,10 @@ struct Lambda : Node {
     // curried def (`def f(a)(b) = e` becomes `def f(a) = (b) => e`): the body
     // is the def's own body, so a `return` in it returns from the lambda.
     bool ownsReturn = false;
+    // Set by Desugar on every lambda lifted out of a curried def, so the
+    // compiler can say that a by-name parameter in a later parameter list is
+    // not supported yet, rather than calling it a function literal (D47).
+    bool fromCurriedDef = false;
 };
 struct Typed : Node {
     Typed(SourcePos p, NodePtr e, TypePtr t)

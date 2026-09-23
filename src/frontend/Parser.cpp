@@ -367,6 +367,7 @@ std::vector<Param> Parser::parseLambdaParams() {
         if (at(TokenKind::Colon)) {
             advance();
             p.type = parseType();
+            p.byName = p.type->kind == TypeTree::Kind::ByName;  // refused by the compiler (D47)
         }
         params.push_back(std::move(p));
     };

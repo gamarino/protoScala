@@ -701,6 +701,19 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                     sp[-1] = force(&frame, sp[-1]);
                     pendingBase = kNoPendingCall;
                     continue;
+                case Op::FORCE_THUNK: {
+                    // A read of a by-name parameter (D47). The thunk the call
+                    // site built is a zero-argument protoScala function; any
+                    // other value is the argument itself, already evaluated at
+                    // a call site the compiler could not resolve (D53), and
+                    // passes through untouched.
+                    const BytecodeModule* thunk = compiledModuleOf(&frame, L, sp[-1]);
+                    if (!thunk || thunk->isMethod() || thunk->arity() != 0) continue;
+                    pendingBase = static_cast<unsigned>(sp - 1 - slots);
+                    sp[-1] = invoke(&frame, sp[-1], nullptr, 0);
+                    pendingBase = kNoPendingCall;
+                    continue;
+                }
                 case Op::JUMP: ip += operand; continue;
                 case Op::JUMP_IF_FALSE: {
                     const proto::ProtoObject* v = *--sp;

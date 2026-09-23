@@ -24,6 +24,8 @@ public:
     EvalHarness() : runtime_(space_), engine_(runtime_.layout()) {
         installPrimitives(runtime_.rootContext(), runtime_.layout());
         for (const auto& n : builtinGlobalNames()) globals_.declare(n, BindingKind::Builtin);
+        for (const BuiltinByNameSignature& sig : builtinByNameSignatures())
+            globals_.setByNameMasks(sig.global, sig.applyMasks);
         for (ClassInfo& t : builtinTypes()) globals_.defineBuiltinType(std::move(t));
         proto::ProtoContext ctx(&space_, runtime_.rootContext());
         loadPrelude(&ctx, engine_, globals_, modules_);

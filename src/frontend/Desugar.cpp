@@ -352,6 +352,7 @@ private:
         while (d.paramLists.size() > 1) {
             auto lambda = std::make_unique<Lambda>(d.pos);
             lambda->ownsReturn = innermost;
+            lambda->fromCurriedDef = true;
             innermost = false;
             lambda->params = std::move(d.paramLists.back());
             d.paramLists.pop_back();

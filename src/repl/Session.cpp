@@ -39,6 +39,10 @@ void reportAt(const std::string& name, SourcePos pos, const std::string& msg) {
 Session::Session() : runtime_(space_), engine_(runtime_.layout()) {
     installPrimitives(runtime_.rootContext(), runtime_.layout());
     for (const auto& n : builtinGlobalNames()) globals_.declare(n, BindingKind::Builtin);
+    // The runtime's own by-name signatures (D47), declared next to the natives
+    // that need them: nothing here names a particular global.
+    for (const BuiltinByNameSignature& sig : builtinByNameSignatures())
+        globals_.setByNameMasks(sig.global, sig.applyMasks);
     for (ClassInfo& t : builtinTypes()) globals_.defineBuiltinType(std::move(t));
     proto::ProtoContext ctx(&space_, runtime_.rootContext());
     loadPrelude(&ctx, engine_, globals_, modules_);

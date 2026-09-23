@@ -54,6 +54,17 @@ const Node& rhsOf(const ValDef& v) {
     return *v.rhs;
 }
 
+// A function literal has no name at its call sites and Scala's function types
+// carry no by-name parameters either, so `(x: => T) => e` is refused.
+void refuseByNameParams(const std::vector<Param>& params, const char* what) {
+    for (const Param& p : params)
+        if (p.byName)
+            throw CompileError(std::string("a by-name parameter is not supported on ") + what +
+                                   ": there is no name at the call site to resolve it against "
+                                   "— take a function instead",
+                               p.pos);
+}
+
 // ---------------------------------------------------------------------------
 // CaptureAnalysis: decides which declarations of one function body live in a
 // Cell. Scopes map names to their declaration and the function depth (0 =
@@ -78,7 +89,8 @@ const Node& rhsOf(const ValDef& v) {
 // ---------------------------------------------------------------------------
 class CaptureAnalysis {
 public:
-    explicit CaptureAnalysis(std::unordered_set<const Node*>& boxed) : boxed_(boxed) {}
+    CaptureAnalysis(std::unordered_set<const Node*>& boxed, const GlobalTable& globals)
+        : boxed_(boxed), globals_(globals) {}
 
     void function(const std::vector<Param>& params, const Node& body, int depth, bool hoisted) {
         checkNativeStack(StackUse::Source);
@@ -106,6 +118,7 @@ private:
     };
 
     std::unordered_set<const Node*>& boxed_;
+    const GlobalTable& globals_;
     std::vector<Scope> scopes_;
     std::vector<bool> isHoistedLevel_;
 
@@ -159,6 +172,33 @@ private:
         if (box) boxed_.insert(d->decl);
     }
 
+    // The by-name arguments of a call whose callee expression is `fnNode`.
+    // This pass runs before any name is resolved, so it deliberately
+    // over-approximates: it asks the selector index for every mask ever
+    // declared under that name (GlobalTable::anyByNameMaskOf), plus the
+    // parameter lists of a `def` it can see in scope. An extra Cell costs a
+    // word; a missing one would lose a write.
+    std::uint32_t byNameMask(const Node& fnNode) const {
+        const Node* fn = &fnNode;
+        std::size_t list = 0;
+        while (fn->kind == NodeKind::TypeApply || fn->kind == NodeKind::Apply) {
+            if (fn->kind == NodeKind::Apply) { ++list; fn = as<Apply>(*fn).fn.get(); }
+            else fn = as<TypeApply>(*fn).fn.get();
+        }
+        const std::string* selector = nullptr;
+        if (fn->kind == NodeKind::Ident) selector = &as<Ident>(*fn).name;
+        else if (fn->kind == NodeKind::Select) selector = &as<Select>(*fn).name;
+        if (!selector) return 0;
+        // A `def` in scope: its own lists, which are exact.
+        const Scope* where = nullptr;
+        if (const Decl* d = lookup(*selector, &where))
+            if (d->kind == DeclKind::Def && d->decl) {
+                const std::vector<std::uint32_t> masks = byNameMasksOfDef(as<DefDef>(*d->decl));
+                return list < masks.size() ? masks[list] : 0;
+            }
+        return globals_.anyByNameMaskOf(*selector);
+    }
+
     void walk(const Node* n, int depth) {
         if (n) walk(*n, depth);
     }
@@ -175,7 +215,16 @@ private:
             case NodeKind::Apply: {
                 const auto& a = as<Apply>(n);
                 walk(a.fn.get(), depth);
-                for (const auto& arg : a.args) walk(arg.get(), depth);
+                // A by-name argument becomes a thunk at the call site (D47), so
+                // it is a nested function here too: what it reads from an
+                // enclosing scope has to be boxed exactly as a lambda's reads.
+                const std::uint32_t mask = a.fn ? byNameMask(*a.fn) : 0;
+                for (std::size_t k = 0; k < a.args.size(); ++k) {
+                    if (k < kMaxByNameParams && (mask >> k) & 1u)
+                        function({}, *a.args[k], depth + 1, /*hoisted=*/false);
+                    else
+                        walk(a.args[k].get(), depth);
+                }
                 return;
             }
             case NodeKind::TypeApply: walk(as<TypeApply>(n).fn.get(), depth); return;
@@ -221,9 +270,20 @@ private:
             case NodeKind::NamedArg: walk(as<NamedArg>(n).value.get(), depth); return;
             case NodeKind::ValDef: definitionBody(n, depth); return;
             case NodeKind::DefDef: definitionBody(n, depth); return;
-            case NodeKind::New:
-                for (const auto& a : as<New>(n).args) walk(a.get(), depth);
+            case NodeKind::New: {
+                const auto& nw = as<New>(n);
+                const std::uint32_t mask =
+                    nw.type && nw.type->kind == TypeTree::Kind::Name
+                        ? globals_.anyByNameMaskOf(nw.type->name)
+                        : 0;
+                for (std::size_t k = 0; k < nw.args.size(); ++k) {
+                    if (k < kMaxByNameParams && (mask >> k) & 1u)
+                        function({}, *nw.args[k], depth + 1, /*hoisted=*/false);
+                    else
+                        walk(nw.args[k].get(), depth);
+                }
                 return;
+            }
             case NodeKind::Match: {
                 const auto& m = as<Match>(n);
                 walk(m.scrutinee.get(), depth);
@@ -297,6 +357,36 @@ private:
 
 } // namespace
 
+std::uint32_t byNameMaskOfParams(const std::vector<Param>& params) {
+    std::uint32_t mask = 0;
+    for (std::size_t k = 0; k < params.size(); ++k) {
+        if (!params[k].byName) continue;
+        if (k >= kMaxByNameParams)
+            throw CompileError("a by-name parameter must be one of the first 32 parameters",
+                               params[k].pos);
+        if (params[k].repeated)
+            throw CompileError("a repeated parameter cannot be by-name", params[k].pos);
+        mask |= 1u << k;
+    }
+    return mask;
+}
+
+// The by-name masks of a def, one per parameter list. Desugar rewrote the extra
+// lists of a curried def into nested lambdas (`def f(a)(b) = e` is
+// `def f(a) = (b) => e`), so the chain is read back off the body.
+std::vector<std::uint32_t> byNameMasksOfDef(const DefDef& d) {
+    std::vector<std::uint32_t> masks{byNameMaskOfParams(paramsOf(d))};
+    const Node* body = d.body.get();
+    while (body && body->kind == NodeKind::Lambda && as<Lambda>(*body).fromCurriedDef) {
+        const auto& l = as<Lambda>(*body);
+        masks.push_back(byNameMaskOfParams(l.params));
+        body = l.body.get();
+    }
+    while (masks.size() > 1 && masks.back() == 0) masks.pop_back();
+    if (masks.size() == 1 && masks[0] == 0) masks.clear();
+    return masks;
+}
+
 // ---------------------------------------------------------------------------
 // Emission with stack-depth accounting
 // ---------------------------------------------------------------------------
@@ -322,8 +412,9 @@ std::size_t Compiler::emitJump(Op op, SourcePos pos, int stackEffect) {
 // Scopes and name resolution
 // ---------------------------------------------------------------------------
 
-Compiler::LocalInfo Compiler::declareLocal(const std::string& name, BindingKind kind, bool boxed) {
-    LocalInfo info{newSlot(), kind, boxed, false};
+Compiler::LocalInfo Compiler::declareLocal(const std::string& name, BindingKind kind, bool boxed,
+                                           std::vector<std::uint32_t> byNameMasks) {
+    LocalInfo info{newSlot(), kind, boxed, false, std::move(byNameMasks)};
     fn_->scopes.back()[name] = info;
     return info;
 }
@@ -345,7 +436,7 @@ Compiler::LocalInfo Compiler::captureInto(FunctionState* f, const std::string& n
     if (!f->parent) { *found = false; return {}; }
     LocalInfo outer = captureInto(f->parent, name, pos, found);
     if (!*found) return {};
-    LocalInfo mine{f->nextSlot++, outer.kind, outer.boxed, /*captured=*/true};
+    LocalInfo mine{f->nextSlot++, outer.kind, outer.boxed, /*captured=*/true, outer.byNameMasks};
     f->mod->addCapture(outer.slot, mine.slot);
     f->scopes.front()[name] = mine;
     return mine;
@@ -357,11 +448,15 @@ Compiler::LocalInfo Compiler::captureInto(FunctionState* f, const std::string& n
 Compiler::Resolution Compiler::resolve(const std::string& name, SourcePos pos) {
     bool found = false;
     LocalInfo info = captureInto(fn_, name, pos, &found);
-    if (found) return Resolution{RefKind::Local, info, info.kind, {}, nullptr};
+    if (found) {
+        const BindingKind kind = info.kind;
+        std::vector<std::uint32_t> masks = info.byNameMasks;
+        return Resolution{RefKind::Local, std::move(info), kind, {}, nullptr, std::move(masks)};
+    }
     if (const MemberInfo* m = memberOf(name))
-        return Resolution{RefKind::Member, {}, BindingKind::Val, m->key, m};
+        return Resolution{RefKind::Member, {}, BindingKind::Val, m->key, m, m->byNameMasks};
     if (const GlobalBinding* g = globals_.binding(name))
-        return Resolution{RefKind::Global, {}, g->kind, g->key, nullptr};
+        return Resolution{RefKind::Global, {}, g->kind, g->key, nullptr, g->byNameMasks};
     if (name == "this")
         throw CompileError("this can be used only inside a class, trait or object", pos);
     if (name == "super") throw CompileError("'super' must be followed by a member selection", pos);
@@ -383,7 +478,7 @@ void Compiler::storeLocal(const LocalInfo& info, SourcePos pos) {
 }
 
 void Compiler::analyseCaptures(const std::vector<Param>& params, const Node& body) {
-    CaptureAnalysis(boxed_).function(params, body, 0, /*hoisted=*/false);
+    CaptureAnalysis(boxed_, globals_).function(params, body, 0, /*hoisted=*/false);
 }
 
 // ---------------------------------------------------------------------------
@@ -444,9 +539,12 @@ void Compiler::compileExpr(const Node& n) {
         case NodeKind::Lambda: {
             const auto& l = as<Lambda>(n);
             if (!l.body) throw CompileError("a function literal needs a body", n.pos);
-            // A curried def's lambda owns its body's `return`s (Desugar).
+            // A curried def's lambda owns its body's `return`s (Desugar), and
+            // carries a real parameter list, so it may declare by-name
+            // parameters (D47).
             compileFunction("<lambda>", l.params, *l.body,
-                            l.ownsReturn ? FnShape::Def : FnShape::Lambda, n.pos);
+                            l.ownsReturn ? FnShape::Def : FnShape::Lambda, n.pos,
+                            /*paramless=*/false, /*allowByName=*/l.fromCurriedDef);
             return;
         }
         case NodeKind::ValDef:
@@ -472,19 +570,103 @@ void Compiler::compileIdent(const Ident& id) {
     if (r.ref == RefKind::Member) {  // this.name (virtual: an override in a subclass wins)
         loadThis(id.pos);
         emit(Op::SEND, fn_->mod->addSendSite(r.key, 0), id.pos, 0);
+        // A by-name constructor parameter is a field holding the thunk (D47).
+        if (r.member && r.member->byNameValue) emit(Op::FORCE_THUNK, 0, id.pos, 0);
         return;
     }
     if (r.ref == RefKind::Local) loadLocal(r.local, id.pos);
     else emit(Op::PUSH_GLOBAL, fn_->mod->addSymbol(r.key), id.pos, +1);
-    if (r.kind == BindingKind::ParamlessDef) emit(Op::CALL, 0, id.pos, 0);
+    // A by-name parameter holds the thunk the call site built: every read runs
+    // it, as Scala re-evaluates a by-name argument at every use (D47).
+    if (r.kind == BindingKind::ByNameParam) emit(Op::FORCE_THUNK, 0, id.pos, 0);
+    else if (r.kind == BindingKind::ParamlessDef) emit(Op::CALL, 0, id.pos, 0);
     else if (r.kind == BindingKind::LazyVal || r.kind == BindingKind::Object)
         emit(Op::FORCE, 0, id.pos, 0);
+}
+
+// The by-name masks of the member `name` of the template being compiled.
+const std::vector<std::uint32_t>* Compiler::byNameMasksOfMember(const std::string& name) const {
+    const MemberInfo* m = memberOf(name);
+    return m && !m->byNameMasks.empty() ? &m->byNameMasks : nullptr;
+}
+
+// The by-name masks of `member` declared by `object objectName` (or by the
+// companion object of that name). The class of `object O` is the type `O.type`.
+const std::vector<std::uint32_t>* Compiler::byNameMasksOfObjectMember(
+    const std::string& objectName, const std::string& member) const {
+    const ClassInfo* cls = globals_.findType(objectName + ".type");
+    if (!cls) return nullptr;
+    auto it = cls->members.find(member);
+    if (it == cls->members.end() || it->second.byNameMasks.empty()) return nullptr;
+    return &it->second.byNameMasks;
+}
+
+// The masks of the declaration the callee *head* names — the expression left
+// after every application layer has been peeled off (D47). A head the compiler
+// cannot resolve to a declaration has none, and its arguments are evaluated
+// (D53).
+const std::vector<std::uint32_t>* Compiler::byNameMasksOfCalleeHead(const Node& head) {
+    const Node* fn = &head;
+    while (fn->kind == NodeKind::TypeApply) fn = as<TypeApply>(*fn).fn.get();
+    if (fn->kind == NodeKind::Ident) {
+        const std::string& name = as<Ident>(*fn).name;
+        bool found = false;
+        const LocalInfo info = captureInto(fn_, name, fn->pos, &found);
+        if (found) {
+            if (info.byNameMasks.empty()) return nullptr;
+            // The vector lives in the enclosing FunctionState's scope map, which
+            // outlives this call.
+            const LocalInfo* own = findInFunction(fn_, name);
+            return own && !own->byNameMasks.empty() ? &own->byNameMasks : nullptr;
+        }
+        if (const std::vector<std::uint32_t>* m = byNameMasksOfMember(name)) return m;
+        const GlobalBinding* g = globals_.binding(name);
+        if (!g) return nullptr;
+        if (!g->byNameMasks.empty()) return &g->byNameMasks;
+        // `C(args)` on a class name: its primary constructor (a case class's
+        // synthesised companion apply, or the universal creator apply).
+        if (g->kind == BindingKind::Object)
+            if (const ClassInfo* cls = globals_.findType(name))
+                if (!cls->primaryByNameMasks.empty()) return &cls->primaryByNameMasks;
+        return nullptr;
+    }
+    if (fn->kind != NodeKind::Select) return nullptr;
+    const auto& sel = as<Select>(*fn);
+    if (sel.qualifier->kind != NodeKind::Ident) return nullptr;
+    const std::string& qual = as<Ident>(*sel.qualifier).name;
+    if (qual == "this") return byNameMasksOfMember(sel.name);
+    if (qual == "super") return nullptr;
+    bool found = false;
+    captureInto(fn_, qual, fn->pos, &found);
+    if (found || memberOf(qual)) return nullptr;  // a local or a field: dynamic
+    const GlobalBinding* g = globals_.binding(qual);
+    if (!g) return nullptr;
+    // A builtin object declares the by-name signature of its `apply` (D47).
+    if (g->kind == BindingKind::Builtin)
+        return sel.name == "apply" && !g->byNameMasks.empty() ? &g->byNameMasks : nullptr;
+    if (g->kind != BindingKind::Object) return nullptr;
+    return byNameMasksOfObjectMember(qual, sel.name);
+}
+
+// Bit k set: argument k of the application whose callee expression is `fnNode`
+// is by-name (D47). The head is reached by peeling application layers, so a
+// curried `def f(a)(b: => T)` is resolved at the list that carries it.
+std::uint32_t Compiler::byNameMaskOfCallee(const Node& fnNode) {
+    const Node* fn = &fnNode;
+    std::size_t list = 0;
+    while (fn->kind == NodeKind::TypeApply || fn->kind == NodeKind::Apply) {
+        if (fn->kind == NodeKind::Apply) { ++list; fn = as<Apply>(*fn).fn.get(); }
+        else fn = as<TypeApply>(*fn).fn.get();
+    }
+    const std::vector<std::uint32_t>* masks = byNameMasksOfCalleeHead(*fn);
+    return masks && list < masks->size() ? (*masks)[list] : 0;
 }
 
 void Compiler::compileApply(const Apply& a) {
     // Type arguments are erased: recv.m[T](args) is a send like recv.m(args).
     const Node* fn = a.fn.get();
     while (fn->kind == NodeKind::TypeApply) fn = as<TypeApply>(*fn).fn.get();
+    const std::uint32_t byName = byNameMaskOfCallee(*a.fn);
     bool named = false;
     for (const auto& arg : a.args) named = named || arg->kind == NodeKind::NamedArg;
     if (named) {
@@ -513,10 +695,12 @@ void Compiler::compileApply(const Apply& a) {
             return;
         }
         compileExpr(*sel.qualifier);
-        for (const auto& arg : a.args) {
-            if (arg->kind == NodeKind::Splice)
-                throw CompileError("splices are only supported in function calls", arg->pos);
-            compileExpr(*arg);
+        for (std::size_t k = 0; k < a.args.size(); ++k) {
+            const Node& arg = *a.args[k];
+            if (arg.kind == NodeKind::Splice)
+                throw CompileError("splices are only supported in function calls", arg.pos);
+            if (k < kMaxByNameParams && (byName >> k) & 1u) compileByNameArgument(arg);
+            else compileExpr(arg);
         }
         const auto n = static_cast<std::uint32_t>(a.args.size());
         emit(Op::SEND_APPLY, sendSite(sel.name, n), a.pos, -static_cast<int>(n));
@@ -527,10 +711,12 @@ void Compiler::compileApply(const Apply& a) {
         const Resolution r = resolve(id.name, id.pos);
         if (r.ref == RefKind::Member) {  // f(args) inside a template: this.f(args)
             loadThis(a.pos);
-            for (const auto& arg : a.args) {
-                if (arg->kind == NodeKind::Splice)
-                    throw CompileError("splices are only supported in function calls", arg->pos);
-                compileExpr(*arg);
+            for (std::size_t k = 0; k < a.args.size(); ++k) {
+                const Node& arg = *a.args[k];
+                if (arg.kind == NodeKind::Splice)
+                    throw CompileError("splices are only supported in function calls", arg.pos);
+                if (k < kMaxByNameParams && (byName >> k) & 1u) compileByNameArgument(arg);
+                else compileExpr(arg);
             }
             const auto n = static_cast<std::uint32_t>(a.args.size());
             emit(Op::SEND_APPLY, fn_->mod->addSendSite(r.key, n), a.pos, -static_cast<int>(n));
@@ -547,17 +733,29 @@ void Compiler::compileApply(const Apply& a) {
         }
     }
     compileExpr(*fn);
-    compileArgsAndCall(a.args, a.pos);
+    compileArgsAndCall(a.args, a.pos, byName);
 }
 
-void Compiler::compileArgsAndCall(const std::vector<NodePtr>& args, SourcePos pos) {
+// A by-name argument is compiled as a zero-argument function; the callee's
+// every read of the parameter runs it (D47).
+void Compiler::compileByNameArgument(const Node& arg) {
+    compileFunction("<by-name>", {}, arg, FnShape::Lambda, arg.pos);
+}
+
+void Compiler::compileArgsAndCall(const std::vector<NodePtr>& args, SourcePos pos,
+                                  std::uint32_t byNameMask) {
     const bool spread = !args.empty() && args.back()->kind == NodeKind::Splice;
     for (std::size_t k = 0; k < args.size(); ++k) {
         const Node& arg = *args[k];
+        const bool isByName = k < kMaxByNameParams && ((byNameMask >> k) & 1u) != 0;
         if (arg.kind == NodeKind::Splice) {
             if (k + 1 != args.size())
                 throw CompileError("a splice must be the last argument", arg.pos);
+            if (isByName)
+                throw CompileError("a splice cannot supply a by-name parameter", arg.pos);
             compileExpr(*as<Splice>(arg).expr);
+        } else if (isByName) {
+            compileByNameArgument(arg);
         } else {
             compileExpr(arg);
         }
@@ -577,6 +775,10 @@ void Compiler::compileSelect(const Select& s) {
     if (s.name == "unary_-") { emit(Op::NEG, 0, s.pos, 0); return; }
     if (s.name == "unary_!") { emit(Op::NOT, 0, s.pos, 0); return; }
     emit(Op::SEND, sendSite(s.name, 0), s.pos, 0);
+    // A by-name constructor parameter of the template being compiled is a
+    // private field holding the thunk, so `this.v` forces it too (D47).
+    const MemberInfo* m = memberOf(s.name);
+    if (m && m->byNameValue) emit(Op::FORCE_THUNK, 0, s.pos, 0);
 }
 
 // a && b  ==>  a; JUMP_IF_FALSE Lf; b; JUMP Lend; Lf: PUSH_FALSE; Lend:
@@ -679,7 +881,8 @@ void Compiler::compileStats(const std::vector<NodePtr>& stats, std::size_t from,
         const NodePtr& s = stats[k];
         if (s->kind == NodeKind::DefDef) {
             const auto& d = as<DefDef>(*s);
-            const LocalInfo info = declareLocal(d.name, kindOf(d), boxed_.count(s.get()) > 0);
+            const LocalInfo info =
+                declareLocal(d.name, kindOf(d), boxed_.count(s.get()) > 0, byNameMasksOfDef(d));
             if (info.boxed) emit(Op::MAKE_CELL, static_cast<std::uint64_t>(info.slot), d.pos, 0);
         } else if (s->kind == NodeKind::ValDef) {
             const auto& v = as<ValDef>(*s);
@@ -692,7 +895,8 @@ void Compiler::compileStats(const std::vector<NodePtr>& stats, std::size_t from,
         const NodePtr& s = stats[k];
         if (s->kind == NodeKind::DefDef) {
             const auto& d = as<DefDef>(*s);
-            compileFunction(d.name, paramsOf(d), bodyOf(d), FnShape::Def, d.pos);
+            compileFunction(d.name, paramsOf(d), bodyOf(d), FnShape::Def, d.pos,
+                            /*paramless=*/false, /*allowByName=*/true);
             storeLocal(*findInFunction(fn_, d.name), d.pos);
         } else if (s->kind == NodeKind::ValDef && as<ValDef>(*s).isLazy) {
             const auto& v = as<ValDef>(*s);
@@ -727,12 +931,12 @@ void Compiler::compileStats(const std::vector<NodePtr>& stats, std::size_t from,
 
 void Compiler::compileFunction(const std::string& name, const std::vector<Param>& params,
                                const Node& body, FnShape shape, SourcePos pos,
-                               bool paramless) {
-    for (const Param& p : params) {
+                               bool paramless, bool allowByName) {
+    for (const Param& p : params)
         if (p.defaultValue)
             throw CompileError("default parameter values are not implemented yet", p.pos);
-        if (p.byName) throw CompileError("by-name parameters are not supported yet", p.pos);
-    }
+    if (!allowByName) refuseByNameParams(params, "a function literal");
+    const std::uint32_t byNameMask = allowByName ? byNameMaskOfParams(params) : 0;
     const bool method = shape == FnShape::Method;
     auto mod = std::make_unique<BytecodeModule>();
     mod->setName(name);
@@ -750,9 +954,14 @@ void Compiler::compileFunction(const std::string& name, const std::vector<Param>
         fs.scopes.back()["this"] = self;
         if (tmpl_ && !tmpl_->selfName.empty()) fs.scopes.back()[tmpl_->selfName] = self;
     }
-    for (const Param& p : params) {
+    for (std::size_t k = 0; k < params.size(); ++k) {
+        const Param& p = params[k];
         const int slot = newSlot();
-        if (p.name != "_") fs.scopes.back()[p.name] = LocalInfo{slot, BindingKind::Param, false, false};
+        const bool byName = k < kMaxByNameParams && ((byNameMask >> k) & 1u) != 0;
+        if (p.name != "_")
+            fs.scopes.back()[p.name] =
+                LocalInfo{slot, byName ? BindingKind::ByNameParam : BindingKind::Param, false,
+                          false};
     }
     const int arity = static_cast<int>(params.size()) + (method ? 1 : 0);
     mod->setArity(arity);
@@ -805,6 +1014,7 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
             if (s->kind == NodeKind::DefDef) {
                 const auto& d = as<DefDef>(*s);
                 const std::string& key = globals_.declare(d.name, kindOf(d));
+                globals_.setByNameMasks(d.name, byNameMasksOfDef(d));
                 if (d.isMain()) {
                     if (main) throw CompileError("only one @main method is allowed per file", d.pos);
                     main = &d;
@@ -882,7 +1092,8 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
         for (const auto& s : unit.stats) {
             if (s->kind == NodeKind::DefDef) {
                 const auto& d = as<DefDef>(*s);
-                compileFunction(d.name, paramsOf(d), bodyOf(d), FnShape::Def, d.pos);
+                compileFunction(d.name, paramsOf(d), bodyOf(d), FnShape::Def, d.pos,
+                                /*paramless=*/false, /*allowByName=*/true);
                 emit(Op::STORE_GLOBAL, top.mod->addSymbol(globalKey(d.name)), d.pos, -1);
             } else if (s->kind == NodeKind::ValDef && as<ValDef>(*s).isLazy) {
                 const auto& v = as<ValDef>(*s);

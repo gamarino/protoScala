@@ -24,6 +24,13 @@ struct MemberInfo {
     MemberKind kind = MemberKind::Def;
     std::string key;        // attribute key on the instance or the prototype
     bool concrete = true;   // false: declared abstract (no body / no initialiser)
+    // One mask per parameter list: bit k marks a by-name parameter (D47). A call
+    // site honours them when it resolves to this declaration; a dynamic send
+    // cannot, and evaluates the argument (D53).
+    std::vector<std::uint32_t> byNameMasks;
+    // A by-name constructor parameter: the field holds the thunk the `new` site
+    // built, so every read of the name forces it (D47).
+    bool byNameValue = false;
 };
 
 inline constexpr const char* kAnyKey = "@Any";
@@ -58,6 +65,8 @@ struct ClassInfo {
     std::vector<std::string> ctorParams;     // primary constructor parameter names
     std::size_t primaryArity = 0;
     bool primaryVariadic = false;
+    // By-name primary-constructor parameters, as one mask in a list (D47).
+    std::vector<std::uint32_t> primaryByNameMasks;
     std::vector<std::size_t> auxArities;     // auxiliary constructors, by arity (D31)
     std::unordered_map<std::string, MemberInfo> members;  // public (own + inherited) and own private
     std::string companionTermKey;     // classes: the term key of the companion object, if any

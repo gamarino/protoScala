@@ -260,9 +260,12 @@ ClassInfo Compiler::buildClassInfo(const TemplateDef& t, const std::string& type
     bool hasStatements = !t.ctorParams.empty();
     bool ownVar = false;
     for (const Param& p : t.ctorParams) {
-        if (p.byName) throw CompileError("by-name parameters are not supported yet", p.pos);
         if (p.defaultValue)
             throw CompileError("default parameter values are not implemented yet", p.pos);
+        // scalac: "`val` parameters may not be call-by-name" — a member has to
+        // hold a value, not a thunk (D47).
+        if (p.byName && (p.isVal || p.isVar || c.isCase))
+            throw CompileError("a val, var or case-class parameter may not be by-name", p.pos);
         // Plain parameters are private fields (reachable from the methods).
         const bool isPublic = (p.isVal || p.isVar || c.isCase) && !p.mods.isPrivate;
         const bool paramIsMember = p.isVal || p.isVar || c.isCase;
@@ -273,11 +276,18 @@ ClassInfo Compiler::buildClassInfo(const TemplateDef& t, const std::string& type
                    p.mods.isPrivate, p.mods.isOverride, /*declaredMember=*/false, p.pos);
             ownVar = true;
         }
+        if (p.byName) c.members.at(p.name).byNameValue = true;
         c.ctorParams.push_back(p.name);
         if (c.isCase) c.fields.push_back(c.members.at(p.name).key);
     }
     c.primaryArity = t.ctorParams.size();
     c.primaryVariadic = !t.ctorParams.empty() && t.ctorParams.back().repeated;
+    // By-name primary-constructor parameters (D47): `C(e)` and `new C(e)` name
+    // the class, so the call site can wrap `e` in a thunk.
+    if (const std::uint32_t ctorMask = byNameMaskOfParams(t.ctorParams)) {
+        c.primaryByNameMasks.assign(1, ctorMask);
+        globals_.noteByNameSelector(t.name, c.primaryByNameMasks);
+    }
     if (c.isCase && c.kind == ClassKind::Class)
         for (std::size_t k = 1; k <= c.fields.size(); ++k)
             c.members["_" + std::to_string(k)] =
@@ -323,6 +333,14 @@ ClassInfo Compiler::buildClassInfo(const TemplateDef& t, const std::string& type
                 addOwn(d.name, d.paramLists.empty() ? MemberKind::ParamlessDef : MemberKind::Def,
                        !d.mods.isPrivate, d.body != nullptr, d.mods.isPrivate, d.mods.isOverride,
                        true, d.pos);
+                // By-name parameters of a method (D47): honoured at a call site
+                // that resolves to this declaration — `this.m(e)`, `m(e)` inside
+                // the template, `O.m(e)` on an object — and evaluated at a
+                // dynamic send (D53).
+                if (std::vector<std::uint32_t> masks = byNameMasksOfDef(d); !masks.empty()) {
+                    globals_.noteByNameSelector(d.name, masks);
+                    c.members.at(d.name).byNameMasks = std::move(masks);
+                }
                 break;
             }
             case NodeKind::TemplateDef:
@@ -420,7 +438,7 @@ void Compiler::compileTemplate(const TemplateDef& t, const ClassInfo& info) {
         if (d.name == "this" || !d.body) continue;
         keys.push_back(info.members.at(d.name).key);
         compileFunction(d.name, paramsOfDef(d), *d.body, FnShape::Method, d.pos,
-                        /*paramless=*/d.paramLists.empty());
+                        /*paramless=*/d.paramLists.empty(), /*allowByName=*/true);
     }
     auto setterFor = [&](const std::string& name, SourcePos pos) {
         keys.push_back(info.members.at(setterName(name)).key);
@@ -491,7 +509,9 @@ void Compiler::compileConstructor(const TemplateDef& t, const ClassInfo& info) {
     fs.scopes.back()["this"] = self;
     if (!t.selfName.empty()) fs.scopes.back()[t.selfName] = self;
     for (const Param& p : t.ctorParams)
-        fs.scopes.back()[p.name] = LocalInfo{newSlot(), BindingKind::Param, false, false};
+        fs.scopes.back()[p.name] =
+            LocalInfo{newSlot(), p.byName ? BindingKind::ByNameParam : BindingKind::Param, false,
+                      false};
     const int arity = 1 + static_cast<int>(t.ctorParams.size());
     mod->setArity(arity);
     mod->setVariadic(info.primaryVariadic);
@@ -679,6 +699,10 @@ void Compiler::compileNewOf(const ClassInfo& info, const std::vector<NodePtr>& a
     }
     emit(Op::PUSH_GLOBAL, fn_->mod->addSymbol(info.key), pos, +1);
     const bool spread = !args.empty() && args.back()->kind == NodeKind::Splice;
+    // The class is named here, so its by-name constructor parameters are
+    // honoured (D47).
+    const std::uint32_t byName =
+        info.primaryByNameMasks.empty() ? 0u : info.primaryByNameMasks[0];
     for (std::size_t k = 0; k < args.size(); ++k) {
         const Node& arg = *args[k];
         if (arg.kind == NodeKind::NamedArg)
@@ -690,6 +714,8 @@ void Compiler::compileNewOf(const ClassInfo& info, const std::vector<NodePtr>& a
                                        " takes no repeated parameter",
                                    arg.pos);
             compileExpr(*as<Splice>(arg).expr);
+        } else if (k < kMaxByNameParams && (byName >> k) & 1u) {
+            compileByNameArgument(arg);
         } else {
             compileExpr(arg);
         }

@@ -52,7 +52,12 @@ enum class Op : uint8_t {
     EQ = 34, NE = 35,                      // Scala == and !=
     NEG = 36,                              // [a] -> [-a]
     NOT = 37,                              // [b] -> [!b]
-    // 38..63   reserved (Phase 1 additions)
+    // A by-name parameter holds the thunk the call site built; every read of
+    // the name runs it (D47). A value that is not a zero-argument function
+    // passes through, so a call site that could not be resolved — and so
+    // evaluated the argument — still works (D53).
+    FORCE_THUNK = 38,                      // [v] -> [v()] for a 0-arg function, else [v]
+    // 39..63   reserved (Phase 1 additions)
     // Object model and pattern matching, Phase 2 (64..95); stack effects in
     // the Phase 2 plan's opcode table and in docs/STATUS.md.
     MAKE_CLASS     = 64,  // [p1..pk m1..mn] -> [cls]    operand: ClassSpec constant
