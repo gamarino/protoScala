@@ -400,7 +400,34 @@ A `for` without `yield` needs `do` and is a plain loop:
 `for (x <- xs) do println(x)`. Chapter 9 covers nesting, guards, patterns and
 what happens when you iterate over an `Option` instead of a `List`.
 
-## 2.12 Where to go next
+## 2.12 Concurrency without a GIL
+
+Python has a global interpreter lock, so two threads never run bytecode at the
+same time; JavaScript has one event loop per worker and copies anything you
+send between workers. protoScala has neither. Threads are real OS threads, two
+of them run Scala at the same time on two cores, and a message passed between
+them is a pointer to an immutable value — no copy, no pickle, no structured
+clone.
+
+You rarely write threads directly. The unit of concurrency is an **actor**: a
+state plus a function that handles one message at a time.
+
+```text
+val counter = Actor.spawn(0) { (state, msg) => (state + msg, state + msg) }
+counter ! 1                  // tell:  queue a message, return immediately
+val total = (counter ? 1).await   // ask: queue a message, get a Future of the reply
+```
+
+The runtime handles one message of an actor at a time, however many threads
+send to it, so the state inside a handler needs no lock. `await` inside a
+handler does not block a worker: the runtime saves the handler's call chain,
+runs something else, and resumes it when the answer arrives.
+
+[Chapter 13](13-actors-and-futures.md) covers actors, the three priority
+bands, futures and their combinators, what happens when a handler fails, and
+`Thread`/`System`.
+
+## 2.13 Where to go next
 
 - [Chapter 4](04-values-and-expressions.md): literals, operators (which are
   methods), strings, equality, `if` and `while` in detail.
@@ -412,5 +439,7 @@ what happens when you iterate over an `Option` instead of a `List`.
   `Option`, and every form of pattern.
 - [Chapter 9](09-for-comprehensions.md): `for … yield`, what it is rewritten
   into, and the placeholder `_`.
+- [Chapter 13](13-actors-and-futures.md): actors, futures and concurrency
+  without a GIL.
 - [Chapter 14](14-repl-and-tooling.md): the REPL, for trying each idea
   interactively.

@@ -13,16 +13,17 @@ tracker of what works and of every deviation is [STATUS.md](STATUS.md). How the
 runtime is built is in [DESIGN.md](DESIGN.md); the cross-runtime story is in
 [INTEROP.md](INTEROP.md).
 
-> **What runs today (protoScala 0.2.0).** Chapters 1, 2, 3, 4, 5, 6, 7, 9 and
-> 14 describe what the binary runs: values and expressions,
+> **What runs today (protoScala 0.3.0).** Chapters 1, 2, 3, 4, 5, 6, 7, 9, 13
+> and 14 describe what the binary runs: values and expressions,
 > `val`/`var`/`lazy val`/`def`, `if`/`while`, lambdas and closures, recursion,
 > integer and string arithmetic, `println` and the REPL — and, since Phase 2,
 > the whole object model: **classes, objects and companions, traits with
 > Scala's linearization and stackable `super`, case classes and case objects,
 > tuples, `Option`, `List`, pattern matching and for-comprehensions**, in both
-> brace and indentation syntax. Collections beyond `List`, string
-> interpolation, exceptions, `enum`, extension methods, actors and modules are
-> planned; their chapters are written together with the phase that implements
+> brace and indentation syntax; and, since Phase 5, **actors with three
+> priority bands, futures with a cooperative `await`, `Thread` and `System`**.
+> Collections beyond `List`, string interpolation, exceptions, `enum`,
+> extension methods and modules are planned; their chapters are written together with the phase that implements
 > them. Every runnable snippet in the tutorial is a conformance fixture under
 > `tests/conformance/tutorial/`, run with the test suite.
 
@@ -67,7 +68,7 @@ differs from Scala 3 in its area.
 | 10 | Strings and interpolation | *Planned* (Phase 3). |
 | 11 | Exceptions | *Planned* (Phase 4). |
 | 12 | Enums and sealed hierarchies | *Planned* (Phase 4). |
-| 13 | Actors and futures | *Planned* (Phase 5). |
+| 13 | [Actors and futures](tutorial/13-actors-and-futures.md) | Actors, telling and asking, priority bands, futures and their combinators, cooperative `await`, handler failures, threads and time, tuning. |
 | 14 | [The REPL and tooling](tutorial/14-repl-and-tooling.md) | The REPL, multi-line input, commands, classes at the prompt, running scripts, error messages, `--disassemble`. |
 
 ## Running the examples

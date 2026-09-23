@@ -494,6 +494,46 @@ without a plan question of their own:
   is reported as `cannot override a mutable variable`, where scalac says
   "needs `override` modifier".
 
+### Concurrency (Phase 5, D43–D52)
+
+Actors, priority bands and futures are described in
+[chapter 13](13-actors-and-futures.md); this is their departures catalogue.
+
+- **D43** — `await` suspends only a chain of protoScala frames each stopped at
+  a call instruction. Inside a native higher-order method (`map`, `foreach`,
+  `withFilter`, a `Future` continuation), or under an instruction that calls
+  back into Scala without being a call site (`==` reaching a user `equals`),
+  it raises `UnsupportedOperationException` instead of suspending; the ask's
+  future receives that failure and the actor stays alive.
+- **D44** — until Phase 4 there are no exception values: a failed `Future`
+  carries `RuntimeError(className, message)`, and `Try`/`Success`/`Failure`
+  (moved up from Phase 3) wrap it. `await` on a failed future raises the same
+  error on the awaiting thread, which no user code can catch yet.
+- **D45** — an actor handler must return `(newState, reply)`; any other result
+  raises `IllegalArgumentException` and fails that message, leaving the
+  actor's state unchanged.
+- **D46** — an actor lives as long as the session: it is anchored in a
+  registry so the collector can reach it and everything it holds while it is
+  only referenced by the (C++) ready stacks. `Future.apply` creates one actor
+  per call.
+- **D47** — `Future.apply` takes a function, not a by-name parameter: write
+  `Future(() => expr)`.
+- **D48** — `map`/`flatMap`/`recover`/`onComplete` run their continuation on
+  the thread that completes the future, or immediately on the caller when it
+  is already complete — there is no `ExecutionContext`. A continuation may not
+  `await` (D43).
+- **D49** — `Thread` and `System` are runtime facilities, not the JVM's:
+  `Thread.start(() => …)`, `t.join()`, `System.nanoTime()`,
+  `System.currentTimeMillis()`, `System.getenv(name)` (`""` when unset).
+  `nanoTime` is a monotonic clock; only differences are meaningful.
+- **D50** — awaiting a future that fails, inside an actor, abandons the rest
+  of the handler and the message's own future inherits the failure (there is
+  no `try`/`catch` to resume into until Phase 4).
+- **D51** — `actor.value` reads the state without sending a message, so it may
+  observe a state older than a send that is still queued.
+- **D52** — `Priority.High` / `Medium` / `Low` are the integers `0` / `1` / `2`
+  on an object, not an `enum` (enums arrive in Phase 4).
+
 ## 3.3 What is missing
 
 Out of scope by design: implicits and givens (D3), the static type checker
@@ -503,17 +543,20 @@ Java reflection.
 Delivered in Phase 2, so no longer on this list: classes, objects,
 companions, traits with linearization and stackable `super`, case classes and
 case objects, tuples, `Option`, the universal `apply` rule, `List`, pattern
-matching and for-comprehensions.
+matching and for-comprehensions. Delivered in Phase 5: actors, priority bands,
+futures and `Try`/`Success`/`Failure`.
+
+Still missing in the concurrency area, and not scheduled: supervision trees,
+`ExecutionContext`, actor timeouts and `Await.result(f, duration)`.
 
 Not implemented yet, with the phase that brings each (see
 [ROADMAP.md](../ROADMAP.md)):
 
 | Feature | Phase |
 |---|---|
-| Collections beyond `List` (`Vector`, `Range`, `Map`, `Set`), `Either`, `Try`, the rest of the `List` API | 3 |
+| Collections beyond `List` (`Vector`, `Range`, `Map`, `Set`), `Either`, the rest of the `List` API | 3 |
 | String interpolation (`s"…"`, `f"…"`) | 3 |
 | Exceptions (`try`/`catch`/`finally`/`throw`), `enum`, exhaustiveness, named and default arguments, by-name parameters, extension methods, local/nested/anonymous classes, multiple constructor parameter lists, `super[T]` | 4 |
-| Actors and futures | 5 |
 | Modules and polyglot imports (UMD), packaging | 6 |
 
 ## 3.4 What is new
