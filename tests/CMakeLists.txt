@@ -65,3 +65,20 @@ foreach(bench_file ${PROTOSCALA_BENCHMARK_FILES})
                 "$<TARGET_FILE:protoscala>"
                 "${CMAKE_SOURCE_DIR}/benchmarks/comparable/${bench_file}")
 endforeach()
+
+# `object_tree.scala` is the one fixture in the tree whose live set cannot fit a
+# small heap: it deliberately holds a complete binary tree of 131071 case-class
+# objects alive at once, measured at 252253 cells (about 1.9 cells per object).
+# protoCore additionally defers collection until the ceiling is approached, so
+# the workload needs a ceiling of roughly 600000 cells to complete at all — far
+# above the 20000-cell value used for the low-heap rooting sweep
+# (`PROTOCORE_HEAP_LIMIT_CELLS=20000 ctest`). An out-of-memory report there
+# would be honest arithmetic, not a rooting defect, so this single test pins its
+# own ceiling (2000000 cells, ~8x the measured live set — the same value
+# tests/cli/gc-pressure.sh uses) and is therefore independent of the ambient
+# environment. Every other test keeps whatever ceiling the sweep sets, so the
+# sweep stays meaningful and needs no `-E` filter.
+if(EXISTS "${CMAKE_SOURCE_DIR}/benchmarks/comparable/object_tree.scala")
+    set_tests_properties("benchmarks/object_tree.scala" PROPERTIES
+        ENVIRONMENT "PROTOCORE_HEAP_LIMIT_CELLS=2000000")
+endif()

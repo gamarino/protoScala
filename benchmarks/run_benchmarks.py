@@ -139,8 +139,9 @@ WORKLOADS = [
      "clj": None},
 ]
 
-# Workloads of the sibling suites that Phase 1 cannot express. Listed in the
-# report, never approximated.
+# Workloads of the sibling suites that protoScala cannot express yet: each one
+# waits for the phase named in its entry (collections, exceptions, actors).
+# Listed in the report, never approximated.
 PENDING = [
     ("list_append", "protoPython / protoST", "Phase 3 (collections)",
      "Phase 1 has no list-building operation (`::`, `:+`, `List(...)`, "
@@ -634,8 +635,8 @@ def write_report(path, meta, columns, workloads, results, jvm_compile, cold):
         L.append("")
     L.append("## Pending workloads")
     L.append("")
-    L.append("Workloads of the sibling suites that need features after Phase 1. "
-             "They are not approximated.")
+    L.append("Workloads of the sibling suites that protoScala cannot express yet; "
+             "each waits for the phase named below. They are not approximated.")
     L.append("")
     L.append("| Workload | Suite | Arrives with | Why |")
     L.append("|---|---|---|---|")
