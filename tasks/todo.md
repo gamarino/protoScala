@@ -40,3 +40,9 @@ maintainer review.
 - [ ] protoCore: full suite, ASan, perf gate on a quiet host
 - [ ] Clean rebuild + suites + fixes: protoPython, protoJS (-j1, sequential test262), protoST, protoClojure, protoScala
 - [ ] Push everything; remove temporary worktrees (protoCore-pslo, protoCore-desc)
+- [ ] Installers for the whole family (Linux, macOS, Windows), protoCore installed on the same machine:
+      protoCore 2.0.0 as the base package; protoScala, protoST, protoClojure, protoPython and protoJS
+      each declaring it as a runtime dependency (deb Depends / rpm Requires), never bundling libprotoCore;
+      INSTALL_RPATH $ORIGIN/../lib so no LD_LIBRARY_PATH is needed. Linux (.deb/.rpm/.tar.gz) built AND
+      verified here (install into a scratch prefix, run the binary); macOS (.dmg) and Windows (NSIS/.zip)
+      configured but explicitly marked unverified on this build host.
