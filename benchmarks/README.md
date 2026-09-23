@@ -125,8 +125,9 @@ on each protoScala build and includes the result in its report.
 
 ## Actor benchmarks — `actor-bench.sh`, `actors/`
 
-The seven modes of DESIGN §8.5, each a protoScala script in
-[`actors/`](actors/) that sizes itself from `PROTOSCALA_BENCH_N`:
+The seven modes of DESIGN §8.5 plus two CPU-bound `saturation-*` modes, each a
+protoScala script in [`actors/`](actors/) that sizes itself from
+`PROTOSCALA_BENCH_N`:
 
 | Mode | Script | Shape |
 |---|---|---|
@@ -137,6 +138,36 @@ The seven modes of DESIGN §8.5, each a protoScala script in
 | `ping-pong` | `actor-pingpong.scala` | ask/reply through the cooperative suspension |
 | `await` | `actor-await.scala` | 100 caller actors awaiting one shared actor; must complete at 1 worker |
 | `priority` | `actor-priority.scala` | a Low-band flood plus 1000 timed High-band asks |
+| `saturation-8` | `actor-saturation-8.scala` | 8 actors × N/8 **CPU-bound** messages (20,000-iteration summation each) |
+| `saturation-32` | `actor-saturation-32.scala` | 32 actors × N/32 CPU-bound messages, identical total work |
+
+### Why the `saturation-*` modes exist
+
+The seven original modes are all capped by their own structural concurrency
+rather than by the machine's cores: `single` has one producer and one actor,
+`fan-out` one producer, `MPSC` four producers against one actor, and `MPMC`
+four producers against four actors (and duly peaks at w=4). `fan-out` is
+additionally **producer-bound** — 78-99% of its measurable window is inside the
+sender's own loop — so adding workers cannot help it. **None of them can
+exhibit a rise up to the physical core count**, which made the suite unable to
+answer the one question a worker-count sweep is for (see
+[`reports/2026-09-23-actors-v4-curve.md`](reports/2026-09-23-actors-v4-curve.md)).
+
+The `saturation-*` modes remove the producer from the critical path instead of
+trying to make it faster: every message carries a 20,000-iteration summation
+(~1.5 ms of interpreter work), so the send loop costs **well under 1%** of the
+run and the workers are the constraint. They mirror protoST's
+`benchmarks/actors/saturation_8a.st` and `saturation_32a.st`, where the same
+shape measured 1.00× / 1.70× / 2.83× / **3.11× at w=6** and then regressed
+under SMT oversubscription. Reading `saturation-8` against `saturation-32`
+separates "the scheduler cannot fill the cores" from "8 actors cannot fill the
+cores"; both carry identical total work, so their curves are comparable.
+
+Both have a protoClojure twin (`actor-saturation-8.clj`, `actor-saturation-32.clj`)
+of the same shape and the **same message count**, so the comparison is
+same-machine, same-shape. Their `processed` value is the **sum the actors
+actually computed**, not a message count, so a handler that silently did no
+work fails the check instead of reading as a very fast run.
 
 Each script prints three lines — `mode=… messages=… processed=…`, then
 `Actor.stats`, then `ok` or `FAILED` — and the runner **verifies all of them
@@ -148,7 +179,7 @@ failure must never read as infinite throughput (the lesson of protoClojure's
 2026-06-14 harness and protoPython's sprint 9).
 
 ```bash
-benchmarks/actor-bench.sh --name actors                 # 7 modes x 6 worker counts
+benchmarks/actor-bench.sh --name actors                 # 9 modes x 6 worker counts
 benchmarks/actor-bench.sh --only single,MPSC --size 100000
 benchmarks/actor-bench.sh --no-compare                  # skip the protoClojure run
 ```
@@ -161,7 +192,7 @@ protoClojure's `benchmarks/actor-bench.sh` also measures, run on the same
 machine on the same day. `ping-pong`, `await` and `priority` have no
 protoClojure twin and say so.
 
-`tests/cli/actor-bench-smoke.sh` runs all seven at `PROTOSCALA_BENCH_N=2000`
+`tests/cli/actor-bench-smoke.sh` runs all of them at `PROTOSCALA_BENCH_N=2000`
 with the test suite, so a benchmark cannot rot unnoticed between full runs.
 
 ## Later

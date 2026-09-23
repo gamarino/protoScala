@@ -173,12 +173,45 @@ behind protoClojure. The honest correction is narrower and it is this: the
 earlier cross-runtime `fan-out` comparison was not measuring the same work,
 the scheduler scales on `MPMC`, and `fan-out`'s ceiling is in its producer.
 
-**Known gap.** No mode in the suite above can exhibit a rise up to the 6
-physical cores of this machine: `single` has one producer and one actor,
-`fan-out` one producer, `MPSC` four producers against one actor, and `MPMC`
-four producers against four actors — so each is capped by its own structural
-concurrency, 1 or 4, and not by the core count. **No conclusion about
-protoScala's 6-core ceiling can be drawn from these numbers.**
+**None of the modes above can exhibit a rise up to the 6 physical cores of
+this machine**: `single` has one producer and one actor, `fan-out` one
+producer, `MPSC` four producers against one actor, and `MPMC` four producers
+against four actors — so each is capped by its own structural concurrency,
+1 or 4, and not by the core count. No conclusion about protoScala's 6-core
+ceiling can be drawn from any number in the table above.
+
+#### The saturation modes (v5): the worker-count rise the suite was missing
+
+Two CPU-bound modes were added to close that gap, mirroring protoST's
+`saturation_8a.st` / `saturation_32a.st`: **`saturation-8`** and
+**`saturation-32`** run 8 or 32 actors over the same total work, with a
+20,000-iteration summation (~1.5 ms) inside every handler. That puts the cost
+in the pool instead of the sender — the send loop is **0.14% of the run at 1
+worker** — so the workers, not the producer, are the constraint. Each has a
+protoClojure twin of the same shape and the **same message count**, and both
+assert the **sum their actors actually computed**, so a handler that silently
+did no work fails instead of reading as a fast run.
+
+Shipped CAS-list binary, median of 4 interleaved samples, speedup against 1
+worker (full tables:
+[benchmarks/reports/2026-09-23-actors-v5-saturation.md](benchmarks/reports/2026-09-23-actors-v5-saturation.md)):
+
+| speedup vs w=1 | w=2 | w=3 | w=4 | w=6 | w=8 | w=12 | w=16 |
+|---|---|---|---|---|---|---|---|
+| `saturation-8` | 1.98× | 2.35× | 3.18× | **3.16×** | 3.47× | 3.14× | 3.26× |
+| `saturation-32` | 2.02× | 2.82× | 3.43× | **3.68×** | 3.90× | **3.97×** | 3.93× |
+| protoClojure twin, 32 actors | 1.79× | 2.69× | 3.09× | 3.51× | 3.65× | 3.91× | 3.76× |
+
+**protoScala's actors do scale with workers** — this is the first mode in the
+suite that shows it, reaching **3.68× at 6 workers** and peaking at **3.97× at
+12**. Three honest qualifications: the near-linear region ends at about 3
+workers, not 6; **protoST's SMT regression above 6 workers did not reproduce**
+here; and the machine was carrying 6-7 foreign threads on its 12 logical CPUs
+throughout, which is enough to explain both. **The exact peak and the absence
+of an SMT cliff are therefore not settled** and need a quiet machine.
+protoClojure's twin traces the same curve, within a few percent, with the same
+peak — evidence that the shape is the machine's and not protoScala's
+scheduler.
 
 **Nothing involving `ProtoMPSCQueue` is shipped**: it is not in protoCore
 master, the released protoScala still uses the CAS-list mailbox, and every

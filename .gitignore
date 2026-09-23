@@ -12,4 +12,5 @@ build-dbg/
 build_bench/
 build_jvm/
 build_tsan/
+build_pmq/
 __pycache__/

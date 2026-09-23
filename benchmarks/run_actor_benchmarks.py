@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Actor benchmark harness — the seven modes of docs/DESIGN.md §8.5.
+"""Actor benchmark harness — the seven modes of docs/DESIGN.md §8.5 plus the
+two CPU-bound `saturation-*` modes that cover the actors-versus-workers axis.
 
 Every script self-reports the work it did (`mode=... messages=... processed=...`,
 then `Actor.stats`, then `ok` or `FAILED`) and this runner verifies that report
@@ -53,6 +54,10 @@ from run_benchmarks import (  # noqa: E402  (imported for the shared machine hea
 DEFAULT_WORKERS = [1, 2, 4, 6, 8, 16]
 DEFAULT_SAMPLES = 5
 
+# sum(1..20000), the compute every saturation message folds into its actor's
+# state. The saturation scripts assert the computed sum, not the exit code.
+SATURATION_PER_MSG = 200010000
+
 # (name, script, default N, expected processed, note)
 MODES = [
     ("single", "actor-throughput.scala", 1000000, lambda n: n + 1,
@@ -73,16 +78,55 @@ MODES = [
     ("priority", "actor-priority.scala", 200000, lambda n: n + 1001,
      "a Low-band flood plus 1000 timed High-band asks; the p50/p99 below are "
      "the High-band ask latencies measured with System.nanoTime."),
+    ("saturation-8", "actor-saturation-8.scala", 4800,
+     lambda n: ((n // 8) * 8 + 8) * SATURATION_PER_MSG,
+     "8 actors x N/8 CPU-bound messages (20,000-iteration summation each, "
+     "~1.5 ms) from one sender. The only modes that can exhibit a rise up to "
+     "the physical core count: the send loop is under 1% of the run, so the "
+     "workers and not the sender are the constraint. 8 actors means at most 8 "
+     "can run at once under the single-method invariant. Mirrors protoST's "
+     "saturation_8a.st. `processed` is the sum the actors computed, not a "
+     "message count."),
+    ("saturation-32", "actor-saturation-32.scala", 4800,
+     lambda n: ((n // 32) * 32 + 32) * SATURATION_PER_MSG,
+     "32 actors x N/32 CPU-bound messages, identical total work to "
+     "saturation-8. More runnable actors than workers at every worker count, "
+     "so it separates 'the scheduler cannot fill the cores' from '8 actors "
+     "cannot fill the cores'. Mirrors protoST's saturation_32a.st."),
 ]
 
-# protoClojure's twin script for the four shapes it also measures.
+# protoClojure's twin script for the shapes it also measures.
 CLJ_SCRIPTS = {
     "single": "actor-throughput.clj",
     "fan-out": "actor-fanout.clj",
     "MPSC": "actor-mpsc.clj",
     "MPMC": "actor-mpmc.clj",
+    "saturation-8": "actor-saturation-8.clj",
+    "saturation-32": "actor-saturation-32.clj",
 }
-CLJ_MIN_MESSAGES = 1000000
+
+# The message count each protoClojure twin must report. The older twins all
+# carry 1,000,000 trivial messages; the saturation twins carry a few thousand
+# expensive ones, so a single global floor would reject them. Their counts
+# match their protoScala twins exactly (4800 sends + one closing probe per
+# actor), which is what makes the two curves comparable.
+CLJ_MIN_MESSAGES = {
+    "single": 1000000,
+    "fan-out": 1000000,
+    "MPSC": 1000000,
+    "MPMC": 1000000,
+    "saturation-8": 4808,
+    "saturation-32": 4832,
+}
+
+# Twins that also assert the value they computed. `processed` here is the sum
+# the actors folded into their state, so a handler that silently did no work
+# fails the check instead of reading as a very fast run. The protoClojure
+# closing probe returns the state without adding to it, hence N and not N + K.
+CLJ_EXPECTED_PROCESSED = {
+    "saturation-8": 4800 * SATURATION_PER_MSG,
+    "saturation-32": 4800 * SATURATION_PER_MSG,
+}
 
 
 def percentile(xs, q):
@@ -232,8 +276,23 @@ def run_clj_sample(binary, bench_dir, mode, workers):
     if not m:
         return None, f"no :messages-processed in output: {out.strip()[-200:]}"
     processed = int(m.group(1))
-    if processed < CLJ_MIN_MESSAGES:
-        return None, f"processed {processed}, expected at least {CLJ_MIN_MESSAGES}"
+    floor = CLJ_MIN_MESSAGES[mode]
+    if processed < floor:
+        return None, f"processed {processed}, expected at least {floor}"
+    # Twins that report the value they computed are checked against it, so a
+    # handler that silently did no work cannot be recorded as a fast run.
+    want = CLJ_EXPECTED_PROCESSED.get(mode)
+    if want is not None:
+        head = re.search(r"mode=(\S+) messages=(\d+) processed=(-?\d+)", out)
+        if not head:
+            return None, "no self-report line"
+        if head.group(1) != mode:
+            return None, f"the script reports mode={head.group(1)}, expected {mode}"
+        got = int(head.group(3))
+        if got != want:
+            return None, f"computed {got}, expected {want}"
+        if not re.search(r"^ok$", out, re.M):
+            return None, "the script did not print 'ok'"
     if seconds <= 0:
         return None, "non-positive elapsed time"
     return processed / seconds, None
@@ -347,7 +406,8 @@ def render(args, binary, backend, cpu, phys, logical, started, load_start, load_
     out = []
     a = out.append
     a(f"# protoScala actor benchmarks — {started:%Y-%m-%d}\n")
-    a("The seven modes of docs/DESIGN.md §8.5. Every script self-reports the work")
+    a("The seven modes of docs/DESIGN.md §8.5 plus the two CPU-bound `saturation-*`")
+    a("modes. Every script self-reports the work")
     a("it did and this runner verified that report before computing any rate; a")
     a("cell that failed any check is printed as FAILED and never as a number.\n")
     a("This machine is a shared daily-driver desktop (VS Code, Chrome and PyCharm")

@@ -545,6 +545,22 @@ with `PROTOSCALA_ACTOR_WORKERS` = 1, 2, 4, 6, 8, 16.
 | `ping-pong` | `actor-pingpong.scala` | 2 actors exchanging asks, 200K round trips — ask/reply latency |
 | `await` | `actor-await.scala` | 1000 actors each awaiting an ask to another actor — cooperative suspension (must finish with `workers = 1`; a blocking `await` would deadlock) |
 | `priority` | `actor-priority.scala` | Low-band flood of 1M messages plus 1000 High-band probes — reports High-band latency p50/p99 |
+| `saturation-8` | `actor-saturation-8.scala` | 8 actors × N/8 **CPU-bound** messages (a 20,000-iteration summation each, ~1.5 ms) — the actors-versus-workers axis |
+| `saturation-32` | `actor-saturation-32.scala` | 32 actors × N/32 CPU-bound messages, identical total work — separates scheduler limits from actor-count limits |
+
+The two `saturation-*` modes **deviate from the 1,000,000-trivial-message rule
+above, deliberately**: they fire a few thousand expensive messages instead. The
+seven modes above are each capped by their own structural concurrency (1 or 4
+producers, or the single-method invariant) rather than by the machine's cores,
+and `fan-out` is additionally producer-bound — 78-99% of its measurable window
+sits inside the sender's loop. **None of them can exhibit a rise up to the
+physical core count.** The `saturation-*` modes put the cost inside the handler
+so the send loop falls below 1% of the run and the workers become the
+constraint. They mirror protoST's `saturation_8a.st` / `saturation_32a.st`,
+which measured 1.00× / 1.70× / 2.83× / 3.11× at w=6 on this machine before
+regressing under SMT oversubscription. Their protoClojure twins carry the same
+shape and the same message count, and their self-reported `processed` value is
+the sum the actors computed, not a message count.
 
 Reporting rules:
 
