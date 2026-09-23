@@ -95,6 +95,12 @@ native error translation, `super[T].m`, `enum`, sealed
 hierarchies, named and default arguments for Scala-defined methods, extension
 methods and templates nested in an `object` pass.
 
+**Landed early (2026-09-23), with the D47 ruling:** by-name parameters
+(`x: => T`). They were not scheduled for any phase; `Future(expr)` needs them,
+so they were implemented as a general feature. What remains for a later phase is
+the part D53 records — honouring a by-name parameter at a call site the compiler
+cannot resolve to a declaration, which needs more than erased types give.
+
 **Already done in Phase 2** (Open question Q5): plain `super.m` is the same
 DESIGN §4.4 algorithm whether or not stackable traits are involved, so
 stackable traits work today — the classic

@@ -202,6 +202,49 @@ Prints:
 - A `def` can be nested inside another `def`, as a Python `def` can be nested
   inside a function.
 
+### Arguments that are not evaluated (by-name parameters)
+
+Fixture: [`tests/conformance/tutorial/02-python-js-by-name.scala`](../../tests/conformance/tutorial/02-python-js-by-name.scala)
+
+```scala
+@main def run(): Unit =
+  def orElse(v: String, fallback: => String): String = if v != "" then v else fallback
+  def expensive(): String =
+    println("computing the fallback")
+    "expensive"
+  println(orElse("cheap", expensive()))
+```
+
+Prints:
+
+```text
+cheap
+```
+
+Note what did *not* happen: "computing the fallback" was never printed, even
+though `expensive()` is written as an ordinary argument. The `=>` in
+`fallback: => String` makes the parameter **by name** — the argument is not
+evaluated at the call, only where the body reads the name, and once per read.
+
+In Python or JavaScript you get this by passing a function and calling it:
+
+```python
+def or_else(v, fallback):        # Python
+    return v if v else fallback()
+or_else("cheap", lambda: expensive())
+```
+
+```javascript
+const orElse = (v, fallback) => v || fallback();   // JavaScript
+orElse("cheap", () => expensive());
+```
+
+Scala's by-name parameter is the same mechanism with the `() =>` and the `()`
+hidden: the *caller* writes a plain expression, the *callee* writes a plain name.
+That is why it looks like an ordinary argument but behaves like a closure, and
+why reading a by-name parameter twice runs the argument twice. Chapter 5 (§5.9)
+has the rule and the one case where protoScala evaluates eagerly anyway.
+
 ## 2.6 Closures
 
 The counter idiom every JavaScript developer has written:

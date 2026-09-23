@@ -13,7 +13,9 @@ It is **not** a JVM replacement: there is no JVM, no sbt/Maven, no Java interop 
 
 protoScala is also a **platform validation project**: protoCore aims to be a solid base for implementing any language, and each new language exposes missing capabilities. Those capabilities are added to protoCore as part of this project — the first two are `ProtoMap`, a persistent map with GC-traced object keys, and `ProtoMPSCQueue`, a lock-free GC-traced actor mailbox; both also serve protoClojure and protoST.
 
-## A flavour of the language (target)
+## A flavour of the language
+
+Every line below runs on 0.3.0 today.
 
 ```scala
 case class Increment(by: Int)
@@ -27,10 +29,13 @@ val counter = Actor.spawn(0) { (state, msg) =>
 
 counter ! Increment(10)
 println((counter ? GetValue).await)          // 10
+println(Future(6 * 7).await)                 // 42 — Future takes its body by name
 
 val squares = for x <- List(1, 2, 3) yield x * x
 println(squares)                              // List(1, 4, 9)
-println(List.range(1, 101).map(BigInt(_)).product.toString.length)  // 158 — no overflow
+
+def factorial(n: Int): Int = if n == 0 then 1 else n * factorial(n - 1)
+println(factorial(100).toString.length)       // 158 — integers never overflow
 ```
 
 ## Project status
@@ -59,6 +64,9 @@ significant-indentation syntax:
   variables, typed, constructor, tuple, `::`, `List(a, rest*)`, alternatives,
   binders, stable identifiers, custom extractors, guards), pattern `val`s and
   `{ case ... }` literals, `isInstanceOf`/`asInstanceOf`;
+- **by-name parameters** `x: => T` on a `def`, a method or a plain constructor
+  parameter: the argument is not evaluated at the call and runs once per read in
+  the body (D53 records where the compiler cannot resolve the call site);
 - **for-comprehensions** (generators, guards, value definitions, patterns,
   `yield` and `do`) over `List`, `Option` and any class with
   `map`/`flatMap`/`withFilter`/`foreach`, with a lazy `withFilter`;
@@ -66,7 +74,8 @@ significant-indentation syntax:
   `List`;
 - **actors and futures, without a GIL**: `Actor.spawn(state)(handler)`, `!`,
   `?`, three priority bands, `Actor.stats`; `Future` with `await`, `map`,
-  `flatMap`, `recover` and `Future(() => e)`; a worker pool of real OS threads
+  `flatMap`, `recover` and `Future(e)` — the body is taken by name; a worker
+  pool of real OS threads
   with lock-free mailboxes and ready stacks; and an `await` inside a handler
   that **suspends cooperatively** — the worker is released, so an actor that
   asks another actor completes even with a single worker;
@@ -77,6 +86,9 @@ significant-indentation syntax:
 val counter = Actor.spawn(0) { (state, msg) => (state + msg, state + msg) }
 counter ! 1                      // tell: queue a message, return at once
 println((counter ? 41).await)    // ask:  a Future of the reply  ->  42
+
+val sink = Actor.spawn(0) { (state, msg) => state + msg }   // no reply to give
+println(Future(6 * 7).await)     // Future takes its body by name  ->  42
 ```
 
 Exceptions, `enum`, extension methods, the Phase 3 collections, string

@@ -30,6 +30,7 @@
 | Feature | Phase |
 |---|---|
 | `val`, `var`, `lazy val`, `def` (multiple parameter lists, default and named arguments, varargs `xs: Int*`) | 1 (defaults/named: 4) |
+| by-name parameters `x: => T` on a `def`, a method or a plain constructor parameter | 5 ✅ (D47, D53) |
 | `if`/`then`/`else`, `while`/`do`, blocks as expressions, `return` | 1 |
 | lambdas `x => e`, `(x, y) => e`, placeholder syntax `_ + 1` | 1 (placeholders: 2 ✅) |
 | infix, prefix (`-x`, `!b`, `~n`) and postfix-free method application | 1 |
@@ -40,6 +41,35 @@
 | `import` (selectors, renames `as`, wildcard `*`, `given` imports parsed only) | 1 (UMD prefixes: 6) |
 | top-level definitions (no wrapping `object` needed), `@main` methods | 1 |
 | `package` clauses (one namespace per file) | 6 |
+
+### 2.1 By-name parameters
+
+A parameter written `x: => T` is not evaluated at the call site. The caller
+wraps the argument in a zero-argument thunk and every read of the name in the
+body runs it, so an argument used twice evaluates twice and one never used never
+evaluates — Scala's rule.
+
+```scala
+def unless(cond: Boolean)(body: => Int): Int = if cond then 0 else body
+unless(true)({ println("never printed"); 1 })     // 0
+
+var n = 0
+def twice(body: => Int): Int = body + body
+twice({ n = n + 1; n })                           // 3, and n is 2
+```
+
+Scala reads the by-name marker off the callee's *static type*. protoScala erases
+types and dispatches dynamically, so the marker is only available where the
+compiler can name the callee. It is honoured at a call by name to a top-level or
+local `def` (any parameter list), a method of the template being compiled, a
+method of an `object`, a class's primary constructor, and a builtin whose by-name
+signature the runtime declares (`Future.apply`). Anywhere else the argument is
+evaluated once at the call — see **D53**, which is a real departure from Scala,
+not an implementation detail.
+
+Two forms are rejected outright, as scalac rejects them: a by-name parameter on a
+function literal (`(x: => Int) => x`), and a `val`, `var` or case-class
+constructor parameter, which would have to hold a thunk instead of a value.
 
 ## 3. Classes and objects (Phase 2)
 
@@ -116,7 +146,7 @@ Ask          ::= Expr '?' Expr                                   -- infix, retur
 
 | Receiver | Member | Meaning |
 |---|---|---|
-| `Actor` | `spawn(state)(handler)` | a new actor; `handler(state, msg)` must return `(newState, reply)` (D45) |
+| `Actor` | `spawn(state)(handler)` | a new actor; `handler(state, msg)` returns `(newState, reply)`, or a bare `newState` when there is no reply (D45) |
 | `Actor` | `isActor(x)`, `stats` | a predicate; `ActorStats(workers, messagesProcessed)` |
 | `Priority` | `High`, `Medium`, `Low` | the fields `0`, `1`, `2` (D52) |
 | an actor | `! msg` | tell, on the Medium band; `Unit` |
@@ -126,7 +156,7 @@ Ask          ::= Expr '?' Expr                                   -- infix, retur
 | a future | `await` | the value; raises the error of a failed future |
 | a future | `isCompleted`, `value` | `Boolean`; `Option[Try[T]]` (`None` while pending) |
 | a future | `map`, `flatMap`, `recover`, `onComplete` | combinators; the continuation runs on the completing thread (D48) |
-| `Future` | `apply(() => e)`, `successful(v)`, `failed(e)` | `apply` runs its body on the worker pool (D47) |
+| `Future` | `apply(e)`, `successful(v)`, `failed(e)` | `apply` takes its body **by name** and runs it on the worker pool (D47) |
 | `Thread` | `start(() => e)`; a thread's `join()` | a real OS thread in the collector's quorum (D49) |
 | `System` | `nanoTime()`, `currentTimeMillis()`, `getenv(name)` | `Long`, `Long`, `String` (D49) |
 
@@ -158,7 +188,7 @@ message)` ahead of Phase 3 (D44).
 | D30 | Reading a field of the instance under construction before its initialiser has run raises `NoSuchMethodError` (Scala reads the default value `0`/`null`) | no declared field defaults |
 | D31 | Methods cannot be overloaded (a second definition of a name in one template is an error); constructors may be overloaded by number of parameters only | types are erased |
 | D32 | Tuples have at most 22 elements (Scala 3 has `TupleXXL`) | `Tuple2`..`Tuple22` are case classes |
-| D33 | `Option.getOrElse` evaluates its default eagerly (by-name parameters are not supported yet) | no by-name parameters yet |
+| D33 | `Option.getOrElse` evaluates its default eagerly: it is a method reached through a dynamic send, where a by-name parameter is not honoured (D53) | D53 |
 | D34 | A pattern-matching function literal `{ case ... }` takes exactly one argument (Scala 3 also accepts it where a function of several parameters is expected) | no expected function type |
 | D35 | A refutable pattern generator written without Scala 3's `case` keyword — `for (Some(v) <- os)` — is accepted and filters. scalac 3.9 rejects it ("pattern's type `Some[Int]` is more specialized than the right hand side expression's type `Option[Int]`") and asks for `case`. protoScala accepts the pattern with or without `case` and filters either way | no static types to detect the narrowing |
 | D36 | For-comprehension desugaring differs where the result does not: `case` on an *irrefutable* generator pattern emits no `withFilter` step (scalac always inserts one), and `for (x <- xs; y = e)` emits two `map`s instead of dotty's single fused `map`. Both produce the values scalac produces; only the number of intermediate traversals differs | simpler desugaring |
@@ -170,15 +200,16 @@ message)` ahead of Phase 3 (D44).
 | D42 | A `MatchError` names the Scala class of the unmatched value: `MatchError: 5 (of class Int)`, where the JVM names the boxed class (`scala.MatchError: 5 (of class java.lang.Integer)`). Consistent with D14 (unqualified class names) and D29 (one integer type) | types are erased; there is no boxed class to name |
 | D43 | `await` suspends only a chain of protoScala frames each stopped at a call instruction. Inside a native higher-order method (`map`, `foreach`, `withFilter`, a `Future` continuation), or under an instruction that calls back into Scala without being a call site, it raises `UnsupportedOperationException` | a recursive VM cannot snapshot a C++ frame |
 | D44 | Until Phase 4 there are no exception values: a failed `Future` carries `RuntimeError(className, message)`, and `Try`/`Success`/`Failure` wrap it | exceptions arrive in Phase 4 |
-| D45 | An actor handler must return `(newState, reply)`; any other result raises `IllegalArgumentException` and fails that message | no static types to infer the intent |
+| D45 | An actor handler returns **either `(newState, reply)` or a bare `newState`**; the bare form means there is no reply to give and the ask's future completes with `()`. A `Tuple2` result is always read as the pair form, so an actor whose state is itself a pair returns it inside one. Only a handler that produces no value at all is rejected, with `IllegalArgumentException` | least surprise: a handler that only updates state should not have to invent a reply |
 | D46 | An actor lives as long as the session (it is anchored so the collector can reach it while only the C++ ready stacks refer to it); `Future.apply` creates one actor per call | a removable registry needs `ProtoMap` |
-| D47 | `Future.apply` takes a function, not a by-name parameter: `Future(() => expr)` | no by-name parameters |
+| D47 | `Future.apply` takes its body **by name**: `Future(expr)` and `Future { … }`, as in Scala. By-name parameters are honoured where the compiler can name the callee (D53) | least surprise: Scala's `Future` takes a by-name body |
 | D48 | `map`/`flatMap`/`recover`/`onComplete` run their continuation on the thread that completes the future, or on the caller when it is already complete; there is no `ExecutionContext`, and a continuation may not `await` | one scheduling entity |
 | D49 | `Thread` and `System` are runtime facilities, not the JVM's; `nanoTime` is monotonic, only differences are meaningful | no JVM |
 | D50 | Awaiting a future that fails, inside an actor, abandons the rest of the handler and that message's future inherits the failure | no `try`/`catch` until Phase 4 |
 | D51 | `actor.value` reads the state without sending a message, so it may observe a state older than a queued send | a lock-free read |
 | D52 | `Priority.High` / `Medium` / `Low` are the integers `0` / `1` / `2` on an object, not an `enum` | `enum` arrives in Phase 4 |
+| D53 | A by-name parameter is honoured only where the compiler resolves the call site to the declaration: a call by name to a top-level or local `def` (any parameter list, including a curried one), a method of the template being compiled, a method of an `object`, a class's primary constructor, and a builtin whose by-name signature the runtime declares (`Future.apply`). At any other call site — a method reached through a dynamic send, or a `def` taken as a function value — the argument is evaluated once at the call and each read of the parameter yields that value. scalac resolves all of these statically, so it stays lazy where protoScala does not | dynamic dispatch: a send carries no signature |
 
 D9–D25 are the provisional Phase 1 departures, D28–D42 the provisional
-Phase 2 departures and D43–D52 the provisional Phase 5 departures listed in
+Phase 2 departures and D43–D53 the provisional Phase 5 departures listed in
 [STATUS.md](STATUS.md#intentional-deviations), pending maintainer review.

@@ -31,8 +31,19 @@ departure with its `D` id.
 ## 13.2 An actor is a state and a handler
 
 `Actor.spawn(initialState)(handler)` creates an actor. The handler takes the
-current state and the incoming message, and must return the pair
-`(newState, reply)`.
+current state and the incoming message, and returns either the pair
+`(newState, reply)` or just the `newState` when there is nothing to reply
+(D45) — a handler that only updates state does not have to invent a reply.
+
+```scala
+val sink = Actor.spawn(0) { (s, m) => s + m }   // no reply
+sink ! 1
+println((sink ? 7).await)                       // () -- a Future[Unit]
+```
+
+A `Tuple2` result is always read as `(newState, reply)`, so an actor whose state
+is itself a pair returns it inside the pair form:
+`{ (s, m) => ((s._1 + 1, s._2 + m), m) }`.
 
 ```scala
 val counter = Actor.spawn(0) { (state, msg) =>
@@ -117,13 +128,14 @@ carries either a value or an error.
 | `f.recover(g)` | a failure becomes `g(error)`; a success passes through |
 | `f.onComplete(g)` | `g(Try[T])`, the primitive the three above are built on |
 
-`Future(() => expr)` runs a computation on the worker pool. Note the `() =>`:
-protoScala has no by-name parameters, so `Future` takes a **function** (D47).
+`Future(expr)` runs a computation on the worker pool. The body is taken **by
+name** (D47), exactly as in Scala, so the block form `Future { … }` works too and
+nothing is evaluated on the calling thread.
 
 ```scala
 val echo = Actor.spawn(0) { (s, m) => (s, m) }
-val chained = (echo ? 4).map(x => x + 1).flatMap(x => Future(() => x * 5))
-val recovered = Future(() => 1 / 0).recover(e => -1)
+val chained = (echo ? 4).map(x => x + 1).flatMap(x => Future(x * 5))
+val recovered = Future(1 / 0).recover(e => -1)
 println(chained.await.toString + " " + recovered.await.toString)
 ```
 
@@ -193,8 +205,9 @@ ArithmeticException 0
 
 Until exceptions arrive in Phase 4 there are no exception *values*, so a failed
 future carries a `RuntimeError` case class and `Try`/`Success`/`Failure` wrap it
-(D44). A handler that returns anything other than a pair fails that message the
-same way, with `IllegalArgumentException` (D45).
+(D44). Every value a handler returns is a valid result — a pair, or a bare new
+state (D45) — so the only rejected result is no value at all, which fails that
+message the same way, with `IllegalArgumentException`.
 
 ## 13.8 Threads and time
 
@@ -225,7 +238,7 @@ println(total.toString + " " + (System.nanoTime() >= started).toString)
 
 Prefer an actor when you want state; use `Thread.start` when you genuinely need
 an independent thread that is not a worker — a producer feeding the pool, for
-instance. `Future(() => …)` runs on the pool and never starts a thread of its
+instance. `Future(…)` runs on the pool and never starts a thread of its
 own.
 
 ## 13.9 Tuning and looking inside
@@ -257,9 +270,10 @@ copied by hand into this chapter.
 |---|---|
 | D43 | `await` suspends only a chain of protoScala frames each stopped at a call instruction; inside a native higher-order method or a `Future` continuation it raises `UnsupportedOperationException` |
 | D44 | There are no exception values yet: a failed `Future` carries `RuntimeError(className, message)`, wrapped by `Try`/`Success`/`Failure` |
-| D45 | An actor handler must return `(newState, reply)`; anything else fails that message |
+| D45 | An actor handler returns `(newState, reply)` or a bare `newState`; with no reply, `?` completes with `()`. A `Tuple2` is always read as the pair form |
 | D46 | An actor lives as long as the session; `Future.apply` creates one actor per call |
-| D47 | `Future.apply` takes a function, not a by-name parameter: `Future(() => expr)` |
+| D47 | `Future.apply` takes its body by name: `Future(expr)`, `Future { … }` |
+| D53 | A by-name parameter is honoured only where the compiler can name the callee; elsewhere the argument is evaluated (chapter 5, §5.9) |
 | D48 | Continuations run on the thread that completes the future (or on the caller when it is already complete); there is no `ExecutionContext`, and a continuation may not `await` |
 | D49 | `Thread` and `System` are runtime facilities, not the JVM's |
 | D50 | Awaiting a future that fails, inside an actor, abandons the rest of the handler; that message's future inherits the failure |

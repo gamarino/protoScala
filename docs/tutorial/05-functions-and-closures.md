@@ -1,9 +1,9 @@
 # 5. Functions and Closures
 
 > **Implementation status.** Everything in this chapter runs today, except
-> the forms listed here. Named and default arguments arrive in Phase 4;
-> by-name parameters (`x: => T`) are parsed and rejected with
-> `by-name parameters are not supported yet`. Since Phase 2, `List` carries
+> the forms listed here. Named and default arguments arrive in Phase 4.
+> By-name parameters (`x: => T`) work (§5.9), with the one limit D53 records.
+> Since Phase 2, `List` carries
 > `map`, `flatMap`, `filter`, `withFilter`, `foreach`, `head`, `tail`, `drop`,
 > `length`/`size`, `isEmpty`, `nonEmpty`, `apply`, `mkString` and `::`
 > (chapter 9); the rest of the collection API, and the other collection types,
@@ -12,7 +12,8 @@
 
 Functions are the centre of Scala. This chapter covers methods (`def`),
 function values (lambdas), closures, recursion and the two ways of deferring a
-computation: `lazy val` and parameterless `def`.
+computation: `lazy val` and parameterless `def` — and a third, the by-name
+parameter (§5.9).
 
 ## 5.1 `def`
 
@@ -247,3 +248,43 @@ opposite of a `lazy val`. Each mention of `next` runs its block again, so
 `first` is `1` and the second `next` is `2`. Use a `val` for a value, a
 `lazy val` for a value computed on demand, and a parameterless `def` for a
 computation that should run each time.
+
+## 5.9 By-name parameters
+
+Fixture: [`tests/conformance/tutorial/05-functions-by-name.scala`](../../tests/conformance/tutorial/05-functions-by-name.scala)
+
+```scala
+@main def run(): Unit =
+  def unless(cond: Boolean)(body: => Int): Int = if cond then 0 else body
+  println(unless(true)({ println("never printed"); 1 }))
+  var n = 0
+  def twice(body: => Int): Int = body + body
+  println(twice({ n = n + 1; n }).toString + " " + n)
+```
+
+Prints:
+
+```text
+0
+3 2
+```
+
+A parameter written `x: => T` is **by name**: the caller does not evaluate the
+argument. The compiler wraps it in a thunk and the body runs that thunk on every
+read of the name. So `unless(true)(…)` never prints "never printed", and `twice`
+evaluates its argument twice — `1 + 2`, leaving `n` at `2`. It is how `assert`,
+`withResource` and every "run this only if…" helper is written in Scala, and how
+`Future(expr)` (chapter 13) keeps its body off the calling thread.
+
+There is a limit worth knowing, because it is a real departure (**D53**). Scala
+reads the `=>` off the callee's static type; protoScala erases types and
+dispatches dynamically, so it can only honour the marker where it can *name* the
+callee at the call site: a call by name to a top-level or local `def` (any
+parameter list), a method of the class being compiled, a method of an `object`, a
+class's primary constructor, and the runtime's own by-name signatures. A method
+reached through an arbitrary receiver, or a `def` stored in a `val` and called
+through it, evaluates the argument once at the call instead. The arithmetic is
+still right; what is lost is the laziness.
+
+Two forms are rejected, exactly as scalac rejects them: a by-name parameter on a
+function literal, and a `val`, `var` or case-class constructor parameter.

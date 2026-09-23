@@ -97,8 +97,9 @@ Per LANGUAGE.md §2–§3, the rows delivered in Phase 2:
 
 Delivered in Phase 5 (DESIGN §8), the concurrency block:
 
-- [x] `Actor.spawn(state)(handler)`; a handler returns `(newState, reply)`
-      (D45). Actors are mutable protoCore objects anchored in a registry
+- [x] `Actor.spawn(state)(handler)`; a handler returns `(newState, reply)` or a
+      bare `newState` when there is no reply (D45). Actors are mutable
+      protoCore objects anchored in a registry
       pinned in a root slot, so the collector reaches every queued payload
       (D46).
 - [x] `a ! msg` (tell), `a ? msg` (ask, a `Future` of the reply),
@@ -116,7 +117,8 @@ Delivered in Phase 5 (DESIGN §8), the concurrency block:
       `ProtoContext::UnmanagedScope`. The pool starts on the first
       `Actor.spawn`, so a script that uses no actor pays nothing.
 - [x] `Future`: `await`, `isCompleted`, `value: Option[Try[T]]`, `map`,
-      `flatMap`, `recover`, `onComplete`, `Future(() => e)` (D47),
+      `flatMap`, `recover`, `onComplete`, `Future(e)` and `Future { … }` —
+      the body is taken **by name** (D47) —
       `Future.successful`, `Future.failed`, the printed forms
       `Future(<pending>)` / `Future(10)` / `Future(<failed: …>)`.
 - [x] **Cooperative `await` inside an actor**: the handler's call chain is
@@ -203,7 +205,8 @@ their reserved ranges.
 | 35 | `NE` | `[a b] -> [Boolean]` | Scala `!=` |
 | 36 | `NEG` | `[a] -> [-a]` | |
 | 37 | `NOT` | `[b] -> [!b]` | |
-| 38..63 | reserved | | Phase 1 additions |
+| 38 | `FORCE_THUNK` | `[v] -> [v()]` | a read of a by-name parameter (D47): runs a zero-argument function, passes any other value through (D53) |
+| 39..63 | reserved | | Phase 1 additions |
 | 64 | `MAKE_CLASS` | `[p1..pk m1..mn] -> [cls]` | operand: a ClassSpec constant |
 | 65 | `NEW` | `[cls a1..an] -> [obj]` | operand: SendSite (constructor key, n) |
 | 66 | `INVOKE_INIT` | `[cls this a1..an] -> [this']` | operand: SendSite (constructor key, n); returns the rebuilt instance (D28) |
@@ -286,7 +289,7 @@ while implementing the phase and has no numbered question.
 | D30 | Reading a field of the instance under construction before its initialiser has run raises `NoSuchMethodError` (Scala reads the default value `0`/`null`) | Q11 |
 | D31 | Methods cannot be overloaded (a second definition of a name in one template is an error); constructors may be overloaded by number of parameters only | Q11 |
 | D32 | Tuples have at most 22 elements (Scala 3 has `TupleXXL`) | — (Scala 3.9 behaviour differs only above 22) |
-| D33 | `Option.getOrElse` evaluates its default eagerly (by-name parameters are not supported yet) | Q7 |
+| D33 | `Option.getOrElse` evaluates its default eagerly: it is a method reached through a dynamic send, where a by-name parameter is not honoured (D53) | Q7 |
 | D34 | A pattern-matching function literal `{ case ... }` takes exactly one argument (Scala 3 also accepts it where a function of several parameters is expected) | Q12 |
 | D35 | A refutable pattern generator written without Scala 3's `case` keyword — `for (Some(v) <- os)` — is accepted and filters. scalac 3.9 rejects it ("pattern's type `Some[Int]` is more specialized than the right hand side expression's type `Option[Int]`") and asks for `case`. protoScala accepts the pattern with or without `case` and filters either way | — |
 | D36 | For-comprehension desugaring differs where the result does not: `case` on an *irrefutable* generator pattern emits no `withFilter` step (scalac always inserts one), and `for (x <- xs; y = e)` emits two `map`s instead of dotty's single fused `map`. Both produce the values scalac produces; only the number of intermediate traversals differs | — |
@@ -307,14 +310,15 @@ authorisation and recorded in [DECISIONS-LOG.md](DECISIONS-LOG.md) as
 |---|---|---|
 | D43 | `await` suspends only a chain of protoScala frames each stopped at a call instruction. Inside a native higher-order method (`map`, `foreach`, `withFilter`, a `Future` continuation), or under an instruction that calls back into Scala without being a call site (`==` reaching a user `equals`, a `MatchError`'s `toString`), it raises `UnsupportedOperationException` instead of suspending; the ask's future receives that failure and the actor stays alive | later |
 | D44 | Until Phase 4 there are no exception values: a failed `Future` carries `RuntimeError(className, message)`, and `Try`/`Success`/`Failure` (moved up from Phase 3) wrap it. `await` on a failed future raises the same error on the awaiting thread, which no user code can catch yet | Phase 4 |
-| D45 | An actor handler must return `(newState, reply)`; any other result raises `IllegalArgumentException` and fails that message, leaving the actor's state unchanged | (perm) |
+| D45 | An actor handler returns **either `(newState, reply)` or a bare `newState`**; the bare form means there is no reply to give and the ask's future completes with `()`. A `Tuple2` result is always read as the pair form, so an actor whose state is itself a pair returns it inside one. Only a handler that produces no value at all is rejected, with `IllegalArgumentException`. The actor keeps its previous state when the handler fails. **Overturned by the maintainer on 2026-09-23** (least surprise): the original D45 required the pair form strictly | (perm) |
 | D46 | An actor lives as long as the session: it is anchored in a registry so the GC can reach it and everything it holds while it is only referenced by the (C++) ready stacks. `Future.apply` creates one actor per call | P1 |
-| D47 | `Future.apply` takes a function, not a by-name parameter: write `Future(() => expr)` (by-name parameters need callee signatures at compile time, which a dynamic dialect has not) | later |
+| D47 | `Future.apply` takes its body **by name**: `Future(expr)` and `Future { … }`, as in Scala. By-name parameters are honoured where the compiler can name the callee (D53). **Overturned by the maintainer on 2026-09-23** (least surprise): the original D47 took a function, `Future(() => expr)` | (perm) |
 | D48 | `map`/`flatMap`/`recover`/`onComplete` run their continuation on the thread that completes the future, or immediately on the caller when it is already complete — there is no `ExecutionContext`. A continuation may not `await` (D43) | later |
 | D49 | `Thread` and `System` are runtime facilities, not the JVM's: `Thread.start(() => …)`, `t.join()`, `System.nanoTime()`, `System.currentTimeMillis()`, `System.getenv(name)` (`""` when unset). `nanoTime` is a monotonic clock; only differences are meaningful | (perm) |
 | D50 | Awaiting a future that fails, inside an actor, abandons the rest of the handler and the message's own future inherits the failure (there is no `try`/`catch` to resume into until Phase 4) | Phase 4 |
 | D51 | `actor.value` reads the state without sending a message, so it may observe a state older than a send that is still queued (protoClojure's `@actor`) | (perm) |
 | D52 | `Priority.High` / `Medium` / `Low` are the integers `0` / `1` / `2` on an object, not an `enum` (enums arrive in Phase 4) | Phase 4 |
+| D53 | A by-name parameter is honoured only where the compiler resolves the call site to the declaration: a call by name to a top-level or local `def` (any parameter list, including a curried one), a method of the template being compiled, a method of an `object`, a class's primary constructor, and a builtin whose by-name signature the runtime declares (`Future.apply`). At any other call site — a method reached through a dynamic send, or a `def` taken as a function value — the argument is evaluated once at the call and each read of the parameter yields that value. scalac resolves all of these statically, so it stays lazy where protoScala does not | later |
 
 ## Known issues / platform dependencies
 

@@ -4,6 +4,31 @@ All notable changes to protoScala are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- **`Future` takes its body by name** — `Future(expr)` and `Future { … }`, as in
+  Scala, instead of `Future(() => expr)`. The maintainer overturned D47 on
+  2026-09-23 on the ground of least surprise for the Scala programmer.
+- **An actor handler may return a bare `newState`** as well as
+  `(newState, reply)`. With no reply the ask's future completes with `()`, so `?`
+  on such an actor is a `Future[Unit]`. A `Tuple2` result is still read as the
+  pair form. The maintainer overturned D45 on 2026-09-23, same ground: a handler
+  that only updates state should not have to invent a reply.
+
+### Added
+
+- **By-name parameters** (`x: => T`) on a `def` (any parameter list, including a
+  curried one), a method, and a plain constructor parameter. The call site
+  compiles the argument into a thunk and the body forces it on every read, so an
+  argument used twice evaluates twice and one never used never evaluates —
+  verified against scalac 3.9.0. New opcode `FORCE_THUNK` (38).
+- **D53**: a by-name parameter is honoured only where the compiler resolves the
+  call site to the declaration. A method reached through a dynamic send, and a
+  `def` taken as a function value, evaluate the argument once at the call.
+  Scala resolves all of these from static types.
+
 ## [0.3.0] - 2026-09-23
 
 Phase 5: actors, priority bands and cooperative futures. Built against
@@ -13,7 +38,8 @@ so the minor version goes from 0.2.0 straight to 0.3.0.
 ### Added
 
 - **Actors** (DESIGN §8.1, §8.2): `Actor.spawn(state)(handler)` where a handler
-  returns `(newState, reply)` (D45); `a ! msg`, `a ? msg`,
+  returns `(newState, reply)` (D45; a bare `newState` is accepted since the
+  ruling of 2026-09-23, see [Unreleased]); `a ! msg`, `a ? msg`,
   `a.send(msg, priority)`, `a.ask(msg, priority)`, `a.value`,
   `Actor.isActor`, `Actor.stats`, the printed form `Actor(<state>)`.
 - **Three priority bands** per actor (`Priority.High`/`Medium`/`Low`, D52),
@@ -27,7 +53,8 @@ so the minor version goes from 0.2.0 straight to 0.3.0.
   suspension, so an actor never runs twice at once however many threads send
   to it. Checked by 8 threads × 25 000 sends at 1, 2, 8 and 16 workers.
 - **Futures** (DESIGN §8.3): `await`, `isCompleted`, `value: Option[Try[T]]`,
-  `map`, `flatMap`, `recover`, `onComplete`, `Future(() => e)` (D47),
+  `map`, `flatMap`, `recover`, `onComplete`, `Future(() => e)` (D47; taken by
+  name since the ruling of 2026-09-23, see [Unreleased]),
   `Future.successful`, `Future.failed`. Continuations run on the thread that
   completes the future (D48).
 - **Cooperative `await` inside an actor**: the handler's call chain is

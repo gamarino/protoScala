@@ -494,7 +494,7 @@ without a plan question of their own:
   is reported as `cannot override a mutable variable`, where scalac says
   "needs `override` modifier".
 
-### Concurrency (Phase 5, D43–D52)
+### Concurrency (Phase 5, D43–D53)
 
 Actors, priority bands and futures are described in
 [chapter 13](13-actors-and-futures.md); this is their departures catalogue.
@@ -509,15 +509,18 @@ Actors, priority bands and futures are described in
   carries `RuntimeError(className, message)`, and `Try`/`Success`/`Failure`
   (moved up from Phase 3) wrap it. `await` on a failed future raises the same
   error on the awaiting thread, which no user code can catch yet.
-- **D45** — an actor handler must return `(newState, reply)`; any other result
-  raises `IllegalArgumentException` and fails that message, leaving the
-  actor's state unchanged.
+- **D45** — an actor handler returns `(newState, reply)` or a bare `newState`,
+  which means there is no reply to give; `?` then completes with `()`. A
+  `Tuple2` result is always read as the pair form, so an actor whose state is a
+  pair returns it inside one. A handler that produces no value at all raises
+  `IllegalArgumentException` and fails that message, leaving the actor's state
+  unchanged.
 - **D46** — an actor lives as long as the session: it is anchored in a
   registry so the collector can reach it and everything it holds while it is
   only referenced by the (C++) ready stacks. `Future.apply` creates one actor
   per call.
-- **D47** — `Future.apply` takes a function, not a by-name parameter: write
-  `Future(() => expr)`.
+- **D47** — `Future.apply` takes its body by name, as in Scala: `Future(expr)`
+  and `Future { … }` both work.
 - **D48** — `map`/`flatMap`/`recover`/`onComplete` run their continuation on
   the thread that completes the future, or immediately on the caller when it
   is already complete — there is no `ExecutionContext`. A continuation may not
@@ -533,6 +536,12 @@ Actors, priority bands and futures are described in
   observe a state older than a send that is still queued.
 - **D52** — `Priority.High` / `Medium` / `Low` are the integers `0` / `1` / `2`
   on an object, not an `enum` (enums arrive in Phase 4).
+- **D53** — a by-name parameter is honoured only where the compiler can name the
+  callee: a call by name to a top-level or local `def`, a method of the template
+  being compiled, a method of an `object`, a class's primary constructor, and the
+  runtime's own by-name signatures. A method reached through a dynamic send, and
+  a `def` taken as a function value, evaluate the argument once at the call.
+  Scala resolves all of these from static types.
 
 ## 3.3 What is missing
 

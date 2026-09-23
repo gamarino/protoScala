@@ -430,7 +430,8 @@ runtimes share one actor model.
 case class Increment(by: Int)
 case object GetValue
 
-// An actor owns a state and a handler (state, msg) => (newState, reply).
+// An actor owns a state and a handler (state, msg) => (newState, reply), or
+// (state, msg) => newState when there is no reply to give (D45).
 val counter = Actor.spawn(0) { (state, msg) =>
   msg match
     case Increment(by) => (state + by, state + by)
