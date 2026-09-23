@@ -53,4 +53,34 @@ out=$(PROTOCORE_HEAP_LIMIT_CELLS=2000000 timeout 90s "$P" "$work/closures.scala"
 [[ $rc -eq 0 && "$out" == "-100000" ]] || { echo "FAIL (closures): exit $rc, '$out'"; exit 1; }
 out=$(PROTOCORE_HEAP_LIMIT_CELLS=2000000 timeout 90s "$P" "$T/conformance/06-recursion/fib-indent.scala" 2>&1); rc=$?
 [[ $rc -eq 0 && "$out" == "6765" ]] || { echo "FAIL (fib): exit $rc, '$out'"; exit 1; }
+# Object graphs (Phase 2): immutable case-class trees built, matched and
+# dropped every round; a for-comprehension building tuples; a mutable
+# instance updated in the loop. Expected values computed independently:
+# the sum over rounds r = 0..39 of the leaf values (s % 7) of build(10, r),
+# plus 4 tuples per round.
+cat >"$work/objects.scala" <<'SCALA'
+sealed trait Tree
+case class Leaf(v: Int) extends Tree
+case class Node(l: Tree, r: Tree) extends Tree
+def build(d: Int, s: Int): Tree =
+  if d == 0 then Leaf(s % 7) else Node(build(d - 1, 2 * s + 1), build(d - 1, 2 * s + 2))
+def sum(t: Tree): Int = t match
+  case Leaf(v) => v
+  case Node(l, r) => sum(l) + sum(r)
+class Counter:
+  var n = 0
+@main def run(): Unit =
+  val c = new Counter
+  var total = 0
+  var round = 0
+  while round < 40 do
+    total += sum(build(10, round))
+    val ps = for (x <- List(1, 2, 3, 4); y <- List(x, x + 1) if (x + y) % 2 == 1) yield (x, y)
+    total += ps.length
+    c.n += 1
+    round += 1
+  println(total.toString + " " + c.n)
+SCALA
+out=$(PROTOCORE_HEAP_LIMIT_CELLS=2000000 timeout 90s "$P" "$work/objects.scala" 2>&1); rc=$?
+[[ $rc -eq 0 && "$out" == "123037 40" ]] || { echo "FAIL (objects): exit $rc, '$out'"; exit 1; }
 echo OK

@@ -127,6 +127,16 @@ WORKLOADS = [
      "py": (PY_TWINS_DIR / "factorial_100.py", {}, FACT100),
      "st": None,
      "clj": (PROTOCLJ_BENCH / "factorial-100.clj", FACT100)},
+    {"name": "attr_lookup", "scala": "attr_lookup.scala",
+     "what": "3 field reads x 100000", "origin": "protoPython / protoST",
+     "py": (PROTOPYTHON_BENCH / "attr_lookup.py", {"BENCH_N": "100000"}, "600000"),
+     "st": (PROTOST_BENCH / "attr_lookup.st", "600000"),
+     "clj": None},
+    {"name": "object_tree", "scala": "object_tree.scala",
+     "what": "build, path-copy and fold a 131071-object case-class tree", "origin": "protoScala",
+     "py": (PY_TWINS_DIR / "object_tree.py", {}, "131071 278364170 725606090"),
+     "st": None,
+     "clj": None},
 ]
 
 # Workloads of the sibling suites that Phase 1 cannot express. Listed in the
@@ -139,8 +149,6 @@ PENDING = [
     ("sum_squares", "protoClojure", "Phase 3 (collections)",
      "needs a built list plus `map` and a reduction (`sum`/`foldLeft`); "
      "Phase 1 lists only offer `foreach`."),
-    ("attr_lookup", "protoPython / protoST", "Phase 2 (classes)",
-     "reads three fields of an object."),
     ("exception_latency", "protoPython / protoST", "Phase 4 (exceptions)",
      "`throw` and `try`/`catch`."),
     ("actor benchmarks", "protoST / protoClojure", "Phase 5 (actors)",
@@ -595,6 +603,8 @@ def write_report(path, meta, columns, workloads, results, jvm_compile, cold):
         "fib30": "protoClojure's `fib.clj`; CPython/protopy run `call_recursion.py` with `BENCH_N=30`.",
         "factorial_100": "Declared `BigInt` so the JVM does not overflow (Int at 13!, Long at 21!); "
                          "protoScala promotes automatically (D1).",
+        "object_tree": "the deep-object-graph workload of DESIGN §1; CPython runs the "
+                       "__slots__ twin in comparable/python/.",
     }
     for w in workloads:
         L.append(f"| `{w['name']}` | {w['what']} | {w['origin']} | {notes.get(w['name'], '')} |")

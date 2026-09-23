@@ -25,9 +25,17 @@ automatically, D1).
 | `fib30.scala` | recursive `fib(30)` | protoClojure `fib.clj`, protoPython `call_recursion.py` (`BENCH_N=30`) |
 | `sum_loop.scala` | sum of 0..1000000 | protoClojure `sum-loop.clj`, `comparable/python/sum_loop.py` |
 | `factorial_100.scala` | `100!` as a `BigInt` (158 digits) | protoClojure `factorial-100.clj`, `comparable/python/factorial_100.py` |
+| `attr_lookup.scala` | 3 field reads × 100000 | protoPython `attr_lookup.py` (`BENCH_N=100000`), protoST `attr_lookup.st` |
+| `object_tree.scala` | build, path-copy and fold a 131071-object case-class tree | `comparable/python/object_tree.py` |
 
 `comparable/python/` holds the CPython/protopy twins of the protoClojure
-workloads, which protoPython's suite does not have.
+workloads, which protoPython's suite does not have, and of `object_tree`.
+
+`object_tree` is protoScala's own twin set: no sibling suite has it. It is
+the deep-object-graph, persistent-structure workload DESIGN §1 names as the
+kind of work protoScala is for (attribute lookup, structural sharing and
+pattern matching over an immutable graph), as opposed to the integer loops
+that dominate the rest of the table.
 
 Every comparable file is also a CTest case (`benchmarks/<file>`): it runs once
 through the conformance runner and must print its `EXPECT` value, so a broken
@@ -35,9 +43,8 @@ benchmark fails `ctest`.
 
 **Pending** (need later phases; not approximated): `list_append` and
 protoClojure's `sum-squares` (Phase 3 collections — Phase 1 has no
-list-building operation and no `map`/reduction), `attr_lookup` (Phase 2
-classes), `exception_latency` (Phase 4 exceptions), the actor benchmarks
-(Phase 5).
+list-building operation and no `map`/reduction), `exception_latency`
+(Phase 4 exceptions), the actor benchmarks (Phase 5).
 
 ## Running
 

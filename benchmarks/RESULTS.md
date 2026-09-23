@@ -12,6 +12,7 @@ average, per-runtime medians, the JVM compile times and the cold-start result:
 | Date | Report | protoScala ÷ CPython (geomean) | Notes |
 |---|---|---:|---|
 | 2026-09-22 | [2026-09-22-suite.md](reports/2026-09-22-suite.md) | 0.74× (8 workloads) | commit `154ab1a`; load 2.9-3.9; all 7 columns, every cell verified |
+| 2026-09-22 | [2026-09-22-phase2.md](reports/2026-09-22-phase2.md) | 1.06× (4 workloads: `attr_lookup`, `object_tree`, `fib`, `tak`) | Phase 2: `attr_lookup` and `object_tree` added; commit `e8f66a1` (the working tree added only the two benchmark files and their Python twin, no runtime change); load 3.88 / 3.10 / 3.25 at start and 3.78 / 3.31 / 3.31 at end — a shared machine, so the absolute milliseconds are noisier than the ratios; every cell verified |
 
 The latest table is also in the top-level README ("Performance").
 
@@ -59,3 +60,64 @@ The suite run of 2026-09-22 (load average 2.9-3.9) re-measured cold start with
 21 runs per case: script 17.43 ms and REPL 18.66 ms for the RelWithDebInfo
 `build_release`; 17.99 / 18.73 ms for a Release build in `build_bench` — all
 below target ([report](reports/2026-09-22-suite.md#cold-start)).
+
+## Cold start (Phase 2)
+
+The cold-start target was raised from < 20 ms to < 25 ms in Phase 2 (DECISIONS-LOG,
+2026-09-22; DESIGN §1): the embedded Scala prelude adds ~1.2 ms to every start and the
+standard library will keep growing.
+
+Task 11 measured the prelude's cost on DEV12 (AMD Ryzen 5 5500U), `build_bench` with
+`-DCMAKE_BUILD_TYPE=Release`, `benchmarks/cold-start.sh <binary> 21`. The baseline was
+taken by stashing the prelude change, rebuilding the same tree with the same flags and
+restoring it. Every one of the 18 measurements verified its output (`verified=21/21`);
+the two `FAIL` marks below are timing only, against the then-current 20 ms target.
+
+| Run | script median (ms) | REPL median (ms) |
+|---|---|---|
+| Baseline `a59824d` 1 | 18.28 | 18.98 |
+| Baseline `a59824d` 2 | 18.22 | 18.76 |
+| Baseline `a59824d` 3 | 18.19 | 19.13 |
+| With prelude 1 | 19.60 | 19.85 |
+| With prelude 2 | 18.93 | 19.93 |
+| With prelude 3 | 19.50 | 20.37 (over the old 20 ms target) |
+| With prelude 4 | 18.82 | 19.97 |
+| With prelude 5 | 19.23 | 20.52 (over the old 20 ms target) |
+| With prelude 6 | 19.21 | 19.94 |
+
+`perf stat -r 3 build_bench/protoscala examples/hello.scala`, before (`a59824d`) and
+after (`ee3b56a`): elapsed 18.58 ms ± 11.2 % → 19.70 ms ± 4.6 %; task-clock 13.78 →
+15.12 ms; cycles 44.0 M → 50.1 M; instructions 29.8 M → 35.9 M; page faults 4 405 →
+4 494. The prelude costs about 1.1–1.3 ms (≈ 6 M cycles) — the parse, compile and run
+of its ~30 lines. The remaining ~18 ms is pre-existing start-up (protoCore space
+set-up, ~4.4 k page faults, primitive installation).
+
+The suite run of 2026-09-22 (`--name phase2`, commit `e8f66a1`, load 3.8–3.9 on a
+shared machine) re-measured cold start with 21 runs per case, all verified, all below
+the 25 ms target ([report](reports/2026-09-22-phase2.md#cold-start)):
+
+| Build | Case | Runs | Verified | Median (ms) |
+|---|---|---:|---:|---:|
+| `build_release` (RelWithDebInfo) | script | 21 | 21 | 18.79 |
+| `build_release` (RelWithDebInfo) | REPL | 21 | 21 | 20.46 |
+| `build_bench` (Release) | script | 21 | 21 | 19.04 |
+| `build_bench` (Release) | REPL | 21 | 21 | 20.31 |
+
+## Phase 2 workloads
+
+The `2026-09-22-phase2.md` run added the two workloads that exercise the object model,
+which is what protoScala is built for (DESIGN §1: an agile, interoperable, very simple
+Scala — not a fast one; the workloads that matter are actors, persistent structures and
+deep object graphs, not integer loops):
+
+- `attr_lookup` — 100000 iterations reading three fields of an object. Twin of
+  protoPython's `attr_lookup.py` (`BENCH_N=100000`) and protoST's `attr_lookup.st`;
+  this closes the last Phase 2 entry of the pending list.
+- `object_tree` — build a complete binary tree of case classes (depth 16, 131071
+  objects), path-copy its leftmost spine so the copy shares every right subtree with
+  the original, and fold both versions with pattern matching. protoScala's own twin
+  set: no sibling suite has it, and the CPython/protopy twin
+  (`comparable/python/object_tree.py`) uses `__slots__` classes.
+
+The measured medians are in the report and are not interpreted further here;
+performance is not a Phase 2 goal and nothing was tuned for these numbers.
