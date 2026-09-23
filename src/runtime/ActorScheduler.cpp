@@ -243,18 +243,24 @@ void ActorScheduler::applyHandlerResult(proto::ProtoContext* ctx, ActorState* a,
                                         const proto::ProtoObject* future) {
     const RuntimeLayout& L = *layout_;
     auto* actor = const_cast<proto::ProtoObject*>(a->actor);
-    const bool isTuple2 =
-        r && r != PROTO_NONE && r->getAttribute(ctx, L.tuple2Key) == PROTO_TRUE;
-    if (!isTuple2)
+    // D45: a handler returns either `(newState, reply)` or a bare `newState`.
+    // A handler that only updates state should not have to invent a reply, so
+    // the bare form is accepted and the ask's future completes with `()`.
+    if (!r || r == PROTO_NONE)
         throw ScalaError("IllegalArgumentException",
-                         "an actor handler must return (newState, reply), got " +
-                             typeName(ctx, L, r));
-    actor->setAttribute(ctx, L.actorStateKey, r->getOwnAttributeDirect(ctx, L.tupleFieldKey[1]));
-    if (future && future != PROTO_NONE)
-        futures::complete(ctx, L, future, r->getOwnAttributeDirect(ctx, L.tupleFieldKey[2]), false);
+                         "an actor handler must return (newState, reply) or newState, got no "
+                         "value at all");
+    const bool isTuple2 = r->getAttribute(ctx, L.tuple2Key) == PROTO_TRUE;
+    const proto::ProtoObject* newState =
+        isTuple2 ? r->getOwnAttributeDirect(ctx, L.tupleFieldKey[1]) : r;
+    const proto::ProtoObject* reply =
+        isTuple2 ? r->getOwnAttributeDirect(ctx, L.tupleFieldKey[2]) : L.unit;
+    actor->setAttribute(ctx, L.actorStateKey, newState);
+    if (future && future != PROTO_NONE) futures::complete(ctx, L, future, reply, false);
 }
 
-// Runs one message: handler(state, msg) must return (newState, reply) (D45).
+// Runs one message: handler(state, msg) returns (newState, reply) or a bare
+// newState, which means there is no reply to give (D45).
 // The actor keeps its previous state when the handler fails (DESIGN §8.4).
 void ActorScheduler::deliver(proto::ProtoContext* ctx, ActorState* a,
                              const proto::ProtoObject* envelope, bool* suspended) {
