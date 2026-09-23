@@ -135,14 +135,23 @@ suspension. **`fan-out` regresses as workers are added and the spreads are
 narrow enough that this is not noise**: protoScala falls from 104,384 msg/s
 at 1 worker to 56,475 msg/s at 16 (-46%), while protoClojure rises from
 314,711 to 507,122 (+61%) over the same range. protoScala's mailboxes are
-still the CAS-list fallback (`protoscala --version` reports it explicitly);
-that the fallback's compare-and-swap push-and-retry and its per-turn,
-three-band backlog scan are *why* `fan-out` regresses under 1000-actor
-contention is a **plausible but UNCONFIRMED hypothesis** — no profiling was
-done to isolate it, and no other candidate (ready-queue contention, GC
-pressure from 1000 live actors) was ruled out. It is the first row to
-re-measure once `ProtoMPSCQueue` lands, not an established explanation. Full
-reading, with every mode and worker count:
+still the CAS-list fallback (`protoscala --version` reports it explicitly).
+
+That the fallback was *why* `fan-out` regresses was recorded as a plausible
+but unconfirmed hypothesis. It has since been measured, and it is **partly
+confirmed — not confirmed**. Building the same protoScala against a protoCore
+that provides `ProtoMPSCQueue` raises `fan-out` by 62% at 1 worker and by
+103% at 16, and shrinks the fall from 1 to 16 workers from -42% to -27% (9
+interleaved samples per cell, protoClojure as the load control). The
+direction does not change: protoScala still loses throughput as workers are
+added while protoClojure gains 66% over the same range, so the mailbox was a
+large part of the cost and not the whole cause. The other candidates
+ready-queue contention and the per-turn three-band backlog scan remain
+untested. **None of this is shipped**: `ProtoMPSCQueue` is not in protoCore
+master, the released protoScala still uses the CAS-list mailbox, and the
+table above is still the one that describes it. Measurement and method:
+[benchmarks/reports/2026-09-23-actors-v3-pmq.md](benchmarks/reports/2026-09-23-actors-v3-pmq.md).
+Full reading, with every mode and worker count:
 [benchmarks/RESULTS.md](benchmarks/RESULTS.md). protoScala's actors carry
 protoCore objects that the collector traces, which is a deliberate cost of
 the design (DESIGN §8.4), not an accident.
