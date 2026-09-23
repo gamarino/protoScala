@@ -127,30 +127,65 @@ spread:
 | priority | 118,575 | 1 worker | no twin |
 
 Across the four comparable shapes, protoScala runs at **0.11×-0.83×**
-protoClojure's median rate (protoClojure is 1.2×-9× faster, depending on
-mode) — consistent with the superseded run's 0.10×-0.89×, so this gap is not
-an artifact of the earlier run's coarser measurement. `await` completes at
-every worker count **including one**, which is the point of the cooperative
-suspension. **`fan-out` regresses as workers are added and the spreads are
-narrow enough that this is not noise**: protoScala falls from 104,384 msg/s
-at 1 worker to 56,475 msg/s at 16 (-46%), while protoClojure rises from
-314,711 to 507,122 (+61%) over the same range. protoScala's mailboxes are
-still the CAS-list fallback (`protoscala --version` reports it explicitly).
+protoClojure's median rate on *these scripts* — but see the correction
+below: for `fan-out` that ratio compares two different workloads that share
+a name. `await` completes at every worker count **including one**, which is
+the point of the cooperative suspension. protoScala's mailboxes are still
+the CAS-list fallback (`protoscala --version` reports it explicitly).
 
-That the fallback was *why* `fan-out` regresses was recorded as a plausible
-but unconfirmed hypothesis. It has since been measured, and it is **partly
-confirmed — not confirmed**. Building the same protoScala against a protoCore
-that provides `ProtoMPSCQueue` raises `fan-out` by 62% at 1 worker and by
-103% at 16, and shrinks the fall from 1 to 16 workers from -42% to -27% (9
-interleaved samples per cell, protoClojure as the load control). The
-direction does not change: protoScala still loses throughput as workers are
-added while protoClojure gains 66% over the same range, so the mailbox was a
-large part of the cost and not the whole cause. The other candidates
-ready-queue contention and the per-turn three-band backlog scan remain
-untested. **None of this is shipped**: `ProtoMPSCQueue` is not in protoCore
-master, the released protoScala still uses the CAS-list mailbox, and the
-table above is still the one that describes it. Measurement and method:
-[benchmarks/reports/2026-09-23-actors-v3-pmq.md](benchmarks/reports/2026-09-23-actors-v3-pmq.md).
+#### Correction (v4): the `fan-out` comparison was not like-for-like
+
+An earlier version of this section stated that protoScala's actors are
+roughly 2×-5× slower than protoClojure's and that `fan-out` regresses as
+workers are added *where protoClojure improves*. The worker-count curve
+measured afterwards shows **that comparison was invalid**, and the tables
+above inherit the flaw. What the full curve establishes:
+
+- **The two `fan-out` scripts measure different work.** protoScala's rotates
+  its target on every send, so nearly every message is a cold wake;
+  protoClojure's sends 1000 consecutive messages to one actor, so 999 of
+  every 1000 coalesce into an already-claimed actor. **Run with protoScala's
+  rotating shape, protoClojure collapses too, and harder**: 143,900 → 97,100
+  → 78,400 → 64,100 msg/s at 1, 4, 6 and 16 workers — **−55%**, against
+  **−32%** for protoScala's `ProtoMPSCQueue` variant over the same window.
+  protoClojure's own batched script, run minutes apart on the same binary,
+  held its 231k → 448k → 418k rise. Equalising the shape **reverses the
+  ranking from 2 workers up**.
+- **The scheduler does scale; `fan-out` specifically does not.** On the same
+  scheduler, the same binaries and the same interleaved run, **`MPMC` rises
+  +113%** from 1 to 4 workers (154,322 → 329,335 msg/s) and is still **+81%**
+  on its 1-worker figure at 16 workers.
+- **`fan-out` is producer-bound in its send path.** An isolated sender
+  reaches 113,600 sends/s against the 87,238 msg/s the benchmark observes at
+  1 worker, and the send loop itself slows from 8.80 s to 18.44 s as workers
+  go 1 → 16 with the work held fixed. 78-99% of the measurable window is
+  inside the sender's loop, not the pool's.
+- **The `MPSC` "−11% with the queue" reported in v3 does not reproduce** — it
+  was noise from two worker counts with overlapping bands. Across the full
+  curve the queue is a wash at 1 worker and better at every higher count.
+- **`single` stayed flat**, as its single-method invariant requires, which is
+  the harness sanity check.
+
+None of this makes protoScala fast, and it is not claimed to. protoScala is
+an agile, interoperable, easily integrable and very simple Scala — **not a
+fast one**; at 1 worker on the identical rotating shape it is still 14%
+behind protoClojure. The honest correction is narrower and it is this: the
+earlier cross-runtime `fan-out` comparison was not measuring the same work,
+the scheduler scales on `MPMC`, and `fan-out`'s ceiling is in its producer.
+
+**Known gap.** No mode in the suite above can exhibit a rise up to the 6
+physical cores of this machine: `single` has one producer and one actor,
+`fan-out` one producer, `MPSC` four producers against one actor, and `MPMC`
+four producers against four actors — so each is capped by its own structural
+concurrency, 1 or 4, and not by the core count. **No conclusion about
+protoScala's 6-core ceiling can be drawn from these numbers.**
+
+**Nothing involving `ProtoMPSCQueue` is shipped**: it is not in protoCore
+master, the released protoScala still uses the CAS-list mailbox, and every
+queue figure quoted here describes a branch build that no released
+protoScala uses. Measurement and method:
+[benchmarks/reports/2026-09-23-actors-v4-curve.md](benchmarks/reports/2026-09-23-actors-v4-curve.md)
+(superseding [v3](benchmarks/reports/2026-09-23-actors-v3-pmq.md)'s reading).
 Full reading, with every mode and worker count:
 [benchmarks/RESULTS.md](benchmarks/RESULTS.md). protoScala's actors carry
 protoCore objects that the collector traces, which is a deliberate cost of

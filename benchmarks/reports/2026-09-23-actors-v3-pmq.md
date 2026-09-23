@@ -1,5 +1,43 @@
 # protoScala actor benchmarks — 2026-09-23, CAS list against `ProtoMPSCQueue`
 
+> ## ⚠ Partly superseded by [`2026-09-23-actors-v4-curve.md`](2026-09-23-actors-v4-curve.md)
+>
+> **The measurements below stand; two conclusions drawn from them do not.**
+> Nothing in this file has been rewritten. What v4 overturns, precisely:
+>
+> 1. **This report measured only w=1 and w=16.** Two points cannot tell "does
+>    not scale" apart from "scales, then pays oversubscription". v4 measured
+>    1, 2, 3, 4, 5, 6, 8, 12 and 16 on the same two binaries and found a real
+>    but **one-worker-wide** scaling region with the queue (+16.6% from w=1 to
+>    the w=2 peak), breaking at w=3 — well inside the 6 physical cores.
+> 2. **The `MPSC` "−11% with the queue" recorded here does not reproduce: it
+>    was noise.** It came from three samples at two worker counts with
+>    overlapping bands. Across the full curve the queue is a **wash at w=1**
+>    (145,636 against 147,022, −0.9%) and **better at every higher worker
+>    count**: +28% at w=2, +23% at w=3, +19% at w=6, +20% at w=8, +7% at w=16.
+>    The sign anomaly is closed; the queue is neutral at w=1 and a modest win
+>    from w=2 up.
+> 3. **The comparison against protoClojure that motivates this report is not
+>    like-for-like.** The two `fan-out` scripts measure different work —
+>    protoScala rotates its target on every send, protoClojure sends 1000
+>    consecutive messages per actor. Given protoScala's rotating shape,
+>    protoClojure collapses too, and harder: 143,900 → 97,100 → 78,400 →
+>    64,100 msg/s at w=1, 4, 6, 16 (**−55%**, against protoScala-with-queue's
+>    −32%). So "protoScala loses throughput as workers are added while
+>    protoClojure gains" is a property of the two scripts, not of the two
+>    schedulers, and the ranking reverses from w=2 up once the shape is equal.
+> 4. **The remaining regression is not the scheduler at large.** `MPMC` rises
+>    **+113%** to its w=4 peak on the same scheduler and the same binaries.
+>    `fan-out` is **producer-bound in its send path**: an isolated sender
+>    reaches 113,600 sends/s against 87,238 msg/s observed at w=1, and the send
+>    loop slows from 8.80 s to 18.44 s as workers go 1 → 16.
+> 5. **Known gap:** no mode in this suite can exhibit a rise up to the 6
+>    physical cores; every mode is capped by 1 or 4 producers or by the
+>    single-method invariant.
+>
+> `ProtoMPSCQueue` is still **not merged**, so every queue number here and in
+> v4 describes a branch build that no released protoScala uses.
+
 > **This does not supersede [`2026-09-23-actors-v2.md`](2026-09-23-actors-v2.md).**
 > That report describes the *shipped* configuration and still does.
 > `ProtoMPSCQueue` (protoCore `feature/mpsc-queue`) **has not been merged**:

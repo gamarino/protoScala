@@ -23,7 +23,9 @@ Actor runs (`benchmarks/actor-bench.sh`) are dated reports in the same folder:
 | Date | Report | Notes |
 |---|---|---|
 | 2026-09-23 | [2026-09-23-actors.md](reports/2026-09-23-actors.md) | **The 0.3.0 release run** (superseded by the row below — kept for history). 7 modes × 6 worker counts, all 42 cells verified; CAS-list mailbox; load 3.59 → 9.09 on a shared machine; protoClojure measured the same day but **as a separate block, not interleaved**; **1 sample per cell, no spread reported** |
-| 2026-09-23 | [2026-09-23-actors-v2.md](reports/2026-09-23-actors-v2.md) | **Interleaved re-run superseding the row above.** Same 7 modes × 6 workers, **5 samples per cell, round-robin across modes, worker counts and runtimes** (protoScala sample immediately followed by the matching protoClojure sample), median + `[min-max]` spread for every cell; load 2.96 at start, 9.51 at midpoint, 9.68 at end; the protoClojure gap (0.11×-0.83×, was 0.10×-0.89×) and the `fan-out` worker regression (protoScala -46% from w=1 to w=16 vs protoClojure +61%) both reproduce with narrow spreads |
+| 2026-09-23 | [2026-09-23-actors-v2.md](reports/2026-09-23-actors-v2.md) | **Interleaved re-run superseding the row above.** Same 7 modes × 6 workers, **5 samples per cell, round-robin across modes, worker counts and runtimes** (protoScala sample immediately followed by the matching protoClojure sample), median + `[min-max]` spread for every cell; load 2.96 at start, 9.51 at midpoint, 9.68 at end; the protoClojure gap (0.11×-0.83×, was 0.10×-0.89×) and the `fan-out` worker regression (protoScala -46% from w=1 to w=16 vs protoClojure +61%) both reproduce with narrow spreads — **but see v4: the `fan-out` comparison is not like-for-like** |
+| 2026-09-23 | [2026-09-23-actors-v3-pmq.md](reports/2026-09-23-actors-v3-pmq.md) | CAS list against `ProtoMPSCQueue` at **w=1 and w=16 only**. Its `MPSC` "−11% with the queue" was noise and does **not** reproduce on the full curve (see v4). `ProtoMPSCQueue` is **not merged**; the shipped binary uses the CAS-list mailbox |
+| 2026-09-23 | [**2026-09-23-actors-v4-curve.md**](reports/2026-09-23-actors-v4-curve.md) | **The worker-count curve, 1-2-3-4-5-6-8-12-16, both mailbox variants, interleaved.** Overturns the cross-runtime `fan-out` reading of v2/v3: given protoScala's rotating shape **protoClojure collapses too, −55% w=1→w=16** against protoScala-with-queue's −32%, so the two scripts were measuring different work. `MPMC` **rises +113%** to w=4 on the same scheduler; `fan-out` is **producer-bound in its send path** (isolated sender 113,600/s vs 87,238 observed; send loop 8.80 s → 18.44 s as w goes 1→16). Records that **no mode in the suite can show a rise to the 6 physical cores** |
 
 ## Actors (Phase 5)
 
@@ -59,12 +61,25 @@ What the run says, unadjusted:
   the physical core count (protoST's measured ceiling).
 - `single` is flat by construction: the single-method invariant serialises one
   actor.
-- **`fan-out` regresses as workers are added** (97k → 54k from 1 to 8 workers)
-  where protoClojure improves. The fallback mailbox rebuilds a `ProtoList`
-  under a compare-and-swap on every push and retries under contention, and the
-  end-of-turn backlog check reads all three bands; with 1000 actors those two
-  costs meet. This row is the first thing to re-measure once `ProtoMPSCQueue`
-  lands. Recorded, not tuned away.
+- **`fan-out` regresses as workers are added** (97k → 54k from 1 to 8 workers).
+  ~~where protoClojure improves~~ — **corrected by
+  [v4](reports/2026-09-23-actors-v4-curve.md):** protoClojure improves only on
+  *its own* `fan-out` script, which sends 1000 consecutive messages per actor;
+  run with protoScala's rotating-target shape it collapses too, and harder
+  (**−55%** from w=1 to w=16 against protoScala-with-queue's −32%). The two
+  scripts measure different work, so this row never compared the two
+  schedulers. v4 also puts 78-99% of the measurable window **inside the
+  sender's loop** — `fan-out` is producer-bound — and shows `MPMC` rising
+  **+113%** to w=4 on the same scheduler. The fallback mailbox rebuilds a
+  `ProtoList` under a compare-and-swap on every push and retries under
+  contention, and the end-of-turn backlog check reads all three bands; with
+  1000 actors those two costs meet, and `ProtoMPSCQueue` removes a large
+  constant factor (+44% to +134%) without changing the shape. Recorded, not
+  tuned away. **`ProtoMPSCQueue` is not merged**; the shipped binary uses the
+  CAS-list mailbox.
+- **Known gap:** none of these modes can exhibit a rise up to the 6 physical
+  cores — each is capped by 1 or 4 producers, or by the single-method
+  invariant, not by the core count.
 - High-band ask latency under a 200k-message Low-band flood: p50 30–42 µs
   across all worker counts, p99 ≈ 2.6 ms (the tail of a loaded host).
 
