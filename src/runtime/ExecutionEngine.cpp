@@ -2,6 +2,7 @@
 #include "compiler/GlobalTable.h"
 #include "compiler/BytecodeModule.h"
 #include "runtime/Errors.h"
+#include "runtime/FutureYield.h"
 #include "runtime/StackGuard.h"
 #include "runtime/Values.h"
 #include "protoCore.h"
@@ -17,15 +18,9 @@ namespace {
 thread_local ActiveCallContext tl_active{};
 thread_local bool tl_activeSet = false;
 
-struct ActiveGuard {
-    ActiveCallContext saved;
-    bool wasSet;
-    ActiveGuard(ExecutionEngine* e, const RuntimeLayout* l) : saved(tl_active), wasSet(tl_activeSet) {
-        tl_active = ActiveCallContext{e, l};
-        tl_activeSet = true;
-    }
-    ~ActiveGuard() { tl_active = saved; tl_activeSet = wasSet; }
-};
+// Native frames between the running bytecode frame and the current C++ frame
+// (D43): 1 while a native method runs, more when a native re-entered the VM.
+thread_local unsigned tl_nativeDepth = 0;
 
 const char* opSymbol(Op op) {
     switch (op) {
@@ -52,13 +47,27 @@ std::string plainName(std::string n) {
 
 const ActiveCallContext* activeCallContext() { return tl_activeSet ? &tl_active : nullptr; }
 
+ExecutionEngine::ActiveCallGuard::ActiveCallGuard(ExecutionEngine* engine, const RuntimeLayout* layout)
+    : saved_(tl_active), wasSet_(tl_activeSet) {
+    tl_active = ActiveCallContext{engine, layout};
+    tl_activeSet = true;
+}
+ExecutionEngine::ActiveCallGuard::~ActiveCallGuard() {
+    tl_active = saved_;
+    tl_activeSet = wasSet_;
+}
+
+unsigned ExecutionEngine::nativeReentryDepth() { return tl_nativeDepth; }
+ExecutionEngine::NativeDepthGuard::NativeDepthGuard() { ++tl_nativeDepth; }
+ExecutionEngine::NativeDepthGuard::~NativeDepthGuard() { --tl_nativeDepth; }
+
 const proto::ProtoObject* ExecutionEngine::run(proto::ProtoContext* parent, const BytecodeModule& mod) {
-    ActiveGuard guard(this, &layout_);
+    ActiveCallGuard guard(this, &layout_);
     return execute(parent, mod, nullptr, 0, nullptr);
 }
 
 std::string ExecutionEngine::showTopLevel(proto::ProtoContext* ctx, const proto::ProtoObject* v) {
-    ActiveGuard guard(this, &layout_);
+    ActiveCallGuard guard(this, &layout_);
     return show(ctx, layout_, v);
 }
 
@@ -66,7 +75,7 @@ const proto::ProtoObject* ExecutionEngine::callTopLevel(proto::ProtoContext* ctx
                                                         const proto::ProtoObject* callable,
                                                         const proto::ProtoObject* const* args,
                                                         unsigned argc) {
-    ActiveGuard guard(this, &layout_);
+    ActiveCallGuard guard(this, &layout_);
     return invoke(ctx, callable, args, argc);
 }
 
@@ -76,6 +85,10 @@ const proto::ProtoObject* ExecutionEngine::callNative(proto::ProtoContext* ctx, 
                                                       unsigned argc) {
     proto::ProtoContext scope(ctx->space, ctx);
     const proto::ProtoList* list = scope.newList(argc, args);
+    // A native that re-enters the VM raises the depth for everything it calls,
+    // and the destructor lowers it on unwinding too, so a FutureYield passing
+    // through does not leave it raised (D43, A0-2).
+    NativeDepthGuard depth;
     const proto::ProtoObject* r = fn(&scope, self, nullptr, list, nullptr);
     if (!r) r = PROTO_NONE;
     scope.returnValue = r;
@@ -471,10 +484,84 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
             slots[specs[k].localSlot] = caps->getAt(&frame, static_cast<int>(k));
     }
 
-    const proto::ProtoObject** sp = slots + stackBase;  // next free operand slot
-    const Instr* const code = mod.code().data();
-    const Instr* ip = code;
+    const proto::ProtoObject* out = runLoop(frame, mod, slots, slots + stackBase, mod.code().data());
+    frame.returnValue = out;
+    return out;
+}
+
+// One record of a suspended chain: where to continue, and the values that were
+// live below the in-flight call. Everything above the call's base is dead --
+// it was the callee's arguments, which the callee consumed.
+static void appendSuspendedFrame(proto::ProtoContext* ctx, const RuntimeLayout& L,
+                                 const BytecodeModule& mod, unsigned ipOffset, unsigned pendingBase,
+                                 const proto::ProtoObject** slots) {
+    auto* actor = const_cast<proto::ProtoObject*>(currentActor());
+    if (!actor)
+        throw ScalaError("UnsupportedOperationException",
+                         "await suspended outside an actor turn");
+    proto::ProtoContext scope(ctx->space, ctx);
+    auto* rec = const_cast<proto::ProtoObject*>(L.frameProto->newChild(&scope, /*isMutable=*/true));
+    scope.returnValue = rec;
+    // The module address travels as a SmallInteger, as MAKE_FN already does;
+    // modules are owned by the Session for the whole session, so it cannot dangle.
+    rec->setAttribute(&scope, L.modKey,
+                      scope.fromInteger(static_cast<long long>(reinterpret_cast<std::intptr_t>(&mod))));
+    rec->setAttribute(&scope, L.ipKey, proto::makeSmallInt(ipOffset));
+    rec->setAttribute(&scope, L.fbaseKey, proto::makeSmallInt(pendingBase));
+    rec->setAttribute(&scope, L.fslotsKey, scope.newList(pendingBase, slots)->asObject(&scope));
+    const proto::ProtoObject* cur = actor->getOwnAttributeDirect(&scope, L.snapshotKey);
+    actor->setAttribute(&scope, L.snapshotKey,
+                        cur->asList(&scope)->appendFirst(&scope, rec)->asObject(&scope));
+}
+
+const proto::ProtoObject* ExecutionEngine::resumeFrames(proto::ProtoContext* parent,
+                                                        const proto::ProtoList* frames,
+                                                        unsigned idx,
+                                                        const proto::ProtoObject* injected) {
+    checkNativeStack();
     const RuntimeLayout& L = layout_;
+    const proto::ProtoObject* rec = frames->getAt(parent, static_cast<int>(idx));
+    const BytecodeModule& mod = *reinterpret_cast<const BytecodeModule*>(
+        static_cast<std::intptr_t>(rec->getOwnAttributeDirect(parent, L.modKey)->asLong(parent)));
+    const auto ipOffset = static_cast<std::size_t>(
+        proto::asSmallInt(rec->getOwnAttributeDirect(parent, L.ipKey)));
+    const auto base = static_cast<unsigned>(
+        proto::asSmallInt(rec->getOwnAttributeDirect(parent, L.fbaseKey)));
+    const proto::ProtoList* saved =
+        rec->getOwnAttributeDirect(parent, L.fslotsKey)->asList(parent);
+
+    const unsigned stackBase =
+        static_cast<unsigned>(mod.arity()) + static_cast<unsigned>(mod.localCount());
+    proto::ProtoContext frame(parent->space, parent);
+    frame.resizeAutomaticLocals(stackBase + static_cast<unsigned>(mod.maxStack()));
+    const proto::ProtoObject** slots = frame.getAutomaticLocals();
+    for (unsigned k = 0; k < base; ++k) slots[k] = saved->getAt(&frame, static_cast<int>(k));
+
+    // The inner frames finish first; their result is what this frame's
+    // in-flight call would have returned. The innermost frame receives the
+    // awaited value itself.
+    const proto::ProtoObject* r = (idx + 1 < frames->getSize(&frame))
+                                      ? resumeFrames(&frame, frames, idx + 1, injected)
+                                      : injected;
+    slots[base] = r;
+    const proto::ProtoObject* out =
+        runLoop(frame, mod, slots, slots + base + 1, mod.code().data() + ipOffset);
+    frame.returnValue = out;
+    return out;
+}
+
+const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
+                                                   const BytecodeModule& mod,
+                                                   const proto::ProtoObject** slots,
+                                                   const proto::ProtoObject** sp,
+                                                   const Instr* ip) {
+    const Instr* const code = mod.code().data();
+    const RuntimeLayout& L = layout_;
+    // The operand-stack index where the in-flight call will write its result,
+    // or kNoPendingCall when this frame is not inside a call. Two stores per
+    // call opcode; it is what makes a frame resumable after a cooperative
+    // yield (DESIGN §8.3, D43).
+    unsigned pendingBase = kNoPendingCall;
     try {
         for (;;) {
             Instr word = *ip++;
@@ -554,8 +641,10 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                 }
                 case Op::CALL: {
                     const proto::ProtoObject** base = sp - operand - 1;
+                    pendingBase = static_cast<unsigned>(base - slots);
                     const proto::ProtoObject* r =
                         invoke(&frame, base[0], base + 1, static_cast<unsigned>(operand));
+                    pendingBase = kNoPendingCall;
                     base[0] = r;
                     sp = base + 1;
                     continue;
@@ -570,6 +659,7 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                     const proto::ProtoList* list = listObj->asList(&frame);
                     const unsigned extra = static_cast<unsigned>(list->getSize(&frame));
                     const proto::ProtoObject* r;
+                    pendingBase = static_cast<unsigned>(base - slots);
                     {
                         proto::ProtoContext argScope(frame.space, &frame);
                         argScope.resizeAutomaticLocals(n + extra);
@@ -579,6 +669,7 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                         r = invoke(&argScope, base[0], a, n + extra);
                         argScope.returnValue = r;
                     }
+                    pendingBase = kNoPendingCall;
                     base[0] = r;
                     sp = base + 1;
                     continue;
@@ -587,8 +678,10 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                 case Op::SEND_APPLY: {
                     const auto& site = mod.constAt(operand);
                     const proto::ProtoObject** base = sp - site.argc - 1;  // receiver
+                    pendingBase = static_cast<unsigned>(base - slots);
                     base[0] = dispatch(&frame, base, siteName(&frame, base[0], site), site.argc,
                                        op == Op::SEND_APPLY);
+                    pendingBase = kNoPendingCall;
                     sp = base + 1;
                     continue;
                 }
@@ -603,7 +696,11 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                     sp[-1] = holder;
                     continue;
                 }
-                case Op::FORCE: sp[-1] = force(&frame, sp[-1]); continue;
+                case Op::FORCE:
+                    pendingBase = static_cast<unsigned>(sp - 1 - slots);
+                    sp[-1] = force(&frame, sp[-1]);
+                    pendingBase = kNoPendingCall;
+                    continue;
                 case Op::JUMP: ip += operand; continue;
                 case Op::JUMP_IF_FALSE: {
                     const proto::ProtoObject* v = *--sp;
@@ -692,7 +789,9 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                 case Op::NEW: {
                     const auto& site = mod.constAt(operand);
                     const proto::ProtoObject** base = sp - site.argc - 1;  // [cls a1..an]
+                    pendingBase = static_cast<unsigned>(base - slots);
                     base[0] = instantiate(&frame, base, site.symbol, site.argc);
+                    pendingBase = kNoPendingCall;
                     sp = base + 1;
                     continue;
                 }
@@ -708,6 +807,7 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                     const proto::ProtoList* list = listObj->asList(&frame);
                     const unsigned extra = static_cast<unsigned>(list->getSize(&frame));
                     const proto::ProtoObject* r;
+                    pendingBase = static_cast<unsigned>(base - slots);
                     {
                         proto::ProtoContext argScope(frame.space, &frame);
                         argScope.resizeAutomaticLocals(n + extra + 1);
@@ -718,6 +818,7 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                         r = instantiate(&argScope, a, site.symbol, n + extra);
                         argScope.returnValue = r;
                     }
+                    pendingBase = kNoPendingCall;
                     base[0] = r;
                     sp = base + 1;
                     continue;
@@ -727,7 +828,9 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                     const proto::ProtoObject** base = sp - site.argc - 2;  // [cls this a1..an]
                     const proto::ProtoObject* init = base[0]->getOwnAttributeDirect(&frame, site.symbol);
                     if (!init) throw std::logic_error("INVOKE_INIT: no initialiser " + site.sval);
+                    pendingBase = static_cast<unsigned>(base - slots);
                     base[0] = callWithReceiver(&frame, init, base + 1, site.argc);
+                    pendingBase = kNoPendingCall;
                     sp = base + 1;
                     continue;
                 }
@@ -746,7 +849,9 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                 case Op::SEND_SUPER: {
                     const auto& site = mod.constAt(operand);
                     const proto::ProtoObject** base = sp - site.argc - 1;  // [this a1..an]
+                    pendingBase = static_cast<unsigned>(base - slots);
                     base[0] = superSend(&frame, base, site);
+                    pendingBase = kNoPendingCall;
                     sp = base + 1;
                     continue;
                 }
@@ -796,7 +901,9 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                     const auto& site = mod.constAt(operand);
                     const proto::ProtoObject** base =
                         sp - site.argc - static_cast<unsigned>(site.nameSymbols.size()) - 1;
+                    pendingBase = static_cast<unsigned>(base - slots);
                     base[0] = sendKeywords(&frame, base, site);
+                    pendingBase = kNoPendingCall;
                     sp = base + 1;
                     continue;
                 }
@@ -807,6 +914,17 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
             throw std::logic_error("unknown opcode " +
                                    std::to_string(static_cast<unsigned>(op)) + " in " + mod.name());
         }
+    } catch (FutureYield&) {
+        // This frame is part of a suspended chain. Record it and rethrow; the
+        // frames prepend themselves, so the actor's list reads outermost-first
+        // (the innermost frame is the first to catch).
+        if (pendingBase == kNoPendingCall)
+            throw ScalaError("UnsupportedOperationException",
+                             "await is not supported here: " + mod.name() +
+                                 " cannot be suspended at this instruction");
+        appendSuspendedFrame(&frame, layout_, mod, static_cast<unsigned>(ip - code), pendingBase,
+                             slots);
+        throw;
     } catch (ScalaError& e) {
         if (e.line == 0) e.line = mod.lineAt(static_cast<std::size_t>(ip - code) - 1);
         throw;

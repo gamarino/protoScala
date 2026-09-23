@@ -2,6 +2,7 @@
 #include "compiler/Compiler.h"
 #include "frontend/Desugar.h"
 #include "frontend/Parser.h"
+#include "runtime/ActorScheduler.h"
 #include "runtime/Errors.h"
 #include "runtime/Prelude.h"
 #include "runtime/Primitives.h"
@@ -41,9 +42,16 @@ Session::Session() : runtime_(space_), engine_(runtime_.layout()) {
     for (ClassInfo& t : builtinTypes()) globals_.defineBuiltinType(std::move(t));
     proto::ProtoContext ctx(&space_, runtime_.rootContext());
     loadPrelude(&ctx, engine_, globals_, modules_);
+    bindPreludeHooks(&ctx, runtime_.mutableLayout(), globals_);
 }
 
-Session::~Session() { std::fflush(stdout); }
+Session::~Session() {
+    // Every exit path (normal end, uncaught error, :quit in the REPL) passes
+    // here before the ProtoSpace member is destroyed (DESIGN §8.2).
+    proto::ProtoContext ctx(&space_, runtime_.rootContext());
+    ActorScheduler::instance().shutdown(&ctx);
+    std::fflush(stdout);
+}
 
 EvalStatus Session::evaluate(const std::string& source, const std::string& sourceName,
                              UnitMode mode, const std::vector<std::string>* mainArgs,

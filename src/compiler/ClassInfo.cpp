@@ -55,6 +55,29 @@ std::vector<ClassInfo> builtinTypes() {
         member(t, "copy", MemberKind::Def);
         out.push_back(std::move(t));
     }
+    // Phase 5: `x.isInstanceOf[Actor]` and `case f: Future` (DESIGN §8).
+    ClassInfo actor = anyRef;
+    actor.name = "Actor";
+    actor.key = kActorKey;
+    actor.isFinal = true;
+    actor.linearization = {kActorKey, kAnyRefKey, kAnyKey};
+    member(actor, "!", MemberKind::Def);
+    member(actor, "?", MemberKind::Def);
+    member(actor, "send", MemberKind::Def);
+    member(actor, "ask", MemberKind::Def);
+    member(actor, "value", MemberKind::ParamlessDef);
+    ClassInfo future = anyRef;
+    future.name = "Future";
+    future.key = kFutureKey;
+    future.isFinal = true;
+    future.linearization = {kFutureKey, kAnyRefKey, kAnyKey};
+    member(future, "await", MemberKind::ParamlessDef);
+    member(future, "isCompleted", MemberKind::ParamlessDef);
+    member(future, "value", MemberKind::ParamlessDef);
+    for (const char* m : {"map", "flatMap", "recover", "onComplete"})
+        member(future, m, MemberKind::Def);
+    out.push_back(std::move(actor));
+    out.push_back(std::move(future));
     out.push_back(std::move(any));
     out.push_back(std::move(anyRef));
     out.push_back(std::move(product));

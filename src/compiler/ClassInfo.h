@@ -30,6 +30,8 @@ inline constexpr const char* kAnyKey = "@Any";
 inline constexpr const char* kAnyRefKey = "@AnyRef";
 inline constexpr const char* kProductKey = "@Product";
 inline constexpr const char* kSerializableKey = "@Serializable";
+inline constexpr const char* kActorKey = "@Actor";        // Phase 5 (DESIGN §8)
+inline constexpr const char* kFutureKey = "@Future";
 inline constexpr const char* kPrimaryCtorKey = "<init>";
 inline constexpr unsigned kMaxTupleArity = 22;
 

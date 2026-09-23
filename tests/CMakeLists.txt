@@ -66,6 +66,23 @@ foreach(bench_file ${PROTOSCALA_BENCHMARK_FILES})
                 "${CMAKE_SOURCE_DIR}/benchmarks/comparable/${bench_file}")
 endforeach()
 
+# --- Phase 5 concurrency fixtures -----------------------------------------------
+# Every fixture that waits for an actor spins on the main thread, which has no
+# deadline of its own: a scheduling bug must fail the suite instead of stalling
+# it (Phase 5 plan, Global Constraints).
+foreach(conf_file ${PROTOSCALA_CONFORMANCE_FILES})
+    if("${conf_file}" MATCHES "^(13-actors|14-futures)/" OR "${conf_file}" MATCHES "tutorial/13-")
+        if("${conf_file}" MATCHES "await")
+            # The cooperative-await fixtures must complete with a single worker,
+            # which a blocking await never could (DESIGN §8.3, D43).
+            set_tests_properties("conformance/${conf_file}" PROPERTIES
+                TIMEOUT 120 ENVIRONMENT "PROTOSCALA_ACTOR_WORKERS=1")
+        else()
+            set_tests_properties("conformance/${conf_file}" PROPERTIES TIMEOUT 120)
+        endif()
+    endif()
+endforeach()
+
 # `object_tree.scala` is the one fixture in the tree whose live set cannot fit a
 # small heap: it deliberately holds a complete binary tree of 131071 case-class
 # objects alive at once, measured at 252253 cells (about 1.9 cells per object).

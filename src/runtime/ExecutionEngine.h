@@ -66,8 +66,54 @@ public:
     // echo, unit tests). Throws ScalaError.
     std::string showTopLevel(proto::ProtoContext* ctx, const proto::ProtoObject* v);
 
+    // Installs `engine`/`layout` as this thread's active call context for the
+    // guard's lifetime. A worker thread re-enters the VM from C++ that never
+    // came through run(), so it installs the context itself (protoClojure's
+    // scheduler blueprint).
+    class ActiveCallGuard {
+    public:
+        ActiveCallGuard(ExecutionEngine* engine, const RuntimeLayout* layout);
+        ~ActiveCallGuard();
+        ActiveCallGuard(const ActiveCallGuard&) = delete;
+        ActiveCallGuard& operator=(const ActiveCallGuard&) = delete;
+
+    private:
+        ActiveCallContext saved_;
+        bool wasSet_;
+    };
+
+    // Native frames between the running bytecode frame and here: 1 while a
+    // native method runs, more when a native re-entered the VM. `await` refuses
+    // to suspend above 1, because the extra C++ frames cannot be snapshotted (D43).
+    static unsigned nativeReentryDepth();
+    // Raises that depth for a region of C++ that re-enters the VM without going
+    // through callNative (a future continuation, DESIGN §8.3).
+    class NativeDepthGuard {
+    public:
+        NativeDepthGuard();
+        ~NativeDepthGuard();
+        NativeDepthGuard(const NativeDepthGuard&) = delete;
+        NativeDepthGuard& operator=(const NativeDepthGuard&) = delete;
+    };
+
+    // Re-materialises a suspended call chain and continues it. `frames` is the
+    // actor's snapshot list, outermost first; `injected` is the value the
+    // await that suspended the chain must return. Frame `idx` is rebuilt, the
+    // inner frames run first, and their result is written where the in-flight
+    // call would have left it (DESIGN §8.3).
+    const proto::ProtoObject* resumeFrames(proto::ProtoContext* parent,
+                                           const proto::ProtoList* frames, unsigned idx,
+                                           const proto::ProtoObject* injected);
+
 private:
+    static constexpr unsigned kNoPendingCall = 0xFFFFFFFFu;
     const RuntimeLayout& layout_;
+
+    // The dispatch loop of one frame, entered fresh by execute() and again by
+    // resumeFrames() with a restored frame.
+    const proto::ProtoObject* runLoop(proto::ProtoContext& frame, const BytecodeModule& mod,
+                                      const proto::ProtoObject** slots,
+                                      const proto::ProtoObject** sp, const Instr* ip);
 
     // base[0] is the receiver, base[1..argc] the arguments; all rooted.
     // `applied`: the call site wrote an argument list (SEND_APPLY), so a member

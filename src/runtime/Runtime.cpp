@@ -11,6 +11,9 @@ enum RootSlot : unsigned {
     kGlobals, kAny, kInt, kDouble, kBoolean, kChar, kString, kList, kUnitProto,
     kFunction, kFunctionArities, kCell, kLazy, kUnit,
     kAnyRef, kProduct, kSerializable, kWithFilter, kListCompanion, kTuples, kTupleCompanions,
+    kActorProto, kFutureProto, kEnvelopeProto, kThreadProto, kFrameProto, kSpawnPartialProto,
+    kActorRegistry, kActorCompanion, kPriorityCompanion, kFutureCompanion, kThreadCompanion,
+    kSystemCompanion,
     kRootSlotCount
 };
 } // namespace
@@ -123,6 +126,61 @@ Runtime::Runtime(proto::ProtoSpace& space) : space_(space) {
     }
     L.withFilterProto->setAttribute(ctx, L.nameKey, makeString(ctx, "WithFilter"));
     L.listCompanion->setAttribute(ctx, L.nameKey, makeString(ctx, "List"));
+
+    // Phase 5: the concurrency prototypes (DESIGN §8). The registry is mutable
+    // and anchors every actor for the session (D46), so the GC reaches an actor,
+    // its mailboxes and every queued message from a root slot -- the ready
+    // stacks are C++ and invisible to it.
+    L.actorProto        = pin(kActorProto, L.anyRefProto->newChild(ctx, true));
+    L.futureProto       = pin(kFutureProto, L.anyRefProto->newChild(ctx, true));
+    L.envelopeProto     = pin(kEnvelopeProto, L.anyProto->newChild(ctx, true));
+    L.threadProto       = pin(kThreadProto, L.anyRefProto->newChild(ctx, true));
+    L.frameProto        = pin(kFrameProto, L.anyProto->newChild(ctx, true));
+    L.spawnPartialProto = pin(kSpawnPartialProto, L.anyProto->newChild(ctx, true));
+    L.actorRegistry     = pin(kActorRegistry, L.anyProto->newChild(ctx, true));
+    L.actorCompanion    = pin(kActorCompanion, L.anyRefProto->newChild(ctx, true));
+    L.priorityCompanion = pin(kPriorityCompanion, L.anyRefProto->newChild(ctx, true));
+    L.futureCompanion   = pin(kFutureCompanion, L.anyRefProto->newChild(ctx, true));
+    L.threadCompanion   = pin(kThreadCompanion, L.anyRefProto->newChild(ctx, true));
+    L.systemCompanion   = pin(kSystemCompanion, L.anyRefProto->newChild(ctx, true));
+    L.handlerKey    = key("__handler__");
+    L.actorStateKey = key("__astate__");
+    L.stateRefKey   = key("__sched_ref__");
+    for (unsigned b = 0; b < 3; ++b) {
+        L.mailboxKey[b] = key(("__mbox" + std::to_string(b) + "__").c_str());
+        L.pendingKey[b] = key(("__pend" + std::to_string(b) + "__").c_str());
+    }
+    L.actorsKey     = key("__actors__");
+    L.threadsKey    = key("__threads__");
+    L.msgKey        = key("__msg__");
+    L.futureKey     = key("__future__");
+    L.snapshotKey   = key("__snapshot__");
+    L.waitingOnKey  = key("__waiting_on__");
+    L.turnFutureKey = key("__turn_future__");
+    L.fstateKey     = key("__fstate__");
+    L.fvalueKey     = key("__fvalue__");
+    L.ferrorKey     = key("__ferror__");
+    L.waitersKey    = key("__waiters__");
+    L.contsKey      = key("__conts__");
+    L.modKey        = key("__mod__");
+    L.ipKey         = key("__ip__");
+    L.fbaseKey      = key("__fbase__");
+    L.fslotsKey     = key("__fslots__");
+    L.threadRefKey  = key("__thread__");
+    L.bodyKey       = key("__body__");
+    L.tuple2Key     = key(tupleTypeKey(2).c_str());
+    L.classNameField = key("className");
+    L.messageField   = key("message");
+    L.actorRegistry->setAttribute(ctx, L.actorsKey, ctx->newList()->asObject(ctx));
+    L.actorRegistry->setAttribute(ctx, L.threadsKey, ctx->newList()->asObject(ctx));
+    bindType(L.actorProto, kActorKey, "Actor");
+    bindType(L.futureProto, kFutureKey, "Future");
+    L.threadProto->setAttribute(ctx, L.nameKey, makeString(ctx, "Thread"));
+    L.actorCompanion->setAttribute(ctx, L.nameKey, makeString(ctx, "Actor"));
+    L.priorityCompanion->setAttribute(ctx, L.nameKey, makeString(ctx, "Priority"));
+    L.futureCompanion->setAttribute(ctx, L.nameKey, makeString(ctx, "Future"));
+    L.threadCompanion->setAttribute(ctx, L.nameKey, makeString(ctx, "Thread"));
+    L.systemCompanion->setAttribute(ctx, L.nameKey, makeString(ctx, "System"));
 
     // Rebind the primitive prototypes (see the header comment).
     space.smallIntegerPrototype = L.intProto;

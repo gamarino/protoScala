@@ -27,9 +27,11 @@ public:
         for (ClassInfo& t : builtinTypes()) globals_.defineBuiltinType(std::move(t));
         proto::ProtoContext ctx(&space_, runtime_.rootContext());
         loadPrelude(&ctx, engine_, globals_, modules_);
+        bindPreludeHooks(&ctx, runtime_.mutableLayout(), globals_);
     }
 
     Runtime& runtime() { return runtime_; }
+    ExecutionEngine* engine() { return &engine_; }
     proto::ProtoSpace& space() { return space_; }
     GlobalTable& globals() { return globals_; }
 

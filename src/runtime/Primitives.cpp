@@ -854,7 +854,8 @@ void installAll(ProtoContext* ctx, proto::ProtoObject* target, const MethodEntry
 const std::vector<std::string>& builtinGlobalNames() {
     // The TupleN companions are globals too: `Tuple2(1, 2)` is `(1, 2)`.
     static const std::vector<std::string> names = [] {
-        std::vector<std::string> v = {"println", "print", "List", "Nil", "__raise"};
+        std::vector<std::string> v = {"println", "print", "List", "Nil", "__raise",
+                                      "Actor", "Priority", "Future", "Thread", "System"};
         for (unsigned n = 2; n <= kMaxTupleArity; ++n) v.push_back("Tuple" + std::to_string(n));
         return v;
     }();
@@ -932,6 +933,7 @@ void installPrimitives(ProtoContext* ctx, const RuntimeLayout& L) {
     L.globals->setAttribute(ctx, proto::ProtoString::createSymbol(ctx, "List"), L.listCompanion);
     L.globals->setAttribute(ctx, proto::ProtoString::createSymbol(ctx, "Nil"), ctx->newList()->asObject(ctx));
     installProductPrimitives(ctx, L);
+    installActorPrimitives(ctx, L);
 }
 
 } // namespace protoScala

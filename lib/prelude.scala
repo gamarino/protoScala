@@ -28,3 +28,36 @@ final case class Some[+A](value: A) extends Option[A]:
 case object None extends Option[Nothing]:
   def isEmpty: Boolean = true
   def get: Nothing = __raise("NoSuchElementException", "None.get")
+
+// Phase 5: the result of a computation that may have failed. Phase 4 replaces
+// RuntimeError with real exception values (D44).
+final case class RuntimeError(className: String, message: String):
+  override def toString: String = className + ": " + message
+
+sealed abstract class Try[+A]:
+  def isSuccess: Boolean
+  def isFailure: Boolean = !isSuccess
+  def get: A
+  def getOrElse[B >: A](default: B): B = if isSuccess then get else default
+  def toOption: Option[A] = if isSuccess then Some(get) else None
+
+final case class Success[+A](value: A) extends Try[A]:
+  def isSuccess: Boolean = true
+  def get: A = value
+
+final case class Failure[+A](error: RuntimeError) extends Try[A]:
+  def isSuccess: Boolean = false
+  def get: A = __raise(error.className, error.message)
+
+// Phase 5: the value Actor.stats returns.
+final case class ActorStats(workers: Int, messagesProcessed: Int)
+
+// Constructors the runtime's native methods call. A native cannot name a
+// global directly (a REPL redefinition gives `Some#1`, D25), so it resolves
+// these through the global table once, after the prelude is compiled.
+def __mkSome[A](v: A): Option[A] = Some(v)
+def __mkNone: Option[Nothing] = None
+def __mkSuccess[A](v: A): Try[A] = Success(v)
+def __mkFailure[A](e: RuntimeError): Try[A] = Failure(e)
+def __mkRuntimeError(c: String, m: String): RuntimeError = RuntimeError(c, m)
+def __mkActorStats(w: Int, m: Int): ActorStats = ActorStats(w, m)

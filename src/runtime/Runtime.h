@@ -72,6 +72,60 @@ struct RuntimeLayout {
     const proto::ProtoString* canEqualName = nullptr; // "canEqual"
     const proto::ProtoString* tupleFieldKey[kMaxTupleArity + 1] = {};  // [1..22]: "_1".."_22"
 
+    // Phase 5: the concurrency prototypes and keys (DESIGN §8). Every prototype
+    // and the registry are pinned in root-context slots (Runtime.cpp).
+    proto::ProtoObject* actorProto = nullptr;         // the prototype of every actor
+    proto::ProtoObject* futureProto = nullptr;        // the prototype of every Future
+    proto::ProtoObject* envelopeProto = nullptr;      // one queued message
+    proto::ProtoObject* threadProto = nullptr;        // a Thread handle (D49)
+    proto::ProtoObject* frameProto = nullptr;         // one record of a suspended call chain
+    proto::ProtoObject* spawnPartialProto = nullptr;  // the result of Actor.spawn(state)
+    proto::ProtoObject* actorRegistry = nullptr;      // mutable: anchors every actor (D46)
+    proto::ProtoObject* actorCompanion = nullptr;     // the value of the global `Actor`
+    proto::ProtoObject* priorityCompanion = nullptr;  // the value of the global `Priority`
+    proto::ProtoObject* futureCompanion = nullptr;    // the value of the global `Future`
+    proto::ProtoObject* threadCompanion = nullptr;    // the value of the global `Thread`
+    proto::ProtoObject* systemCompanion = nullptr;    // the value of the global `System`
+    const proto::ProtoString* handlerKey = nullptr;    // "__handler__"
+    const proto::ProtoString* actorStateKey = nullptr; // "__astate__": the user state
+    const proto::ProtoString* stateRefKey = nullptr;   // "__sched_ref__": ActorState address
+    const proto::ProtoString* mailboxKey[3] = {};      // "__mbox0__".."__mbox2__"
+    const proto::ProtoString* pendingKey[3] = {};      // "__pend0__".."__pend2__"
+    const proto::ProtoString* actorsKey = nullptr;     // "__actors__" on the registry
+    const proto::ProtoString* threadsKey = nullptr;    // "__threads__" on the registry
+    const proto::ProtoString* msgKey = nullptr;        // "__msg__" on an envelope
+    const proto::ProtoString* futureKey = nullptr;     // "__future__" on an envelope
+    const proto::ProtoString* snapshotKey = nullptr;   // "__snapshot__": suspended frames
+    const proto::ProtoString* waitingOnKey = nullptr;  // "__waiting_on__": the awaited future
+    const proto::ProtoString* turnFutureKey = nullptr; // "__turn_future__": the suspended ask
+    const proto::ProtoString* fstateKey = nullptr;     // "__fstate__": 0 pending, 1 ok, 2 failed
+    const proto::ProtoString* fvalueKey = nullptr;     // "__fvalue__"
+    const proto::ProtoString* ferrorKey = nullptr;     // "__ferror__": a RuntimeError instance
+    const proto::ProtoString* waitersKey = nullptr;    // "__waiters__": suspended actors
+    const proto::ProtoString* contsKey = nullptr;      // "__conts__": continuations (D48)
+    const proto::ProtoString* modKey = nullptr;        // "__mod__" on a frame record
+    const proto::ProtoString* ipKey = nullptr;         // "__ip__"
+    const proto::ProtoString* fbaseKey = nullptr;      // "__fbase__"
+    const proto::ProtoString* fslotsKey = nullptr;     // "__fslots__"
+    const proto::ProtoString* threadRefKey = nullptr;  // "__thread__": ProtoThread address
+    const proto::ProtoString* bodyKey = nullptr;       // "__body__": a Thread's function
+    const proto::ProtoString* tuple2Key = nullptr;     // "@Tuple2": the D45 handler-result test
+    const proto::ProtoString* classNameField = nullptr;  // RuntimeError.className
+    const proto::ProtoString* messageField = nullptr;    // RuntimeError.message
+
+    // Prelude values the natives construct, resolved after the prelude is
+    // compiled (a REPL redefinition gives `Some#1`, so a name cannot be
+    // hard-coded). Filled by bindPreludeHooks.
+    struct PreludeHooks {
+        const proto::ProtoObject* actorStats = nullptr;
+        const proto::ProtoObject* someCompanion = nullptr;
+        const proto::ProtoObject* noneValue = nullptr;
+        const proto::ProtoObject* success = nullptr;
+        const proto::ProtoObject* failure = nullptr;
+        const proto::ProtoObject* runtimeError = nullptr;
+        bool bound = false;
+    } hooks;
+
     const proto::ProtoObject* functionProtoFor(unsigned arity) const {
         return functionArity[arity <= kMaxFunctionArity ? arity : kMaxFunctionArity + 1];
     }
@@ -85,6 +139,8 @@ public:
 
     proto::ProtoContext* rootContext() const;
     const RuntimeLayout& layout() const { return layout_; }
+    // Non-const access, used only by bindPreludeHooks (Session, EvalHarness).
+    RuntimeLayout& mutableLayout() { return layout_; }
 
 private:
     proto::ProtoSpace& space_;
