@@ -13,6 +13,7 @@ average, per-runtime medians, the JVM compile times and the cold-start result:
 |---|---|---:|---|
 | 2026-09-22 | [2026-09-22-suite.md](reports/2026-09-22-suite.md) | 0.74× (8 workloads) | commit `154ab1a`; load 2.9-3.9; all 7 columns, every cell verified |
 | 2026-09-22 | [2026-09-22-phase2.md](reports/2026-09-22-phase2.md) | 1.06× (4 workloads: `attr_lookup`, `object_tree`, `fib`, `tak`) | Phase 2: `attr_lookup` and `object_tree` added; commit `e8f66a1` (the working tree added only the two benchmark files and their Python twin, no runtime change); load 3.88 / 3.10 / 3.25 at start and 3.78 / 3.31 / 3.31 at end — a shared machine, so the absolute milliseconds are noisier than the ratios; every cell verified |
+| 2026-09-23 | [2026-09-23-suite.md](reports/2026-09-23-suite.md) | 0.83× (all 10 workloads) | **The 0.2.0 release run.** Full suite, `attr_lookup` and `object_tree` included; commit `6e6837f` (the working tree held Phase 2's documentation changes only, no runtime change); load 3.11 / 2.98 / 3.38 at start and 4.21 / 3.73 / 3.63 at end — a shared machine, so absolute milliseconds are noisier than ratios; all 7 columns, every cell verified |
 
 The latest table is also in the top-level README ("Performance").
 
@@ -121,3 +122,23 @@ deep object graphs, not integer loops):
 
 The measured medians are in the report and are not interpreted further here;
 performance is not a Phase 2 goal and nothing was tuned for these numbers.
+
+## Release run for 0.2.0 (2026-09-23)
+
+`2026-09-22-phase2.md` measured only four workloads; the release table in the README
+comes from the full ten-workload run of
+[2026-09-23-suite.md](reports/2026-09-23-suite.md), which is the reference for 0.2.0.
+Nothing was tuned between the two runs — the only code changes in between were
+documentation and conformance fixtures.
+
+Two readings the numbers support, both consistent with DESIGN §1:
+
+- `attr_lookup` — 34.9 ms, 0.79× CPython and 3.5× faster than protoST's twin on the
+  same machine. Field reads go through protoCore's per-thread attribute cache and cost
+  about what a CPython attribute read costs, start-up included.
+- `object_tree` — 391.1 ms, 1.92× CPython. Building 131071 immutable case-class
+  instances and path-copying a spine is the workload protoScala is *for*, and it is the
+  row where protoScala is furthest behind CPython's `__slots__` twin. protoCore's
+  structural sharing makes the path copy cheap; the allocation of 131071 objects is
+  what dominates. protopy runs the same twin in 3668.2 ms, so the cost is the shared
+  object kernel's, not protoScala's frontend.

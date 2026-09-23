@@ -237,8 +237,13 @@ Performed on the AST before code generation:
   cache — no parallel inline caches.
 - `object O` is a lazily initialised singleton, created on first access and
   stored in the module's globals.
-- A companion object and its class are linked through a `__companion__`
-  attribute; `C(args)` on a companion resolves to `C.apply(args)`.
+- A companion object and its class are linked **at compile time**, in the
+  compiler's type namespace, so `C(args)` resolves to `C.apply(args)` without
+  a runtime link (Phase 2, Q3). A `__companion__` attribute was the original
+  sketch, but a two-way link between two immutable objects cannot be built and
+  nothing at run time needs it: class prototypes stay immutable (P6, no
+  mutables-tree entry). A one-way `__companion__` on the object's class can be
+  added later if interop asks for it.
 
 ### 4.3 Traits and linearization
 
@@ -265,6 +270,12 @@ in `T` executes:
 The cost is O(linearization length) per `super` call. No name matching (the
 protoST wart) and no protoCore change. If profiling shows it matters, the
 platform option of a protoCore "lookup after parent" API is recorded as R6.
+
+Delivered in **Phase 2** (Q5): plain `super.m` is the same algorithm whether or
+not stackable traits are involved, so stackable traits already work
+(`tests/conformance/07-classes/stackable-traits.scala`). `super[T].m`, which
+names the ancestor explicitly instead of taking the next one in the
+linearization, stays in Phase 4.
 
 ### 4.5 Case classes
 
@@ -318,8 +329,15 @@ parameter names. Default values are compiled into the callee's prologue.
 `e match { case ... }` compiles to a cascade:
 
 1. **Type / class test** — native tag tests for primitives (`isSmallInt`,
-   string, double, char, boolean) or prototype membership (`isInstanceOf`
-   against the class prototype) for classes and traits.
+   string, double, char, boolean) or prototype membership for classes and
+   traits. Membership is tested with a **per-class marker attribute** keyed by
+   the type key and found through the cached `getAttribute` walk, not with
+   protoCore's `isInstanceOf` (Phase 2, Q2): that implementation stopped after
+   50 visited objects, which gives false negatives on the flattened chains
+   protoScala installs. The marker is exact, allocation-free and bounded by the
+   chain length. The protoCore fix specified in
+   [platform/ISINSTANCEOF-FIX.md](platform/ISINSTANCEOF-FIX.md) replaces it
+   once it is merged and every embedder has been rebuilt.
 2. **Extraction** — case classes read their fields by interned key
    (`getOwnAttributeDirect`); tuples are case classes; `h :: t` on a `List`
    extracts `getAt(0)` and the tail slice; a user `unapply` returning
@@ -602,10 +620,10 @@ project raises them and does not decide them unilaterally.
 |---|---|---|---|
 | R1 | Allocation-free loops have no GC poll: a tight `while` can stall a stop-the-world pause (protoST S3). Needs an agreed back-edge poll API | GC latency | maintainer |
 | R2 | Every `ProtoTuple` is interned and perennial. Scala avoids it (§4.6); **protoClojure maps vectors to `ProtoTuple`**, so long-running protoClojure programs retain every vector ever built. Options: weak interner, non-interned tuple type, or migration | memory growth | maintainer + platform track |
-| R3 | `getAttribute` stops after 500 parent steps | deep trait hierarchies | maintainer |
+| R3 | `getAttribute` stops after 500 parent steps; `isInstanceOf` stops after 50 visited objects and keeps 64 pending siblings, which gives false negatives on the flattened chains protoScala installs (Phase 2, Q2). protoScala works around the second with per-class marker attributes (§5.3); the maintainer's fix ([platform/ISINSTANCEOF-FIX.md](platform/ISINSTANCEOF-FIX.md)) removes both caps and lands with the protoCore 2.0.0 merge | deep trait hierarchies | maintainer (fix specified, not yet merged here) |
 | R4 | `createSymbol` leaks for strings longer than 6 bytes (protoClojure known issue) | memory | maintainer |
 | R5 | One runtime per process (process-global UMD module cache, protoST K1) | multi-runtime tests | maintainer |
-| R6 | `super` is O(n) per call (§4.4); a protoCore "lookup after parent" API is the escape hatch | performance | protoScala, later |
+| R6 | `super` is O(n) per call (§4.4); a protoCore "lookup after parent" API is the escape hatch. **Now exercised**: Phase 2 ships `SEND_SUPER`, so every `super.m` walks the receiver's linearization | performance | protoScala, later |
 | R7 | No public API to attach a foreign OS thread | embedding | maintainer |
 | R9 | Actor mailboxes must be GC-visible (§8.4). **Decided (2026-09-22): a new protoCore type, `ProtoMPSCQueue`** — lock-free MPSC queue with GC-traced items, shared by protoScala, protoClojure and protoST ([platform/PMQ-SPEC.md](platform/PMQ-SPEC.md)). Its GC strategy is settled with the maintainer in the P2 plan's Task 0 | correctness / throughput | decided; P2 |
 | R8 | Tagged-pointer budget: 37 of 64 pointer tags and 11 of 16 embedded types are free today; P1 and P2 take one tag each (35 left); every new protoCore type must justify a tag | platform longevity | platform specs |
@@ -623,7 +641,7 @@ Summarised here; milestones, done-when criteria and tracks are in
 | P1 *(platform)* | `ProtoMap` in protoCore (+ hashed-collection helper), tests, full rebuild of every embedder |
 | P2 *(platform)* | `ProtoMPSCQueue` in protoCore (GC-traced lock-free mailbox), tests, microbenchmarks, full rebuild of every embedder |
 | 1 | Lexer (with offside rule), parser, AST, core compiler + VM (expressions, `val`/`var`/`def`, `if`/`while`, lambdas), `println`, REPL |
-| 2 | Classes, objects, traits + linearization, case classes, universal `apply`, for-comprehensions, pattern matching |
+| 2 | Classes, objects, traits + linearization, case classes, universal `apply`, for-comprehensions, pattern matching, plain `super` (§4.4), the `Option` prelude and a minimal `List` |
 | 3 | SmallInteger fast paths, `List`/`Vector`/`Map`/`Set`/`Range`, prelude (`Option`, `Either`, `Try`), string interpolation |
 | 4 | Exceptions, `super` in stackable traits, enums and sealed hierarchies, named/default arguments |
 | 5 | Actors, priority bands, cooperative futures |

@@ -1,7 +1,8 @@
 # protoScala Language Reference
 
-> **Status:** target language definition (2026-09-22). What is implemented
-> today is tracked in [STATUS.md](STATUS.md). The reference language is
+> **Status:** target language definition (2026-09-23; Phases 1 and 2
+> shipped). What is implemented today is tracked in
+> [STATUS.md](STATUS.md). The reference language is
 > **Scala 3** (the Scala 3 language reference); this document lists what
 > protoScala accepts, the milestone that brings each feature, and every
 > intentional departure.
@@ -30,11 +31,11 @@
 |---|---|
 | `val`, `var`, `lazy val`, `def` (multiple parameter lists, default and named arguments, varargs `xs: Int*`) | 1 (defaults/named: 4) |
 | `if`/`then`/`else`, `while`/`do`, blocks as expressions, `return` | 1 |
-| lambdas `x => e`, `(x, y) => e`, placeholder syntax `_ + 1` | 1 (placeholders: 2) |
+| lambdas `x => e`, `(x, y) => e`, placeholder syntax `_ + 1` | 1 (placeholders: 2 ✅) |
 | infix, prefix (`-x`, `!b`, `~n`) and postfix-free method application | 1 |
 | string interpolation `s""`, `f""`, `raw""` | 3 |
-| `for` comprehensions (generators, guards, value definitions, `yield`) | 2 |
-| `match` with the patterns of DESIGN §5.3 | 2 |
+| `for` comprehensions (generators, guards, value definitions, patterns, `yield` and `do`) | 2 ✅ |
+| `match` with the patterns of DESIGN §5.3, pattern `val`s, `{ case ... }` literals | 2 ✅ |
 | `try`/`catch`/`finally`, `throw` | 4 |
 | `import` (selectors, renames `as`, wildcard `*`, `given` imports parsed only) | 1 (UMD prefixes: 6) |
 | top-level definitions (no wrapping `object` needed), `@main` methods | 1 |
@@ -42,21 +43,49 @@
 
 ## 3. Classes and objects (Phase 2)
 
+Delivered in Phase 2 ✅:
+
 - `class`, constructor parameters (`val`/`var`/plain), auxiliary constructors
   `def this(...)`, `extends`, `with`, `override`, `abstract`, `final`,
   `sealed`, `open` (accepted), access modifiers (parsed; `private` enforced
-  only as a lookup restriction on the defining class — D5).
-- `object`, companion objects, `case class`, `case object`, `trait` with
-  concrete and abstract members, trait parameters (Scala 3).
+  only as a lookup restriction on the defining class and its companion — D5).
+- `object` (a lazily initialised singleton), companion objects,
+  `case class`, `case object`, `trait` with concrete and abstract members,
+  trait parameters (Scala 3), Scala's linearization.
+- `super.m`, including stackable traits.
+- `this`, self-type aliases (`self =>`), `isInstanceOf[T]`, `asInstanceOf[T]`
+  (checked at run time where `T` denotes a class; unchecked for parameterised
+  types — erasure; D29 and D37 for what the test actually compares).
+- Case-class members `apply`, `unapply`, `equals`, `hashCode`, `toString`,
+  `copy`, `canEqual`, `productArity`, `productElement`, `productPrefix`,
+  `_1`..`_N`; tuples `Tuple2`..`Tuple22` as case classes (D32).
+- The universal `apply` rule, `update` (`a(i) = v`), generated setters and
+  method values (D10).
+
+Later phases:
+
 - `enum` with simple cases and parameterised cases; `values`, `ordinal`,
   `valueOf` (Phase 4).
 - Extension methods `extension (x: T) def m ...` (Phase 4, dispatched on the
   receiver's runtime prototype — D6).
-- `super.m`, `super[T].m` in stackable traits (Phase 4).
-- `this`, `isInstanceOf[T]`, `asInstanceOf[T]` (checked at run time where `T`
-  denotes a class; unchecked for parameterised types — erasure).
+- `super[T].m`, which names the ancestor explicitly instead of taking the next
+  one in the linearization (Phase 4).
+- Named and default arguments for Scala-defined methods (Phase 4; native
+  methods, `copy` among them, already accept them).
+- Multiple constructor parameter lists (Phase 4).
+- Templates nested in an `object` (Phase 4, with `enum`); local classes inside
+  a block and anonymous classes `new T { ... }` after that. Until then a
+  `class`, `trait` or `object` must be defined at the top level of a file, and
+  anything else is rejected with "must be defined at the top level".
 
 ## 4. Standard library (Phases 3–5)
+
+Phase 2 ships a subset ahead of Phase 3, because for-comprehensions and
+extractors need it: `Option`/`Some`/`None` from the embedded prelude
+(`lib/prelude.scala`), and `List(...)`, `Nil`, `::`, `map`, `flatMap`,
+`filter`, `withFilter`, `foreach`, `length`, `tail`, `drop`, `mkString`.
+
+The full target surface:
 
 - `Any`, `AnyRef`, `Nothing`, `Unit`, `Int`, `Long`, `Double`, `Boolean`,
   `Char`, `String`, `BigInt` (all dynamic, DESIGN §4.1).
@@ -80,12 +109,27 @@
 | D2 | `Float` is `Double` | protoCore has one floating type |
 | D3 | No implicits / givens / `using` resolution (parsed, rejected with a clear error if used) | resolution needs static types |
 | D4 | No exhaustiveness or static type checking; type errors surface at run time | types are erased |
-| D5 | Access modifiers are advisory except `private` on the defining class | no static checker |
+| D5 | Access modifiers are advisory except `private`: a private member is stored under a class-qualified key, reachable only from code of its class and companion; an access from elsewhere fails at run time with `NoSuchMethodError`; `protected`, `override` and member `final` are not checked. The "weaker access privileges" check that rejects a `private` member implementing an abstract one applies only to a `private` the user wrote, never to a synthesised member | no static checker |
 | D6 | Extension methods dispatch on the runtime prototype, not the static type | types are erased |
 | D7 | `Map`/`Set` iteration order is unspecified and may differ from Scala's | persistent structures; no ordering guarantee beyond Scala's own (`ListMap`/`SortedMap` are separate types, later) |
 | D8 | Java interop (`java.*` classes) is absent; polyglot interop goes through UMD | no JVM |
+| D10 | A bare reference to `def f()` evaluates to the function; `obj.m` for a method with parameters is a function value (eta-expansion); `obj.m()` on a parameterless `def m` whose result is a function applies that result | no static expected types |
 | D26 | Value discarding (`Unit` expected type) applies only where `Unit` is written on the definition or an ascription, not when it comes from a function type (`val f: Int => Unit = x => x + 1` returns `x + 1`) | types are erased |
 | D27 | `@main` methods take no parameters or one `String*` parameter; typed `@main` parameters are rejected | no `FromString` instances without static types |
+| D28 | Instances of classes without `var` fields are immutable and rebuilt field by field during construction: every field store returns a new object and `new` yields the last one. A `this` that escapes before the last field is initialised — stored in a field, passed to another object, or **captured by a closure created in the constructor, including the initialiser of a `val` member** — denotes an earlier version: it lacks every field stored after that point (reading one raises `NoSuchMethodError`) and is neither `==` nor `eq` to the finished instance. A class that declares a `var`, itself or through an ancestor, builds mutable instances and has neither restriction | immutability by default (DESIGN §4.2) |
+| D29 | Type tests follow the runtime representation: `Int`, `Long`, `Short`, `Byte` and `BigInt` are one integer type (D1), `Float` is `Double` (D2), so `3L.isInstanceOf[Int]` is `true`; `asInstanceOf` never converts numbers; `null.asInstanceOf[Int]` is `null`; an extractor's `unapply` is called without the type test its parameter type implies | D1, D2, D4 |
+| D30 | Reading a field of the instance under construction before its initialiser has run raises `NoSuchMethodError` (Scala reads the default `0`/`null`) | no declared field defaults |
+| D31 | Methods cannot be overloaded; constructors may be overloaded by number of parameters only | types are erased |
+| D32 | Tuples have at most 22 elements (Scala 3 has `TupleXXL`) | `Tuple2`..`Tuple22` are case classes |
+| D33 | `Option.getOrElse` evaluates its default eagerly | no by-name parameters yet |
+| D34 | A pattern-matching function literal `{ case ... }` takes exactly one argument | no expected function type |
+| D35 | A refutable pattern generator without Scala 3's `case` keyword — `for (Some(v) <- os)` — is accepted and filters; scalac 3.9 rejects it and asks for `case` | no static types to detect the narrowing |
+| D36 | For-comprehension desugaring differs where the result does not: `case` on an irrefutable pattern emits no `withFilter` step, and `for (x <- xs; y = e)` emits two `map`s instead of one fused `map` | simpler desugaring |
+| D37 | An intersection type cannot be tested at run time: `case v: (A & B)` and `x.isInstanceOf[A & B]` are rejected at compile time, where scalac tests both components. A parenthesised tuple type, `case v: (Int, Int)`, is accepted by both and tests only the erasure | one marker attribute per class |
+| D38 | The default `toString` is `Name@<identity hash>`: `object O` prints `O@…` (the JVM prints `O$@…`) and `println(Tuple2)` prints `Tuple2@<hash>` | no JVM name mangling |
+| D39 | `List` hash codes differ from the JVM's while staying consistent with `==`; case classes, case objects, tuples and strings hash bit-identically | `List` is a `ProtoList` |
+| D40 | A `var` redefining a concrete inherited `var` without `override` is reported as "cannot override a mutable variable" (scalac: "needs `override` modifier") | `override` is never accepted on a `var` |
 
-D9–D25 are the provisional Phase 1 departures listed in
+D9–D25 are the provisional Phase 1 departures and D28–D40 the provisional
+Phase 2 departures listed in
 [STATUS.md](STATUS.md#intentional-deviations), pending maintainer review.

@@ -144,12 +144,12 @@ WORKLOADS = [
 # Listed in the report, never approximated.
 PENDING = [
     ("list_append", "protoPython / protoST", "Phase 3 (collections)",
-     "Phase 1 has no list-building operation (`::`, `:+`, `List(...)`, "
-     "`ListBuffer`); re-spreading varargs would copy the whole list per step, "
-     "an O(N^2) algorithm that is not a twin."),
+     "Phase 2 builds lists by prepending (`::`, `List(...)`) but has no append "
+     "(`:+`, `ListBuffer`); re-spreading varargs would copy the whole list per "
+     "step, an O(N^2) algorithm that is not a twin."),
     ("sum_squares", "protoClojure", "Phase 3 (collections)",
-     "needs a built list plus `map` and a reduction (`sum`/`foldLeft`); "
-     "Phase 1 lists only offer `foreach`."),
+     "Phase 2 lists have `map`, but the reduction (`sum`/`foldLeft`) that this "
+     "workload folds with arrives in Phase 3."),
     ("exception_latency", "protoPython / protoST", "Phase 4 (exceptions)",
      "`throw` and `try`/`catch`."),
     ("actor benchmarks", "protoST / protoClojure", "Phase 5 (actors)",
@@ -600,7 +600,7 @@ def write_report(path, meta, columns, workloads, results, jvm_compile, cold):
     L.append("|---|---|---|---|")
     notes = {
         "int_sum_loop": "protoST's twin sums 1..N (result 5000050000); the others sum 0 until N.",
-        "range_iterate": "protoScala: a `while` loop (no `for`/Range before Phase 2/3).",
+        "range_iterate": "protoScala: a `while` loop. `for` landed in Phase 2, but `Range` is Phase 3, so the twin keeps the loop.",
         "fib30": "protoClojure's `fib.clj`; CPython/protopy run `call_recursion.py` with `BENCH_N=30`.",
         "factorial_100": "Declared `BigInt` so the JVM does not overflow (Int at 13!, Long at 21!); "
                          "protoScala promotes automatically (D1).",
@@ -623,7 +623,7 @@ def write_report(path, meta, columns, workloads, results, jvm_compile, cold):
     if cold:
         L.append("## Cold start")
         L.append("")
-        L.append("`benchmarks/cold-start.sh <binary> 21` (self-verifying; target < 20 ms, "
+        L.append("`benchmarks/cold-start.sh <binary> 21` (self-verifying; target < 25 ms, "
                  "DESIGN §1):")
         L.append("")
         L.append("| Build | Case | Runs | Verified | Median (ms) | Target met |")

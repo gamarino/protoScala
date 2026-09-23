@@ -4,10 +4,44 @@ All notable changes to protoScala are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.2.0] - 2026-09-23
+
+Phase 2: object model, apply, for, match. Built against protoCore `e43fa2e4`.
 
 ### Added
 
+- Classes: `val`/`var`/plain constructor parameters, fields, methods, auxiliary
+  constructors, `extends`/`with`, abstract members, `override`, `final`,
+  `sealed`; `private` enforced as a lookup restriction (D5).
+- Traits with Scala's linearization, installed as protoCore parent chains
+  (DESIGN §4.3), trait parameters, `super` calls including stackable traits
+  (DESIGN §4.4).
+- Objects (lazy singletons), companions, case classes and case objects with
+  `apply`, `unapply`, `equals`, `hashCode` (equal to the JVM's), `toString`,
+  `copy` (positional and named), `canEqual`, `productArity`, `productElement`,
+  `productPrefix`, `_1`..`_N`.
+- Tuples `Tuple2`..`Tuple22` as case classes (never protoCore tuples,
+  DESIGN §4.6).
+- The universal `apply` rule, `update`, setters, method values.
+- Pattern matching: literals, wildcards, variables, typed patterns,
+  constructor and tuple patterns, `::`, `List(a, rest*)`, alternatives,
+  binders, stable identifiers, custom extractors, guards, `MatchError`;
+  pattern `val`s; `{ case ... }` literals; `isInstanceOf`/`asInstanceOf`.
+- For-comprehensions (generators, guards, value definitions, patterns; `yield`
+  and `do`) over `List`, `Option` and any class with
+  `map`/`flatMap`/`withFilter`/`foreach`; lazy `withFilter`.
+- Placeholder syntax (`_ + 1`).
+- The prelude (`lib/prelude.scala`): `Option`, `Some`, `None`.
+- `List(...)`, `Nil`, `::`, `map`, `flatMap`, `filter`, `withFilter`,
+  `foreach`, `length`, `tail`, `drop`, `mkString`.
+- REPL: class, trait, object and case-class definitions, redefinition by
+  shadowing.
+- Benchmarks: `attr_lookup` (twin of protoPython/protoST) and `object_tree`
+  (a deep immutable object graph); GC-pressure checks for object graphs.
+- Tutorial chapters 6, 7 and 9; chapters 2, 3, 5 and 14 extended.
+- Conformance fixtures for the object model, case classes, `apply`, lists,
+  pattern matching and for-comprehensions (`tests/conformance/07-*` to
+  `12-*`), each in a braces and an indentation variant.
 - Benchmark suite: `benchmarks/comparable/*.scala`, Scala 3 twins (same
   algorithm and N) of the protoPython/protoST core workloads (`int_sum_loop`,
   `fib`, `str_concat`, `range_iterate`) and of protoClojure's (`tak`, `fib30`,
@@ -21,7 +55,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-Fixes from the final Phase 1 review:
+Fixes from the final Phase 1 review, which had not been released yet:
 
 
 - REPL: an indented construct typed line by line (`while i < 3 do`, then
@@ -54,6 +88,18 @@ Fixes from the final Phase 1 review:
 - The `ProtoSparseListObject` platform type is now called `ProtoMap`
   (`docs/platform/PROTOMAP-SPEC.md`).
 - D1 also covers integer literals (no range limit).
+- The cold-start target is now < 25 ms (was < 20 ms): the embedded Scala
+  prelude adds about 1.2 ms to every start and the standard library will keep
+  growing (maintainer decision, DESIGN §1).
+- Companion objects are linked at compile time instead of through a runtime
+  `__companion__` attribute, so class prototypes stay immutable (DESIGN §4.2).
+- Class and trait membership is tested with a per-class marker attribute
+  rather than protoCore's `isInstanceOf`, whose traversal caps give false
+  negatives on flattened chains (DESIGN §5.3, `docs/platform/ISINSTANCEOF-FIX.md`).
+
+### Deviations (provisional, pending maintainer review)
+
+- D28–D40 ([docs/STATUS.md](docs/STATUS.md)); D5 and D10 extended.
 
 ## [0.1.0] - 2026-09-22
 

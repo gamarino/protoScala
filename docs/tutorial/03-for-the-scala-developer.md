@@ -453,8 +453,9 @@ It stops with:
 
 Scala prints `3`. Write `(a: Int, b: Int) => a + b`, or pass one tuple.
 
-**Smaller Phase 2 behaviours,** recorded in STATUS.md without a question of
-their own:
+**Smaller Phase 2 behaviours,** recorded in
+[STATUS.md](../STATUS.md#provisional-deviations-phase-2--pending-maintainer-decision)
+without a plan question of their own:
 
 - `class`, `trait` and `object` must be defined at the **top level of a
   file**; local, nested and anonymous classes (`new T { … }`), multiple
@@ -465,20 +466,29 @@ their own:
   unaffected.
 - **Named arguments** work only in a case class's `copy`; elsewhere they are
   rejected with `named arguments are not implemented yet` until Phase 4.
-- A refutable pattern in a `for` generator is accepted **without** Scala 3.9's
-  `case` keyword and filters, as in Scala 2; and writing `case` in front of an
-  irrefutable pattern emits no filter, since the pattern cannot fail. Both
-  give the same results as Scala for programs Scala accepts.
-- `for (x <- xs; y = e)` compiles to two `map`s where dotty fuses them into
-  one; the values are identical.
-- `List` hash codes differ from the JVM's (they stay consistent with `==`);
-  case classes, tuples, strings and numbers are bit-identical.
-- The default `toString` of a plain instance is `Name@<identity hash>`; an
-  `object` prints `O@…` where the JVM prints `O$@…`.
+- **D35** — a refutable pattern in a `for` generator is accepted **without**
+  Scala 3.9's `case` keyword and filters, as in Scala 2 (scalac rejects it and
+  asks for `case`).
+- **D36** — writing `case` in front of an irrefutable pattern emits no filter,
+  since the pattern cannot fail, and `for (x <- xs; y = e)` compiles to two
+  `map`s where dotty fuses them into one. Both give exactly the values Scala
+  gives; only the number of intermediate traversals differs.
+- **D37** — an **intersection type cannot be tested at run time**:
+  `case v: (A & B)` and `x.isInstanceOf[A & B]` are rejected at compile time
+  with `this type cannot be tested at run time`, where scalac accepts them and
+  tests both components. Write two nested tests, or one test plus a guard. The
+  unparenthesised `case v: A & B` is a syntax error in scalac too. A
+  parenthesised *tuple* type, `case v: (Int, Int)`, is accepted here and by
+  scalac, and both test only the tuple's erasure.
+- **D39** — `List` hash codes differ from the JVM's (they stay consistent with
+  `==`); case classes, tuples, strings and numbers are bit-identical.
+- **D38** — the default `toString` of a plain instance is
+  `Name@<identity hash>`; an `object` prints `O@…` where the JVM prints
+  `O$@…`, and `println(Tuple2)` prints `Tuple2@<hash>`.
 - A `match` that finds no case raises `MatchError: 5 (of class Int)`, naming
   the Scala class; the JVM names the boxed one (`java.lang.Integer`).
-- A `var` that shadows a concrete inherited `var` without `override` is
-  reported as `cannot override a mutable variable`, where scalac says
+- **D40** — a `var` that shadows a concrete inherited `var` without `override`
+  is reported as `cannot override a mutable variable`, where scalac says
   "needs `override` modifier".
 
 ## 3.3 What is missing

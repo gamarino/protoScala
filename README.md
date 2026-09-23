@@ -35,69 +35,113 @@ println(List.range(1, 101).map(BigInt(_)).product.toString.length)  // 158 — n
 
 ## Project status
 
-**Phase 1 complete (version 0.1.0) — not production ready, open for community
-review.** The binary runs Scala 3 scripts and offers a REPL: `val`/`var`/
-`lazy val`/`def`, `if`/`while`, lambdas and closures, recursion (with
-`StackOverflowError` instead of a crash), `println`, in both brace and
-significant-indentation syntax. Classes, pattern matching, collections,
-exceptions and actors are not implemented yet — see
+**Phase 2 complete (version 0.2.0) — not production ready, open for community
+review.** The binary runs Scala 3 scripts and offers a REPL, in both brace and
+significant-indentation syntax:
+
+- `val`/`var`/`lazy val`/`def`, `if`/`while`, lambdas and closures, placeholder
+  syntax (`_ + 1`), recursion (with `StackOverflowError` instead of a crash),
+  `println`;
+- **classes** with `val`/`var`/plain constructor parameters, auxiliary
+  constructors, `extends`/`with`, abstract members, `override`, `final`,
+  `sealed`, `private` (enforced as a lookup restriction);
+- **objects and companions**, **case classes** and **case objects** with
+  `apply`, `unapply`, `equals`, `hashCode` (bit-equal to the JVM's),
+  `toString`, `copy`, `productArity`/`productElement`/`productPrefix`,
+  `_1`..`_N`;
+- **traits** with Scala's linearization installed as protoCore parent chains,
+  trait parameters, and `super` — stackable traits included;
+- **tuples** `Tuple2`..`Tuple22`, the universal `apply` rule, `update`,
+  generated setters and method values;
+- **pattern matching** with every pattern of the design (literals, wildcards,
+  variables, typed, constructor, tuple, `::`, `List(a, rest*)`, alternatives,
+  binders, stable identifiers, custom extractors, guards), pattern `val`s and
+  `{ case ... }` literals, `isInstanceOf`/`asInstanceOf`;
+- **for-comprehensions** (generators, guards, value definitions, patterns,
+  `yield` and `do`) over `List`, `Option` and any class with
+  `map`/`flatMap`/`withFilter`/`foreach`, with a lazy `withFilter`;
+- `Option`/`Some`/`None` from a prelude written in protoScala, and a minimal
+  `List`.
+
+Exceptions, `enum`, extension methods, the Phase 3 collections, string
+interpolation, actors and UMD are not implemented yet — see
 [docs/STATUS.md](docs/STATUS.md) for the exact boundary and
 [docs/ROADMAP.md](docs/ROADMAP.md) for what each later phase brings.
 
 ## Performance
 
-Latest measured run: 2026-09-22, AMD Ryzen 5 5500U (6 cores, 12 logical CPUs),
-Linux 7.0, protoScala commit `154ab1a`, load average 2.92 at start and 3.88 at
-end. Full report, with versions and build types of every runtime:
-[benchmarks/reports/2026-09-22-suite.md](benchmarks/reports/2026-09-22-suite.md).
+Latest measured run: 2026-09-23, AMD Ryzen 5 5500U (6 cores, 12 logical CPUs),
+Linux 7.0, protoScala commit `6e6837f` (0.2.0; the working tree held Phase 2's
+documentation changes only), load average 3.11 at start and 4.21 at end — a
+shared machine, so absolute milliseconds are noisier than the ratios. Full
+report, with versions and build types of every runtime:
+[benchmarks/reports/2026-09-23-suite.md](benchmarks/reports/2026-09-23-suite.md).
 Median wall-clock in ms of a **cold process** (start-up included, for every
 runtime), 2 warmup + 5 timed runs, every run's printed result verified;
 `—` means the runtime has no twin of that workload.
 
 | Workload | protoScala | protoScala Release | Scala 3.9 (JVM 21) | CPython 3.14 | protopy | protost | protoclj | protoScala ÷ CPython |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| `int_sum_loop` (0 until 100000) | 19.2 | 19.3 | 213.6 | 34.4 | 111.0 | 31.5 | — | 0.56× |
-| `fib` (fib(25)) | 42.2 | 42.8 | 193.4 | 41.3 | 168.4 | 379.4 | — | 1.02× |
-| `str_concat` (2000 concats) | 16.3 | 16.0 | 192.1 | 30.7 | 128.0 | 16.4 | — | 0.53× |
-| `range_iterate` (100000) | 19.3 | 19.2 | 192.1 | 36.2 | 115.7 | 55.0 | — | 0.53× |
-| `tak` (18, 12, 6) | 22.1 | 22.1 | 188.8 | 32.4 | 34.5 | — | 40.6 | 0.68× |
-| `fib30` (fib(30)) | 336.1 | 340.0 | 189.6 | 154.2 | 790.4 | — | 513.4 | 2.18× |
-| `sum_loop` (0..1000000) | 61.3 | 63.3 | 212.9 | 86.3 | 79.8 | — | 60.3 | 0.71× |
-| `factorial_100` (BigInt) | 15.0 | 15.5 | 199.8 | 29.4 | 18.1 | — | 15.3 | 0.51× |
-| **Geomean vs CPython** (rows) | 0.74× (8) | 0.74× (8) | 4.30× (8) | 1.00× | 2.20× (8) | 1.62× (4) | 1.11× (4) | **0.74×** |
+| `int_sum_loop` (0 until 100000) | 25.0 | 24.3 | 218.5 | 44.7 | 141.6 | 37.0 | — | 0.56× |
+| `fib` (fib(25)) | 48.9 | 50.2 | 206.2 | 47.0 | 198.9 | 423.0 | — | 1.04× |
+| `str_concat` (2000 concats) | 18.4 | 17.6 | 198.5 | 36.2 | 125.6 | 16.6 | — | 0.51× |
+| `range_iterate` (100000) | 22.4 | 21.0 | 207.6 | 37.4 | 127.1 | 63.7 | — | 0.60× |
+| `tak` (18, 12, 6) | 25.4 | 25.6 | 212.4 | 35.1 | 38.3 | — | 47.0 | 0.72× |
+| `fib30` (fib(30)) | 381.0 | 370.1 | 204.6 | 181.4 | 923.9 | — | 569.7 | 2.10× |
+| `sum_loop` (0..1000000) | 72.9 | 67.2 | 208.0 | 93.0 | 88.8 | — | 67.8 | 0.78× |
+| `factorial_100` (BigInt) | 16.3 | 16.0 | 208.2 | 35.3 | 19.8 | — | 15.6 | 0.46× |
+| `attr_lookup` (3 field reads × 100000) | 34.9 | 34.5 | 215.3 | 44.4 | 165.2 | 120.7 | — | 0.79× |
+| `object_tree` (131071-object tree: build, path-copy, fold) | 391.1 | 380.9 | 232.7 | 203.5 | 3668.2 | — | — | 1.92× |
+| **Geomean vs CPython** (rows) | 0.83× (10) | 0.80× (10) | 3.56× (10) | 1.00× | 2.82× (10) | 1.74× (5) | 1.08× (4) | **0.83×** |
 
 Cold start (`benchmarks/cold-start.sh`, 21 runs, target < 25 ms): script
-17.43 ms, REPL 18.66 ms (RelWithDebInfo); 17.99 / 18.73 ms (Release).
+18.86 ms, REPL 19.71 ms (RelWithDebInfo); 19.29 / 20.81 ms (Release). The
+embedded Scala prelude that Phase 2 added costs about 1.2 ms of that.
 
-**Reading.** Most rows measure start-up more than work: protoScala starts in
-about 15 ms (`factorial_100` is almost pure start-up) and CPython in about
-25-30 ms, so on short workloads protoScala comes out ahead and the 0.74×
-geomean is largely a start-up figure, not a throughput claim. Where the work
-dominates, the picture reverses: `fib30` (2.69M calls) is 2.2× slower than
+**Reading.** Short rows measure start-up more than work: protoScala starts in
+about 16 ms (`factorial_100` is almost pure start-up) and CPython in about
+30-35 ms, so on short workloads protoScala comes out ahead, and the 0.83×
+geomean is as much a start-up figure as a throughput one. Where the work
+dominates, the picture reverses. `fib30` (2.69M calls) is 2.1× slower than
 CPython 3.14 — protoScala is call-dispatch bound, which the `fib(25)` row hides
-behind its start-up advantage. Loop arithmetic (`sum_loop`, one million
-iterations) runs at 0.71× CPython and on a par with protoClojure. The Release
-build is indistinguishable from the canonical RelWithDebInfo build. The JVM
-column runs the same `.scala` source compiled with `scalac` (compile time
-excluded, reported separately); each sample is a fresh `java` process, so
-~190 ms of JVM start-up and class loading dominate every row, and the JIT's
-steady state — where the JVM would be far ahead on `fib30`, as its 190 ms
-total already suggests — is not measured. Cold-process timing favours
-short-lived runtimes.
+behind its start-up advantage. `object_tree`, the workload that exercises what
+protoScala is actually *for* (build 131071 immutable case-class instances,
+path-copy a spine so the copy shares every right subtree, then fold both
+versions with pattern matching), is 1.92× slower than CPython's `__slots__`
+twin: structural sharing makes the copy cheap, and allocating the tree is what
+dominates. protopy runs the same twin in 3.7 s, so that cost belongs to the
+shared object kernel and its GC, not to protoScala's frontend. `attr_lookup`,
+the field-read twin, runs at 0.79× CPython and 3.5× faster than protoST on the
+same machine: attribute reads go through protoCore's per-thread attribute
+cache and no parallel inline caches were added. Loop arithmetic (`sum_loop`,
+one million iterations) runs at 0.78× CPython and on a par with protoClojure.
+The Release build is indistinguishable from the canonical RelWithDebInfo
+build. The JVM column runs the same `.scala` source compiled with `scalac`
+(compile time excluded, reported separately); each sample is a fresh `java`
+process, so ~200 ms of JVM start-up and class loading dominate every row, and
+the JIT's steady state — where the JVM would be far ahead on `fib30` and
+`object_tree`, as its ~200 ms floor already suggests — is not measured.
+Cold-process timing favours short-lived runtimes.
+
+Adding the two object-model rows moved the geomean from 0.74× (8 workloads) to
+0.83× (10), because they are the two heaviest workloads in the suite. That is
+the honest direction: the more the suite measures real object-graph work
+instead of start-up, the closer protoScala sits to CPython, and nothing here
+was tuned.
 
 **What these numbers are for.** protoScala is positioned as an agile,
 interoperable, easily integrable and very simple Scala — not a fast one.
 Beating the JVM on integer loops is an explicit non-goal (see
 [docs/DESIGN.md](docs/DESIGN.md) §1); this suite tracks start-up and guards
-against regressions. The workloads that matter for the positioning — actors,
-complex persistent structures, deep object graphs and interop — join the suite
-as the phases that enable them land.
+against regressions. Phase 2 added the first two workloads that matter for the
+positioning, `attr_lookup` and `object_tree`; the rest — actors, the full
+persistent collections and interop — join the suite as the phases that enable
+them land.
 
 **Pending workloads** (need later phases; not approximated): `list_append`
-and protoClojure's `sum-squares` (Phase 3 collections), `attr_lookup`
-(Phase 2 classes), `exception_latency` (Phase 4 exceptions), the actor
-benchmarks (Phase 5). See [benchmarks/README.md](benchmarks/README.md) to run
-the suite.
+and protoClojure's `sum-squares` (Phase 3 collections), `exception_latency`
+(Phase 4 exceptions), the actor benchmarks (Phase 5). See
+[benchmarks/README.md](benchmarks/README.md) to run the suite.
 
 ## Building
 

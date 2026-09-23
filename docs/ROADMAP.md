@@ -59,20 +59,30 @@ its suite.
 - `examples/hello.scala` and `examples/fib.scala` run; cold start < 20 ms (the target became < 25 ms in Phase 2, see DESIGN §1).
 **Plan:** [plans/2026-09-22-phase-1-core-language.md](plans/2026-09-22-phase-1-core-language.md).
 
-## Phase 2 — Object model, apply, for, match
+## Phase 2 — Object model, apply, for, match ✅ (2026-09-23)
 
 **Goal:** idiomatic Scala data modelling.
 **Done when:** classes, objects, companions, traits with Scala linearization
 (unit-tested against `scalac`-documented examples), case classes with all
 synthesised members, universal `apply`, for-comprehensions over `List`, and
 pattern matching (all DESIGN §5.3 patterns) pass their fixtures.
+**Plan:** [plans/2026-09-22-phase-2-object-model.md](plans/2026-09-22-phase-2-object-model.md).
+**Delivered beyond the criteria:** plain `super` including stackable traits
+(Open question Q5), an `Option` prelude written in protoScala and a minimal
+`List` moved up from Phase 3 (Q7, Q8), `SEND_KW` for named arguments to native
+methods (Q9), tuples `Tuple2`..`Tuple22` as case classes, REPL definitions of
+classes, traits, objects and case classes, and the `attr_lookup` and
+`object_tree` benchmarks. Provisional deviations D28–D40 are recorded in
+[STATUS.md](STATUS.md#provisional-deviations-phase-2--pending-maintainer-decision).
 
 ## Phase 3 — Fast paths, collections, prelude
 
 **Goal:** a usable standard library.
 **Done when:** SmallInteger fast paths with LargeInteger promotion are
 covered by boundary fixtures (±2^53); `List`, `Vector`, `Range`, `Option`,
-`Either`, `Try`, tuples and string interpolation pass their fixtures;
+`Either`, `Try`, tuples and string interpolation pass their fixtures
+(`Option`, tuples and a minimal `List` already landed in Phase 2 — Q7, Q8 —
+so this phase completes the `List` surface and adds the rest);
 `Map`/`Set` pass on `ProtoMap` (requires P1); benchmark suite
 v1 (`fib`, `tak`, `sum-loop`, `list-ops`, `map-build`) self-reports and is
 recorded in `benchmarks/RESULTS.md`.
@@ -81,9 +91,17 @@ recorded in `benchmarks/RESULTS.md`.
 
 **Goal:** complete core semantics.
 **Done when:** `try`/`catch`/`finally`/`throw` with pattern-matched handlers,
-native error translation, stackable traits with `super` (classic
-`Doubling`/`Incrementing`/`Filtering` queue example), `enum`, sealed
-hierarchies, named and default arguments, extension methods pass.
+native error translation, `super[T].m`, `enum`, sealed
+hierarchies, named and default arguments for Scala-defined methods, extension
+methods and templates nested in an `object` pass.
+
+**Already done in Phase 2** (Open question Q5): plain `super.m` is the same
+DESIGN §4.4 algorithm whether or not stackable traits are involved, so
+stackable traits work today — the classic
+`Doubling`/`Incrementing` queue example is the fixture
+`tests/conformance/07-classes/stackable-traits.scala`. What remains for this
+phase is `super[T].m`, which names the ancestor explicitly instead of taking
+the next one in the linearization, and its done-when fixture.
 
 ## Phase 5 — Actors and futures
 
