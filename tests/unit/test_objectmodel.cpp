@@ -44,10 +44,16 @@ TEST(ObjectModel, InstancesOfAnImmutableShapeWalkItsWholeChain) {
     EXPECT_EQ(inst->getAttribute(c, sym(c, "@C")), PROTO_TRUE);  // the membership marker
     EXPECT_EQ(b->newChild(c)->getAttribute(c, sym(c, "@C")), PROTO_NONE);
     const proto::ProtoList* parents = inst->getParents(c);
-    ASSERT_EQ(parents->getSize(c), 4u);  // [C, T2, T1, B]
+    // protoCore 2.0.0 flattens in setParents: the listed parents keep their order and
+    // every missing ancestor is appended after them, so the chain is
+    // [C, T2, T1, B, root, objectPrototype] rather than the four entries the list named.
+    // The linearization protoScala installs is unchanged, and so is lookup order.
+    ASSERT_EQ(parents->getSize(c), 6u);
     EXPECT_EQ(parents->getAt(c, 0), cls);
     EXPECT_EQ(parents->getAt(c, 1), t2);
+    EXPECT_EQ(parents->getAt(c, 2), t1);
     EXPECT_EQ(parents->getAt(c, 3), b);
+    EXPECT_EQ(parents->getAt(c, 4), root);
     EXPECT_EQ(inst->getPrototype(c), cls);
     // A mutable instance of the same class walks the same chain and keeps its identity.
     const proto::ProtoObject* m = cls->newChild(c, true);
@@ -59,20 +65,23 @@ TEST(ObjectModel, InstancesOfAnImmutableShapeWalkItsWholeChain) {
     EXPECT_NE(inst->setAttribute(c, sym(c, "field"), c->fromInteger(7)), inst);
 }
 
-TEST(ObjectModel, SetParentsOnAMutableObjectIsInvisibleToItsChildren) {
-    // The reason class prototypes are immutable shapes (Design note 2; protoST
-    // STATUS D21). If this starts failing, protoCore made parent chains live:
-    // update Design note 2 (the immutable-shape construction stays correct).
+TEST(ObjectModel, ChildrenOfAMutableObjectCaptureItsChainAtCreationTime) {
+    // protoCore 2.0.0: newChild reads a mutable prototype's CURRENT snapshot, so a
+    // child created AFTER a setParents sees the new chain (under 1.x it saw none of
+    // it). A child created BEFORE keeps the chain it captured. Class prototypes stay
+    // immutable shapes (Design note 2) because that makes the capture point moot.
     proto::ProtoSpace space;
     proto::ProtoContext ctx(&space, space.rootContext);
     proto::ProtoContext* c = &ctx;
     const proto::ProtoObject* t = space.objectPrototype->newChild(c)->setAttribute(c, sym(c, "who"), c->fromInteger(1));
     const proto::ProtoObject* items[] = {t};
     const proto::ProtoObject* mutableClass = space.objectPrototype->newChild(c, true);
+    const proto::ProtoObject* before = mutableClass->newChild(c, false);
     mutableClass->setParents(c, c->newList(1, items));
     EXPECT_EQ(intAttr(c, mutableClass, "who"), 1);  // the class itself sees the new chain
-    const proto::ProtoObject* child = mutableClass->newChild(c, false);
-    EXPECT_EQ(child->getAttribute(c, sym(c, "who")), PROTO_NONE);  // its children do not
+    const proto::ProtoObject* after = mutableClass->newChild(c, false);
+    EXPECT_EQ(intAttr(c, after, "who"), 1);                         // created after: sees it
+    EXPECT_EQ(before->getAttribute(c, sym(c, "who")), PROTO_NONE);  // created before: does not
 }
 
 TEST(ObjectModel, DeepChainsResolveThroughTheMarker) {
