@@ -22,6 +22,14 @@ median_ms() {  # reads nanosecond samples on stdin, prints the median in ms
     sort -n | awk '{ a[NR] = $1 } END { printf "%.2f", a[int((NR + 1) / 2)] / 1e6 }'
 }
 
+min_ms() {  # reads nanosecond samples on stdin, prints the min in ms
+    sort -n | head -1 | awk '{ printf "%.2f", $1 / 1e6 }'
+}
+
+max_ms() {  # reads nanosecond samples on stdin, prints the max in ms
+    sort -n | tail -1 | awk '{ printf "%.2f", $1 / 1e6 }'
+}
+
 run_case() {  # $1 label, $2 expected last line, $3... command
     local label="$1" expected="$2"; shift 2
     local samples="" ok=0 i
@@ -33,9 +41,11 @@ run_case() {  # $1 label, $2 expected last line, $3... command
         [[ "$out" == "$expected" ]] && ok=$((ok + 1))
         samples+="$((t1 - t0))"$'\n'
     done
-    local med
+    local med lo hi
     med=$(printf '%s' "$samples" | median_ms)
-    echo "$label: runs=$N verified=$ok median_ms=$med target_ms=$TARGET_MS"
+    lo=$(printf '%s' "$samples" | min_ms)
+    hi=$(printf '%s' "$samples" | max_ms)
+    echo "$label: runs=$N verified=$ok median_ms=$med min_ms=$lo max_ms=$hi target_ms=$TARGET_MS"
     [[ $ok -eq $N ]] || { echo "$label: FAIL: $((N - ok)) run(s) printed the wrong output"; return 1; }
     awk -v m="$med" -v t="$TARGET_MS" 'BEGIN { exit !(m < t) }' \
         || { echo "$label: FAIL: median ${med} ms is not below ${TARGET_MS} ms"; return 1; }

@@ -86,106 +86,151 @@ interpolation and UMD are not implemented yet — see
 
 ## Performance
 
+protoScala is positioned as an agile, interoperable, easily integrable and
+very simple Scala — **not a fast one.** Beating the JVM on integer loops, or
+matching protoClojure's raw actor throughput, are explicit non-goals (see
+[docs/DESIGN.md](docs/DESIGN.md) §1). Where the numbers below show protoScala
+losing, they are reported as measured, not adjusted or explained away.
+
+Both tables in this section come from an **interleaved re-run** (2026-09-23)
+that supersedes an earlier same-day run measured in blocks. This machine is
+the maintainer's daily-driver desktop: VS Code, Chrome and PyCharm run
+throughout, the load-average floor is roughly 2-3 on 12 logical CPUs, and
+there is no quiet window to wait for. Every runtime is sampled round-robin
+(one sample of column A, then B, then C, … then back to A) so ambient load
+hits every column alike, and every cell below reports its median **and**
+`[min-max]` spread — ratios between columns are the primary result, absolute
+milliseconds/msg-per-second are indicative only.
+
 ### Actors (0.3.0)
 
-First measured actor run: 2026-09-23, same machine, **CAS-list mailboxes**
-(protoCore 2.0.0 has no `ProtoMPSCQueue` yet), load average 3.59 at start and
-9.09 at end — a shared machine, so these are a lower bound. All 42 cells
-(7 modes × 6 worker counts) verified their own message counts before any rate
-was computed. Full report:
-[benchmarks/reports/2026-09-23-actors.md](benchmarks/reports/2026-09-23-actors.md).
+Interleaved re-run: 2026-09-23, same machine, **CAS-list mailboxes**
+(protoCore 2.0.0 has no `ProtoMPSCQueue` yet), load average 2.96 at start,
+9.51 at midpoint, 9.68 at end. All 42 protoScala cells (7 modes × 6 worker
+counts) and 24 protoClojure comparison cells verified their own message
+counts before any rate was computed, 5 samples per cell, protoScala and
+protoClojure sampled back to back at every (mode, workers) pair so the
+comparison is same-machine, same-moment. Full report, with every cell's
+spread:
+[benchmarks/reports/2026-09-23-actors-v2.md](benchmarks/reports/2026-09-23-actors-v2.md)
+(the superseded single-sample run is kept at
+[benchmarks/reports/2026-09-23-actors.md](benchmarks/reports/2026-09-23-actors.md)).
 
-| Mode | peak msg/s | at | protoClojure, same day |
+| Mode | peak msg/s (median) | at | protoClojure at the same worker count |
 |---|---:|---|---:|
-| single | 126,950 | 1 worker | 331,565 |
-| fan-out | 97,516 | 1 worker | 526,039 |
-| MPSC | 166,983 | 1 worker | 296,121 |
-| MPMC | 250,212 | 4 workers | 334,898 |
-| ping-pong | 22,092 | 2 workers | no twin |
-| await | 44,736 | 4 workers | no twin |
-| priority | 115,890 | 1 worker | no twin |
+| single | 133,942 | 2 workers | 302,051 [294,048-330,161] |
+| fan-out | 104,384 | 1 worker | 314,711 [302,402-329,415] |
+| MPSC | 161,528 | 2 workers | 285,136 [264,822-301,420] |
+| MPMC | 254,412 | 4 workers | 307,878 [299,924-323,011] |
+| ping-pong | 20,397 | 2 workers | no twin |
+| await | 46,815 | 4 workers | no twin |
+| priority | 118,575 | 1 worker | no twin |
 
-`await` completes at every worker count **including one**, which is the point
-of the cooperative suspension. `fan-out` currently regresses as workers are
-added, where protoClojure improves; the cause and the plan are in
+Across the four comparable shapes, protoScala runs at **0.11×-0.83×**
+protoClojure's median rate (protoClojure is 1.2×-9× faster, depending on
+mode) — consistent with the superseded run's 0.10×-0.89×, so this gap is not
+an artifact of the earlier run's coarser measurement. `await` completes at
+every worker count **including one**, which is the point of the cooperative
+suspension. **`fan-out` regresses as workers are added and the spreads are
+narrow enough that this is not noise**: protoScala falls from 104,384 msg/s
+at 1 worker to 56,475 msg/s at 16 (-46%), while protoClojure rises from
+314,711 to 507,122 (+61%) over the same range. protoScala's mailboxes are
+still the CAS-list fallback (`protoscala --version` reports it explicitly);
+that the fallback's compare-and-swap push-and-retry and its per-turn,
+three-band backlog scan are *why* `fan-out` regresses under 1000-actor
+contention is a **plausible but UNCONFIRMED hypothesis** — no profiling was
+done to isolate it, and no other candidate (ready-queue contention, GC
+pressure from 1000 live actors) was ruled out. It is the first row to
+re-measure once `ProtoMPSCQueue` lands, not an established explanation. Full
+reading, with every mode and worker count:
 [benchmarks/RESULTS.md](benchmarks/RESULTS.md). protoScala's actors carry
-protoCore objects that the collector traces, which is a deliberate cost of the
-design (DESIGN §8.4), not an accident.
+protoCore objects that the collector traces, which is a deliberate cost of
+the design (DESIGN §8.4), not an accident.
 
+### The general suite (0.3.0)
 
-
-Latest measured run: 2026-09-23, AMD Ryzen 5 5500U (6 cores, 12 logical CPUs),
-Linux 7.0, protoScala commit `6e6837f` (0.2.0; the working tree held Phase 2's
-documentation changes only), load average 3.11 at start and 4.21 at end — a
-shared machine, so absolute milliseconds are noisier than the ratios. Full
-report, with versions and build types of every runtime:
-[benchmarks/reports/2026-09-23-suite.md](benchmarks/reports/2026-09-23-suite.md).
+Interleaved re-run: 2026-09-23, AMD Ryzen 5 5500U (6 cores, 12 logical CPUs),
+Linux 7.0, protoScala commit `3703759` (main, actors landed), protoCore
+`bf972d3f` (2.0.0), load average 3.37 at start, 4.08 at midpoint, 4.39 at
+end. Full report, with versions and build types of every runtime:
+[benchmarks/reports/2026-09-23-suite-v2.md](benchmarks/reports/2026-09-23-suite-v2.md)
+(the superseded run, whose protoScala figures agree within 10%, is kept at
+[benchmarks/reports/2026-09-23-suite.md](benchmarks/reports/2026-09-23-suite.md)).
 Median wall-clock in ms of a **cold process** (start-up included, for every
-runtime), 2 warmup + 5 timed runs, every run's printed result verified;
-`—` means the runtime has no twin of that workload.
+runtime) with its `[min-max]` spread, 2 warmup + 7 timed runs, every run's
+printed result verified; `—` means the runtime has no twin of that workload.
 
 | Workload | protoScala | protoScala Release | Scala 3.9 (JVM 21) | CPython 3.14 | protopy | protost | protoclj | protoScala ÷ CPython |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| `int_sum_loop` (0 until 100000) | 25.0 | 24.3 | 218.5 | 44.7 | 141.6 | 37.0 | — | 0.56× |
-| `fib` (fib(25)) | 48.9 | 50.2 | 206.2 | 47.0 | 198.9 | 423.0 | — | 1.04× |
-| `str_concat` (2000 concats) | 18.4 | 17.6 | 198.5 | 36.2 | 125.6 | 16.6 | — | 0.51× |
-| `range_iterate` (100000) | 22.4 | 21.0 | 207.6 | 37.4 | 127.1 | 63.7 | — | 0.60× |
-| `tak` (18, 12, 6) | 25.4 | 25.6 | 212.4 | 35.1 | 38.3 | — | 47.0 | 0.72× |
-| `fib30` (fib(30)) | 381.0 | 370.1 | 204.6 | 181.4 | 923.9 | — | 569.7 | 2.10× |
-| `sum_loop` (0..1000000) | 72.9 | 67.2 | 208.0 | 93.0 | 88.8 | — | 67.8 | 0.78× |
-| `factorial_100` (BigInt) | 16.3 | 16.0 | 208.2 | 35.3 | 19.8 | — | 15.6 | 0.46× |
-| `attr_lookup` (3 field reads × 100000) | 34.9 | 34.5 | 215.3 | 44.4 | 165.2 | 120.7 | — | 0.79× |
-| `object_tree` (131071-object tree: build, path-copy, fold) | 391.1 | 380.9 | 232.7 | 203.5 | 3668.2 | — | — | 1.92× |
-| **Geomean vs CPython** (rows) | 0.83× (10) | 0.80× (10) | 3.56× (10) | 1.00× | 2.82× (10) | 1.74× (5) | 1.08× (4) | **0.83×** |
+| `int_sum_loop` (0 until 100000) | 24.6 [22.2-25.2] | 23.5 [23.1-25.8] | 216.4 [201.4-263.2] | 38.0 [36.6-44.5] | 123.7 [120.5-129.5] | 36.7 [35.2-38.6] | — | 0.65× |
+| `fib` (fib(25)) | 49.2 [47.5-56.0] | 49.2 [46.8-57.0] | 210.5 [204.5-225.0] | 46.0 [44.0-50.8] | 190.1 [179.8-192.6] | 415.3 [400.3-425.0] | — | 1.07× |
+| `str_concat` (2000 concats) | 19.4 [17.8-20.0] | 20.6 [19.1-21.5] | 205.1 [197.8-214.8] | 34.2 [33.2-45.3] | 122.2 [119.2-140.1] | 17.4 [16.7-18.0] | — | 0.57× |
+| `range_iterate` (100000) | 23.0 [21.5-25.7] | 23.9 [22.9-25.6] | 218.1 [204.3-240.3] | 36.5 [35.3-42.6] | 122.6 [119.5-142.6] | 63.3 [50.6-72.0] | — | 0.63× |
+| `tak` (18, 12, 6) | 26.6 [25.6-30.8] | 26.2 [25.4-26.6] | 216.3 [192.4-270.0] | 36.9 [35.2-45.3] | 39.2 [37.5-41.0] | — | 46.4 [44.0-50.3] | 0.72× |
+| `fib30` (fib(30)) | 372.3 [350.2-482.4] | 382.6 [350.9-438.7] | 206.7 [190.8-249.4] | 179.6 [169.8-228.2] | 887.3 [852.3-1051.0] | — | 582.1 [558.8-784.5] | 2.07× |
+| `sum_loop` (0..1000000) | 67.1 [66.5-76.1] | 68.1 [66.4-79.9] | 205.8 [188.6-228.7] | 90.1 [87.7-97.0] | 87.6 [77.3-97.1] | — | 68.7 [65.9-71.2] | 0.75× |
+| `factorial_100` (BigInt) | 17.9 [16.4-18.7] | 17.9 [17.3-19.7] | 206.1 [196.5-221.1] | 32.9 [31.5-35.5] | 20.4 [19.7-21.5] | — | 16.3 [14.5-17.0] | 0.54× |
+| `attr_lookup` (3 field reads × 100000) | 35.8 [33.9-38.7] | 36.8 [34.0-37.9] | 210.0 [197.6-227.6] | 45.6 [42.0-47.1] | 161.6 [157.2-167.9] | 123.6 [117.6-129.4] | — | 0.79× |
+| `object_tree` (131071-object tree: build, path-copy, fold) | 406.9 [383.7-629.9] | 404.7 [379.6-613.6] | 255.0 [216.0-384.1] | 209.1 [195.6-261.0] | 3657.1 [3619.2-4142.0] | — | — | 1.95× |
+| **Geomean vs CPython** (rows) | 0.86× (10) | 0.87× (10) | 3.72× (10) | 1.00× | 2.82× (10) | 1.84× (5) | 1.11× (4) | **0.86×** |
 
 Cold start (`benchmarks/cold-start.sh`, 21 runs, target < 25 ms): script
-18.86 ms, REPL 19.71 ms (RelWithDebInfo); 19.29 / 20.81 ms (Release). The
-embedded Scala prelude that Phase 2 added costs about 1.2 ms of that.
+21.02 [19.44-22.68] ms, REPL 21.77 [20.37-23.28] ms (RelWithDebInfo); script
+21.05 [19.50-22.26] ms, REPL 22.59 [20.42-24.33] ms (Release). **Verdict: MET**
+for all four rows — every individual sample, including the worst, stayed
+below the 25 ms target (the closest approach was the Release REPL's worst
+sample at 24.33 ms, still under target). This is a real verdict, not a
+close call disguised as one: unlike an earlier informal pass that saw the
+median straddle 25 ms under heavier load, this interleaved run's full spread
+never touched the target.
 
 **Reading.** Short rows measure start-up more than work: protoScala starts in
-about 16 ms (`factorial_100` is almost pure start-up) and CPython in about
-30-35 ms, so on short workloads protoScala comes out ahead, and the 0.83×
+about 17-18 ms (`factorial_100` is almost pure start-up) and CPython in about
+32-38 ms, so on short workloads protoScala comes out ahead, and the 0.86×
 geomean is as much a start-up figure as a throughput one. Where the work
-dominates, the picture reverses. `fib30` (2.69M calls) is 2.1× slower than
-CPython 3.14 — protoScala is call-dispatch bound, which the `fib(25)` row hides
-behind its start-up advantage. `object_tree`, the workload that exercises what
-protoScala is actually *for* (build 131071 immutable case-class instances,
-path-copy a spine so the copy shares every right subtree, then fold both
-versions with pattern matching), is 1.92× slower than CPython's `__slots__`
-twin: structural sharing makes the copy cheap, and allocating the tree is what
-dominates. protopy runs the same twin in 3.7 s, so that cost belongs to the
-shared object kernel and its GC, not to protoScala's frontend. `attr_lookup`,
-the field-read twin, runs at 0.79× CPython and 3.5× faster than protoST on the
-same machine: attribute reads go through protoCore's per-thread attribute
-cache and no parallel inline caches were added. Loop arithmetic (`sum_loop`,
-one million iterations) runs at 0.78× CPython and on a par with protoClojure.
-The Release build is indistinguishable from the canonical RelWithDebInfo
-build. The JVM column runs the same `.scala` source compiled with `scalac`
+dominates, the picture reverses, and protoScala loses. `fib30` (2.69M calls)
+is 2.07× slower than CPython 3.14 — protoScala is call-dispatch bound, which
+the `fib(25)` row hides behind its start-up advantage. `object_tree`, the
+workload that exercises what protoScala is actually *for* (build 131071
+immutable case-class instances, path-copy a spine so the copy shares every
+right subtree, then fold both versions with pattern matching), is 1.95×
+slower than CPython's `__slots__` twin: structural sharing makes the copy
+cheap, and allocating the tree is what dominates. protopy runs the same twin
+in 3.66 s, so that cost belongs to the shared object kernel and its GC, not
+to protoScala's frontend. `attr_lookup`, the field-read twin, runs at 0.79×
+CPython and about 3.5× faster than protoST on the same machine: attribute
+reads go through protoCore's per-thread attribute cache and no parallel
+inline caches were added. Loop arithmetic (`sum_loop`, one million
+iterations) runs at 0.75× CPython and close to protoClojure. The Release
+build is indistinguishable from the canonical RelWithDebInfo build within
+spread. The JVM column runs the same `.scala` source compiled with `scalac`
 (compile time excluded, reported separately); each sample is a fresh `java`
-process, so ~200 ms of JVM start-up and class loading dominate every row, and
-the JIT's steady state — where the JVM would be far ahead on `fib30` and
+process, so ~200-260 ms of JVM start-up and class loading dominate every row,
+and the JIT's steady state — where the JVM would be far ahead on `fib30` and
 `object_tree`, as its ~200 ms floor already suggests — is not measured.
 Cold-process timing favours short-lived runtimes.
 
-Adding the two object-model rows moved the geomean from 0.74× (8 workloads) to
-0.83× (10), because they are the two heaviest workloads in the suite. That is
-the honest direction: the more the suite measures real object-graph work
-instead of start-up, the closer protoScala sits to CPython, and nothing here
-was tuned.
+Compared against the superseded, single-sample run of the same day, every
+protoScala workload's median moved less than 10%, and the geomean moved from
+0.83× to 0.86× — inside the spread shown above, i.e. the earlier run's
+numbers were not meaningfully noise-distorted for the protoScala column, even
+though it reported no spread of its own. The columns that moved most were
+`protoScala Release`'s `str_concat` (+17%, 17.6 → 20.6 ms) and `range_iterate`
+(+14%, 21.0 → 23.9 ms) — both still inside a few milliseconds and both
+plausibly load noise given the higher midpoint/end load of this run (up to
+6.83) versus the superseded run (up to 4.21).
 
-**What these numbers are for.** protoScala is positioned as an agile,
-interoperable, easily integrable and very simple Scala — not a fast one.
-Beating the JVM on integer loops is an explicit non-goal (see
-[docs/DESIGN.md](docs/DESIGN.md) §1); this suite tracks start-up and guards
-against regressions. Phase 2 added the first two workloads that matter for the
-positioning, `attr_lookup` and `object_tree`; the rest — actors, the full
-persistent collections and interop — join the suite as the phases that enable
-them land.
+**What these numbers are for.** This suite tracks start-up and guards against
+regressions; it is not a claim that protoScala is fast. Phase 2 added the
+first two workloads that matter for the positioning, `attr_lookup` and
+`object_tree`; the rest — the full persistent collections and interop — join
+the suite as the phases that enable them land. Phase 5 added the actor
+benchmarks above.
 
 **Pending workloads** (need later phases; not approximated): `list_append`
 and protoClojure's `sum-squares` (Phase 3 collections), `exception_latency`
-(Phase 4 exceptions), the actor benchmarks (Phase 5). See
-[benchmarks/README.md](benchmarks/README.md) to run the suite.
+(Phase 4 exceptions). See [benchmarks/README.md](benchmarks/README.md) to run
+the suite.
 
 ## Building
 

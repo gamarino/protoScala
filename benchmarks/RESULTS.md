@@ -13,7 +13,8 @@ average, per-runtime medians, the JVM compile times and the cold-start result:
 |---|---|---:|---|
 | 2026-09-22 | [2026-09-22-suite.md](reports/2026-09-22-suite.md) | 0.74× (8 workloads) | commit `154ab1a`; load 2.9-3.9; all 7 columns, every cell verified |
 | 2026-09-22 | [2026-09-22-phase2.md](reports/2026-09-22-phase2.md) | 1.06× (4 workloads: `attr_lookup`, `object_tree`, `fib`, `tak`) | Phase 2: `attr_lookup` and `object_tree` added; commit `e8f66a1` (the working tree added only the two benchmark files and their Python twin, no runtime change); load 3.88 / 3.10 / 3.25 at start and 3.78 / 3.31 / 3.31 at end — a shared machine, so the absolute milliseconds are noisier than the ratios; every cell verified |
-| 2026-09-23 | [2026-09-23-suite.md](reports/2026-09-23-suite.md) | 0.83× (all 10 workloads) | **The 0.2.0 release run.** Full suite, `attr_lookup` and `object_tree` included; commit `6e6837f` (the working tree held Phase 2's documentation changes only, no runtime change); load 3.11 / 2.98 / 3.38 at start and 4.21 / 3.73 / 3.63 at end — a shared machine, so absolute milliseconds are noisier than ratios; all 7 columns, every cell verified |
+| 2026-09-23 | [2026-09-23-suite.md](reports/2026-09-23-suite.md) | 0.83× (all 10 workloads) | **The 0.2.0 release run** (superseded by the row below — kept for history). Full suite, `attr_lookup` and `object_tree` included; commit `6e6837f` (the working tree held Phase 2's documentation changes only, no runtime change); load 3.11 / 2.98 / 3.38 at start and 4.21 / 3.73 / 3.63 at end — a shared machine, so absolute milliseconds are noisier than ratios; all 7 columns, every cell verified; **5 timed samples per cell, no spread reported** |
+| 2026-09-23 | [2026-09-23-suite-v2.md](reports/2026-09-23-suite-v2.md) | 0.86× (all 10 workloads) | **Interleaved re-run superseding the row above.** Same commit tree (`3703759-dirty`); 7 timed samples per cell (2 warmup), round-robin across all 7 columns, **`[min-max]` spread reported for every cell**; load 3.37/6.73/6.83 at start, 4.08/6.19/6.63 at midpoint, 4.39/5.87/6.49 at end; every workload's protoScala figure moved less than 10% from the superseded run, i.e. that run was not meaningfully noise-distorted for the protoScala column |
 
 The latest table is also in the top-level README ("Performance").
 
@@ -21,7 +22,8 @@ Actor runs (`benchmarks/actor-bench.sh`) are dated reports in the same folder:
 
 | Date | Report | Notes |
 |---|---|---|
-| 2026-09-23 | [2026-09-23-actors.md](reports/2026-09-23-actors.md) | **The 0.3.0 release run.** 7 modes × 6 worker counts, all 42 cells verified; CAS-list mailbox; load 3.59 → 9.09 on a shared machine; protoClojure measured the same day |
+| 2026-09-23 | [2026-09-23-actors.md](reports/2026-09-23-actors.md) | **The 0.3.0 release run** (superseded by the row below — kept for history). 7 modes × 6 worker counts, all 42 cells verified; CAS-list mailbox; load 3.59 → 9.09 on a shared machine; protoClojure measured the same day but **as a separate block, not interleaved**; **1 sample per cell, no spread reported** |
+| 2026-09-23 | [2026-09-23-actors-v2.md](reports/2026-09-23-actors-v2.md) | **Interleaved re-run superseding the row above.** Same 7 modes × 6 workers, **5 samples per cell, round-robin across modes, worker counts and runtimes** (protoScala sample immediately followed by the matching protoClojure sample), median + `[min-max]` spread for every cell; load 2.96 at start, 9.51 at midpoint, 9.68 at end; the protoClojure gap (0.11×-0.83×, was 0.10×-0.89×) and the `fan-out` worker regression (protoScala -46% from w=1 to w=16 vs protoClojure +61%) both reproduce with narrow spreads |
 
 ## Actors (Phase 5)
 

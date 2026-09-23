@@ -309,6 +309,13 @@ class Cell:
     def median(self):
         return None if self.failure else median(self.samples)
 
+    @property
+    def spread(self):
+        """(min, max) of the timed samples, or None if failed/empty."""
+        if self.failure or not self.samples:
+            return None
+        return min(self.samples), max(self.samples)
+
 
 def compile_jvm(scala_home, java_opts):
     """scalac every comparable file once, untimed for the benchmark; returns
@@ -346,13 +353,13 @@ def wait_for_load(max_load, max_wait):
     return la, waited, attempts
 
 
-def run_cold_start(binary):
-    p = subprocess.run([str(SCRIPT_DIR / "cold-start.sh"), str(binary), "21"],
+def run_cold_start(binary, runs=21):
+    p = subprocess.run([str(SCRIPT_DIR / "cold-start.sh"), str(binary), str(runs)],
                        capture_output=True, text=True)
     rows = []
     for line in p.stdout.splitlines():
-        m = re.match(r"(\w+): runs=(\d+) verified=(\d+) median_ms=([\d.]+) target_ms=(\d+)",
-                     line)
+        m = re.match(r"(\w+): runs=(\d+) verified=(\d+) median_ms=([\d.]+) "
+                     r"min_ms=([\d.]+) max_ms=([\d.]+) target_ms=(\d+)", line)
         if m:
             rows.append(m.groups())
     notes = [ln for ln in p.stdout.splitlines() if "FAIL" in ln]
@@ -441,8 +448,10 @@ def main():
     columns = [c for c in columns if c[2]]
 
     results = {}
+    load_mid = None
+    mid_index = len(workloads) // 2
     print("== Comparable workloads ==")
-    for w in workloads:
+    for idx, w in enumerate(workloads):
         sfile = COMPARABLE_DIR / w["scala"]
         expected = expect_of(sfile)
         cells = {"protoscala": Cell([str(scala_bin), str(sfile)], expected)}
@@ -475,6 +484,9 @@ def main():
                 print(f" {key}={'FAILED' if c.failure else f'{c.median:.1f}'}", end="")
         print(flush=True)
         results[w["name"]] = cells
+        if idx == mid_index:
+            load_mid = loadavg()
+            print(f"  [load average at midpoint: {fmt_load(load_mid)}]", flush=True)
 
     cold = []
     if not args.no_cold_start:
@@ -485,7 +497,7 @@ def main():
                 cold.append((label, build_type(b), rows, rc, notes))
                 for r in rows:
                     print(f"  {label:<20} {r[0]:<7} median {r[3]} ms "
-                          f"({r[2]}/{r[1]} verified)")
+                          f"[{r[4]}-{r[5]}] ({r[2]}/{r[1]} verified)")
                 for n in notes:
                     print(f"  {label:<20} {n}")
 
@@ -496,7 +508,7 @@ def main():
     out = Path(args.output) if args.output else REPORTS_DIR / f"{date:%Y-%m-%d}-{args.name}.md"
     meta = {
         "date": date, "cpu": cpu, "cores": cores, "ncpu": ncpu, "commit": commit,
-        "load_start": load_start, "load_end": load_end, "waited": waited,
+        "load_start": load_start, "load_mid": load_mid, "load_end": load_end, "waited": waited,
         "attempts": attempts, "max_load": args.max_load,
         "bins": {"protoscala": scala_bin, "release": rel_bin, "cpython": cpython,
                  "protopy": protopy, "protost": protost, "protoclj": protoclj,
@@ -536,14 +548,19 @@ def write_report(path, meta, columns, workloads, results, jvm_compile, cold):
              + (f"; `build_bench/protoscala` is {build_type(b['release'])}"
                 if b["release"] else "; no `build_bench` Release build"))
     L.append(f"- **Load average (1/5/15 min):** {fmt_load(meta['load_start'])} at start, "
-             f"{fmt_load(meta['load_end'])} at end"
+             + (f"{fmt_load(meta['load_mid'])} at midpoint, " if meta.get("load_mid") else "")
+             + f"{fmt_load(meta['load_end'])} at end"
              + (f" (the run waited {meta['waited']} s for the 1-minute load to drop "
                 f"below {meta['max_load']})" if meta["waited"] else ""))
     L.append(f"- **Method:** {WARMUP_RUNS} warmup + {N_RUNS} timed runs per cell, "
-             "interleaved across runtimes; median wall-clock of a cold process "
-             "(start-up included). Every run's printed result is verified; a "
-             "wrong result, non-zero exit or timeout marks the cell FAILED and "
-             "it is excluded from every aggregate.")
+             "interleaved across runtimes (round-robin: one sample of each runtime, "
+             "then the next, so ambient load hits every column alike); median "
+             "wall-clock of a cold process (start-up included), spread reported as "
+             "`[min-max]` beside every median. This machine is a daily-driver desktop "
+             "(VS Code, Chrome and PyCharm run throughout); ratios to CPython are the "
+             "primary result, absolute milliseconds are indicative only. Every run's "
+             "printed result is verified; a wrong result, non-zero exit or timeout "
+             "marks the cell FAILED and it is excluded from every aggregate.")
     L.append("")
     L.append("### Runtimes")
     L.append("")
@@ -621,15 +638,28 @@ def write_report(path, meta, columns, workloads, results, jvm_compile, cold):
     if cold:
         L.append("## Cold start")
         L.append("")
-        L.append("`benchmarks/cold-start.sh <binary> 21` (self-verifying; target < 25 ms, "
-                 "DESIGN §1):")
+        L.append("`benchmarks/cold-start.sh <binary> <runs>` (self-verifying; target < 25 ms, "
+                 "DESIGN §1). Verdict: **MET** if every sample (including the worst) is below "
+                 "the target; **MISSED** if the median is at or above it; **STRADDLES** if the "
+                 "median is below the target but the spread crosses it (the worst sample is at "
+                 "or above 25 ms) — neither met nor missed, and reported as such rather than "
+                 "picking a side:")
         L.append("")
-        L.append("| Build | Case | Runs | Verified | Median (ms) | Target met |")
-        L.append("|---|---|---:|---:|---:|---|")
+        L.append("| Build | Case | Runs | Verified | Median (ms) | Spread [min-max] (ms) | Verdict |")
+        L.append("|---|---|---:|---:|---:|---:|---|")
         for label, bt, rows, rc, cnotes in cold:
-            for case, runs, ok, med, target in rows:
-                met = "yes" if (ok == runs and float(med) < float(target)) else "**no**"
-                L.append(f"| {label} ({bt}) | {case} | {runs} | {ok} | {med} | {met} |")
+            for case, runs, ok, med, lo, hi, target in rows:
+                medf, hif, tgt = float(med), float(hi), float(target)
+                if ok != runs:
+                    verdict = "**FAIL** (wrong output)"
+                elif hif < tgt:
+                    verdict = "MET"
+                elif medf >= tgt:
+                    verdict = "MISSED"
+                else:
+                    verdict = "STRADDLES"
+                L.append(f"| {label} ({bt}) | {case} | {runs} | {ok} | {med} | "
+                         f"[{lo}-{hi}] | {verdict} |")
         L.append("")
     L.append("## Pending workloads")
     L.append("")
@@ -652,7 +682,7 @@ def write_report(path, meta, columns, workloads, results, jvm_compile, cold):
 
 def results_table(columns, workloads, results):
     heads = [h for _, h, _ in columns]
-    rows = ["| Workload | " + " | ".join(f"{h} (ms)" for h in heads)
+    rows = ["| Workload | " + " | ".join(f"{h} (ms, median [min-max])" for h in heads)
             + " | protoScala ÷ CPython |",
             "|---|" + "---:|" * (len(heads) + 1)]
     ratios = {k: [] for k, _, _ in columns}
@@ -668,7 +698,9 @@ def results_table(columns, workloads, results):
             elif c.failure:
                 vals.append("FAILED")
             else:
-                vals.append(f"{c.median:.1f}")
+                sp = c.spread
+                spread_txt = f" [{sp[0]:.1f}-{sp[1]:.1f}]" if sp else ""
+                vals.append(f"{c.median:.1f}{spread_txt}")
                 if py_ms and key != "cpython":
                     ratios[key].append(c.median / py_ms)
         ps = cells["protoscala"]
