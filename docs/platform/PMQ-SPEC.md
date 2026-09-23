@@ -77,6 +77,34 @@ must fit that model rather than import mutable-heap techniques:
 
 1. **No new stop-the-world work.** Nothing proportional to queue length or
    node count may be done inside the pause.
+
+   **Verdict: MET** (protoCore 2.1.0, merge `f60baf11`). `takeAll`'s two
+   O(batch) loops — the young-chain walk and the reversal — poll every 64
+   nodes, matching `allocCell`'s every-64-allocations poll, so a draining
+   consumer parks promptly instead of holding the world stopped for the length
+   of its batch. The pause is flat in the batch size:
+
+   | Batch (items) | Median stop-the-world pause |
+   |---|---|
+   | 50,000 | 30 us |
+   | 100,000 | 33 us |
+   | 200,000 | 36 us |
+   | 400,000 | 20-35 us |
+
+   That is level with the plain bulk `ProtoList` builder measured on the same
+   machine (47 us median while a thread builds 100,000 elements), i.e. the
+   queue adds no pause cost of its own. Before the poll was added the same
+   probe measured 338 us at 50,000 and 3,731 us at 400,000 — an 11x rise for
+   an 8x batch, plainly linear.
+
+   Measured by `MPSCQueueGC.LargeDrainDoesNotBlockStopTheWorld`
+   (`protoCore/test/ProtoMPSCQueueGCTests.cpp`), swept with
+   `PMQ_PAUSE_BATCH`. Re-measured beyond the range above as a check on the
+   shape of the curve: 1,600,000 items gives a 43-47 us median, still flat.
+   Individual samples on a loaded machine reach the high hundreds of
+   microseconds and one 1,600,000-item sweep produced a 144 us median that did
+   not reproduce (43 us and 47 us on re-runs), so the medians above are the
+   load-bearing figures, not the per-sample maxima.
 2. **No write barriers, card marking or mutator-side GC bookkeeping** on
    `push`/`takeAll`.
 3. **No lost items under concurrent marking.** An item pushed while the GC is
@@ -140,6 +168,20 @@ agent under the maintainer's authorisation for the overnight run, and is
 patched. The full argument for each is in
 `docs/plans/2026-09-23-phase-p2-protompscqueue.md`, Task 0.
 
+**Implementation status: D1-D10 are all implemented and merged**, in protoCore
+2.1.0 via merge `f60baf11` on `master`. Their **review status is unchanged —
+every one is still `pending review`**, and only the maintainer clears that.
+"Implemented and merged" here means the code matches the decision as recorded,
+not that the decision has been accepted.
+
+Verified against the merge for the whole family: protoCore 438/438; and, all
+rebuilt from clean against 2.1.0, protoPython 582/583 (the one failure is the
+pre-existing `protopy_import_site`, triggered by a `.pth` in a sibling
+`venv/`), protoJS ctest 34/34 with conformity 5/5 and test262
+`built-ins/{Object,Reflect,Proxy}` at 3619 passed with no newly failing test,
+protoST 833/833, protoClojure 383/383, protoScala 694/694. protoScala's
+mailbox seam selects `ProtoMPSCQueue` (§6 step 3).
+
 | Id | Decision | Taken by |
 |---|---|---|
 | D1 | GC design **(b′)**: an atomic `head` of immutable CAS-prepended nodes inside the queue cell, made safe without any stop-the-world capture by a **retain chain**. `takeAll` publishes a retain cell holding the chain onto `retained` *before* it detaches the chain from `head`; `processReferences` loads `head` *before* `retained`. Both orderings are load-bearing. | agent, pending review |
@@ -188,3 +230,14 @@ patched. The full argument for each is in
   to park — which it does only in `allocCell`/`safepoint`, neither of which is
   reached inside the publish window. **No allocation and no protoCore call may
   be added between the load and the CAS.**
+- **The every-64-nodes poll does not weaken the ABA argument.** The poll that
+  makes §3 constraint 1 hold is a parking point, so it would break the
+  argument above if it sat inside the publish window. It does not: both polled
+  loops run **after** the detaching exchange and therefore **outside** the
+  publish window. The window still contains no allocation, no safepoint and no
+  protoCore call, so the recorded ABA-impossibility argument holds unchanged.
+  This is the same invariant as D3 (critical-section scope) seen from the
+  liveness side, and it is why the poll interval and the poll *placement* are
+  separate concerns: the interval is a tuning choice, the placement is load
+  bearing. **A poll must never be moved into, or added inside, the publish
+  window.**
