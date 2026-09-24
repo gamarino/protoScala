@@ -14,6 +14,8 @@ enum RootSlot : unsigned {
     kActorProto, kFutureProto, kEnvelopeProto, kThreadProto, kFrameProto, kSpawnPartialProto,
     kActorRegistry, kActorCompanion, kPriorityCompanion, kFutureCompanion, kThreadCompanion,
     kSystemCompanion,
+    kRangeProto, kVectorProto, kMapProto, kSetProto, kFoldPartialProto,
+    kVectorCompanion, kMapCompanion, kSetCompanion,
     kRootSlotCount
 };
 } // namespace
@@ -180,6 +182,27 @@ Runtime::Runtime(proto::ProtoSpace& space) : space_(space) {
     L.tuple2Key     = key(tupleTypeKey(2).c_str());
     L.classNameField = key("className");
     L.messageField   = key("message");
+    // Phase 3: the collection prototypes and their companions (DESIGN §6,
+    // plan A0-4). Each payload lives in one attribute of an ordinary object.
+    L.rangeProto       = pin(kRangeProto, L.anyRefProto->newChild(ctx, true));
+    L.vectorProto      = pin(kVectorProto, L.anyRefProto->newChild(ctx, true));
+    L.mapProto         = pin(kMapProto, L.anyRefProto->newChild(ctx, true));
+    L.setProto         = pin(kSetProto, L.anyRefProto->newChild(ctx, true));
+    L.foldPartialProto = pin(kFoldPartialProto, L.anyProto->newChild(ctx, true));
+    L.vectorCompanion  = pin(kVectorCompanion, L.anyRefProto->newChild(ctx, true));
+    L.mapCompanion     = pin(kMapCompanion, L.anyRefProto->newChild(ctx, true));
+    L.setCompanion     = pin(kSetCompanion, L.anyRefProto->newChild(ctx, true));
+    L.rangeStartKey     = key("__start__");
+    L.rangeEndKey       = key("__end__");
+    L.rangeStepKey      = key("__step__");
+    L.rangeInclusiveKey = key("__inclusive__");
+    // `__list__` is NOT reused: it is already the WithFilter's source key.
+    L.vecDataKey  = key("__vec__");
+    L.mapDataKey  = key("__map__");
+    L.foldSrcKey  = key("__fold_src__");
+    L.foldSeedKey = key("__fold_seed__");
+    L.foldLeftKey = key("__fold_left__");
+
     L.actorRegistry->setAttribute(ctx, L.actorsKey, ctx->newList()->asObject(ctx));
     L.actorRegistry->setAttribute(ctx, L.threadsKey, ctx->newList()->asObject(ctx));
     bindType(L.actorProto, kActorKey, "Actor");
@@ -190,6 +213,13 @@ Runtime::Runtime(proto::ProtoSpace& space) : space_(space) {
     L.futureCompanion->setAttribute(ctx, L.nameKey, makeString(ctx, "Future"));
     L.threadCompanion->setAttribute(ctx, L.nameKey, makeString(ctx, "Thread"));
     L.systemCompanion->setAttribute(ctx, L.nameKey, makeString(ctx, "System"));
+    bindType(L.rangeProto, kRangeKey, "Range");
+    bindType(L.vectorProto, kVectorKey, "Vector");
+    bindType(L.mapProto, kMapKey, "Map");
+    bindType(L.setProto, kSetKey, "Set");
+    L.vectorCompanion->setAttribute(ctx, L.nameKey, makeString(ctx, "Vector"));
+    L.mapCompanion->setAttribute(ctx, L.nameKey, makeString(ctx, "Map"));
+    L.setCompanion->setAttribute(ctx, L.nameKey, makeString(ctx, "Set"));
 
     // Rebind the primitive prototypes (see the header comment).
     space.smallIntegerPrototype = L.intProto;

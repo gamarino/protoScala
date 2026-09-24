@@ -8,6 +8,7 @@
 #include "protoCore.h"
 
 #include <algorithm>
+#include <stdexcept>
 #include <climits>
 #include <cmath>
 #include <cstdio>
@@ -889,19 +890,6 @@ PRIM(function_apply) {
 // Installation
 // ---------------------------------------------------------------------------
 
-struct MethodEntry {
-    const char* name;
-    proto::ProtoMethod fn;
-};
-
-template <std::size_t N>
-void installAll(ProtoContext* ctx, proto::ProtoObject* target, const MethodEntry (&entries)[N]) {
-    // setAttribute on a mutable prototype mutates it in place.
-    for (const MethodEntry& e : entries)
-        target->setAttribute(ctx, proto::ProtoString::createSymbol(ctx, e.name),
-                             ctx->fromMethod(nullptr, e.fn));
-}
-
 } // namespace
 
 const std::vector<std::string>& builtinGlobalNames() {
@@ -987,8 +975,16 @@ void installPrimitives(ProtoContext* ctx, const RuntimeLayout& L) {
     // The globals the compiler resolves `List` and `Nil` to (builtinGlobalNames).
     L.globals->setAttribute(ctx, proto::ProtoString::createSymbol(ctx, "List"), L.listCompanion);
     L.globals->setAttribute(ctx, proto::ProtoString::createSymbol(ctx, "Nil"), ctx->newList()->asObject(ctx));
+    // The single `equals` on anyProto is what scalaIsIdentityKey compares a
+    // resolved `equals` against (DESIGN §6.1, plan A0-5). It exists only now,
+    // which is why the layout field is filled here and not in Runtime::Runtime.
+    const_cast<RuntimeLayout&>(L).defaultEqualsMethod =
+        L.anyProto->getOwnAttributeDirect(ctx, L.equalsName);
+    if (!L.defaultEqualsMethod)
+        throw std::logic_error("installPrimitives: anyProto has no equals");
     installProductPrimitives(ctx, L);
     installActorPrimitives(ctx, L);
+    installCollectionPrimitives(ctx, L);
 }
 
 } // namespace protoScala

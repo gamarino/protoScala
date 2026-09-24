@@ -86,4 +86,24 @@ inline const ProtoObject* boolean(bool b) { return b ? PROTO_TRUE : PROTO_FALSE;
 
 inline const ProtoObject* str(ProtoContext* ctx, const std::string& s) { return makeString(ctx, s); }
 
+// ---------------------------------------------------------------------------
+// Installation
+// ---------------------------------------------------------------------------
+
+// One native method to install on a prototype. Shared here so that
+// Primitives.cpp, ProductPrimitives.cpp and CollectionPrimitives.cpp install
+// their tables through one definition.
+struct MethodEntry {
+    const char* name;
+    proto::ProtoMethod fn;
+};
+
+template <std::size_t N>
+void installAll(ProtoContext* ctx, proto::ProtoObject* target, const MethodEntry (&entries)[N]) {
+    // setAttribute on a mutable prototype mutates it in place.
+    for (const MethodEntry& e : entries)
+        target->setAttribute(ctx, proto::ProtoString::createSymbol(ctx, e.name),
+                             ctx->fromMethod(nullptr, e.fn));
+}
+
 } // namespace protoScala::prim

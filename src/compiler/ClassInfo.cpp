@@ -76,6 +76,39 @@ std::vector<ClassInfo> builtinTypes() {
     member(future, "value", MemberKind::ParamlessDef);
     for (const char* m : {"map", "flatMap", "recover", "onComplete"})
         member(future, m, MemberKind::Def);
+    // Phase 3: the collections that are objects rather than raw protoCore
+    // values (DESIGN §6). `List` is a raw ProtoList and is tested by TypeCode,
+    // so it needs no ClassInfo; these four are tested by their marker key.
+    ClassInfo range = anyRef;
+    range.name = "Range";
+    range.key = kRangeKey;
+    range.isFinal = true;
+    range.linearization = {kRangeKey, kAnyRefKey, kAnyKey};
+    for (const char* m : {"apply", "by", "contains", "map", "flatMap", "filter", "withFilter",
+                          "foreach", "exists", "forall", "count", "find", "mkString"})
+        member(range, m, MemberKind::Def);
+    for (const char* m : {"length", "size", "isEmpty", "nonEmpty", "head", "last", "sum",
+                          "reverse", "toList", "toSeq", "toVector", "toSet"})
+        member(range, m, MemberKind::ParamlessDef);
+    ClassInfo vector = anyRef;
+    vector.name = "Vector";
+    vector.key = kVectorKey;
+    vector.isFinal = true;
+    vector.linearization = {kVectorKey, kAnyRefKey, kAnyKey};
+    ClassInfo map = anyRef;
+    map.name = "Map";
+    map.key = kMapKey;
+    map.isFinal = true;
+    map.linearization = {kMapKey, kAnyRefKey, kAnyKey};
+    ClassInfo set = anyRef;
+    set.name = "Set";
+    set.key = kSetKey;
+    set.isFinal = true;
+    set.linearization = {kSetKey, kAnyRefKey, kAnyKey};
+    out.push_back(std::move(range));
+    out.push_back(std::move(vector));
+    out.push_back(std::move(map));
+    out.push_back(std::move(set));
     out.push_back(std::move(actor));
     out.push_back(std::move(future));
     out.push_back(std::move(any));

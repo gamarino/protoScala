@@ -121,6 +121,33 @@ struct RuntimeLayout {
     const proto::ProtoString* classNameField = nullptr;  // RuntimeError.className
     const proto::ProtoString* messageField = nullptr;    // RuntimeError.message
 
+    // Phase 3: the collection prototypes (DESIGN §6, plan A0-4). Each is an
+    // ordinary protoCore object whose payload is one attribute, and each is
+    // pinned in a root-context slot like the rest.
+    proto::ProtoObject* rangeProto = nullptr;          // Range
+    proto::ProtoObject* vectorProto = nullptr;         // Vector
+    proto::ProtoObject* mapProto = nullptr;            // Map (DESIGN §6.1)
+    proto::ProtoObject* setProto = nullptr;            // Set
+    proto::ProtoObject* vectorCompanion = nullptr;     // the value of the global `Vector`
+    proto::ProtoObject* mapCompanion = nullptr;        // the value of the global `Map`
+    proto::ProtoObject* setCompanion = nullptr;        // the value of the global `Set`
+    proto::ProtoObject* foldPartialProto = nullptr;    // the result of xs.foldLeft(z)
+    const proto::ProtoString* rangeStartKey = nullptr;     // "__start__"
+    const proto::ProtoString* rangeEndKey = nullptr;       // "__end__"
+    const proto::ProtoString* rangeStepKey = nullptr;      // "__step__"
+    const proto::ProtoString* rangeInclusiveKey = nullptr; // "__inclusive__"
+    const proto::ProtoString* vecDataKey = nullptr;        // "__vec__": a ProtoList
+    const proto::ProtoString* mapDataKey = nullptr;        // "__map__": a ProtoMap
+    const proto::ProtoString* foldSrcKey = nullptr;        // "__fold_src__"
+    const proto::ProtoString* foldSeedKey = nullptr;       // "__fold_seed__"
+    const proto::ProtoString* foldLeftKey = nullptr;       // "__fold_left__"
+    // The one `equals` installed on anyProto (Primitives.cpp, any_equals). A
+    // class that does not override `equals` resolves to exactly this object,
+    // which is how scalaIsIdentityKey decides DESIGN §6.1's identity/value
+    // classification without a heuristic. Filled by installPrimitives, not by
+    // Runtime::Runtime, because the method object does not exist until then.
+    const proto::ProtoObject* defaultEqualsMethod = nullptr;
+
     // Prelude values the natives construct, resolved after the prelude is
     // compiled (a REPL redefinition gives `Some#1`, so a name cannot be
     // hard-coded). Filled by bindPreludeHooks.

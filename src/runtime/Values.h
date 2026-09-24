@@ -54,6 +54,34 @@ inline bool isObjectCellFast(const proto::ProtoObject* v) {
 // Appends the UTF-8 encoding of code point `c` to `out`.
 void appendUtf8(std::string& out, char32_t c);
 
+// Is `v` one of the Phase 3 collection objects? Each tests the one attribute
+// that object kind always carries (plan A0-4). The `key != nullptr` guard is
+// load-bearing: a predicate may be called before Runtime has interned its key
+// (an EvalHarness built without installPrimitives, a native reached during
+// bootstrap), and it must answer false rather than probe a null key. A Set and
+// a Map both carry `__map__`, so they are told apart by their prototype.
+bool isRangeFast(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v);
+bool isVectorFast(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v);
+bool isMapFast(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v);
+bool isSetFast(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v);
+
+// A read-only view of a Scala Seq — a List, a Vector, or a Range — used by
+// valuesEqual and scalaHash so that List(1,2) == Vector(1,2) == (1 to 2) and the
+// three hash alike (DESIGN §6, plan A0-7 and A0-8). It ALLOCATES NOTHING: a
+// Range is read arithmetically, never materialised, which is what makes
+// cross-kind Seq equality affordable on the EQ opcode's path.
+struct SeqView {
+    const proto::ProtoList* list = nullptr;  // List, or a Vector's __vec__
+    long long start = 0;                     // Range only
+    long long step = 1;                      // Range only
+    long long size = 0;
+    bool isRange = false;
+    bool valid = false;                      // false: `v` is not a Seq at all
+};
+SeqView seqViewOf(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v);
+// Element `i` of the view; `i` must be in [0, size).
+const proto::ProtoObject* seqElemAt(proto::ProtoContext* ctx, const SeqView& s, long long i);
+
 // The BytecodeModule of a compiled Scala function value, or nullptr for any
 // other value (native methods, non-object receivers, plain objects).
 const BytecodeModule* compiledModuleOf(proto::ProtoContext* ctx, const RuntimeLayout& L,

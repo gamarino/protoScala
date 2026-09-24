@@ -212,6 +212,7 @@ add_library(protoscala_runtime STATIC
     src/runtime/ExecutionEngine.cpp
     src/runtime/Primitives.cpp
     src/runtime/ProductPrimitives.cpp
+    src/runtime/CollectionPrimitives.cpp
     src/runtime/ActorPrimitives.cpp
     src/runtime/ActorScheduler.cpp
     src/runtime/Futures.cpp

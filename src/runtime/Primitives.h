@@ -27,6 +27,10 @@ void installProductPrimitives(proto::ProtoContext* ctx, const RuntimeLayout& lay
 // installPrimitives calls it.
 void installActorPrimitives(proto::ProtoContext* ctx, const RuntimeLayout& layout);
 
+// Phase 3: Vector, Range, Map and Set (DESIGN §6, §6.1). Called by
+// installPrimitives after installProductPrimitives.
+void installCollectionPrimitives(proto::ProtoContext* ctx, const RuntimeLayout& layout);
+
 // Resolves the prelude values the native methods construct. Call once, right
 // after loadPrelude, from every entry point that builds a runtime (Session,
 // EvalHarness). A missing name is a build defect, not user input: it throws.

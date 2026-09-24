@@ -148,6 +148,71 @@ std::string formatDouble(double d) {
     return out;
 }
 
+// ---------------------------------------------------------------------------
+// Phase 3 collections: the object-kind predicates and the Seq view
+// ---------------------------------------------------------------------------
+
+// All four are one word comparison against the pinned prototype. NOT a probe of
+// the payload attribute: `getAttribute` answers PROTO_NONE, not nullptr, for a
+// key the object does not carry, so `getAttribute(k) != nullptr` is true for
+// every object and would have made every one of these predicates answer `true`
+// for every other kind. Prototype identity is exact here because each of the
+// four is built only by newChild of its pinned prototype and none is
+// subclassable (they are final builtin types), and it also tells a Set from a
+// Map, which carry the same `__map__` payload key.
+bool isRangeFast(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v) {
+    return L.rangeProto != nullptr && isObjectCellFast(v) && v->getPrototype(ctx) == L.rangeProto;
+}
+
+bool isVectorFast(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v) {
+    return L.vectorProto != nullptr && isObjectCellFast(v) && v->getPrototype(ctx) == L.vectorProto;
+}
+
+bool isMapFast(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v) {
+    return L.mapProto != nullptr && isObjectCellFast(v) && v->getPrototype(ctx) == L.mapProto;
+}
+
+bool isSetFast(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v) {
+    return L.setProto != nullptr && isObjectCellFast(v) && v->getPrototype(ctx) == L.setProto;
+}
+
+SeqView seqViewOf(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v) {
+    SeqView out;
+    if (isListFast(v)) {
+        out.list = v->asList(ctx);
+        out.size = static_cast<long long>(out.list->getSize(ctx));
+        out.valid = true;
+        return out;
+    }
+    if (!isObjectCellFast(v)) return out;            // cheap reject before two probes
+    if (isVectorFast(ctx, L, v)) {
+        out.list = v->getAttribute(ctx, L.vecDataKey)->asList(ctx);
+        out.size = static_cast<long long>(out.list->getSize(ctx));
+        out.valid = true;
+        return out;
+    }
+    if (isRangeFast(ctx, L, v)) {
+        out.start = proto::asSmallInt(v->getAttribute(ctx, L.rangeStartKey));
+        out.step = proto::asSmallInt(v->getAttribute(ctx, L.rangeStepKey));
+        const long long end = proto::asSmallInt(v->getAttribute(ctx, L.rangeEndKey));
+        const bool inclusive = v->getAttribute(ctx, L.rangeInclusiveKey) == PROTO_TRUE;
+        const long long last = inclusive ? end : (out.step > 0 ? end - 1 : end + 1);
+        out.size = (out.step == 0 || (out.step > 0 ? last < out.start : last > out.start))
+                       ? 0
+                       : (last - out.start) / out.step + 1;
+        out.isRange = true;
+        out.valid = true;
+        return out;
+    }
+    return out;   // not a Seq
+}
+
+const proto::ProtoObject* seqElemAt(proto::ProtoContext* ctx, const SeqView& s, long long i) {
+    // A Range is arithmetic, so nothing is allocated and nothing is built.
+    return s.isRange ? proto::makeSmallInt(s.start + i * s.step)
+                     : s.list->getAt(ctx, static_cast<int>(i));
+}
+
 std::string show(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v) {
     if (!v || v == PROTO_NONE) return "null";
     if (v == L.unit) return "()";
@@ -205,17 +270,25 @@ bool valuesEqual(proto::ProtoContext* ctx, const RuntimeLayout& L,
     if (a == b) return true;
     if (proto::ProtoObject::isStringTagFast(a) && proto::ProtoObject::isStringTagFast(b))
         return a->partialCompare(ctx, b) == std::partial_ordering::equivalent;
-    if (isListFast(a) && isListFast(b)) {
-        checkNativeStack();  // nested lists recurse
-        const proto::ProtoList* la = a->asList(ctx);
-        const proto::ProtoList* lb = b->asList(ctx);
-        const unsigned long n = la->getSize(ctx);
-        if (n != lb->getSize(ctx)) return false;
-        for (unsigned long k = 0; k < n; ++k)
-            if (!valuesEqual(ctx, L, la->getAt(ctx, static_cast<int>(k)), lb->getAt(ctx, static_cast<int>(k))))
+    // Scala Seq equality across kinds: List(1,2) == Vector(1,2) == (1 to 2)
+    // (DESIGN §6, plan A0-7 and A0-8). Deciding it here, before any prototype
+    // dispatch, is what keeps the EQ opcode -- which never dispatches -- in
+    // agreement with `a.equals(b)`. The view allocates nothing, so comparing a
+    // billion-element Range costs the length check alone.
+    const SeqView sa = seqViewOf(ctx, L, a);
+    if (sa.valid) {
+        const SeqView sb = seqViewOf(ctx, L, b);
+        if (!sb.valid) return false;
+        if (sa.size != sb.size) return false;               // O(1) short-circuit
+        if (sa.isRange && sb.isRange)                       // O(1) for two Ranges
+            return sa.size == 0 || (sa.start == sb.start && sa.step == sb.step);
+        checkNativeStack();  // nested sequences recurse
+        for (long long i = 0; i < sa.size; ++i)
+            if (!valuesEqual(ctx, L, seqElemAt(ctx, sa, i), seqElemAt(ctx, sb, i)))
                 return false;
         return true;
     }
+    if (seqViewOf(ctx, L, b).valid) return false;   // a Seq equals only a Seq
     if (isScalaInstance(ctx, L, a)) {  // a == b is a.equals(b) (null was handled above)
         const ActiveCallContext* active = activeCallContext();
         if (!active) return a == b;  // no engine to run equals: identity, as show and hash do
@@ -250,12 +323,17 @@ std::int32_t scalaHash(proto::ProtoContext* ctx, const RuntimeLayout& L, const p
     if (isCharFast(v)) return static_cast<std::int32_t>(charValueFast(v));
     if (proto::ProtoObject::isStringTagFast(v))
         return hashing::javaStringHash(reinterpret_cast<const proto::ProtoString*>(v)->toStdString(ctx));
-    if (isListFast(v)) {
+    // One hash for every Seq kind, over the same view valuesEqual uses.
+    // Required, not optional: an ==/## split would make Map(List(0,1,2) -> 1)
+    // miss a lookup by (0 until 3) and let Set hold duplicates (plan A0-8).
+    // hashing::seqHash is Phase 2's mixer, reused verbatim so List hash codes
+    // do not change (D39).
+    if (const SeqView sv = seqViewOf(ctx, L, v); sv.valid) {
         checkNativeStack();
-        const proto::ProtoList* list = v->asList(ctx);
         std::vector<std::int32_t> hs;
-        for (unsigned long k = 0, n = list->getSize(ctx); k < n; ++k)
-            hs.push_back(scalaHash(ctx, L, list->getAt(ctx, static_cast<int>(k))));
+        hs.reserve(static_cast<std::size_t>(sv.size));
+        for (long long i = 0; i < sv.size; ++i)
+            hs.push_back(scalaHash(ctx, L, seqElemAt(ctx, sv, i)));
         return hashing::seqHash(hs);
     }
     if (isScalaInstance(ctx, L, v)) {
