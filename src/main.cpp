@@ -25,6 +25,15 @@ namespace {
 void printVersion() {
     std::printf("protoScala %s (actor mailboxes: %s)\n", protoScala::versionString(),
                 protoScala::Mailbox::implementationName());
+    // Which prelude path this binary takes. A user who measures start-up needs
+    // to know whether the image is in it, and a binary built by cross-compiling
+    // honestly says it is not.
+#if defined(PROTOSCALA_HAVE_PRELUDE_IMAGE)
+    std::printf("prelude: precompiled image (set PROTOSCALA_PRELUDE_NO_IMAGE=1 to compile "
+                "lib/prelude.scala at start-up instead)\n");
+#else
+    std::printf("prelude: compiled at start-up (no precompiled image in this build)\n");
+#endif
 }
 
 void printHelp() {

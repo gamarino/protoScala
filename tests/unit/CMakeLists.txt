@@ -22,6 +22,7 @@ add_executable(protoscala_unit_tests
     test_primitives.cpp
     test_readystack.cpp
     test_mailbox.cpp
+    test_prelude_image.cpp
 )
 
 target_link_libraries(protoscala_unit_tests

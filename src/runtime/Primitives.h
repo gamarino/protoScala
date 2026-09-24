@@ -6,6 +6,7 @@
  */
 #pragma once
 #include "runtime/Runtime.h"
+#include "support/BuiltinNames.h"
 
 #include <cstdint>
 #include <string>
@@ -46,17 +47,9 @@ void bindPreludeHooks(proto::ProtoContext* ctx, RuntimeLayout& layout, const Glo
 // Phase 6. Nothing about it is Scala-aware.
 void installKeywordProbe(proto::ProtoContext* ctx, const RuntimeLayout& layout);
 
-// Global functions installed by installPrimitives ({"println", "print"}).
-const std::vector<std::string>& builtinGlobalNames();
-
-// The by-name signatures the runtime declares for its own globals (D47): the
-// global's name, then one mask per parameter list of its `apply`, bit k set when
-// argument k is by-name. The compiler has no built-in knowledge of any of them;
-// it reads this list when a session declares the builtin globals.
-struct BuiltinByNameSignature {
-    const char* global;
-    std::vector<std::uint32_t> applyMasks;
-};
-const std::vector<BuiltinByNameSignature>& builtinByNameSignatures();
+// `builtinGlobalNames()` and `builtinByNameSignatures()` moved to
+// support/BuiltinNames.h (Phase 6 Task 2): they are pure data, and the
+// build-time tool `protoscala-precompile` needs exactly the same list without
+// linking this library. Included here so every existing caller keeps compiling.
 
 } // namespace protoScala

@@ -132,6 +132,14 @@ public:
     // returns the position of the `op` word. Throws std::length_error beyond
     // kMaxExtendedOperand.
     std::size_t emit(Op op, std::uint64_t operand, int line);
+    // Appends an already-assembled instruction word and its line entry, with no
+    // re-encoding. This exists for the precompiled prelude image and for nothing
+    // else: `emit` re-encodes an (op, operand) pair and would refuse the second
+    // half of an EXTEND-prefixed pair the compiler has already assembled.
+    void appendRawInstr(Instr word, int line) {
+        code_.push_back(word);
+        lines_.push_back(line);
+    }
     // A forward jump with a placeholder operand; never extended.
     std::size_t emitJump(Op op, int line);
     // Sets the jump at `jumpAt` to land on `target` (target >= jumpAt + 1).

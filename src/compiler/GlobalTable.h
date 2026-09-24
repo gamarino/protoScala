@@ -65,6 +65,27 @@ public:
         return b.key;
     }
 
+    // Binds `name` to an EXISTING binding, rather than allocating a key for
+    // it. An import does this: the module's global already exists under its
+    // own key and the importing unit only needs the name to reach it.
+    // Deliberately does not touch `counters_`: the key was allocated by the
+    // module's own table, which shares those counters (Phase 6 A0-16), so no
+    // second allocation can produce it.
+    void bind(const std::string& name, const GlobalBinding& b) {
+        declaredInUnit_.insert(name);
+        table_[name] = b;
+        // The key exists already; make sure a LATER declaration of the same
+        // name in this table shadows it rather than re-issuing the same key.
+        // Without this, a prelude binding installed from the image (which never
+        // goes through declare()) would leave the counter unset, and a REPL
+        // redefinition of a prelude name would be handed the prelude's own key.
+        reserveKey(*counters_, name, b.key);
+    }
+
+    // The names this unit declared. A module's exports are the difference
+    // between its table and the prelude snapshot it was copied from.
+    const std::unordered_set<std::string>& declaredInUnit() const { return declaredInUnit_; }
+
     // Records which arguments of a call to `name` are by-name (D47). Called
     // right after declare(), which resets the masks, so a redefinition that
     // drops the by-name parameter drops the wrapping with it.
@@ -139,6 +160,17 @@ public:
         }
         return typeKeyOfName_.at(name);
     }
+    // Makes `name` resolve to an existing type key (an imported type). The key
+    // was allocated by the module's own table, which shares `typeCounters_`.
+    void aliasType(const std::string& name, const std::string& key) {
+        typesDeclaredInUnit_.insert(name);
+        typeKeyOfName_[name] = key;
+        reserveKey(*typeCounters_, name, key.empty() ? key : key.substr(1));
+    }
+    // The type names this unit declared (see declaredInUnit()).
+    const std::unordered_set<std::string>& typesDeclaredInUnit() const {
+        return typesDeclaredInUnit_;
+    }
     // Records the description of a declared type (info.key from declareType).
     void defineType(ClassInfo info) {
         const std::string key = info.key;
@@ -164,7 +196,35 @@ public:
         return it == typesByKey_.end() ? nullptr : &it->second;
     }
 
+    // --- Whole-table access, for the prelude image and its generator -------
+    // `protoscala-precompile` writes these out and buildPreludeImage replays
+    // them, so a session that takes the image path ends up with exactly the
+    // table the compiler produced. Nothing else should need them.
+    const std::unordered_map<std::string, GlobalBinding>& allBindings() const { return table_; }
+    const std::unordered_map<std::string, ClassInfo>& allTypes() const { return typesByKey_; }
+    const std::unordered_map<std::string, std::string>& typeKeys() const { return typeKeyOfName_; }
+    const std::unordered_map<std::string, std::uint32_t>& byNameSelectors() const {
+        return *byNameSelectors_;
+    }
+
 private:
+    // Records that `key` has been handed out for `name`, so the next declare()
+    // of that name allocates a shadowing key instead of the same one. `key` is
+    // either `name` or `name#N`.
+    static void reserveKey(std::unordered_map<std::string, int>& counters,
+                           const std::string& name, const std::string& key) {
+        auto [it, fresh] = counters.try_emplace(name, 0);
+        (void)fresh;
+        const auto hash = key.rfind('#');
+        if (hash == std::string::npos || key.compare(0, hash, name) != 0) return;
+        int n = 0;
+        for (std::size_t k = hash + 1; k < key.size(); ++k) {
+            if (key[k] < '0' || key[k] > '9') return;
+            n = n * 10 + (key[k] - '0');
+        }
+        if (n > it->second) it->second = n;
+    }
+
     std::unordered_map<std::string, GlobalBinding> table_;
     std::unordered_set<std::string> declaredInUnit_;
     // Per name: how many shadowing keys were handed out (shared by copies).

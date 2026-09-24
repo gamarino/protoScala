@@ -1107,20 +1107,6 @@ PRIM(prim_install_extension) {
 
 } // namespace
 
-const std::vector<std::string>& builtinGlobalNames() {
-    // The TupleN companions are globals too: `Tuple2(1, 2)` is `(1, 2)`.
-    static const std::vector<std::string> names = [] {
-        std::vector<std::string> v = {"println", "print", "List", "Nil", "__raise",
-                                      "Actor", "Future", "Thread", "System",
-                                      "__fmt", "__tryOf", "__classNameOf", "__kwprobe",
-                                      "__installExtension",
-                                      "Vector", "Map", "Set"};
-        for (unsigned n = 2; n <= kMaxTupleArity; ++n) v.push_back("Tuple" + std::to_string(n));
-        return v;
-    }();
-    return names;
-}
-
 void installPrimitives(ProtoContext* ctx, const RuntimeLayout& L) {
     static constexpr MethodEntry globals[] = {
         {"println", &prim_println}, {"print", &prim_print}, {"__raise", &prim_raise},

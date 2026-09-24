@@ -504,11 +504,6 @@ void install(ProtoContext* ctx, proto::ProtoObject* target, const Entry* entries
 // `Future(expr)` must not evaluate `expr` on the caller: the body belongs to the
 // one-shot actor the future runs on (DESIGN §8.3), so `Future.apply` declares
 // its single parameter by-name (D47). The compiler learns it from here.
-const std::vector<BuiltinByNameSignature>& builtinByNameSignatures() {
-    static const std::vector<BuiltinByNameSignature> sigs = {{"Future", {0x1u}}};
-    return sigs;
-}
-
 void installActorPrimitives(proto::ProtoContext* ctx, const RuntimeLayout& L) {
     using namespace protoScala::prim;
     static constexpr Entry actorObject[] = {{"spawn", &actor_spawnPartial},

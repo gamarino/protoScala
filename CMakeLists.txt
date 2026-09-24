@@ -176,6 +176,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
 add_library(protoscala_support STATIC
     src/support/Version.cpp
     src/support/FormatSpec.cpp
+    src/support/BuiltinNames.cpp
     src/runtime/StackGuard.cpp
 )
 target_link_libraries(protoscala_support PUBLIC ${PROTOCORE_LIBRARY} pthread)
@@ -204,6 +205,35 @@ add_library(protoscala_compiler STATIC
 target_link_libraries(protoscala_compiler PUBLIC protoscala_frontend protoscala_support)
 target_compile_options(protoscala_compiler PRIVATE -Wall -Wextra -Wpedantic)
 
+# --- The precompiled prelude image (a build product, not a cache) ----------------
+# protoscala-precompile compiles lib/prelude.scala on the BUILD host and writes
+# generated/PreludeImage.cpp: static tables that src/runtime/PreludeImage.cpp
+# walks. The custom command DEPENDS on the prelude, so the image is regenerated
+# whenever the source changes and can never be stale -- there is no cache
+# directory, no mtime comparison and nothing a user can invalidate.
+#
+# Cross-compiling cannot run a host tool, so the image is simply absent and the
+# binary compiles the embedded source, exactly as 0.5.0 does.
+#
+# protoscala-precompile is deliberately NOT installed: install(TARGETS) names
+# only protoscala, and shipping a build tool would ship a binary no user runs.
+if(NOT CMAKE_CROSSCOMPILING)
+    add_executable(protoscala-precompile src/tools/PrecompileMain.cpp)
+    target_link_libraries(protoscala-precompile PRIVATE protoscala_compiler protoscala_support)
+    target_include_directories(protoscala-precompile PRIVATE src)
+    target_compile_options(protoscala-precompile PRIVATE -Wall -Wextra -Wpedantic)
+    set(PROTOSCALA_PRELUDE_IMAGE "${CMAKE_CURRENT_BINARY_DIR}/generated/PreludeImage.cpp")
+    add_custom_command(
+        OUTPUT  "${PROTOSCALA_PRELUDE_IMAGE}"
+        COMMAND protoscala-precompile
+                "${CMAKE_CURRENT_SOURCE_DIR}/lib/prelude.scala"
+                "${PROTOSCALA_PRELUDE_IMAGE}"
+        DEPENDS protoscala-precompile "${CMAKE_CURRENT_SOURCE_DIR}/lib/prelude.scala"
+        COMMENT "Precompiling lib/prelude.scala into the prelude image")
+else()
+    message(STATUS "protoScala: cross-compiling, so the prelude is compiled at start-up")
+endif()
+
 # --- Runtime: VM, values, primitives (the stack guard is in support) -----------
 add_library(protoscala_runtime STATIC
     src/runtime/Runtime.cpp
@@ -218,11 +248,16 @@ add_library(protoscala_runtime STATIC
     src/runtime/Futures.cpp
     src/runtime/Mailbox.cpp
     src/runtime/Prelude.cpp
+    src/runtime/PreludeImage.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/generated/PreludeSource.cpp
 )
 target_link_libraries(protoscala_runtime PUBLIC protoscala_compiler protoscala_support
     ${PROTOCORE_LIBRARY} pthread)
 target_compile_options(protoscala_runtime PRIVATE -Wall -Wextra -Wpedantic)
+if(NOT CMAKE_CROSSCOMPILING)
+    target_sources(protoscala_runtime PRIVATE "${PROTOSCALA_PRELUDE_IMAGE}")
+    target_compile_definitions(protoscala_runtime PUBLIC PROTOSCALA_HAVE_PRELUDE_IMAGE)
+endif()
 
 # --- Actor mailbox backend (DESIGN §8.2, docs/platform/PMQ-SPEC.md) --------------
 # Selected by the protoCore *version*, never by grepping protoCore.h for the
