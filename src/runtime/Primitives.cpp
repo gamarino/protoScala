@@ -887,6 +887,36 @@ PRIM(string_mkString) {
     return str(ctx, out + end);
 }
 
+// count/exists/forall complete the collection-like half of StringOps that the
+// tutorial's chapter 10 exercises; toVector and toSet convert through toList.
+PRIM(string_count) {
+    const ProtoObject* p = arg(ctx, args, 0, "count", 1);
+    const long long n = stringLength(ctx, self);
+    long long hits = 0;
+    for (long long i = 0; i < n; ++i) {
+        ProtoContext step(ctx->space, ctx);
+        if (truth(&step, callOne(&step, p, asStr(self)->getAt(&step, static_cast<int>(i))), "count"))
+            ++hits;
+    }
+    return ctx->fromInteger(hits);
+}
+
+const ProtoObject* stringAllAny(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+                                bool wantAll, const char* method) {
+    const ProtoObject* p = arg(ctx, args, 0, method, 1);
+    const long long n = stringLength(ctx, self);
+    for (long long i = 0; i < n; ++i) {
+        ProtoContext step(ctx->space, ctx);
+        const bool hit =
+            truth(&step, callOne(&step, p, asStr(self)->getAt(&step, static_cast<int>(i))), method);
+        if (wantAll && !hit) return PROTO_FALSE;
+        if (!wantAll && hit) return PROTO_TRUE;
+    }
+    return boolean(wantAll);
+}
+NAMED2(string_forall, stringAllAny, true, "forall")
+NAMED2(string_exists, stringAllAny, false, "exists")
+
 PRIM(string_toBoolean) {
     expectArgs(ctx, args, "toBoolean", 0);
     const std::string s = selfText(ctx, self);
@@ -1078,6 +1108,7 @@ void installPrimitives(ProtoContext* ctx, const RuntimeLayout& L) {
         {"mkString", &string_mkString}, {"compareTo", &string_compareTo},
         {"equalsIgnoreCase", &string_equalsIgnoreCase}, {"capitalize", &string_capitalize},
         {"repeat", &string_times}, {"toBoolean", &string_toBoolean},
+        {"count", &string_count}, {"forall", &string_forall}, {"exists", &string_exists},
         {"toLong", &string_toInt}, {"format", &string_format}};
     // `::` is List-only: prepending to a Vector is `+:`. Every other List
     // method is the shared List/Vector implementation of

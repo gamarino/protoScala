@@ -84,6 +84,13 @@ EvalStatus Session::evaluate(const std::string& source, const std::string& sourc
     } catch (const CompileError& e) {
         reportAt(sourceName, e.pos, e.what());
         return EvalStatus::Error;
+    } catch (const ParseError& e) {
+        // The desugarer rejects a few forms the parser cannot judge -- an
+        // unknown string interpolator is the one (D56) -- and reports them as a
+        // ParseError with a position. Without this arm it escaped as an
+        // "internal error", which reads as a crash.
+        reportAt(sourceName, e.pos, e.what());
+        return EvalStatus::Error;
     } catch (const std::length_error& e) {  // bytecode limits
         reportAt(sourceName, SourcePos{}, e.what());
         return EvalStatus::Error;

@@ -83,6 +83,16 @@ std::string formatOne(proto::ProtoContext* ctx, const RuntimeLayout& L, const Fo
                 for (char& c : digits)
                     c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
             if (spec.grouping && spec.conversion == 'd') digits = groupDigits(digits);
+            // `#` is Java's alternate form: `0x`/`0X` before a hexadecimal and
+            // `0` before an octal, verified against tools/scala3-3.9.0
+            // (`f"$h%#x $h%#X $h%#o"` of 255 is `0xff 0XFF 0377`). The prefix
+            // goes inside the zero padding, as the sign does.
+            if (spec.alternate) {
+                if (spec.conversion == 'x') digits = "0x" + digits;
+                else if (spec.conversion == 'X') digits = "0X" + digits;
+                else if (spec.conversion == 'o' && (digits.empty() || digits[0] != '0'))
+                    digits = "0" + digits;
+            }
             return padNumeric(sign, digits, spec);
         }
         case 'e': case 'E': case 'f': case 'g': case 'G': {
