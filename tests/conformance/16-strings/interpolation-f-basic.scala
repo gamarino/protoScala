@@ -1,6 +1,6 @@
-// XFAIL: pi=3.14 n=00042 hex=ff pct=42%
-// Task 4 implements the f interpolator; until then the compiler rejects it.
-// The EXPECT line above is the spec-correct output, verified against scalac.
+// EXPECT: pi=3.14 n=00042 hex=ff pct=42%
+// Verified byte for byte against tools/scala3-3.9.0 (under -Duser.language=en:
+// protoScala is locale-free by decision A0-2/D55, the JVM is not).
 @main def run(): Unit =
   val pi = 3.14159
   val n = 42

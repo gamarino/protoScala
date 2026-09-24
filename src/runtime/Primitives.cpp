@@ -1,4 +1,5 @@
 #include "runtime/Primitives.h"
+#include "runtime/Format.h"
 #include "runtime/Errors.h"
 #include "runtime/ExecutionEngine.h"
 #include "runtime/Hashing.h"
@@ -115,6 +116,27 @@ PRIM(prim_raise) {
     const std::string cls = stringArg(ctx, arg(ctx, args, 0, "__raise", 2), "__raise");
     const std::string msg = stringArg(ctx, args->getAt(ctx, 1), "__raise");
     throw ScalaError(cls, msg);
+}
+
+// __fmt(lit0, v0, spec0, lit1, v1, spec1, ..., litN): the compiled form of an
+// f-interpolator (Compiler::compileFormat). Arity is always 3k + 1. The
+// specifiers were already validated at compile time, so a parse failure here is
+// an internal error, not a user one.
+PRIM(prim_fmt) {
+    const unsigned long n = argCount(ctx, args);
+    if (n == 0 || n % 3 != 1)
+        throw ScalaError("IllegalArgumentException", "__fmt takes 3k + 1 arguments, got " +
+                                                         std::to_string(n));
+    const RuntimeLayout& L = layoutOf();
+    std::string out;
+    for (unsigned long k = 0; k + 1 < n; k += 3) {
+        out += stringArg(ctx, args->getAt(ctx, static_cast<int>(k)), "__fmt");
+        const ProtoObject* v = args->getAt(ctx, static_cast<int>(k + 1));
+        const std::string spec = stringArg(ctx, args->getAt(ctx, static_cast<int>(k + 2)), "__fmt");
+        out += formatOne(ctx, L, parseFormatSpec(spec), v);
+    }
+    out += stringArg(ctx, args->getAt(ctx, static_cast<int>(n - 1)), "__fmt");
+    return str(ctx, out);
 }
 
 // ---------------------------------------------------------------------------
@@ -855,7 +877,8 @@ const std::vector<std::string>& builtinGlobalNames() {
     // The TupleN companions are globals too: `Tuple2(1, 2)` is `(1, 2)`.
     static const std::vector<std::string> names = [] {
         std::vector<std::string> v = {"println", "print", "List", "Nil", "__raise",
-                                      "Actor", "Priority", "Future", "Thread", "System"};
+                                      "Actor", "Priority", "Future", "Thread", "System",
+                                      "__fmt"};
         for (unsigned n = 2; n <= kMaxTupleArity; ++n) v.push_back("Tuple" + std::to_string(n));
         return v;
     }();
@@ -864,7 +887,8 @@ const std::vector<std::string>& builtinGlobalNames() {
 
 void installPrimitives(ProtoContext* ctx, const RuntimeLayout& L) {
     static constexpr MethodEntry globals[] = {
-        {"println", &prim_println}, {"print", &prim_print}, {"__raise", &prim_raise}};
+        {"println", &prim_println}, {"print", &prim_print}, {"__raise", &prim_raise},
+        {"__fmt", &prim_fmt}};
     static constexpr MethodEntry any[] = {
         {"toString", &any_toString}, {"equals", &any_equals}, {"==", &any_eqeq},
         {"!=", &any_noteq}, {"eq", &any_eq}, {"ne", &any_ne},

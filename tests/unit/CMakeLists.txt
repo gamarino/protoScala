@@ -10,6 +10,7 @@ add_executable(protoscala_unit_tests
     test_linearizer.cpp
     test_desugar.cpp
     test_bytecode.cpp
+    test_format.cpp
     test_compiler.cpp
     test_values.cpp
     test_objectmodel.cpp

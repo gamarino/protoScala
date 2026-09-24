@@ -175,6 +175,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
 # parser, the desugarer and the compiler check it as well as the VM.
 add_library(protoscala_support STATIC
     src/support/Version.cpp
+    src/support/FormatSpec.cpp
     src/runtime/StackGuard.cpp
 )
 target_link_libraries(protoscala_support PUBLIC ${PROTOCORE_LIBRARY} pthread)
@@ -207,6 +208,7 @@ target_compile_options(protoscala_compiler PRIVATE -Wall -Wextra -Wpedantic)
 add_library(protoscala_runtime STATIC
     src/runtime/Runtime.cpp
     src/runtime/Values.cpp
+    src/runtime/Format.cpp
     src/runtime/ExecutionEngine.cpp
     src/runtime/Primitives.cpp
     src/runtime/ProductPrimitives.cpp

@@ -182,9 +182,13 @@ TEST(Compiler, SemanticErrors) {
     EXPECT_TRUE(has(compileError("val f = () => return 1"), "return inside a lambda"));
     EXPECT_TRUE(has(compileError("return 1"), "return outside"));
     EXPECT_TRUE(has(listing("val t = (1, 2)"), "MAKE_TUPLE 2"));
-    // Phase 3 implemented `s` and `raw`; `f` follows in Task 4 and an unknown
-    // interpolator is rejected while desugaring (D56, CompilerInterpolation).
-    EXPECT_TRUE(has(compileError("val s = f\"x\""), "f interpolator is not implemented yet"));
+    // Phase 3 implements `s`, `raw` and `f`; an unknown interpolator is rejected
+    // while desugaring (D56, CompilerInterpolation), and a bad f specifier is a
+    // compile error at the interpolation's position (A0-2, D55).
+    EXPECT_TRUE(has(compileError("val n = 1\nval s = f\"$n%q\""),
+                    "unsupported format specifier '%q'"));
+    EXPECT_TRUE(has(compileError("val n = 1\nval s = f\"50% of $n\""),
+                    "conversions must follow a splice"));
     EXPECT_TRUE(has(compileError("def f(x: Int) = x\nval y = f(x = 1)"), "named arguments"));
     EXPECT_TRUE(has(compileError("def f(x: Int = 1) = x"), "default parameter values"));
     // A by-name parameter is thunked at a call site that names its declaration

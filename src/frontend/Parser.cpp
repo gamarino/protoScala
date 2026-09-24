@@ -496,8 +496,12 @@ NodePtr Parser::parsePrefix() {
 
 namespace {
 // The f-interpolator's specifier is the leading %… of the literal text that
-// follows a hole. Returns its length in `text`, or 0 when the text does not
-// start with a specifier. `%%` is an escaped percent, not a specifier.
+// follows a hole. Returns the length of the *attempt* in `text`, or 0 when the
+// text does not start with one: `%%` is an escaped percent, and a lone trailing
+// `%` is not a specifier either. Whether the conversion character is one
+// protoScala supports is decided by parseFormatSpec in the compiler, so `%q`
+// reaches the user as "unsupported format specifier '%q'" at the interpolation's
+// position rather than as a complaint about a stray percent.
 std::size_t formatSpecLength(const std::string& text) {
     if (text.size() < 2 || text[0] != '%' || text[1] == '%') return 0;
     std::size_t k = 1;
@@ -508,12 +512,7 @@ std::size_t formatSpecLength(const std::string& text) {
         ++k;
         while (k < text.size() && text[k] >= '0' && text[k] <= '9') ++k;
     }
-    if (k >= text.size()) return 0;
-    const char c = text[k];
-    const bool isConversion = c == 's' || c == 'b' || c == 'c' || c == 'd' || c == 'o' ||
-                              c == 'x' || c == 'X' || c == 'e' || c == 'E' || c == 'f' ||
-                              c == 'g' || c == 'G';
-    return isConversion ? k + 1 : 0;
+    return k >= text.size() ? 0 : k + 1;   // the conversion character
 }
 } // namespace
 

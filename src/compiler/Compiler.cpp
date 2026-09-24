@@ -11,6 +11,7 @@
  *    local defs).
  */
 #include "compiler/Compiler.h"
+#include "support/FormatSpec.h"
 #include "runtime/StackGuard.h"
 
 #include <stdexcept>
@@ -1186,8 +1187,47 @@ void Compiler::compileInterp(const InterpString& n) {
     emit(Op::CONCAT, pieces, n.pos, -static_cast<int>(pieces) + 1);
 }
 
+namespace {
+
+// In an f-interpolator literal, `%%` is a literal percent and a bare `%` is an
+// error: a specifier may only follow a hole, which the parser has already taken
+// off. scalac says the same ("conversions must follow a splice; use %% for
+// literal %"), so the two agree on which programs compile.
+std::string unescapePercent(const std::string& text, SourcePos pos) {
+    std::string out;
+    for (std::size_t k = 0; k < text.size(); ++k) {
+        if (text[k] != '%') { out += text[k]; continue; }
+        if (k + 1 < text.size() && text[k + 1] == '%') { out += '%'; ++k; continue; }
+        throw CompileError("conversions must follow a splice in an f-interpolator; "
+                           "use %% for a literal % (%n is not supported: write \\n)",
+                           pos);
+    }
+    return out;
+}
+
+} // namespace
+
+// f"a$x%05db" becomes __fmt("a", x, "%05d", "b"): the literal before each hole,
+// the value, its specifier, and finally the trailing literal. The specifiers are
+// validated here so a bad one is a compile error at the right position (A0-2).
 void Compiler::compileFormat(const InterpString& n) {
-    throw CompileError("the f interpolator is not implemented yet", n.pos);
+    for (const std::string& spec : n.specs) {
+        if (spec.empty()) continue;
+        try {
+            (void)parseFormatSpec(spec);
+        } catch (const std::invalid_argument& e) {
+            throw CompileError(e.what(), n.pos);
+        }
+    }
+    const std::size_t argc = 1 + 3 * n.args.size();     // tail + (literal, value, spec) each
+    compileIdent(Ident(n.pos, "__fmt"));
+    for (std::size_t k = 0; k < n.args.size(); ++k) {
+        emit(Op::PUSH_CONST, fn_->mod->addString(unescapePercent(n.literals[k], n.pos)), n.pos, +1);
+        compileExpr(*n.args[k]);
+        emit(Op::PUSH_CONST, fn_->mod->addString(n.specs[k]), n.pos, +1);
+    }
+    emit(Op::PUSH_CONST, fn_->mod->addString(unescapePercent(n.literals.back(), n.pos)), n.pos, +1);
+    emit(Op::CALL, static_cast<std::uint64_t>(argc), n.pos, -static_cast<int>(argc));
 }
 
 } // namespace protoScala
