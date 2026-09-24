@@ -950,7 +950,7 @@ void Compiler::compileFunction(const std::string& name, const std::vector<Param>
     FunctionState* saved = fn_;
     fn_ = &fs;
     if (method) {
-        const LocalInfo self{newSlot(), BindingKind::Param, false, false};
+        const LocalInfo self{newSlot(), BindingKind::Param, false, false, {}};
         fs.scopes.back()["this"] = self;
         if (tmpl_ && !tmpl_->selfName.empty()) fs.scopes.back()[tmpl_->selfName] = self;
     }
@@ -961,7 +961,7 @@ void Compiler::compileFunction(const std::string& name, const std::vector<Param>
         if (p.name != "_")
             fs.scopes.back()[p.name] =
                 LocalInfo{slot, byName ? BindingKind::ByNameParam : BindingKind::Param, false,
-                          false};
+                          false, {}};
     }
     const int arity = static_cast<int>(params.size()) + (method ? 1 : 0);
     mod->setArity(arity);

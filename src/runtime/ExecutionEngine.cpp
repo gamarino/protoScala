@@ -22,11 +22,16 @@ thread_local bool tl_activeSet = false;
 // (D43): 1 while a native method runs, more when a native re-entered the VM.
 thread_local unsigned tl_nativeDepth = 0;
 
-const char* opSymbol(Op op) {
+// The interned method name of a binary operator, read from the layout rather
+// than interned per execution (Phase 3, Task 1 Step 3). `?` cannot occur: the
+// dispatch loop only reaches slowBinary for these seven opcodes.
+const proto::ProtoString* binaryOpName(const RuntimeLayout& L, Op op) {
     switch (op) {
-        case Op::ADD: return "+";  case Op::SUB: return "-";  case Op::MUL: return "*";
-        case Op::LT:  return "<";  case Op::LE:  return "<="; case Op::GT:  return ">";
-        case Op::GE:  return ">="; default:      return "?";
+        case Op::ADD: return L.binaryOpName[0]; case Op::SUB: return L.binaryOpName[1];
+        case Op::MUL: return L.binaryOpName[2]; case Op::LT:  return L.binaryOpName[3];
+        case Op::LE:  return L.binaryOpName[4]; case Op::GT:  return L.binaryOpName[5];
+        case Op::GE:  return L.binaryOpName[6];
+        default: throw std::logic_error("slowBinary: not a binary operator opcode");
     }
 }
 
@@ -428,6 +433,10 @@ void ExecutionEngine::throwMissingMember(proto::ProtoContext* ctx, const proto::
     // `x_=` on an object that has `x`: an assignment to a val.
     if (n.size() > 2 && n.compare(n.size() - 2, 2, "_=") == 0) {
         const std::string field = n.substr(0, n.size() - 2);
+        // The one interning call left in this file, and deliberately: this runs
+        // once, immediately before throwing, and the symbol already exists
+        // whenever the answer is `true` (the class interned it when it declared
+        // the field), so it allocates nothing on the path that matters.
         if (receiver->hasAttribute(ctx, proto::ProtoString::createSymbol(ctx, field.c_str())) == PROTO_TRUE)
             throw ScalaError("NoSuchMethodError", "Reassignment to val " + field);
     }
@@ -767,6 +776,17 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                     continue;
                 }
                 case Op::EQ: case Op::NE: {
+                    // No SmallInteger fast path here, and deliberately: the
+                    // first branch of valuesEqual already is one
+                    // (Values.cpp:202, two tag tests then a word compare), so
+                    // duplicating it buys nothing. Measured with
+                    // `perf stat -r 3`, interleaved, on this host: on a loop
+                    // dominated by `==` between integers the duplicate was
+                    // 1.172 vs 1.180 Gcycles -- inside the error bars -- while
+                    // `sum_loop`, which never executes EQ, cost 750 vs 693
+                    // Mcycles, an 8 % regression from code layout alone in the
+                    // hottest function of the runtime. Phase 3 Task 1 Step 2
+                    // was therefore backed out under its own 3 % rule.
                     const bool eq = valuesEqual(&frame, L, sp[-2], sp[-1]);
                     sp[-2] = (eq == (op == Op::EQ)) ? PROTO_TRUE : PROTO_FALSE;
                     --sp;
@@ -779,16 +799,14 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                     else if (isNumberFast(a))
                         sp[-1] = a->negate(&frame);
                     else
-                        sp[-1] = send(&frame, a,
-                                      proto::ProtoString::createSymbol(&frame, "unary_-"), nullptr, 0);
+                        sp[-1] = send(&frame, a, L.unaryMinusName, nullptr, 0);
                     continue;
                 }
                 case Op::NOT: {
                     const proto::ProtoObject* a = sp[-1];
                     if (a == PROTO_TRUE) sp[-1] = PROTO_FALSE;
                     else if (a == PROTO_FALSE) sp[-1] = PROTO_TRUE;
-                    else sp[-1] = send(&frame, a,
-                                       proto::ProtoString::createSymbol(&frame, "unary_!"), nullptr, 0);
+                    else sp[-1] = send(&frame, a, L.unaryNotName, nullptr, 0);
                     continue;
                 }
                 case Op::MAKE_CLASS: {
@@ -984,9 +1002,11 @@ const proto::ProtoObject* ExecutionEngine::slowBinary(proto::ProtoContext* ctx, 
         const bool r = op == Op::LT ? c < 0 : op == Op::LE ? c <= 0 : op == Op::GT ? c > 0 : c >= 0;
         return r ? PROTO_TRUE : PROTO_FALSE;
     }
-    // Anything else is an ordinary method call on the left operand.
+    // Anything else is an ordinary method call on the left operand. The operator
+    // name comes from the layout: a class that overloads `+` would otherwise
+    // re-intern the symbol on every application.
     const proto::ProtoObject* argv[1] = {b};
-    return send(ctx, a, proto::ProtoString::createSymbol(ctx, opSymbol(op)), argv, 1);
+    return send(ctx, a, binaryOpName(L, op), argv, 1);
 }
 
 } // namespace protoScala

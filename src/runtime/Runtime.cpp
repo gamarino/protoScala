@@ -54,6 +54,15 @@ Runtime::Runtime(proto::ProtoSpace& space) : space_(space) {
     L.valueKey    = proto::ProtoString::createSymbol(ctx, "__value__");
     L.thunkKey    = proto::ProtoString::createSymbol(ctx, "__thunk__");
     L.applyName   = proto::ProtoString::createSymbol(ctx, "apply");
+    // Phase 3: the operator names ExecutionEngine sends. `unary_-` and `unary_!`
+    // are seven bytes, so interning them on every execution also leaked (R4).
+    L.unaryMinusName = proto::ProtoString::createSymbol(ctx, "unary_-");
+    L.unaryNotName   = proto::ProtoString::createSymbol(ctx, "unary_!");
+    {
+        static const char* const ops[7] = {"+", "-", "*", "<", "<=", ">", ">="};
+        for (unsigned k = 0; k < 7; ++k)
+            L.binaryOpName[k] = proto::ProtoString::createSymbol(ctx, ops[k]);
+    }
 
     // Phase 2: the class-model prototypes. Tuple2..Tuple22 are pinned together
     // in one list, as the function arities are.

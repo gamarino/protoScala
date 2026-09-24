@@ -48,6 +48,14 @@ struct RuntimeLayout {
     const proto::ProtoString* valueKey = nullptr;     // "__value__": Cell / Lazy value
     const proto::ProtoString* thunkKey = nullptr;     // "__thunk__": Lazy initialiser
     const proto::ProtoString* applyName = nullptr;    // "apply"
+    // Phase 3: the operator method names the dispatch loop sends when an operand
+    // is not a number. Interning them per execution was measured at 51 % of CPU
+    // in protoST and leaks for names longer than six bytes (R4), so every one
+    // this engine can send lives here and is read, never re-interned.
+    const proto::ProtoString* unaryMinusName = nullptr;  // "unary_-"
+    const proto::ProtoString* unaryNotName = nullptr;    // "unary_!"
+    // Indexed by Op: ADD, SUB, MUL, LT, LE, GT, GE (see binaryOpName()).
+    const proto::ProtoString* binaryOpName[7] = {};
 
     // Phase 2 (pinned in root-context slots like the rest):
     proto::ProtoObject* anyRefProto = nullptr;        // AnyRef: the root of every class chain

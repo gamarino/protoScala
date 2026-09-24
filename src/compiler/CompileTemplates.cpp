@@ -255,7 +255,7 @@ ClassInfo Compiler::buildClassInfo(const TemplateDef& t, const std::string& type
                                    pos);
         }
         c.members[name] =
-            MemberInfo{kind, isPublic ? name : privateKey(c.key, name), concrete || inheritedConcrete};
+            MemberInfo{kind, isPublic ? name : privateKey(c.key, name), concrete || inheritedConcrete, {}};
     };
     bool hasStatements = !t.ctorParams.empty();
     bool ownVar = false;
@@ -291,7 +291,7 @@ ClassInfo Compiler::buildClassInfo(const TemplateDef& t, const std::string& type
     if (c.isCase && c.kind == ClassKind::Class)
         for (std::size_t k = 1; k <= c.fields.size(); ++k)
             c.members["_" + std::to_string(k)] =
-                MemberInfo{MemberKind::ParamlessDef, "_" + std::to_string(k), true};
+                MemberInfo{MemberKind::ParamlessDef, "_" + std::to_string(k), true, {}};
     for (const NodePtr& s : t.body) {
         switch (s->kind) {
             case NodeKind::ValDef: {
@@ -505,13 +505,13 @@ void Compiler::compileConstructor(const TemplateDef& t, const ClassInfo& info) {
     fs.scopes.emplace_back();
     FunctionState* saved = fn_;
     fn_ = &fs;
-    const LocalInfo self{newSlot(), BindingKind::Param, false, false};
+    const LocalInfo self{newSlot(), BindingKind::Param, false, false, {}};
     fs.scopes.back()["this"] = self;
     if (!t.selfName.empty()) fs.scopes.back()[t.selfName] = self;
     for (const Param& p : t.ctorParams)
         fs.scopes.back()[p.name] =
             LocalInfo{newSlot(), p.byName ? BindingKind::ByNameParam : BindingKind::Param, false,
-                      false};
+                      false, {}};
     const int arity = 1 + static_cast<int>(t.ctorParams.size());
     mod->setArity(arity);
     mod->setVariadic(info.primaryVariadic);
@@ -628,9 +628,9 @@ void Compiler::compileAuxConstructor(const DefDef& d, const ClassInfo& info) {
     fs.scopes.emplace_back();
     FunctionState* saved = fn_;
     fn_ = &fs;
-    fs.scopes.back()["this"] = LocalInfo{newSlot(), BindingKind::Param, false, false};
+    fs.scopes.back()["this"] = LocalInfo{newSlot(), BindingKind::Param, false, false, {}};
     for (const Param& p : params)
-        fs.scopes.back()[p.name] = LocalInfo{newSlot(), BindingKind::Param, false, false};
+        fs.scopes.back()[p.name] = LocalInfo{newSlot(), BindingKind::Param, false, false, {}};
     const int arity = 1 + static_cast<int>(params.size());
     mod->setArity(arity);
     analyseCaptures(params, body);

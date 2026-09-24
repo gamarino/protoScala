@@ -61,7 +61,7 @@ public:
         auto [counter, fresh] = counters_->try_emplace(name, 0);
         std::string key = fresh ? name : name + "#" + std::to_string(++counter->second);
         GlobalBinding& b = table_[name];
-        b = GlobalBinding{kind, std::move(key)};
+        b = GlobalBinding{kind, std::move(key), {}};
         return b.key;
     }
 

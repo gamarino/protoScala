@@ -5,7 +5,7 @@ namespace protoScala {
 std::vector<ClassInfo> builtinTypes() {
     std::vector<ClassInfo> out;
     auto member = [](ClassInfo& c, const std::string& name, MemberKind kind) {
-        c.members[name] = MemberInfo{kind, name, true};
+        c.members[name] = MemberInfo{kind, name, true, {}};
     };
     ClassInfo any;
     any.name = "Any";
