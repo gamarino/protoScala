@@ -78,6 +78,8 @@ struct RuntimeLayout {
     const proto::ProtoString* equalsName = nullptr;   // "equals"
     const proto::ProtoString* hashCodeName = nullptr; // "hashCode"
     const proto::ProtoString* canEqualName = nullptr; // "canEqual"
+    const proto::ProtoString* isEmptyName = nullptr;  // "isEmpty" (flatMap's probe)
+    const proto::ProtoString* getName = nullptr;      // "get"     (flatMap's probe)
     const proto::ProtoString* tupleFieldKey[kMaxTupleArity + 1] = {};  // [1..22]: "_1".."_22"
 
     // Phase 5: the concurrency prototypes and keys (DESIGN §8). Every prototype

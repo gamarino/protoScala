@@ -49,3 +49,74 @@ TEST(Range, SeqEqualityAndHashAreCrossKindAndAllocationFree) {
     EXPECT_EQ(h.eval("(0 until 1000000000) == (0 until 1000000000)"), "true");
     EXPECT_EQ(h.eval("(0 until 3) == 3"), "false");
 }
+
+TEST(ListSurface, SliceOperationsClampRatherThanThrow) {
+    EvalHarness h;
+    EXPECT_EQ(h.eval("List(1, 2, 3).take(99)"), "List(1, 2, 3)");
+    EXPECT_EQ(h.eval("List(1, 2, 3).take(-1)"), "List()");
+    EXPECT_EQ(h.eval("List(1, 2, 3).drop(99)"), "List()");
+    EXPECT_EQ(h.eval("List[Int]().splitAt(2)"), "(List(),List())");
+}
+
+TEST(ListSurface, ZipTruncatesToTheShorterSide) {
+    EvalHarness h;
+    EXPECT_EQ(h.eval("List(1, 2, 3).zip(List(\"a\"))"), "List((1,a))");
+    EXPECT_EQ(h.eval("List[Int]().zip(List(1))"), "List()");
+}
+
+TEST(ListSurface, IndexingOutOfRangeThrows) {
+    EvalHarness h;
+    EXPECT_EQ(h.eval("List(1, 2, 3)(5)"),
+              "error: IndexOutOfBoundsException: 5 is out of bounds (min 0, max 2)");
+}
+
+TEST(ListSurface, FoldWorksCurriedAndUncurried) {
+    EvalHarness h;
+    EXPECT_EQ(h.eval("List(1, 2, 3).foldLeft(0)(_ + _)"), "6");
+    EXPECT_EQ(h.eval("List(1, 2, 3).foldLeft(0, (a: Int, b: Int) => a + b)"), "6");
+    EXPECT_EQ(h.eval("List(1, 2, 3).foldRight(0)((x, acc) => x - acc)"), "2");
+    EXPECT_EQ(h.eval("List[Int]().foldLeft(7)(_ + _)"), "7");
+}
+
+TEST(ListSurface, SortIsStable) {
+    EvalHarness h;
+    h.eval("case class P(k: Int, s: String)");
+    EXPECT_EQ(h.eval("List(P(1, \"a\"), P(2, \"c\"), P(1, \"b\")).sortBy(_.k).map(_.s)"),
+              "List(a, b, c)");
+}
+
+TEST(ListSurface, SortedRefusesIncomparableElements) {
+    EvalHarness h;
+    h.eval("class Opaque(val n: Int)");
+    // protoCore's `compare` would happily order two object cells by address, so
+    // the orderable kinds are checked first and an unorderable pair fails loudly.
+    EXPECT_EQ(h.eval("List(new Opaque(1), new Opaque(2)).sorted"),
+              "error: IllegalArgumentException: sorted needs comparable elements; use sortWith");
+    EXPECT_EQ(h.eval("List(new Opaque(2), new Opaque(1)).sortWith((a, b) => a.n < b.n).map(_.n)"),
+              "List(1, 2)");
+}
+
+TEST(VectorSurface, SeqEqualityAndHashAgreeWithList) {
+    EvalHarness h;
+    EXPECT_EQ(h.eval("List(1, 2) == Vector(1, 2)"), "true");
+    EXPECT_EQ(h.eval("Vector(1, 2) == List(1, 2)"), "true");
+    EXPECT_EQ(h.eval("List(1, 2).## == Vector(1, 2).##"), "true");
+    EXPECT_EQ(h.eval("Vector(1, 2).equals(List(1, 2))"), "true");
+}
+
+TEST(VectorSurface, VectorAndListAreDistinguishableTypes) {
+    EvalHarness h;
+    EXPECT_EQ(h.eval("Vector(1).isInstanceOf[Vector[Int]]"), "true");
+    EXPECT_EQ(h.eval("List(1).isInstanceOf[Vector[Int]]"), "false");
+    EXPECT_EQ(h.eval("Vector(1).toString"), "Vector(1)");
+    EXPECT_EQ(h.eval("Vector[Int]().toString"), "Vector()");
+}
+
+TEST(VectorSurface, TheResultKindFollowsTheReceiver) {
+    EvalHarness h;
+    EXPECT_EQ(h.eval("Vector(1, 2).map(_ + 1).toString"), "Vector(2, 3)");
+    EXPECT_EQ(h.eval("List(1, 2).map(_ + 1).toString"), "List(2, 3)");
+    EXPECT_EQ(h.eval("Vector(1, 2).filter(_ > 1).toString"), "Vector(2)");
+    EXPECT_EQ(h.eval("Vector(1, 2).reverse.toString"), "Vector(2, 1)");
+    EXPECT_EQ(h.eval("Vector(1, 2).splitAt(1).toString"), "(Vector(1),Vector(2))");
+}

@@ -101,6 +101,8 @@ Runtime::Runtime(proto::ProtoSpace& space) : space_(space) {
     L.equalsName = key("equals");
     L.hashCodeName = key("hashCode");
     L.canEqualName = key("canEqual");
+    L.isEmptyName = key("isEmpty");
+    L.getName = key("get");
     for (unsigned k = 1; k <= kMaxTupleArity; ++k)
         L.tupleFieldKey[k] = key(("_" + std::to_string(k)).c_str());
 
