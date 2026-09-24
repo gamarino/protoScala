@@ -137,19 +137,36 @@ WORKLOADS = [
      "py": (PY_TWINS_DIR / "object_tree.py", {}, "131071 278364170 725606090"),
      "st": None,
      "clj": None},
+    # Phase 3: the two suite-v1 members the collections work made expressible.
+    # Every expected string below was computed with tools/scala3-3.9.0 and
+    # confirmed by the CPython twin; none was worked out by hand.
+    {"name": "list_ops", "scala": "list_ops.scala",
+     "what": "map / filter / foldLeft over a 100000-element List", "origin": "protoScala",
+     "py": (PY_TWINS_DIR / "list_ops.py", {}, "9999900000 100000 50000"),
+     "st": None,
+     "clj": None},
+    {"name": "map_build", "scala": "map_build.scala",
+     "what": "build and read back a 50000-entry Map", "origin": "protoScala",
+     "py": (PY_TWINS_DIR / "map_build.py", {}, "50000 1249975000 50000"),
+     "st": None,
+     "clj": None},
 ]
 
 # Workloads of the sibling suites that protoScala cannot express yet: each one
 # waits for the phase named in its entry (collections, exceptions, actors).
 # Listed in the report, never approximated.
 PENDING = [
-    ("list_append", "protoPython / protoST", "Phase 3 (collections)",
-     "Phase 2 builds lists by prepending (`::`, `List(...)`) but has no append "
-     "(`:+`, `ListBuffer`); re-spreading varargs would copy the whole list per "
-     "step, an O(N^2) algorithm that is not a twin."),
-    ("sum_squares", "protoClojure", "Phase 3 (collections)",
-     "Phase 2 lists have `map`, but the reduction (`sum`/`foldLeft`) that this "
-     "workload folds with arrives in Phase 3."),
+    # Phase 3 made these two expressible (`:+` and `foldLeft`/`sum` exist now),
+    # but the ROADMAP's benchmark suite v1 names fib, tak, sum-loop, list-ops and
+    # map-build, and list_ops already measures the same List surface. They stay
+    # listed rather than silently dropped, so nothing looks like a gap that was
+    # closed without being measured.
+    ("list_append", "protoPython / protoST", "expressible since Phase 3; not in suite v1",
+     "`:+` landed in Phase 3, so the twin is now writable. It is not part of the "
+     "ROADMAP's suite v1 and `list_ops` already exercises the same surface."),
+    ("sum_squares", "protoClojure", "expressible since Phase 3; not in suite v1",
+     "`map` plus `sum`/`foldLeft` landed in Phase 3, so the twin is now writable, "
+     "and `list_ops` already exercises both."),
     ("exception_latency", "protoPython / protoST", "Phase 4 (exceptions)",
      "`throw` and `try`/`catch`."),
 ]

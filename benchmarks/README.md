@@ -41,8 +41,8 @@ Every comparable file is also a CTest case (`benchmarks/<file>`): it runs once
 through the conformance runner and must print its `EXPECT` value, so a broken
 benchmark fails `ctest`.
 
-`object_tree` keeps a 131071-object graph alive at once, so it is the one
-fixture in the tree that cannot fit a small heap: its live set measures 252253
+`object_tree` keeps a 131071-object graph alive at once, so it is one of the
+fixtures that cannot fit a small heap: its live set measures 252253
 cells (about 1.9 cells per object), and because protoCore defers collection
 until the ceiling is approached it needs a ceiling of roughly 600000 cells to
 complete at all. Its CTest case therefore pins its own
@@ -57,10 +57,25 @@ PROTOCORE_HEAP_LIMIT_CELLS=20000 ctest --test-dir build_release --output-on-fail
 The GC-pressure stress test for object graphs is `tests/cli/gc-pressure.sh`,
 which runs its own case at a fixed ceiling.
 
-**Pending** (need later phases; not approximated): `list_append` and
-protoClojure's `sum-squares` (Phase 3 collections — Phase 1 has no
-list-building operation and no `map`/reduction), `exception_latency`
-(Phase 4 exceptions), the actor benchmarks (Phase 5).
+`list_ops` and `map_build` (Phase 3) pin the same ceiling and for the same
+reason: three 100000-element lists and 50000 string keys with their entries do
+not fit the 20000-cell sweep, and an honest out-of-memory there would read as a
+rooting defect.
+
+`list_ops` and `map_build` complete the ROADMAP's **benchmark suite v1**
+(`fib`, `tak`, `sum-loop`, `list-ops`, `map-build`). Both print the work they
+did -- the fold result, the collection sizes and, for `map_build`, the number of
+keys read back -- so a collection surface that silently loses entries fails the
+run instead of reading as a fast one. The `map_build` twin uses Python's mutable
+`dict` against protoScala's immutable `Map`: the algorithm is the same, the
+allocation behaviour deliberately is not, and `benchmarks/RESULTS.md` says what
+that costs.
+
+**Pending** (not approximated): `exception_latency` (Phase 4 exceptions), the
+actor benchmarks (Phase 5). `list_append` and protoClojure's `sum-squares`
+became expressible in Phase 3 (`:+`, `foldLeft`, `sum`) and are listed in the
+runner's `PENDING` with that note; they are not in suite v1, and `list_ops`
+already exercises the same surface.
 
 ## Running
 

@@ -209,3 +209,66 @@ Two readings the numbers support, both consistent with DESIGN §1:
   structural sharing makes the path copy cheap; the allocation of 131071 objects is
   what dominates. protopy runs the same twin in 3668.2 ms, so the cost is the shared
   object kernel's, not protoScala's frontend.
+
+## Phase 3 workloads — benchmark suite v1 (2026-09-23)
+
+The ROADMAP's benchmark suite v1 is `fib`, `tak`, `sum-loop`, `list-ops` and
+`map-build`. The first three already existed; Phase 3 adds the last two, which
+the collections work made expressible. Full table:
+[2026-09-23-phase3-v1.md](reports/2026-09-23-phase3-v1.md).
+
+- **Machine:** AMD Ryzen 5 5500U (6 cores, 12 logical CPUs), a daily-driver
+  desktop.
+- **Date:** 2026-09-23.
+- **protoScala commit:** `ae2650b` (the tree also carried the uncommitted Task 12
+  benchmark files, which are these two workloads).
+- **protoCore commit:** `983bbf98`, version 2.1.0.
+- **Load average:** 3.90 at the start, 3.59 at the midpoint, 3.46 at the end.
+  Above the 2.0 "quiet host" bar, so the absolute milliseconds are indicative;
+  the interleaved round-robin means ambient load hits every column alike, which
+  is what makes the ratios usable.
+- **No FAILED cell.** Every run's printed result was verified against the
+  workload's `// EXPECT:` line before any rate was computed.
+
+| Workload | protoScala | CPython | protoScala ÷ CPython |
+|---|---:|---:|---:|
+| `fib` (suite v1) | 51.4 ms | 46.4 ms | 1.11× |
+| `tak` (suite v1) | 28.6 ms | 37.0 ms | 0.77× |
+| `sum_loop` (suite v1) | 66.4 ms | 93.4 ms | 0.71× |
+| `list_ops` (new) | 465.5 ms | 1934.7 ms | 0.24× |
+| `map_build` (new) | 354.9 ms | 80.0 ms | 4.43× |
+| **Geomean, all 12 workloads** | — | — | **0.91×** |
+
+Two readings the numbers support:
+
+- `list_ops` is 0.24× CPython, but the twins are not doing the same work at the
+  same cost: the Python twin builds its list with `insert(0, i)`, which is O(n)
+  per step, while `::` on a `ProtoList` is O(log n). The row says that
+  protoScala's prepend-and-fold surface is cheap, not that protoScala is four
+  times faster than CPython at list work.
+- `map_build` is 4.43× CPython, and that is the honest cost of an immutable map:
+  every one of the 50000 inserts returns a new `ProtoMap` version, where
+  CPython's `dict` mutates one object in place. protopy runs the same twin in
+  935.0 ms, so 354.9 ms is not a protoScala frontend cost. An immutable map that
+  shares structure is what DESIGN §6.1 asks for; a faster mutable one is a
+  different data structure, not a tuning target (P5).
+
+**The verification was proved, not asserted.** With `999 ` prepended to
+`list_ops.scala`'s `// EXPECT:` line, the run marked both protoScala cells FAILED
+and excluded them from every aggregate, reporting:
+
+```
+- `list_ops` / protoscala: printed '9999900000 100000 50000', expected '999 9999900000 100000 50000'
+- `list_ops` / release: printed '9999900000 100000 50000', expected '999 9999900000 100000 50000'
+```
+
+while `map_build`, untouched, still produced numbers. That is the ROADMAP's
+"self-reports and is recorded" clause demonstrated end to end.
+
+**Cold start**, same run, 21 runs each, all verified: 24.43 ms (script) and
+24.24 ms (repl) for the RelWithDebInfo build, 22.71 ms and 23.72 ms for the
+Release build — inside DESIGN §1's 25 ms budget at load 3.90, after the prelude
+grew by `Either` and the extended `Option`/`Try`. An earlier measurement during
+the phase read 27.05 ms at load 4.03; the budget is at the line and is
+load-sensitive, so the figure is only meaningful with its load average beside
+it.

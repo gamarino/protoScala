@@ -117,3 +117,14 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/benchmarks/comparable/object_tree.scala")
     set_tests_properties("benchmarks/object_tree.scala" PROPERTIES
         ENVIRONMENT "PROTOCORE_HEAP_LIMIT_CELLS=2000000")
 endif()
+
+# `map_build.scala` is the second such fixture (Phase 3): 50000 string keys plus
+# their entries do not fit the 20000-cell sweep ceiling either, and an honest
+# out-of-memory there would read as a rooting defect. Same ceiling, same reason.
+# `list_ops.scala` holds three 100000-element lists at once and needs one too.
+foreach(pinned_bench map_build.scala list_ops.scala)
+    if(EXISTS "${CMAKE_SOURCE_DIR}/benchmarks/comparable/${pinned_bench}")
+        set_tests_properties("benchmarks/${pinned_bench}" PROPERTIES
+            ENVIRONMENT "PROTOCORE_HEAP_LIMIT_CELLS=2000000" TIMEOUT 300)
+    endif()
+endforeach()
