@@ -64,3 +64,37 @@ target_link_libraries(test_actors
 target_compile_options(test_actors PRIVATE -Wall -Wextra -Wpedantic)
 add_test(NAME unit/actors COMMAND test_actors)
 set_tests_properties(unit/actors PROPERTIES TIMEOUT 300 ENVIRONMENT "PROTOSCALA_ACTOR_WORKERS=4")
+
+# --- Two runtimes in one process (Phase 6 Task 10, R5) --------------------------
+# ROADMAP Phase 6: prefix routing tested "with protoST's provider when both are
+# built". It links protoST into a TEST executable, never into the shipped binary,
+# and changes nothing in the protoST tree.
+#
+# protoST builds two static libraries rather than one shared object, so both are
+# named here; `find_library(NAMES protoST)` (the name the plan guessed) finds
+# neither.
+find_library(PROTOST_RUNTIME_LIBRARY NAMES protost_runtime
+    PATHS "${CMAKE_SOURCE_DIR}/../protoST/build_release" NO_DEFAULT_PATH)
+find_library(PROTOST_FRONTEND_LIBRARY NAMES protost_frontend
+    PATHS "${CMAKE_SOURCE_DIR}/../protoST/build_release" NO_DEFAULT_PATH)
+find_path(PROTOST_INCLUDE_DIR NAMES protoST/STRuntime.h
+    PATHS "${CMAKE_SOURCE_DIR}/../protoST/include" NO_DEFAULT_PATH)
+if(PROTOST_RUNTIME_LIBRARY AND PROTOST_FRONTEND_LIBRARY AND PROTOST_INCLUDE_DIR
+   AND PROTOSCALA_PROTOST_INTEROP)
+    message(STATUS "protoScala: protoST found beside this tree; umd/protost-interop is built")
+    add_executable(protoscala_protost_interop protost_interop.cpp)
+    target_include_directories(protoscala_protost_interop PRIVATE
+        "${CMAKE_SOURCE_DIR}/src" "${PROTOST_INCLUDE_DIR}" ${PROTOCORE_INCLUDE_DIRS})
+    target_link_libraries(protoscala_protost_interop PRIVATE
+        protoscala_repl protoscala_runtime protoscala_compiler protoscala_frontend
+        protoscala_support
+        "${PROTOST_RUNTIME_LIBRARY}" "${PROTOST_FRONTEND_LIBRARY}" GTest::gtest_main)
+    target_compile_options(protoscala_protost_interop PRIVATE -Wall -Wextra)
+    add_test(NAME umd/protost-interop COMMAND protoscala_protost_interop)
+    set_tests_properties(umd/protost-interop PROPERTIES TIMEOUT 120)
+elseif(NOT PROTOSCALA_PROTOST_INTEROP)
+    message(STATUS "protoScala: umd/protost-interop is off "
+                   "(-DPROTOSCALA_PROTOST_INTEROP=ON to build it); see docs/STATUS.md under R5")
+else()
+    message(STATUS "protoScala: protoST not found beside this tree; umd/protost-interop is skipped")
+endif()

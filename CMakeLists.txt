@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(protoScala VERSION 0.5.0 LANGUAGES CXX)
+project(protoScala VERSION 0.6.0 LANGUAGES CXX)
 
 # Default to RelWithDebInfo so casual builds are not -O0 (protoST convention).
 # Override with -DCMAKE_BUILD_TYPE=Release for a stripped -O3.
@@ -38,6 +38,12 @@ set(PROTOCORE_ABI_SOVERSION    "2")
 # The protoCore release that introduced ProtoMPSCQueue. Kept separate from the
 # floor above so the two can be reasoned about independently.
 set(PROTOSCALA_PMQ_MIN_PROTOCORE "2.1.0")
+# Phase 6 Task 10: the two-runtime interop experiment (R5). Off by default
+# because it links a SIBLING repository's build output into a test executable,
+# which makes protoScala's suite depend on another tree's build state. The
+# outcome of running it is recorded in docs/STATUS.md under R5.
+option(PROTOSCALA_PROTOST_INTEROP
+    "Build umd/protost-interop, which links protoST into a test executable (R5)" OFF)
 option(PROTOCORE_REQUIRE_PACKAGE
     "Require an installed protoCore CMake package; never fall back to ../protoCore" OFF)
 
@@ -332,6 +338,11 @@ install(TARGETS protoscala
     COMPONENT protoScala)
 install(FILES LICENSE README.md
     DESTINATION ${CMAKE_INSTALL_DOCDIR}
+    COMPONENT protoScala)
+# Provider plug-ins are dropped here by whoever ships one; protoScala ships none
+# (Phase 6 A0-13). The directory is created so the path `--version` prints
+# actually exists on an installed system.
+install(DIRECTORY DESTINATION "${CMAKE_INSTALL_LIBDIR}/protoscala/providers"
     COMPONENT protoScala)
 
 # --- CPack configuration ---------------------------------------------------
