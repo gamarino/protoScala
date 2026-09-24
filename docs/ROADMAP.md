@@ -31,19 +31,20 @@ full suite passes; every embedder was rebuilt from clean and passes its suite.
 **Decided (2026-09-22):** iterator option (a) (PROTOMAP-SPEC §3.3); the
 hashed-collection helper lives in protoCore (§4).
 
-## Phase P2 — `ProtoMPSCQueue` in protoCore *(platform)*
+## Phase P2 — `ProtoMPSCQueue` in protoCore *(platform)* ✅ — merged and released in protoCore 2.1.0
 
 **Goal:** a lock-free multi-producer / single-consumer queue whose items the
 GC traces, used as the actor mailbox of every runtime
 ([platform/PMQ-SPEC.md](platform/PMQ-SPEC.md); maintainer decision on R9).
-**Opens with:** Task 0 — the GC strategy that satisfies PMQ-SPEC §3, agreed
-with the maintainer.
+**Opened with:** Task 0 — the GC strategy satisfying PMQ-SPEC §3, decided as
+the retain-chain design and validated by a test that fails without it
+(PMQ-SPEC §7).
 **Done when:** the type is merged in protoCore with the tests of PMQ-SPEC §5
 (including TSan and GC-pressure runs); the microbenchmark table is recorded;
 protoCore's full suite passes; every embedder was rebuilt from clean and passes
 its suite.
 **Prerequisite for:** Phase 5, and the mailbox part of tracks C and S.
-**Plan:** written when P2 starts (after P1).
+**Plan:** [plans/2026-09-23-phase-p2-protompscqueue.md](plans/2026-09-23-phase-p2-protompscqueue.md).
 
 ## Phase 1 — Lexer, parser, core evaluator, REPL ✅ (2026-09-22)
 
