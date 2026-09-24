@@ -263,8 +263,10 @@ ClassInfo Compiler::buildClassInfo(const TemplateDef& t, const std::string& type
     bool hasStatements = !t.ctorParams.empty();
     bool ownVar = false;
     for (const Param& p : t.ctorParams) {
-        if (p.defaultValue)
-            throw CompileError("default parameter values are not implemented yet", p.pos);
+        if (p.defaultValue && p.repeated)
+            throw CompileError("a default parameter value is not supported on a repeated "
+                               "constructor parameter",
+                               p.pos);
         // scalac: "`val` parameters may not be call-by-name" — a member has to
         // hold a value, not a thunk (D47).
         if (p.byName && (p.isVal || p.isVar || c.isCase))
@@ -284,6 +286,13 @@ ClassInfo Compiler::buildClassInfo(const TemplateDef& t, const std::string& type
         if (c.isCase) c.fields.push_back(c.members.at(p.name).key);
     }
     c.primaryArity = t.ctorParams.size();
+    // Trailing parameters with a default may be omitted; the callee prologue
+    // fills them (Phase 4). A default in the middle is legal too, but then every
+    // later parameter has to be given by name, which the prologue's
+    // "is missing argument 'x'" reports.
+    c.primaryMinArity = c.primaryArity;
+    while (c.primaryMinArity > 0 && t.ctorParams[c.primaryMinArity - 1].defaultValue)
+        --c.primaryMinArity;
     c.primaryVariadic = !t.ctorParams.empty() && t.ctorParams.back().repeated;
     // By-name primary-constructor parameters (D47): `C(e)` and `new C(e)` name
     // the class, so the call site can wrap `e` in a thunk.
@@ -419,7 +428,8 @@ std::vector<std::string> Compiler::runtimeChain(const ClassInfo& info) const {
 }
 
 std::string Compiler::ctorKeyFor(const ClassInfo& info, std::size_t argc, SourcePos pos) const {
-    if (argc == info.primaryArity || (info.primaryVariadic && argc + 1 >= info.primaryArity))
+    if (argc == info.primaryArity || (info.primaryVariadic && argc + 1 >= info.primaryArity) ||
+        (argc >= info.primaryMinArity && argc < info.primaryArity))
         return kPrimaryCtorKey;
     if (std::find(info.auxArities.begin(), info.auxArities.end(), argc) != info.auxArities.end())
         return auxCtorKey(argc);
@@ -605,6 +615,10 @@ void Compiler::compileConstructor(const TemplateDef& t, const ClassInfo& info) {
     }
     emit(Op::PUSH_LOCAL, 0, t.pos, +1);
     emit(Op::RETURN, 0, t.pos, -1);
+    // A constructor binds named arguments and fills its defaults in its own
+    // prologue, exactly as a method does (Phase 4).
+    recordParamsAndDefaults(*mod, t.ctorParams, /*method=*/true, info.name + ".<init>",
+                            fs.scopes.front());
     mod->setLocalCount(fs.nextSlot - arity);
     mod->setMaxStack(fs.maxDepth);
     fn_ = saved;
@@ -705,6 +719,33 @@ void Compiler::compileNewOf(const ClassInfo& info, const std::vector<NodePtr>& a
         return;
     }
     emit(Op::PUSH_GLOBAL, fn_->mod->addSymbol(info.key), pos, +1);
+    // `new C(x = 1)`: the arguments travel in protoCore's keywordParameters and
+    // the constructor's own prologue binds them, exactly as a method's does. NEW
+    // takes a KwSendSite instead of a SendSite; no extra opcode is needed.
+    bool anyNamed = false;
+    for (const auto& arg : args) anyNamed = anyNamed || arg->kind == NodeKind::NamedArg;
+    if (anyNamed) {
+        std::size_t positional = 0;
+        const std::vector<std::string> keywords = splitNamedArgs(args, &positional);
+        const std::uint32_t byNameCtor =
+            info.primaryByNameMasks.empty() ? 0u : info.primaryByNameMasks[0];
+        for (std::size_t k = 0; k < args.size(); ++k) {
+            const Node& arg = args[k]->kind == NodeKind::NamedArg ? *as<NamedArg>(*args[k]).value
+                                                                 : *args[k];
+            // A by-name constructor parameter is only honoured positionally: a
+            // named argument's parameter is not known until the callee binds it.
+            if (args[k]->kind != NodeKind::NamedArg && k < kMaxByNameParams &&
+                (byNameCtor >> k) & 1u)
+                compileByNameArgument(arg);
+            else
+                compileExpr(arg);
+        }
+        emit(Op::NEW,
+             fn_->mod->addKwSendSite(ctorKeyFor(info, args.size(), pos),
+                                     static_cast<std::uint32_t>(positional), keywords),
+             pos, -static_cast<int>(args.size()));
+        return;
+    }
     const bool spread = !args.empty() && args.back()->kind == NodeKind::Splice;
     // The class is named here, so its by-name constructor parameters are
     // honoured (D47).
@@ -712,8 +753,6 @@ void Compiler::compileNewOf(const ClassInfo& info, const std::vector<NodePtr>& a
         info.primaryByNameMasks.empty() ? 0u : info.primaryByNameMasks[0];
     for (std::size_t k = 0; k < args.size(); ++k) {
         const Node& arg = *args[k];
-        if (arg.kind == NodeKind::NamedArg)
-            throw CompileError("named arguments are not implemented yet", arg.pos);
         if (arg.kind == NodeKind::Splice) {
             if (k + 1 != args.size()) throw CompileError("a splice must be the last argument", arg.pos);
             if (!info.primaryVariadic)

@@ -36,6 +36,16 @@ void installCollectionPrimitives(proto::ProtoContext* ctx, const RuntimeLayout& 
 // EvalHarness). A missing name is a build defect, not user input: it throws.
 void bindPreludeHooks(proto::ProtoContext* ctx, RuntimeLayout& layout, const GlobalTable& globals);
 
+// The keyword-argument stand-in for a foreign callable (DESIGN §5.2, §9).
+// `__kwprobe` is a global object whose native `call` method reports the
+// positional and keyword arguments it received, exactly as a UMD-provided
+// foreign method will: it reads protoCore's keywordParameters directly and
+// recovers each name from the interned symbol its key is the address of. It is
+// reached through exactly the same SEND_KW path a foreign object will be, so it
+// exercises the whole protoScala half of the convention without UMD, which is
+// Phase 6. Nothing about it is Scala-aware.
+void installKeywordProbe(proto::ProtoContext* ctx, const RuntimeLayout& layout);
+
 // Global functions installed by installPrimitives ({"println", "print"}).
 const std::vector<std::string>& builtinGlobalNames();
 

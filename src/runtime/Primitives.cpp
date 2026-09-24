@@ -1055,7 +1055,7 @@ const std::vector<std::string>& builtinGlobalNames() {
     static const std::vector<std::string> names = [] {
         std::vector<std::string> v = {"println", "print", "List", "Nil", "__raise",
                                       "Actor", "Future", "Thread", "System",
-                                      "__fmt", "__tryOf", "__classNameOf",
+                                      "__fmt", "__tryOf", "__classNameOf", "__kwprobe",
                                       "Vector", "Map", "Set"};
         for (unsigned n = 2; n <= kMaxTupleArity; ++n) v.push_back("Tuple" + std::to_string(n));
         return v;
@@ -1155,7 +1155,65 @@ void installPrimitives(ProtoContext* ctx, const RuntimeLayout& L) {
         throw std::logic_error("installPrimitives: anyProto has no equals");
     installProductPrimitives(ctx, L);
     installActorPrimitives(ctx, L);
+    installKeywordProbe(ctx, L);
     installCollectionPrimitives(ctx, L);
+}
+
+// __kwprobe.call(positional..., named = ...) -> a deterministic report.
+//
+// A foreign method reached through UMD receives keyword arguments in protoCore's
+// `keywordParameters` ProtoSparseList, whose key is the ADDRESS of the interned
+// ProtoString symbol for the parameter's name. Recovering the name from the key
+// is therefore a cast: the key IS that symbol's address, and an interned string
+// is PERENNIAL — never collected, never moved — so the address stays valid for
+// the life of the ProtoSpace. That perenniality is also why an integer-keyed
+// ProtoSparseList is the right structure here and ProtoMap is not: ProtoMap
+// exists for arbitrary COLLECTABLE object keys the collector must trace, which is
+// a different problem (the same principle that makes ProtoTuple interned).
+//
+// Declared with the raw ProtoMethod signature rather than the PRIM macro,
+// because it is the one native in the tree that USES its fifth parameter and the
+// macro discards it.
+const ProtoObject* prim_kwprobe_call(ProtoContext* ctx, const ProtoObject*,
+                                     const proto::ParentLink*, const ProtoList* args,
+                                     const proto::ProtoSparseList* keywords) {
+    const RuntimeLayout& L = layoutOf();
+    std::string out = "pos=[";
+    const unsigned long n = args ? args->getSize(ctx) : 0;
+    for (unsigned long i = 0; i < n; ++i) {
+        if (i > 0) out += ",";
+        out += show(ctx, L, args->getAt(ctx, static_cast<int>(i)));
+    }
+    out += "] kw=[";
+    // Sorted by name, so the report is deterministic whatever order the keys
+    // happen to sit in (a ProtoSparseList orders by key word, i.e. by address).
+    std::vector<std::pair<std::string, std::string>> pairs;
+    if (keywords) {
+        const proto::ProtoSparseListIterator* it = keywords->getIterator(ctx);
+        while (it && it->hasNext(ctx)) {
+            const unsigned long key = it->nextKey(ctx);
+            const ProtoObject* v = it->nextValue(ctx);
+            const auto* symbol = reinterpret_cast<const proto::ProtoString*>(key);
+            pairs.emplace_back(symbol->toStdString(ctx), show(ctx, L, v));
+            // `advance` is a non-const member and getIterator hands back a const
+            // pointer: the cast is protoCore's own iteration idiom.
+            it = const_cast<proto::ProtoSparseListIterator*>(it)->advance(ctx);
+        }
+    }
+    std::sort(pairs.begin(), pairs.end());
+    for (std::size_t i = 0; i < pairs.size(); ++i) {
+        if (i > 0) out += ",";
+        out += pairs[i].first + "=" + pairs[i].second;
+    }
+    return str(ctx, out + "]");
+}
+
+void installKeywordProbe(ProtoContext* ctx, const RuntimeLayout& L) {
+    auto* probe = const_cast<ProtoObject*>(L.anyRefProto->newChild(ctx, /*isMutable=*/true));
+    probe->setAttribute(ctx, L.nameKey, makeString(ctx, "__kwprobe"));
+    probe->setAttribute(ctx, proto::ProtoString::createSymbol(ctx, "call"),
+                        ctx->fromMethod(probe, &prim_kwprobe_call));
+    L.globals->setAttribute(ctx, proto::ProtoString::createSymbol(ctx, "__kwprobe"), probe);
 }
 
 } // namespace protoScala

@@ -484,3 +484,34 @@ TEST(EnginePatterns, MatchBindsGuardsAndFails) {
     EXPECT_EQ(h.eval("\"x\".asInstanceOf[Int]"), "error: ClassCastException: String cannot be cast to Int");
     EXPECT_EQ(h.eval("null.asInstanceOf[String] == null"), "true");
 }
+
+// --- Named and default arguments (Phase 4, DESIGN §5.2) ---------------------
+
+TEST(NamedArguments, ReorderAndDefaults) {
+    EvalHarness h;
+    h.eval("def f(a: Int, b: Int = 2): String = a.toString + \"/\" + b");
+    EXPECT_EQ(h.eval("f(1)"), "1/2");
+    EXPECT_EQ(h.eval("f(a = 1)"), "1/2");
+    EXPECT_EQ(h.eval("f(b = 9, a = 1)"), "1/9");
+    EXPECT_EQ(h.eval("f(1, b = 9)"), "1/9");
+}
+
+TEST(NamedArguments, ErrorsAreLoud) {
+    EvalHarness h;
+    h.eval("def f(a: Int, b: Int): Int = a + b");
+    EXPECT_NE(h.eval("f(a = 1, z = 2)").find("has no parameter named 'z'"), std::string::npos);
+    EXPECT_NE(h.eval("f(1, a = 2)").find("received parameter 'a' twice"), std::string::npos);
+    EXPECT_NE(h.eval("f(a = 1)").find("is missing argument 'b'"), std::string::npos);
+}
+
+TEST(NamedArguments, ANativeThatIgnoresKeywordsFailsLoudly) {
+    EvalHarness h;
+    // A native that does not read protoCore's keywordParameters sees no
+    // positional argument at all, and reports the arity mismatch by name. The
+    // point is that the call FAILS rather than quietly doing something else; the
+    // natives that do accept named arguments (a case class's `copy` and `apply`,
+    // and the `__kwprobe` stand-in) read the list and bind it.
+    const std::string err = h.eval("\"abc\".substring(beginIndex = 1)");
+    EXPECT_NE(err.find("substring"), std::string::npos) << err;
+    EXPECT_NE(err.find("error:"), std::string::npos) << err;
+}

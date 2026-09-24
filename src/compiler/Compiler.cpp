@@ -14,6 +14,7 @@
 #include "support/FormatSpec.h"
 #include "runtime/StackGuard.h"
 
+#include <algorithm>
 #include <stdexcept>
 
 namespace protoScala {
@@ -100,6 +101,13 @@ public:
         scopes_.emplace_back();
         for (const Param& p : params)
             scopes_.back().names[p.name] = Decl{nullptr, depth, DeclKind::Param, -1};
+        // A parameter's DEFAULT runs in the callee's own frame at the same depth
+        // as the body, so an enclosing local it names must be boxed exactly as one
+        // the body names is. Without this a default read a raw, not-yet-assigned
+        // slot whenever the body happened not to mention the same local — the
+        // same program working or not for an unrelated reason (Phase 4).
+        for (const Param& p : params)
+            if (p.defaultValue) walk(*p.defaultValue, depth);
         walk(body, depth);
         scopes_.pop_back();
     }
@@ -758,9 +766,46 @@ void Compiler::compileApply(const Apply& a) {
     bool named = false;
     for (const auto& arg : a.args) named = named || arg->kind == NodeKind::NamedArg;
     if (named) {
-        if (fn->kind != NodeKind::Select)
-            throw CompileError("named arguments are not implemented yet", a.pos);
-        compileNamedSend(as<Select>(*fn), a.args, a.pos);
+        // `recv.m(x = 1)` is a SEND_KW; `f(x = 1)` on a global def, a local
+        // function or any other value is a CALL_KW, which SEND_KW cannot express
+        // because it has no receiver. `C(x = 1)` on a case class is the
+        // companion's synthesised `apply`, so it becomes a keyword `new`.
+        if (fn->kind == NodeKind::Select) {
+            compileNamedSend(as<Select>(*fn), a.args, a.pos);
+            return;
+        }
+        if (fn->kind == NodeKind::Ident) {
+            const auto& id = as<Ident>(*fn);
+            const Resolution r = resolve(id.name, id.pos);
+            if (r.ref == RefKind::Member) {   // f(x = 1) inside a template
+                loadThis(a.pos);
+                std::size_t positional = 0;
+                const std::vector<std::string> keywords = splitNamedArgs(a.args, &positional);
+                for (const auto& arg : a.args)
+                    compileExpr(arg->kind == NodeKind::NamedArg ? *as<NamedArg>(*arg).value : *arg);
+                emit(Op::SEND_KW,
+                     fn_->mod->addKwSendSite(r.key, static_cast<std::uint32_t>(positional),
+                                             keywords),
+                     a.pos, -static_cast<int>(a.args.size()));
+                return;
+            }
+            if (r.ref == RefKind::Global && r.kind == BindingKind::Object) {
+                const ClassInfo* cls = globals_.findType(id.name);
+                if (cls && cls->isCase && cls->kind == ClassKind::Class &&
+                    cls->companionTermKey == r.key && !cls->companionHasApply) {
+                    compileNewOf(*cls, a.args, a.pos);
+                    return;
+                }
+            }
+        }
+        compileExpr(*fn);
+        std::size_t positional = 0;
+        const std::vector<std::string> keywords = splitNamedArgs(a.args, &positional);
+        for (const auto& arg : a.args)
+            compileExpr(arg->kind == NodeKind::NamedArg ? *as<NamedArg>(*arg).value : *arg);
+        emit(Op::CALL_KW,
+             fn_->mod->addKwSendSite("apply", static_cast<std::uint32_t>(positional), keywords),
+             a.pos, -static_cast<int>(a.args.size()));
         return;
     }
     if (fn->kind == NodeKind::Select) {
@@ -1027,12 +1072,119 @@ void Compiler::compileStats(const std::vector<NodePtr>& stats, std::size_t from,
 // Functions
 // ---------------------------------------------------------------------------
 
+void Compiler::recordParamsAndDefaults(BytecodeModule& mod, const std::vector<Param>& params,
+                                       bool method, const std::string& name,
+                                       const std::unordered_map<std::string, LocalInfo>& outerScope) {
+    std::vector<std::string> names;
+    if (method) names.push_back("this");
+    for (const Param& p : params) names.push_back(p.name);
+    mod.setParamNames(std::move(names));
+    // PASS 1, discarded: compiling each default with the CALLEE as the enclosing
+    // function forces the callee to capture every enclosing local the default
+    // names, through the ordinary resolver rather than a second free-variable
+    // walk that could disagree with it. Without it a default would read an
+    // enclosing local only when the body happened to read it too — the same
+    // program working or not for an unrelated reason, which is exactly the kind
+    // of silent inconsistency this phase refuses.
+    for (std::size_t k = 0; k < params.size(); ++k) {
+        if (!params[k].defaultValue) continue;
+        BytecodeModule scratch;
+        scratch.setName("<default-prepass>");
+        FunctionState probe;
+        probe.mod = &scratch;
+        probe.parent = fn_;          // the callee itself
+        probe.allowsReturn = false;
+        probe.scopes.emplace_back();
+        FunctionState* saved = fn_;
+        fn_ = &probe;
+        try {
+            compileExpr(*params[k].defaultValue);
+        } catch (...) {
+            fn_ = saved;
+            throw;
+        }
+        fn_ = saved;
+    }
+    // PASS 2: the capture list is final now, so each block can mirror it.
+    for (std::size_t k = 0; k < params.size(); ++k)
+        if (params[k].defaultValue) compileDefaultBlock(mod, params, k, method, name, outerScope);
+}
+
+void Compiler::compileDefaultBlock(BytecodeModule& owner, const std::vector<Param>& params,
+                                   std::size_t index, bool method, const std::string& name,
+                                   const std::unordered_map<std::string, LocalInfo>& outerScope) {
+    // The block MIRRORS the callee's slot prefix: `this`, the parameters, and
+    // every value the callee captured, all at their own slot numbers. `execute`
+    // runs it with the callee frame's slots as its arguments, so reading any of
+    // them is an ordinary PUSH_LOCAL and no capture machinery is involved. That
+    // is what lets a default read a parameter of a PREVIOUS parameter list, which
+    // Desugar has folded into an enclosing lambda (`def f(a: Int)(b: Int = a + 1)`).
+    // Every slot the callee has allocated so far: its parameters, its locals and
+    // its captures, which `captureInto` interleaves rather than grouping at the
+    // end. The block's own ARITY carries this number to the run time, so
+    // bindKeywordsAndDefaults needs no separate bookkeeping.
+    const int mirrored = fn_->nextSlot;
+    auto sub = std::make_unique<BytecodeModule>();
+    sub->setName(name + "$default$" + std::to_string(index));
+    sub->setMethod(method);
+    sub->setArity(mirrored);
+    FunctionState fs;
+    fs.mod = sub.get();
+    fs.parent = nullptr;          // everything it may read is already a parameter
+    fs.allowsReturn = false;
+    fs.scopes.emplace_back();
+    fs.nextSlot = mirrored;       // its own locals start after the mirrored prefix
+    const int paramBase = method ? 1 : 0;
+    for (const auto& [n, info] : outerScope) {
+        const bool isParam =
+            info.slot >= paramBase && info.slot < paramBase + static_cast<int>(params.size());
+        // A LATER parameter is deliberately left out of scope, so a forward
+        // reference (`def f(a: Int = b, b: Int = 1)`) is a loud compile error
+        // rather than a read of an unfilled slot.
+        if (isParam && info.slot - paramBase >= static_cast<int>(index)) continue;
+        fs.scopes.back()[n] = info;
+    }
+    FunctionState* saved = fn_;
+    fn_ = &fs;
+    compileExpr(*params[index].defaultValue);
+    emit(Op::RETURN, 0, params[index].pos, -1);
+    sub->setLocalCount(fs.nextSlot - mirrored);
+    sub->setMaxStack(fs.maxDepth);
+    fn_ = saved;
+    const std::size_t blockIndex = owner.addBlock(std::move(sub));
+    owner.setDefaultBlock(index + (method ? 1u : 0u), blockIndex);
+}
+
+std::vector<std::string> Compiler::splitNamedArgs(const std::vector<NodePtr>& args,
+                                                  std::size_t* positional) {
+    std::vector<std::string> keywords;
+    *positional = 0;
+    for (const auto& arg : args) {
+        if (arg->kind == NodeKind::NamedArg) {
+            const std::string& name = as<NamedArg>(*arg).name;
+            if (std::find(keywords.begin(), keywords.end(), name) != keywords.end())
+                throw CompileError("parameter " + name + " is specified twice", arg->pos);
+            keywords.push_back(name);
+        } else {
+            if (!keywords.empty())
+                throw CompileError("positional after named argument", arg->pos);
+            if (arg->kind == NodeKind::Splice)
+                throw CompileError("a splice cannot be mixed with named arguments", arg->pos);
+            ++*positional;
+        }
+    }
+    return keywords;
+}
+
 void Compiler::compileFunction(const std::string& name, const std::vector<Param>& params,
                                const Node& body, FnShape shape, SourcePos pos,
                                bool paramless, bool allowByName) {
     for (const Param& p : params)
-        if (p.defaultValue)
-            throw CompileError("default parameter values are not implemented yet", p.pos);
+        if (p.defaultValue && !params.empty() && params.back().repeated)
+            throw CompileError("a default parameter value is not supported on a method with a "
+                               "repeated parameter: the callee cannot tell an omitted default "
+                               "from an empty repeated argument",
+                               p.pos);
     if (!allowByName) refuseByNameParams(params, "a function literal");
     const std::uint32_t byNameMask = allowByName ? byNameMaskOfParams(params) : 0;
     const bool method = shape == FnShape::Method;
@@ -1067,6 +1219,8 @@ void Compiler::compileFunction(const std::string& name, const std::vector<Param>
     analyseCaptures(params, body);
     compileExpr(body);
     emit(Op::RETURN, 0, pos, -1);
+    // After the body: the capture list is final, so a default block can mirror it.
+    recordParamsAndDefaults(*mod, params, method, name, fs.scopes.front());
     mod->setLocalCount(fs.nextSlot - arity);
     mod->setMaxStack(fs.maxDepth);
     fn_ = saved;

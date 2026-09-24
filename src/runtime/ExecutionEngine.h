@@ -128,12 +128,19 @@ private:
                                       std::size_t* faultPc);
 
     // One frame, with its handler table active. `execute` and `resumeFrames`
-    // call this, never runLoop directly (plan A0-3, escalation E2): the handler
-    // body is entered by `continue`, OUTSIDE the C++ catch block, so it runs
-    // with no live C++ handler, an ordinary ip and an ordinary operand stack —
-    // and therefore suspends cooperatively like any other bytecode. Searching
-    // and jumping inside the catch instead would break `await` inside a `catch`
-    // or a `finally` silently.
+    // call this, never runLoop directly (escalation E2): the handler body is
+    // entered by `continue`, OUTSIDE the C++ catch block. Two things depend on
+    // that, and the second is the load-bearing one:
+    //
+    //  - the handler body runs with no live C++ handler, an ordinary ip and an
+    //    ordinary operand stack, so it suspends cooperatively like any other
+    //    bytecode;
+    //  - the frame can catch a SECOND exception — one raised by its own handler
+    //    body, by the RETHROW a non-matching cascade emits, or by a `finally` —
+    //    because the loop re-enters this frame's own try region. Entering the
+    //    handler from inside the catch abandons the loop, and the frame's handler
+    //    table is then never consulted again: measured, that turns 11 fixtures
+    //    red (see docs/DECISIONS-LOG.md, E2).
     const proto::ProtoObject* runFrame(proto::ProtoContext& frame, const BytecodeModule& mod,
                                        const proto::ProtoObject** slots,
                                        const proto::ProtoObject** sp, const Instr* ip);
@@ -171,13 +178,15 @@ private:
     const proto::ProtoString* siteName(proto::ProtoContext* ctx, const proto::ProtoObject* receiver,
                                        const BytecodeModule::Const& site) const;
     const proto::ProtoObject* callWithReceiver(proto::ProtoContext* ctx, const proto::ProtoObject* method,
-                                               const proto::ProtoObject** base, unsigned argc);
+                                               const proto::ProtoObject** base, unsigned argc,
+                                               const proto::ProtoSparseList* keywords = nullptr);
     const proto::ProtoObject* bindMethod(proto::ProtoContext* ctx, const proto::ProtoObject* method,
                                          const proto::ProtoObject* receiver);
     const proto::ProtoObject* forceMember(proto::ProtoContext* ctx, const proto::ProtoObject* holder,
                                           const proto::ProtoObject* receiver);
     const proto::ProtoObject* instantiate(proto::ProtoContext* ctx, const proto::ProtoObject** base,
-                                          const proto::ProtoString* ctorKey, unsigned argc);
+                                          const proto::ProtoString* ctorKey, unsigned argc,
+                                          const proto::ProtoSparseList* keywords = nullptr);
     [[gnu::noinline]] const proto::ProtoObject* makeClass(proto::ProtoContext* ctx,
                                                           const BytecodeModule::Const& spec,
                                                           const proto::ProtoObject* const* base);

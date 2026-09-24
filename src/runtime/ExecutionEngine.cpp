@@ -230,11 +230,22 @@ const proto::ProtoObject* ExecutionEngine::callMember(proto::ProtoContext* ctx,
 const proto::ProtoObject* ExecutionEngine::callWithReceiver(proto::ProtoContext* ctx,
                                                             const proto::ProtoObject* m,
                                                             const proto::ProtoObject** base,
-                                                            unsigned argc) {
-    if (m->isMethod(ctx)) return callNative(ctx, m->asMethod(ctx), base[0], base + 1, argc);
+                                                            unsigned argc,
+                                                            const proto::ProtoSparseList* keywords) {
+    if (m->isMethod(ctx)) {
+        if (keywords) {
+            proto::ProtoContext scope(ctx->space, ctx);
+            const proto::ProtoList* positional = scope.newList(argc, base + 1);
+            const proto::ProtoObject* r =
+                m->asMethod(ctx)(&scope, base[0], nullptr, positional, keywords);
+            scope.returnValue = r ? r : PROTO_NONE;
+            return r ? r : PROTO_NONE;
+        }
+        return callNative(ctx, m->asMethod(ctx), base[0], base + 1, argc);
+    }
     const BytecodeModule* mod = compiledModuleOf(ctx, layout_, m);
     if (!mod || !mod->isMethod()) throw std::logic_error("callWithReceiver: not a method");
-    return execute(ctx, *mod, base, argc + 1, nullptr);
+    return execute(ctx, *mod, base, argc + 1, nullptr, keywords);
 }
 
 // A function value for `receiver.m` (eta-expansion): a Function<N> object
@@ -277,7 +288,8 @@ const proto::ProtoObject* ExecutionEngine::forceMember(proto::ProtoContext* ctx,
 const proto::ProtoObject* ExecutionEngine::instantiate(proto::ProtoContext* ctx,
                                                        const proto::ProtoObject** base,
                                                        const proto::ProtoString* ctorKey,
-                                                       unsigned argc) {
+                                                       unsigned argc,
+                                                       const proto::ProtoSparseList* keywords) {
     const RuntimeLayout& L = layout_;
     const proto::ProtoObject* cls = base[0];
     // Mutability is inherited: a subclass of a class with a `var` field also
@@ -291,7 +303,7 @@ const proto::ProtoObject* ExecutionEngine::instantiate(proto::ProtoContext* ctx,
         throw ScalaError("IllegalArgumentException",
                          typeName(ctx, L, base[0]) + " has no constructor taking " +
                              std::to_string(argc) + " arguments");
-    return callWithReceiver(ctx, init, base, argc);
+    return callWithReceiver(ctx, init, base, argc, keywords);
 }
 
 const proto::ProtoObject* ExecutionEngine::construct(proto::ProtoContext* ctx,
@@ -474,7 +486,11 @@ void ExecutionEngine::bindKeywordsAndDefaults(proto::ProtoContext& frame, const 
         // may read the parameters declared before it: the default block takes
         // exactly those slots as its own arguments, which is why they must
         // already be bound and live in the frame's traced slots (plan A0-11).
-        slots[i] = execute(&frame, mod.block(block), slots, static_cast<unsigned>(i), nullptr);
+        // The default block mirrors this frame's slot prefix — parameters,
+        // locals and captures — so it is run with those slots as its arguments,
+        // and its own arity is exactly how many of them it expects.
+        const BytecodeModule& dflt = mod.block(block);
+        slots[i] = execute(&frame, dflt, slots, static_cast<unsigned>(dflt.arity()), nullptr);
         filled[i] = true;
     }
 }
@@ -661,12 +677,6 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
     for (unsigned k = 0; k < positional; ++k) slots[k] = args[k];
     if (mod.isVariadic())
         slots[fixed] = frame.newList(argc - fixed, args + fixed)->asObject(&frame);
-    // Named arguments and defaults are bound HERE, in the callee: a caller that
-    // does not know its callee statically therefore still works. The platform
-    // is late-binding even where Scala is not; late detection is accepted,
-    // silent failure is not (plan A0-11).
-    if (keywords || (mod.hasDefaults() && positional < fixed))
-        bindKeywordsAndDefaults(frame, mod, keywords, slots, positional);
     if (mod.captureCount() > 0) {
         // A module with captures is never run without them: filling its
         // capture slots with nulls would corrupt the frame silently. Scala
@@ -681,6 +691,13 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
         for (std::size_t k = 0; k < specs.size(); ++k)
             slots[specs[k].localSlot] = caps->getAt(&frame, static_cast<int>(k));
     }
+    // Named arguments and defaults are bound HERE, in the callee, and AFTER the
+    // captures: a default block mirrors this frame's parameters and captures, so
+    // both must already be in place. A caller that does not know its callee
+    // statically therefore still works — the platform is late-binding even where
+    // Scala is not; late detection is accepted, silent failure is not.
+    if (keywords || (mod.hasDefaults() && positional < fixed))
+        bindKeywordsAndDefaults(frame, mod, keywords, slots, positional);
 
     // runFrame, never runLoop: the module's handler table must be active for
     // this frame, and the handler body must run outside the C++ catch (A0-3).
@@ -1142,10 +1159,20 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                     continue;
                 }
                 case Op::NEW: {
+                    // A KwSendSite operand means `new C(x = 1)`: the keyword
+                    // values follow the positional ones and the constructor's own
+                    // prologue binds them, so no extra opcode is needed.
                     const auto& site = mod.constAt(operand);
-                    const proto::ProtoObject** base = sp - site.argc - 1;  // [cls a1..an]
+                    const unsigned named = static_cast<unsigned>(site.nameSymbols.size());
+                    const proto::ProtoObject** base = sp - site.argc - named - 1;  // [cls a1..an k1..km]
                     pendingBase = static_cast<unsigned>(base - slots);
-                    base[0] = instantiate(&frame, base, site.symbol, site.argc);
+                    if (named == 0) {
+                        base[0] = instantiate(&frame, base, site.symbol, site.argc);
+                    } else {
+                        proto::ProtoContext scope(frame.space, &frame);
+                        const proto::ProtoSparseList* keywords = keywordsOfSite(&scope, base, site);
+                        base[0] = instantiate(&frame, base, site.symbol, site.argc, keywords);
+                    }
                     pendingBase = kNoPendingCall;
                     sp = base + 1;
                     continue;

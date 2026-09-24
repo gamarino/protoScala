@@ -195,6 +195,30 @@ private:
         BytecodeModule::HandlerKind kind,
         const std::vector<std::pair<std::size_t, std::size_t>>& holes);
 
+    // --- Named and default arguments (Phase 4, DESIGN §5.2) ---------------
+    // Records the callee's parameter names (index 0 is `this` for a method, so
+    // the names and the slots line up) and compiles one default block per
+    // parameter that has an initialiser. Binding happens in the CALLEE, so this
+    // is all a call site needs to know nothing about.
+    // Called AFTER the callee's body, so `mod.captureCount()` is final.
+    // `outerScope` is the callee's own parameter scope, which by then also holds
+    // every value it captured.
+    void recordParamsAndDefaults(BytecodeModule& mod, const std::vector<Param>& params,
+                                 bool method, const std::string& name,
+                                 const std::unordered_map<std::string, LocalInfo>& outerScope);
+    // A default's value is computed by a block of the callee's own module whose
+    // parameters are the parameters declared BEFORE it, so a default may read
+    // them (`def f(a: Int, b: Int = a + 1)`); `execute` runs it with the frame's
+    // slots as its arguments.
+    void compileDefaultBlock(BytecodeModule& owner, const std::vector<Param>& params,
+                             std::size_t index, bool method, const std::string& name,
+                             const std::unordered_map<std::string, LocalInfo>& outerScope);
+    // Splits `args` into positional and named, in SOURCE order, rejecting a
+    // duplicate name and a positional argument after a named one. Returns the
+    // keyword names; `positional` gets the count before the first named one.
+    std::vector<std::string> splitNamedArgs(const std::vector<NodePtr>& args,
+                                            std::size_t* positional);
+
     void compileLazyThunk(const Node& rhs, SourcePos pos);  // thunk + MAKE_LAZY
     void compileStats(const std::vector<NodePtr>& stats, std::size_t from, SourcePos pos);
     void storeLocal(const LocalInfo& info, SourcePos pos);

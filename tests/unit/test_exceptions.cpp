@@ -157,3 +157,57 @@ TEST(NativeTranslation, AVmDefectIsNotCatchable) {
     mod->addHandler({tryStart, tryEnd, body, 0, 0, BytecodeModule::HandlerKind::Catch});
     EXPECT_THROW(h.runModule(std::move(mod)), std::logic_error);
 }
+
+// --- The keyword-argument convention (DESIGN §5.2) ---------------------------
+
+TEST(KeywordConvention, ANonInternedKeyMatchesNothing) {
+    // createSymbol INTERNS; fromUTF8 does not and returns a different pointer for
+    // the same text. A key built from the latter matches no parameter, and the
+    // failure is SILENT — the argument simply never binds. protoJS hit this class
+    // of bug more than once, so the trap is pinned by a test and not only by a
+    // comment.
+    //
+    // The name below is deliberately LONG, and that is the sharp edge: protoCore
+    // embeds a short string in the pointer word itself, so `fromUTF8("dtype")`
+    // and `createSymbol("dtype")` are the SAME word and a non-interned key works
+    // by accident. The bug then appears only for a parameter whose name is too
+    // long to embed — which is precisely why it is hard to find and why this test
+    // exists. Both halves are asserted, so a change to the embedding threshold
+    // shows up here rather than in a user's program.
+    EvalHarness h;
+    proto::ProtoContext* ctx = h.runtime().rootContext();
+    const proto::ProtoString* shortInterned = proto::ProtoString::createSymbol(ctx, "dtype");
+    const proto::ProtoString* shortLoose = proto::ProtoString::fromUTF8(ctx, "dtype");
+    EXPECT_EQ(shortInterned, shortLoose)
+        << "a short name is embedded in the pointer word, so the trap is invisible for it";
+
+    const char* longName = "encodingOfTheOutput";
+    const proto::ProtoString* interned = proto::ProtoString::createSymbol(ctx, longName);
+    const proto::ProtoString* interned2 = proto::ProtoString::createSymbol(ctx, longName);
+    const proto::ProtoString* loose = proto::ProtoString::fromUTF8(ctx, longName);
+    EXPECT_EQ(interned, interned2) << "createSymbol must intern";
+    EXPECT_NE(interned, loose) << "fromUTF8 must not intern a name too long to embed";
+
+    const proto::ProtoSparseList* bad = ctx->newSparseList();
+    bad = bad->setAt(ctx, reinterpret_cast<unsigned long>(loose), proto::makeSmallInt(1));
+    EXPECT_FALSE(bad->has(ctx, reinterpret_cast<unsigned long>(interned)))
+        << "a key built from a non-interning constructor must not match the interned one";
+
+    const proto::ProtoSparseList* good = ctx->newSparseList();
+    good = good->setAt(ctx, reinterpret_cast<unsigned long>(interned), proto::makeSmallInt(1));
+    EXPECT_TRUE(good->has(ctx, reinterpret_cast<unsigned long>(interned2)));
+}
+
+TEST(KeywordConvention, EveryParameterNameOfALinkedModuleIsInterned) {
+    // The other half of the same trap: linkSymbols must intern the parameter
+    // names, because the ADDRESS of that symbol is the key a call site builds.
+    EvalHarness h;
+    h.eval("def described(width: Int = 0, height: Int = 0): String = \"\" + width + height");
+    proto::ProtoContext* ctx = h.runtime().rootContext();
+    // Reached through the probe rather than the module directly: a name that was
+    // interned matches the symbol a caller would build for the same text.
+    EXPECT_EQ(h.eval("__kwprobe.call(width = 2, height = 3)"),
+              "pos=[] kw=[height=3,width=2]");
+    EXPECT_EQ(proto::ProtoString::createSymbol(ctx, "width"),
+              proto::ProtoString::createSymbol(ctx, "width"));
+}

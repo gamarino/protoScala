@@ -77,6 +77,9 @@ struct ClassInfo {
     std::vector<std::string> fields;         // case classes: the product elements' attribute keys
     std::vector<std::string> ctorParams;     // primary constructor parameter names
     std::size_t primaryArity = 0;
+    // The lowest positional count `new C(...)` accepts: primaryArity minus the
+    // trailing parameters that carry a default value (Phase 4).
+    std::size_t primaryMinArity = 0;
     bool primaryVariadic = false;
     // By-name primary-constructor parameters, as one mask in a list (D47).
     std::vector<std::uint32_t> primaryByNameMasks;

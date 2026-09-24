@@ -189,8 +189,12 @@ TEST(Compiler, SemanticErrors) {
                     "unsupported format specifier '%q'"));
     EXPECT_TRUE(has(compileError("val n = 1\nval s = f\"50% of $n\""),
                     "conversions must follow a splice"));
-    EXPECT_TRUE(has(compileError("def f(x: Int) = x\nval y = f(x = 1)"), "named arguments"));
-    EXPECT_TRUE(has(compileError("def f(x: Int = 1) = x"), "default parameter values"));
+    // Named arguments and default parameter values are implemented (Phase 4):
+    // both compile, and the callee's prologue binds them.
+    EXPECT_EQ(compileError("def f(x: Int) = x\nval y = f(x = 1)"), "");
+    EXPECT_EQ(compileError("def f(x: Int = 1) = x"), "");
+    EXPECT_TRUE(has(compileError("def f(x: Int = 1, xs: Int*) = x"), "repeated parameter"));
+    EXPECT_TRUE(has(compileError("def f(a: Int = b, b: Int = 1) = a"), "Not found: b"));
     // A by-name parameter is thunked at a call site that names its declaration
     // and forced on every read in the body (D47).
     EXPECT_TRUE(has(listing("def f(x: => Int) = x\nval y = f(1)"), "function <by-name>"));
