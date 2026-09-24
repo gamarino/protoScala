@@ -499,9 +499,9 @@ TEST(ParserTemplates, Errors) {
               std::string::npos);
     EXPECT_NE(parseErrorOf("new T { def f = 1 }").find("anonymous classes are not implemented yet"),
               std::string::npos);
-    EXPECT_NE(parseErrorOf("class A(x: Int)(y: Int)")
-                  .find("multiple constructor parameter lists are not implemented yet"),
-              std::string::npos);
+    // Multiple constructor parameter lists are implemented (Phase 4, D84): they
+    // concatenate into one flat list.
+    EXPECT_EQ(parseErrorOf("class A(x: Int)(y: Int)"), "");
     EXPECT_NE(parseErrorOf("def f: Int").find("'=' expected"), std::string::npos);  // outside a template
     // `super[T].f` is implemented (Phase 4); what is still an error is `super`
     // with no member selection at all.

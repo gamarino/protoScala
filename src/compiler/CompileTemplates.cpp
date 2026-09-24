@@ -73,9 +73,12 @@ const ClassInfo& Compiler::resolveType(const TypeTree& t, SourcePos pos) const {
     if (name.empty()) throw CompileError("a class or trait name is expected here", pos);
     for (const char* prefix : {"scala.", "java.lang."})
         if (name.rfind(prefix, 0) == 0) name = name.substr(std::char_traits<char>::length(prefix));
-    const ClassInfo* c = globals_.findType(name);
-    if (!c) throw CompileError("Not found: type " + name, pos);
-    return *c;
+    // A template lifted out of an `object` has a dotted name, and Scala's scoping
+    // sees a sibling without the qualifier, so the enclosing prefixes are tried
+    // innermost first.
+    for (const std::string& candidate : scopedNames(name))
+        if (const ClassInfo* c = globals_.findType(candidate)) return *c;
+    throw CompileError("Not found: type " + name, pos);
 }
 
 // Parents first; a template of this unit may extend another one defined below it.
@@ -344,9 +347,11 @@ ClassInfo Compiler::buildClassInfo(const TemplateDef& t, const std::string& type
                 break;
             }
             case NodeKind::TemplateDef:
-                throw CompileError(
-                    "classes, traits and objects must be defined at the top level of a file",
-                    s->pos);
+                // Desugar lifts a template nested in an `object` to the top
+                // level, so one reaching here was nested in a class or a trait.
+                throw CompileError("classes, traits and objects must be defined at the top level "
+                                   "of a file or in an object",
+                                   s->pos);
             case NodeKind::Import:
                 break;
             default:
@@ -458,7 +463,9 @@ void Compiler::compileTemplate(const TemplateDef& t, const ClassInfo& info) {
         compileAuxConstructor(as<DefDef>(*s), info);
     }
     BytecodeModule::ClassSpecData spec;
-    spec.displayName = info.name;
+    // The SIMPLE name: `object O { case class C }` prints `C(1)`, not `O.C(1)`,
+    // which is what scalac prints too.
+    spec.displayName = simpleName(info.name);
     spec.key = info.key;
     spec.parentCount = static_cast<std::uint32_t>(chain.size());
     spec.memberKeys = keys;

@@ -130,6 +130,15 @@ private:
     LocalInfo declareLocal(const std::string& name, BindingKind kind, bool boxed,
                            std::vector<std::uint32_t> byNameMasks = {});
     Resolution resolve(const std::string& name, SourcePos pos);
+    // The names `name` may denote, as seen from the template being compiled: a
+    // template nested in an `object` is lifted to a top-level definition with a
+    // dotted name, and Scala's scoping sees the enclosing object's members
+    // without a qualifier. Innermost prefix first, the bare name last.
+    std::vector<std::string> scopedNames(const std::string& name) const;
+    // `O.C` / `O.P.C` when the whole Select chain is a plain path that names a
+    // lifted top-level definition, else "". Empty when a local or a member
+    // shadows the head of the path.
+    std::string liftedGlobalPath(const Node& n);
     const std::string& globalKey(const std::string& name) const;
     const LocalInfo* findInFunction(FunctionState* f, const std::string& name);
     LocalInfo captureInto(FunctionState* f, const std::string& name, SourcePos pos, bool* found);

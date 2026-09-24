@@ -51,6 +51,13 @@ inline constexpr unsigned kMaxTupleArity = 22;
 inline std::string tupleTypeKey(unsigned n) { return "@Tuple" + std::to_string(n); }
 inline std::string auxCtorKey(std::size_t arity) { return "<init>" + std::to_string(arity); }
 inline std::string setterName(const std::string& name) { return name + "_="; }
+// The last segment of a (possibly dotted) template name: a template lifted out
+// of an `object` keeps the qualified name for resolution and shows the simple
+// one, exactly as Scala does (`O.C`'s toString says `C`).
+inline std::string simpleName(const std::string& name) {
+    const auto dot = name.rfind('.');
+    return dot == std::string::npos ? name : name.substr(dot + 1);
+}
 inline std::string privateKey(const std::string& typeKey, const std::string& name) {
     return typeKey.substr(1) + "::" + name;
 }

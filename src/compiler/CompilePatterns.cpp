@@ -297,7 +297,17 @@ void Compiler::compilePattern(const Pattern& p, int slot, std::vector<std::size_
 }
 
 void Compiler::compileExtractor(const Pattern& p, int slot, std::vector<std::size_t>& fail) {
-    const std::string& name = p.name;
+    // A template lifted out of an `object` is a top-level definition with a
+    // dotted name, and an unqualified sibling reference inside that object must
+    // find it (Scala's scoping), so the enclosing prefixes are tried first.
+    std::string resolved = p.name;
+    if (p.expr && p.expr->kind == NodeKind::Ident)
+        for (const std::string& candidate : scopedNames(p.name))
+            if (globals_.findType(candidate) || globals_.binding(candidate)) {
+                resolved = candidate;
+                break;
+            }
+    const std::string& name = resolved;
     bool shadowed = false;  // a local or member with the extractor's name
     if (p.expr->kind == NodeKind::Ident) {
         bool found = false;

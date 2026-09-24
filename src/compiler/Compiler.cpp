@@ -476,6 +476,41 @@ Compiler::LocalInfo Compiler::captureInto(FunctionState* f, const std::string& n
 // A bare name inside a template resolves: local (including `this`, the self
 // alias and the constructor parameters inside the constructor) -> member of
 // the template (own, inherited, Any's) -> global.
+std::vector<std::string> Compiler::scopedNames(const std::string& name) const {
+    std::vector<std::string> out;
+    if (tmpl_) {
+        std::string prefix = tmpl_->info->name;
+        for (;;) {
+            out.push_back(prefix + "." + name);
+            const auto dot = prefix.rfind('.');
+            if (dot == std::string::npos) break;
+            prefix = prefix.substr(0, dot);
+        }
+    }
+    out.push_back(name);
+    return out;
+}
+
+std::string Compiler::liftedGlobalPath(const Node& n) {
+    if (n.kind != NodeKind::Select) return {};
+    std::vector<const std::string*> parts;
+    const Node* cur = &n;
+    while (cur->kind == NodeKind::Select) {
+        parts.push_back(&as<Select>(*cur).name);
+        cur = as<Select>(*cur).qualifier.get();
+    }
+    if (cur->kind != NodeKind::Ident) return {};
+    const std::string& head = as<Ident>(*cur).name;
+    // A local or a member of the head's name shadows the dotted global, which is
+    // the only way `O.C` could mean something else.
+    for (FunctionState* f = fn_; f; f = f->parent)
+        if (findInFunction(f, head)) return {};
+    if (memberOf(head)) return {};
+    std::string path = head;
+    for (auto it = parts.rbegin(); it != parts.rend(); ++it) path += "." + **it;
+    return globals_.binding(path) ? path : std::string{};
+}
+
 Compiler::Resolution Compiler::resolve(const std::string& name, SourcePos pos) {
     bool found = false;
     LocalInfo info = captureInto(fn_, name, pos, &found);
@@ -486,8 +521,9 @@ Compiler::Resolution Compiler::resolve(const std::string& name, SourcePos pos) {
     }
     if (const MemberInfo* m = memberOf(name))
         return Resolution{RefKind::Member, {}, BindingKind::Val, m->key, m, m->byNameMasks};
-    if (const GlobalBinding* g = globals_.binding(name))
-        return Resolution{RefKind::Global, {}, g->kind, g->key, nullptr, g->byNameMasks};
+    for (const std::string& candidate : scopedNames(name))
+        if (const GlobalBinding* g = globals_.binding(candidate))
+            return Resolution{RefKind::Global, {}, g->kind, g->key, nullptr, g->byNameMasks};
     if (name == "this")
         throw CompileError("this can be used only inside a class, trait or object", pos);
     if (name == "super") throw CompileError("'super' must be followed by a member selection", pos);
@@ -583,7 +619,7 @@ void Compiler::compileExpr(const Node& n) {
             throw CompileError("definition used as an expression", n.pos);
         case NodeKind::TemplateDef:
             throw CompileError("classes, traits and objects must be defined at the top level "
-                               "of a file", n.pos);
+                               "of a file or in an object", n.pos);
         case NodeKind::New: compileNew(as<New>(n)); return;
         case NodeKind::Match: compileMatch(as<Match>(n)); return;
         case NodeKind::Try: compileTry(as<Try>(n)); return;
@@ -710,6 +746,14 @@ void Compiler::compileApply(const Apply& a) {
     // Type arguments are erased: recv.m[T](args) is a send like recv.m(args).
     const Node* fn = a.fn.get();
     while (fn->kind == NodeKind::TypeApply) fn = as<TypeApply>(*fn).fn.get();
+    // `O.C(args)` on a template lifted out of `object O` names the top-level
+    // definition `O.C`, so it is compiled exactly as the bare name would be —
+    // including the case-class `apply` that becomes a `new`.
+    std::unique_ptr<Ident> lifted;
+    if (const std::string path = liftedGlobalPath(*fn); !path.empty()) {
+        lifted = std::make_unique<Ident>(fn->pos, path);
+        fn = lifted.get();
+    }
     const std::uint32_t byName = byNameMaskOfCallee(*a.fn);
     bool named = false;
     for (const auto& arg : a.args) named = named || arg->kind == NodeKind::NamedArg;
@@ -812,6 +856,14 @@ void Compiler::compileArgsAndCall(const std::vector<NodePtr>& args, SourcePos po
 void Compiler::compileSelect(const Select& s) {
     if (s.qualifier->kind == NodeKind::Super) {
         compileSuperSend(s.name, {}, as<Super>(*s.qualifier).qualifier, s.pos);
+        return;
+    }
+    // `O.C` names a lifted top-level definition rather than selecting a member
+    // of `O`. A longer path (`O.P.C`, `O.C.member`) resolves by recursion: the
+    // qualifier is itself a Select and reaches this test on its own.
+    if (const std::string path = liftedGlobalPath(s); !path.empty()) {
+        const Ident id(s.pos, path);
+        compileIdent(id);
         return;
     }
     compileExpr(*s.qualifier);

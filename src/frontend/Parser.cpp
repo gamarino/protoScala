@@ -1315,11 +1315,13 @@ NodePtr Parser::parseTemplateDef(Modifiers mods) {
             peek(1).kind == TokenKind::LParen) {
             advance();
         }
-        if (at(TokenKind::LParen) && !peek().firstOnLine) {
+        // Multiple constructor parameter lists CONCATENATE into one flat list
+        // (D84): `class C(a: Int)(b: Int)` has one parameter list, so `new C(1)(2)`
+        // and `new C(1, 2)` are the same call.
+        while (at(TokenKind::LParen) && !peek().firstOnLine) {
             node->hasParamClause = true;
-            node->ctorParams = parseClassParamClause();
-            if (at(TokenKind::LParen) && !peek().firstOnLine)
-                unsupported("multiple constructor parameter lists", peek(), true);
+            std::vector<Param> clause = parseClassParamClause();
+            for (Param& p : clause) node->ctorParams.push_back(std::move(p));
         }
     }
     if (node->isCase && node->kind == TemplateKind::Class && !node->hasParamClause)
@@ -1499,13 +1501,14 @@ NodePtr Parser::parseTemplateStat() {
 NodePtr Parser::parseNew() {
     auto node = std::make_unique<New>(expect(TokenKind::KwNew, "'new'").pos);
     node->type = parseSimpleType();
-    if (at(TokenKind::LParen) && !peek().firstOnLine) {
+    // Repeated argument lists concatenate, because the constructor's parameter
+    // lists do (D84).
+    while (at(TokenKind::LParen) && !peek().firstOnLine) {
         advance();
-        node->args = parseArgs();
+        std::vector<NodePtr> clause = parseArgs();
+        for (NodePtr& a : clause) node->args.push_back(std::move(a));
         node->hasArgs = true;
     }
-    if (at(TokenKind::LParen) && !peek().firstOnLine)
-        unsupported("multiple constructor argument lists", peek(), true);
     // A body on the next line is still a class body, as for a template
     // definition (parseTemplateDef).
     if (at(TokenKind::Newline) && peek(1).kind == TokenKind::LBrace)

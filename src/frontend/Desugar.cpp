@@ -182,6 +182,26 @@ public:
         for (auto& s : ss) s = expr(std::move(s));
     }
 
+    // Phase 4: a template nested in an `object` is LIFTED to the top level with
+    // a qualified name — `object O { class C }` becomes `class O.C` plus an empty
+    // `object O` — because a class prototype is built by top-level code and
+    // `.` cannot occur in a Scala identifier, so `@O.C` can never collide with a
+    // type key a user could write. Nesting is arbitrarily deep (`O.P.C`).
+    //
+    // Nesting in a `class` or a `trait` is still rejected: such a template would
+    // capture the enclosing instance, which needs a per-instance class (D80).
+    void liftNestedTemplates(std::vector<NodePtr>& ss) {
+        std::vector<NodePtr> lifted;
+        for (auto& s : ss)
+            if (s->kind == NodeKind::TemplateDef) liftFrom(as<TemplateDef>(*s), lifted);
+        if (lifted.empty()) return;
+        // The lifted templates come FIRST, so the object they were written in can
+        // reference them from its own body.
+        lifted.reserve(lifted.size() + ss.size());
+        for (auto& s : ss) lifted.push_back(std::move(s));
+        ss = std::move(lifted);
+    }
+
     // Every case class of `ss` gets a companion object with the synthesised
     // apply and unapply (DESIGN §4.5), unless the companion defines them.
     void synthesizeCompanions(std::vector<NodePtr>& ss) {
@@ -216,6 +236,46 @@ public:
 private:
     int tempCounter_ = 0;
     int patternCounter_ = 0;  // <pN>, <bN>
+
+    // `t.name` prefixed onto every sibling name a parent reference names, before
+    // the siblings themselves are renamed: `case class Leaf(...) extends T`
+    // inside `object Ast` has to become `... extends Ast.T`, because the parent
+    // is resolved before any template scope exists.
+    static void qualifySibling(TypeTree& ty, const std::string& prefix,
+                               const std::vector<std::string>& siblings) {
+        if (ty.kind != TypeTree::Kind::Name && ty.kind != TypeTree::Kind::Applied) return;
+        for (const std::string& sib : siblings)
+            if (ty.name == sib) {
+                ty.name = prefix + "." + sib;
+                return;
+            }
+    }
+
+    void liftFrom(TemplateDef& t, std::vector<NodePtr>& out) {
+        checkNativeStack(StackUse::Source);
+        const bool isObject = t.kind == TemplateKind::Object;
+        std::vector<std::string> siblings;
+        for (const NodePtr& m : t.body)
+            if (m->kind == NodeKind::TemplateDef) siblings.push_back(as<TemplateDef>(*m).name);
+        std::vector<NodePtr> keep;
+        for (NodePtr& m : t.body) {
+            if (!m || m->kind != NodeKind::TemplateDef) {
+                keep.push_back(std::move(m));
+                continue;
+            }
+            auto& n = as<TemplateDef>(*m);
+            if (!isObject)
+                throw ParseError("classes, traits and objects must be defined at the top level "
+                                 "of a file or in an object",
+                                 n.pos, false);
+            for (ParentRef& p : n.parents)
+                if (p.type) qualifySibling(*p.type, t.name, siblings);
+            n.name = t.name + "." + n.name;
+            liftFrom(n, out);          // deeper nesting first
+            out.push_back(std::move(m));
+        }
+        t.body = std::move(keep);
+    }
 
     // `Unit` / `scala.Unit` as written (types are not resolved in Phase 1).
     static bool isUnitType(const TypeTree* t) {
@@ -655,6 +715,7 @@ private:
 
 void desugar(CompilationUnit& unit) {
     Desugarer ds;
+    ds.liftNestedTemplates(unit.stats);
     ds.synthesizeCompanions(unit.stats);
     ds.stats(unit.stats);
 }

@@ -124,3 +124,29 @@ TEST(Desugar, PatternValues) {
               "(unit (def f (block (val <t0> (match p (case (tuple-pat a b) (tuple a b)))) "
               "(val a (. <t0> _1)) (val b (. <t0> _2)) a)))");
 }
+
+// --- Nested templates (Phase 4) --------------------------------------------
+
+TEST(Desugar, ANestedTemplateIsLiftedWithAQualifiedName) {
+    const std::string d = du("object O:\n  class C(val n: Int)\n");
+    // The lifted template comes FIRST, so the object's own body can name it.
+    EXPECT_NE(d.find("O.C"), std::string::npos) << d;
+    EXPECT_LT(d.find("O.C"), d.find("(object O ")) << d;
+}
+
+TEST(Desugar, NestingIsArbitrarilyDeep) {
+    const std::string d = du("object O:\n  object P:\n    class C(val n: Int)\n");
+    EXPECT_NE(d.find("O.P.C"), std::string::npos) << d;
+}
+
+TEST(Desugar, ANestedTemplateInAClassIsStillRejected) {
+    EXPECT_THROW(du("class Outer:\n  class Inner(val n: Int)\n"), ParseError);
+}
+
+TEST(Desugar, ASiblingNamedInAnExtendsClauseIsQualified) {
+    const std::string d =
+        du("object Ast:\n  sealed trait T\n  case class Leaf(n: Int) extends T\n");
+    // `extends T` must have become `extends Ast.T`, because a parent is resolved
+    // before any template scope exists.
+    EXPECT_NE(d.find("Ast.T"), std::string::npos) << d;
+}
