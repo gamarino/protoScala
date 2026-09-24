@@ -210,7 +210,7 @@ struct DefDef : Node {
 };
 struct Import : Node { Import(SourcePos p) : Node(NodeKind::Import, p) {} std::string text; };
 
-enum class TemplateKind : uint8_t { Class, Trait, Object };
+enum class TemplateKind : uint8_t { Class, Trait, Object, Enum };
 
 // One entry of an `extends` clause: `B(args)`, `T`, `Option[A]`.
 struct ParentRef {
@@ -234,6 +234,19 @@ struct TemplateDef : Node {
     std::string selfName;                  // `self =>` alias of `this`, or empty
     std::vector<NodePtr> body;             // template statements
     bool synthetic = false;                // a companion object created by Desugar
+    // Phase 4, `enum` only: the cases in declaration order. A case with no
+    // parameters and no parent arguments becomes a `case object`; anything else a
+    // `case class`. Desugar expands the whole TemplateDef into a sealed abstract
+    // class, one template per case inside the companion, and the generated
+    // `values` / `valueOf` / `fromOrdinal`.
+    struct EnumCase {
+        std::string name;
+        std::vector<Param> params;        // empty: a singleton case
+        std::vector<NodePtr> parentArgs;  // `case Red extends Color(0xFF0000)`
+        bool hasParentArgs = false;
+        SourcePos pos;
+    };
+    std::vector<EnumCase> enumCases;
 };
 
 // new T(args)

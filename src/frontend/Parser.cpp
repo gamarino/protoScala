@@ -1073,7 +1073,10 @@ NodePtr Parser::parseDefinition(std::vector<std::string> annotations) {
         case TokenKind::KwClass: case TokenKind::KwObject: case TokenKind::KwTrait:
             if (isLazy) fail("'lazy' is not allowed on a class, trait or object", t);
             return parseTemplateDef(mods);
-        case TokenKind::KwEnum: case TokenKind::KwType: case TokenKind::KwPackage:
+        case TokenKind::KwEnum:
+            if (isLazy) fail("'lazy' is not allowed on an enum", t);
+            return parseEnumDef(mods);
+        case TokenKind::KwType: case TokenKind::KwPackage:
         case TokenKind::KwExport:
             notImplemented("'" + t.text + "' definitions", t);
         default:
@@ -1477,7 +1480,8 @@ std::vector<NodePtr> Parser::parseTemplateBody(std::string* selfName) {
             advance();
             continue;
         }
-        stats.push_back(parseTemplateStat());
+        // An enum case appends itself to the enum and yields no statement.
+        if (NodePtr st = parseTemplateStat()) stats.push_back(std::move(st));
         const TokenKind k = peek().kind;
         if (k != TokenKind::Newline && k != TokenKind::Semicolon && k != statsEnd)
             fail("';' or newline expected but '" + spelling(peek()) + "' found", peek());
@@ -1492,8 +1496,87 @@ std::vector<NodePtr> Parser::parseTemplateBody(std::string* selfName) {
 }
 
 NodePtr Parser::parseTemplateStat() {
+    // Inside an `enum` body, `case Red, Green` and `case Leaf(n: Int)` are enum
+    // cases rather than definitions or expressions. `case class` / `case object`
+    // keep their ordinary meaning.
+    if (enumTarget_ && at(TokenKind::KwCase) && peek(1).kind != TokenKind::KwClass &&
+        peek(1).kind != TokenKind::KwObject) {
+        parseEnumCases(*enumTarget_);
+        return nullptr;
+    }
     if (atDefinitionStart()) return parseDefinition({});
     return parseExpr();
+}
+
+// EnumCase ::= 'case' id {',' id}                              -- singletons
+//            | 'case' id '(' Params ')' ['extends' ParentArgs]  -- a case class
+//            | 'case' id 'extends' ParentArgs                   -- a parameterised singleton
+void Parser::parseEnumCases(TemplateDef& target) {
+    const Token& kw = expect(TokenKind::KwCase, "'case'");
+    for (;;) {
+        TemplateDef::EnumCase c;
+        c.pos = peek().pos;
+        c.name = expect(TokenKind::Identifier, "an enum case name").text;
+        if (at(TokenKind::LBracket)) parseTypeParams();        // erased, like every other
+        if (at(TokenKind::LParen) && !peek().firstOnLine) {
+            c.params = parseClassParamClause();
+            while (at(TokenKind::LParen) && !peek().firstOnLine) {
+                std::vector<Param> more = parseClassParamClause();
+                for (Param& p : more) c.params.push_back(std::move(p));
+            }
+        }
+        if (at(TokenKind::KwExtends)) {
+            advance();
+            std::vector<ParentRef> parents = parseParents();
+            if (parents.size() != 1)
+                fail("an enum case extends its own enum and nothing else", kw);
+            c.parentArgs = std::move(parents.front().args);
+            c.hasParentArgs = parents.front().hasArgs;
+        }
+        target.enumCases.push_back(std::move(c));
+        // A comma list is only legal for bare singletons.
+        if (!at(TokenKind::Comma)) break;
+        if (!target.enumCases.back().params.empty() || target.enumCases.back().hasParentArgs)
+            fail("only enum cases without parameters may be listed after a comma", kw);
+        advance();
+    }
+}
+
+// enum Name[TypeParams](Params) extends Parents: <cases and members>
+NodePtr Parser::parseEnumDef(Modifiers mods) {
+    const Token& start = expect(TokenKind::KwEnum, "'enum'");
+    auto node = std::make_unique<TemplateDef>(start.pos);
+    node->kind = TemplateKind::Enum;
+    node->mods = mods;
+    node->name = expect(TokenKind::Identifier, "enum name").text;
+    if (at(TokenKind::LBracket)) node->typeParams = parseTypeParams();
+    while (at(TokenKind::LParen) && !peek().firstOnLine) {
+        node->hasParamClause = true;
+        std::vector<Param> clause = parseClassParamClause();
+        for (Param& p : clause) node->ctorParams.push_back(std::move(p));
+    }
+    if (at(TokenKind::KwExtends)) {
+        advance();
+        node->parents = parseParents();
+    }
+    if (atIdent("derives")) {   // type-class derivation: parsed and ignored (D79)
+        advance();
+        parseType();
+        while (at(TokenKind::Comma)) {
+            advance();
+            parseType();
+        }
+    }
+    if (at(TokenKind::Newline) && peek(1).kind == TokenKind::LBrace) advance();
+    if (!at(TokenKind::LBrace) && !at(TokenKind::ColonEol) &&
+        !(at(TokenKind::Colon) && peek(1).kind == TokenKind::EndOfFile))
+        fail("an enum needs a body with at least one case", start);
+    TemplateDef* const savedTarget = enumTarget_;
+    enumTarget_ = node.get();
+    node->body = parseTemplateBody(&node->selfName);
+    enumTarget_ = savedTarget;
+    if (node->enumCases.empty()) fail("an enum needs at least one case", start);
+    return node;
 }
 
 // new T | new T(args) | new T[A](args). Anonymous class bodies are not

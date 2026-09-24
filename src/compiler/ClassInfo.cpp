@@ -105,10 +105,10 @@ std::vector<ClassInfo> builtinTypes() {
     set.key = kSetKey;
     set.isFinal = true;
     set.linearization = {kSetKey, kAnyRefKey, kAnyKey};
-    // Phase 4: the marker trait every `enum` class extends (DESIGN §4.5). Its
-    // `ordinal` and `toString` are natives on enumProto; the cases themselves
-    // are ordinary case classes and case objects, so pattern matching,
-    // `equals`, `hashCode` and `unapply` come from Phase 2 for free.
+    // Phase 4: the marker trait every `enum` class extends (DESIGN §4.5). The
+    // cases are ordinary case classes and case objects, so pattern matching,
+    // toString, equals, hashCode and unapply come from Phase 2 for free, and
+    // `enum` needs NO native method of its own.
     ClassInfo enumTrait = anyRef;
     enumTrait.name = "Enum";
     enumTrait.key = kEnumKey;
@@ -116,7 +116,10 @@ std::vector<ClassInfo> builtinTypes() {
     enumTrait.isAbstract = true;
     enumTrait.hasInit = false;
     enumTrait.linearization = {kEnumKey, kAnyRefKey, kAnyKey};
-    member(enumTrait, "ordinal", MemberKind::ParamlessDef);
+    // `ordinal` is declared ABSTRACT here: the desugarer gives every enum case a
+    // `val ordinal`, and a case implementing an abstract member needs no
+    // `override`. Nothing native is installed for it.
+    enumTrait.members["ordinal"] = MemberInfo{MemberKind::ParamlessDef, "ordinal", false, {}};
     out.push_back(std::move(enumTrait));
     out.push_back(std::move(range));
     out.push_back(std::move(vector));

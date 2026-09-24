@@ -12,7 +12,7 @@ enum RootSlot : unsigned {
     kFunction, kFunctionArities, kCell, kLazy, kUnit,
     kAnyRef, kProduct, kSerializable, kWithFilter, kListCompanion, kTuples, kTupleCompanions,
     kActorProto, kFutureProto, kEnvelopeProto, kThreadProto, kFrameProto, kSpawnPartialProto,
-    kActorRegistry, kActorCompanion, kPriorityCompanion, kFutureCompanion, kThreadCompanion,
+    kActorRegistry, kActorCompanion, kFutureCompanion, kThreadCompanion,
     kSystemCompanion,
     kRangeProto, kVectorProto, kMapProto, kSetProto, kFoldPartialProto,
     kVectorCompanion, kMapCompanion, kSetCompanion,
@@ -153,7 +153,6 @@ Runtime::Runtime(proto::ProtoSpace& space) : space_(space) {
     L.spawnPartialProto = pin(kSpawnPartialProto, L.anyProto->newChild(ctx, true));
     L.actorRegistry     = pin(kActorRegistry, L.anyProto->newChild(ctx, true));
     L.actorCompanion    = pin(kActorCompanion, L.anyRefProto->newChild(ctx, true));
-    L.priorityCompanion = pin(kPriorityCompanion, L.anyRefProto->newChild(ctx, true));
     L.futureCompanion   = pin(kFutureCompanion, L.anyRefProto->newChild(ctx, true));
     L.threadCompanion   = pin(kThreadCompanion, L.anyRefProto->newChild(ctx, true));
     L.systemCompanion   = pin(kSystemCompanion, L.anyRefProto->newChild(ctx, true));
@@ -208,8 +207,6 @@ Runtime::Runtime(proto::ProtoSpace& space) : space_(space) {
     // per-class marker the THROW opcode tests, exactly as `case p: Point` tests
     // `@Point` — a Phase 2 marker attribute, never protoCore's isInstanceOf (R3).
     L.throwableKey = key(kThrowableKey);
-    L.ordinalKey   = key("__ordinal__");
-    L.enumNameKey  = key("__enumname__");
     L.enumProto    = pin(kEnumProto, L.anyRefProto->newChild(ctx, true));
 
     L.actorRegistry->setAttribute(ctx, L.actorsKey, ctx->newList()->asObject(ctx));
@@ -218,7 +215,6 @@ Runtime::Runtime(proto::ProtoSpace& space) : space_(space) {
     bindType(L.futureProto, kFutureKey, "Future");
     L.threadProto->setAttribute(ctx, L.nameKey, makeString(ctx, "Thread"));
     L.actorCompanion->setAttribute(ctx, L.nameKey, makeString(ctx, "Actor"));
-    L.priorityCompanion->setAttribute(ctx, L.nameKey, makeString(ctx, "Priority"));
     L.futureCompanion->setAttribute(ctx, L.nameKey, makeString(ctx, "Future"));
     L.threadCompanion->setAttribute(ctx, L.nameKey, makeString(ctx, "Thread"));
     L.systemCompanion->setAttribute(ctx, L.nameKey, makeString(ctx, "System"));

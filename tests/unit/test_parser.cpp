@@ -347,8 +347,8 @@ TEST(ParserDefs, Imports) {
 }
 
 TEST(ParserDefs, UnsupportedDefinitionsAreReportedClearly) {
-    EXPECT_NE(unitError("enum Color { case Red }").find("not implemented yet"), std::string::npos);
     EXPECT_NE(unitError("type T = Int").find("not implemented yet"), std::string::npos);
+    EXPECT_NE(unitError("package p").find("not implemented yet"), std::string::npos);
     EXPECT_NE(unitError("lazy val (a, b) = p").find("lazy pattern definitions"), std::string::npos);
     EXPECT_NE(unitError("given x: Int = 1").find("(D3)"), std::string::npos);
     EXPECT_NE(unitError("def f(using x: Int) = x").find("(D3)"), std::string::npos);
@@ -384,8 +384,10 @@ TEST(ParserDefs, ImportsInsideBlocksAndSelectors) {
 }
 
 TEST(ParserDefs, MoreUnsupportedAndInvalidDefinitions) {
-    EXPECT_NE(unitError("enum E { case A }").find("'enum' definitions are not implemented yet"),
-              std::string::npos);
+    // `enum` is implemented (Phase 4): it parses into a TemplateDef of kind Enum
+    // that Desugar expands into a sealed class, its cases and a companion.
+    EXPECT_EQ(unitError("enum E { case A }"), "");
+    EXPECT_NE(unitError("enum E { }").find("at least one case"), std::string::npos);
     EXPECT_NE(unitError("type T = Int").find("'type' definitions are not implemented yet"),
               std::string::npos);
     EXPECT_NE(unitError("extension (x: Int) def y = x").find("not implemented yet"),

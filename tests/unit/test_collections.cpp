@@ -261,6 +261,40 @@ TEST(MapSurface, SlotKindFollowsTheClassification) {
     }
 }
 
+// Phase 4: the classification of an `enum` case, which the two Phase 3 fixtures
+// that were XFAIL pending `enum` (18-maps-and-sets/map-enum-case-keys.scala and
+// map-parameterised-enum-case-keys.scala) cannot tell apart, for exactly the
+// reason the test above gives.
+//
+// BOTH kinds of case take the HASHED path, and the Phase 3 fixture's prose
+// claiming a singleton is an identity key was wrong. A singleton enum case is a
+// case OBJECT, and a case object carries the synthesised product_equals, which is
+// not defaultEqualsMethod — so the classifier sends it down the value path, and
+// it does so for `case object Marker` written by hand in exactly the same way.
+// That is consistent rather than special: a case object has EXACTLY ONE instance,
+// so value equality and identity coincide for it and the two classifications are
+// indistinguishable at run time. What matters is that no rule about `enum` exists
+// anywhere in the classifier, which is ruling C2's point.
+TEST(MapSurface, EnumCaseSlotKindIsTheCaseClassOneForBothKindsOfCase) {
+    EvalHarness h;
+    h.eval("enum Colour { case Red, Blue }");
+    h.eval("enum Shape { case Dot(n: Int) }");
+    h.eval("case object HandWritten");
+    h.eval("object PlainObject");
+    const SlotKinds singleton = slotKindsOf(h, "Map[Any, Int](Colour.Red -> 1)");
+    EXPECT_EQ(singleton.hashed, 1u);
+    EXPECT_EQ(singleton.identity, 0u);
+    const SlotKinds parameterised = slotKindsOf(h, "Map[Any, Int](Shape.Dot(1) -> 1)");
+    EXPECT_EQ(parameterised.hashed, 1u);
+    EXPECT_EQ(parameterised.identity, 0u);
+    // The same for a hand-written case object, and NOT for a plain one: the
+    // classifier looks at `equals`, never at how the object was written.
+    const SlotKinds handWritten = slotKindsOf(h, "Map[Any, Int](HandWritten -> 1)");
+    EXPECT_EQ(handWritten.hashed, 1u);
+    const SlotKinds plain = slotKindsOf(h, "Map[Any, Int](PlainObject -> 1)");
+    EXPECT_EQ(plain.identity, 1u);
+}
+
 TEST(MapSurface, EveryClassifiedKindSurvivesARoundTrip) {
     EvalHarness h;
     // One key of every kind §6.1 names. A misclassified kind vanishes, so the

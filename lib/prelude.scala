@@ -77,6 +77,12 @@ case object None extends Option[Nothing]:
   def isEmpty: Boolean = true
   def get: Nothing = throw new NoSuchElementException("None.get")
 
+// Phase 4: a real enum, retiring D52. The ordinals are 0 / 1 / 2, which is
+// exactly the band index the scheduler already uses, so nothing in
+// ActorScheduler changes; `send`/`ask` accept a Priority case or a plain Int.
+enum Priority:
+  case High, Medium, Low
+
 // Phase 3: the disjoint union. `map`/`flatMap`/`foreach` are right-biased, as
 // they are in Scala 2.13 and Scala 3. There is no `withFilter`: Scala's needs a
 // `Left` to fall back to, which needs the static type (D67).

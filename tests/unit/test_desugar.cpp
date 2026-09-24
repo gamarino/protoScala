@@ -1,3 +1,4 @@
+#include "EvalHarness.h"
 #include "frontend/AST.h"
 #include "frontend/Desugar.h"
 #include "frontend/Parser.h"
@@ -5,6 +6,7 @@
 #include <gtest/gtest.h>
 
 using namespace protoScala;
+using protoScala::test::EvalHarness;
 
 namespace {
 std::string d(const std::string& src) { return dump(*desugarExpr(parseExpressionSource(src))); }
@@ -149,4 +151,37 @@ TEST(Desugar, ASiblingNamedInAnExtendsClauseIsQualified) {
     // `extends T` must have become `extends Ast.T`, because a parent is resolved
     // before any template scope exists.
     EXPECT_NE(d.find("Ast.T"), std::string::npos) << d;
+}
+
+// --- enum (Phase 4, DESIGN §4.5) -------------------------------------------
+
+TEST(Desugar, AnEnumExpandsToASealedClassCasesAndACompanion) {
+    const std::string u = du("enum Color:\n  case Red, Green\n");
+    // The cases are written inside the companion and lifted out by the nested-
+    // template pass, so they carry the qualified names Scala requires.
+    EXPECT_NE(u.find("class abstract sealed Color"), std::string::npos) << u;
+    EXPECT_NE(u.find("Color.Red"), std::string::npos) << u;
+    EXPECT_NE(u.find("Color.Green"), std::string::npos) << u;
+    EXPECT_NE(u.find("Enum"), std::string::npos) << u;      // the marker parent
+    EXPECT_NE(u.find("values"), std::string::npos) << u;
+    EXPECT_NE(u.find("valueOf"), std::string::npos) << u;
+    EXPECT_NE(u.find("fromOrdinal"), std::string::npos) << u;
+}
+
+TEST(Desugar, AnEnumWithAParameterisedCaseHasNoValuesOrValueOf) {
+    // scalac defines `values` and `valueOf` only when every case is a singleton;
+    // `fromOrdinal` always exists and covers the singletons alone.
+    const std::string u = du("enum Tree:\n  case Leaf(n: Int)\n");
+    EXPECT_EQ(u.find("values"), std::string::npos) << u;
+    EXPECT_EQ(u.find("valueOf"), std::string::npos) << u;
+    EXPECT_NE(u.find("fromOrdinal"), std::string::npos) << u;
+}
+
+TEST(Desugar, EnumCasesKeepTheirDeclarationOrdinals) {
+    EvalHarness h;
+    h.eval("enum Colour2 { case Red, Green, Blue }");
+    EXPECT_EQ(h.eval("Colour2.Red.ordinal"), "0");
+    EXPECT_EQ(h.eval("Colour2.Green.ordinal"), "1");
+    EXPECT_EQ(h.eval("Colour2.Blue.ordinal"), "2");
+    EXPECT_EQ(h.eval("Colour2.values.length"), "3");
 }

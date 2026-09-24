@@ -182,6 +182,26 @@ public:
         for (auto& s : ss) s = expr(std::move(s));
     }
 
+    // Phase 4: `enum` is lowered entirely in the frontend (DESIGN §4.5), to a
+    // sealed abstract class, one `case object` or `case class` per case inside
+    // the companion, and the generated `values` / `valueOf` / `fromOrdinal`. No
+    // new compiler concept, no new opcode and no runtime prototype: pattern
+    // matching, toString, equals, hashCode and unapply all come from Phase 2's
+    // case-class machinery, and Task 7's lifting gives each case the qualified
+    // name `Color.Red` that Scala requires.
+    void expandEnums(std::vector<NodePtr>& ss) {
+        std::vector<NodePtr> out;
+        for (NodePtr& s : ss) {
+            if (!s || s->kind != NodeKind::TemplateDef ||
+                as<TemplateDef>(*s).kind != TemplateKind::Enum) {
+                out.push_back(std::move(s));
+                continue;
+            }
+            expandEnum(as<TemplateDef>(*s), out);
+        }
+        ss = std::move(out);
+    }
+
     // Phase 4: a template nested in an `object` is LIFTED to the top level with
     // a qualified name — `object O { class C }` becomes `class O.C` plus an empty
     // `object O` — because a class prototype is built by top-level code and
@@ -249,6 +269,105 @@ private:
                 ty.name = prefix + "." + sib;
                 return;
             }
+    }
+
+    // A `Name` type tree, for a generated parent reference.
+    static TypePtr nameType(const std::string& name, SourcePos pos) {
+        auto t = std::make_unique<TypeTree>();
+        t->kind = TypeTree::Kind::Name;
+        t->name = name;
+        t->pos = pos;
+        return t;
+    }
+
+    void expandEnum(TemplateDef& e, std::vector<NodePtr>& out) {
+        // 1. `sealed abstract class <Name>(<params>) extends <parents> with Enum`,
+        //    carrying every member of the enum body that is not a case.
+        auto cls = std::make_unique<TemplateDef>(e.pos);
+        cls->kind = TemplateKind::Class;
+        cls->mods = e.mods;
+        cls->mods.isAbstract = true;
+        cls->mods.isSealed = true;
+        cls->name = e.name;
+        cls->typeParams = e.typeParams;
+        cls->hasParamClause = e.hasParamClause;
+        cls->ctorParams = std::move(e.ctorParams);
+        cls->parents = std::move(e.parents);
+        cls->selfName = e.selfName;
+        cls->body = std::move(e.body);
+        ParentRef enumParent;
+        enumParent.type = nameType("Enum", e.pos);
+        enumParent.pos = e.pos;
+        cls->parents.push_back(std::move(enumParent));
+
+        // 2. `object <Name>`, holding one template per case. Task 7 lifts them
+        //    out with the qualified names `<Name>.<Case>`, which is exactly what
+        //    Scala requires at the use site.
+        auto companion = std::make_unique<TemplateDef>(e.pos);
+        companion->kind = TemplateKind::Object;
+        companion->name = e.name;
+        bool allSingletons = true;
+        std::vector<std::string> singletons;   // the cases `values` covers
+        for (std::size_t i = 0; i < e.enumCases.size(); ++i) {
+            TemplateDef::EnumCase& c = e.enumCases[i];
+            const bool singleton = c.params.empty();
+            allSingletons = allSingletons && singleton;
+            if (singleton) singletons.push_back(c.name);
+            auto cse = std::make_unique<TemplateDef>(c.pos);
+            cse->kind = singleton ? TemplateKind::Object : TemplateKind::Class;
+            cse->isCase = true;
+            cse->name = c.name;
+            cse->hasParamClause = !singleton;
+            cse->ctorParams = std::move(c.params);
+            ParentRef p;
+            p.type = nameType(e.name, c.pos);
+            p.args = std::move(c.parentArgs);
+            p.hasArgs = c.hasParentArgs;
+            p.pos = c.pos;
+            cse->parents.push_back(std::move(p));
+            // `ordinal` is an ordinary val, so no runtime support is needed for
+            // it. Ordinals count EVERY case in declaration order, exactly as
+            // Scala's do, even though `values` covers only the singletons.
+            auto ordinal = std::make_unique<ValDef>(c.pos);
+            ordinal->name = "ordinal";
+            ordinal->type = nameType("Int", c.pos);
+            auto lit = std::make_unique<IntLit>(c.pos);
+            lit->value = static_cast<long long>(i);
+            ordinal->rhs = std::move(lit);
+            cse->body.push_back(std::move(ordinal));
+            companion->body.push_back(std::move(cse));
+        }
+
+        // 3. `values`, `valueOf` and `fromOrdinal`, generated as SOURCE TEXT and
+        //    parsed, so the generated code cannot drift from what a user could
+        //    have written by hand. scalac defines `values` and `valueOf` only
+        //    when every case is a singleton, and `fromOrdinal` always, covering
+        //    the singletons alone; the messages below are scalac's own.
+        std::string src;
+        if (allSingletons) {
+            src += "def values: List[" + e.name + "] = ";
+            for (const std::string& c : singletons) src += c + " :: ";
+            src += "Nil\n";
+            src += "def valueOf(name: String): " + e.name + " =\n";
+            for (const std::string& c : singletons)
+                src += "  if name == \"" + c + "\" then " + c + " else\n";
+            src += "  throw new IllegalArgumentException(\"enum " + e.name +
+                   " has no case with name: \" + name)\n";
+        }
+        src += "def fromOrdinal(n: Int): " + e.name + " =\n";
+        for (const std::string& c : singletons)
+            src += "  if n == " + c + ".ordinal then " + c + " else\n";
+        src += "  throw new NoSuchElementException(\"enum " + e.name +
+               " has no case with ordinal: \" + n)\n";
+        std::unique_ptr<CompilationUnit> generated = parseSource(src);
+        for (NodePtr& m : generated->stats) {
+            rebase(*m, e.pos);   // the generated text has no coordinates of its own
+            companion->body.push_back(std::move(m));
+        }
+        generated->stats.clear();
+
+        out.push_back(std::move(cls));
+        out.push_back(std::move(companion));
     }
 
     void liftFrom(TemplateDef& t, std::vector<NodePtr>& out) {
@@ -715,6 +834,7 @@ private:
 
 void desugar(CompilationUnit& unit) {
     Desugarer ds;
+    ds.expandEnums(unit.stats);
     ds.liftNestedTemplates(unit.stats);
     ds.synthesizeCompanions(unit.stats);
     ds.stats(unit.stats);

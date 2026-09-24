@@ -487,6 +487,7 @@ void render(std::string& out, const Node& n) {
                 case TemplateKind::Class:  out += x.isCase ? "case-class" : "class"; break;
                 case TemplateKind::Trait:  out += "trait"; break;
                 case TemplateKind::Object: out += x.isCase ? "case-object" : "object"; break;
+                case TemplateKind::Enum:   out += "enum"; break;
             }
             if (x.mods.isAbstract) out += " abstract";
             if (x.mods.isFinal) out += " final";
@@ -705,6 +706,10 @@ void eachChildSlot(Node& n, F f) {
             takeParams(t.ctorParams);
             for (auto& p : t.parents) for (auto& a : p.args) f(a);
             for (auto& s : t.body) f(s);
+            for (auto& c : t.enumCases) {      // Phase 4: `enum` cases
+                takeParams(c.params);
+                for (auto& a : c.parentArgs) f(a);
+            }
             return;
         }
         case NodeKind::New: for (auto& a : as<New>(n).args) f(a); return;

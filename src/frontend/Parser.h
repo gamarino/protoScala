@@ -111,6 +111,10 @@ private:
     bool inTemplateBody_ = false;  // parsing the statements of a template body (abstract members allowed)
     Modifiers parseModifiers(bool* isLazy);
     NodePtr parseTemplateDef(Modifiers mods);           // at `case`, `class`, `trait` or `object`
+    NodePtr parseEnumDef(Modifiers mods);               // at `enum` (Phase 4)
+    // While parsing an `enum` body: where a `case` clause appends its cases.
+    TemplateDef* enumTarget_ = nullptr;
+    void parseEnumCases(TemplateDef& target);           // at `case` inside an enum body
     std::vector<Param> parseClassParamClause();         // after the name: `(` ... `)`
     std::vector<ParentRef> parseParents();              // after `extends`
     std::vector<NodePtr> parseTemplateBody(std::string* selfName);  // `{...}` or `:` + indented block

@@ -41,15 +41,22 @@ const ProtoObject* makeTuple2(ProtoContext* ctx, const RuntimeLayout& L, const P
     return activeCallContext()->engine->send(ctx, L.tupleCompanion[2], L.applyName, pair, 2);
 }
 
+// A Priority case (its `ordinal`, 0 / 1 / 2) or a plain Int, so a program written
+// against the pre-Phase-4 integer surface still works (D52 retired).
 Band bandArg(ProtoContext* ctx, const ProtoObject* v, const char* method) {
-    if (proto::isSmallInt(v)) {
-        const long long n = proto::asSmallInt(v);
-        if (n >= 0 && n <= 2) return static_cast<Band>(static_cast<unsigned>(n));
+    const ProtoObject* n = v;
+    if (v != PROTO_NONE && !proto::isSmallInt(v)) {
+        const auto* ordinal = proto::ProtoString::createSymbol(ctx, "ordinal");
+        const ProtoObject* o = v->getAttribute(ctx, ordinal);
+        if (o && o != PROTO_NONE) n = o;
     }
-    (void)ctx;
+    if (proto::isSmallInt(n)) {
+        const long long k = proto::asSmallInt(n);
+        if (k >= 0 && k <= 2) return static_cast<Band>(static_cast<unsigned>(k));
+    }
     throw ScalaError("IllegalArgumentException",
-                     std::string(method) +
-                         " expects Priority.High, Priority.Medium or Priority.Low");
+                     std::string(method) + " expects Priority.High, Priority.Medium or " +
+                         "Priority.Low, got " + typeName(ctx, layoutOf(), v));
 }
 
 // Builds the envelope in its own child context and queues it. Returns the
@@ -534,19 +541,12 @@ void installActorPrimitives(proto::ProtoContext* ctx, const RuntimeLayout& L) {
     install(ctx, L.threadProto, threads, std::size(threads));
     install(ctx, L.systemCompanion, system, std::size(system));
 
-    // Priority.High / Medium / Low are the fields 0 / 1 / 2 (D52).
-    L.priorityCompanion->setAttribute(ctx, proto::ProtoString::createSymbol(ctx, "High"),
-                                      proto::makeSmallInt(0));
-    L.priorityCompanion->setAttribute(ctx, proto::ProtoString::createSymbol(ctx, "Medium"),
-                                      proto::makeSmallInt(1));
-    L.priorityCompanion->setAttribute(ctx, proto::ProtoString::createSymbol(ctx, "Low"),
-                                      proto::makeSmallInt(2));
-
+    // `Priority` is a prelude `enum` since Phase 4 (D52 retired), so the runtime
+    // installs no object of its own for it.
     auto bind = [&](const char* name, proto::ProtoObject* v) {
         L.globals->setAttribute(ctx, proto::ProtoString::createSymbol(ctx, name), v);
     };
     bind("Actor", L.actorCompanion);
-    bind("Priority", L.priorityCompanion);
     bind("Future", L.futureCompanion);
     bind("Thread", L.threadCompanion);
     bind("System", L.systemCompanion);

@@ -95,7 +95,6 @@ struct RuntimeLayout {
     proto::ProtoObject* spawnPartialProto = nullptr;  // the result of Actor.spawn(state)
     proto::ProtoObject* actorRegistry = nullptr;      // mutable: anchors every actor (D46)
     proto::ProtoObject* actorCompanion = nullptr;     // the value of the global `Actor`
-    proto::ProtoObject* priorityCompanion = nullptr;  // the value of the global `Priority`
     proto::ProtoObject* futureCompanion = nullptr;    // the value of the global `Future`
     proto::ProtoObject* threadCompanion = nullptr;    // the value of the global `Thread`
     proto::ProtoObject* systemCompanion = nullptr;    // the value of the global `System`
@@ -152,10 +151,11 @@ struct RuntimeLayout {
     const proto::ProtoObject* defaultEqualsMethod = nullptr;
 
     // Phase 4: exceptions and enums (DESIGN §7, §4.5).
-    proto::ProtoObject* enumProto = nullptr;               // the Enum builtin trait
+    // The prototype `@Enum` binds to, so MAKE_CLASS can push it as a parent of
+    // every `enum` class. `enum` needs no native method: `ordinal` is a val the
+    // desugarer writes, and toString comes from Product.
+    proto::ProtoObject* enumProto = nullptr;
     const proto::ProtoString* throwableKey = nullptr;      // "@Throwable": the THROW marker
-    const proto::ProtoString* ordinalKey = nullptr;        // "__ordinal__" on an enum case
-    const proto::ProtoString* enumNameKey = nullptr;       // "__enumname__" on an enum case
 
     // Prelude values the natives construct, resolved after the prelude is
     // compiled (a REPL redefinition gives `Some#1`, so a name cannot be
