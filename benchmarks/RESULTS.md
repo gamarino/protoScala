@@ -359,12 +359,37 @@ w=4 and w=6 are 2,439 and 2,507 msg/s with `[2,350-2,747]` and `[2,414-2,561]`
 spreads that overlap. The honest statement is that the near-linear region and the
 plateau are where v5 found them, and that this phase did not move them.
 
-**Cold start** missed the < 25 ms budget of DESIGN §1 and this phase made it worse:
-26.31 ms (script) / 26.98 ms (REPL) for the canonical build and 25.87 / 27.56 ms for
-the Release build, against 24.96 / 24.80 and 22.60 / 23.80 on the 0.4.0 baseline.
-Load average was 3.6 then and 4.9–5.5 now, so neither figure is clean — but the
-direction is real and the cause is known: the prelude grew by **twenty exception
-classes, `StringContext` and the `Priority` enum**, and it is parsed, desugared,
-compiled and run at every start-up with nothing cached between runs. **The budget
-is not claimed as met.** Meeting it needs either a precompiled prelude or fewer
-prelude classes, which is a Phase 6 decision.
+**Cold start** missed the < 25 ms budget of DESIGN §1, by about 1 ms, and the
+cause was **measured rather than asserted**. The 0.4.0 and 0.5.0 binaries were
+re-measured **interleaved in the same window** (0.4.0 built from `941f577` in a
+scratch worktree against the same protoCore), three rounds of 21 verified runs
+each, plus a third binary: 0.5.0 with **twenty more exception classes of the same
+shape added to the prelude**, a probe that is not shipped.
+
+| binary | script median | REPL median |
+|---|---:|---:|
+| 0.4.0 (`941f577`) | 23.91 ms | 24.46 ms |
+| 0.5.0 (shipped) | 25.22 ms | 25.58 ms |
+| 0.5.0 + 20 probe prelude classes | 26.41 ms | — |
+
+Per-round script medians, in order: 0.4.0 24.21 / 23.91 / 23.83, 0.5.0
+25.53 / 24.98 / 25.22, probe 26.60 / 26.05 / 26.41 — **monotone in all three
+rounds**, which a 1 ms effect on a shared host does not usually manage. The REPL
+column comes from an earlier two-binary interleave in the same session, so read
+down a column and not across.
+
+Phase 4 cost **+1.31 ms**; twenty more classes cost a further **+1.19 ms**. The
+prelude grew from 156 lines / 7,575 bytes to 200 lines / 10,176 bytes — twenty
+exception classes, `StringContext` and the `Priority` enum — and at roughly
+**60 µs per prelude class** that growth accounts for essentially the whole
+regression. This matters because it **rules out the alternative explanation**: it
+is not the exception machinery in the engine (the per-frame retry loop was
+measured free above, and mutable prototypes make class *creation* cheaper), it is
+that the prelude is parsed, desugared, compiled and run at every start-up with
+nothing cached between runs. **The budget is not claimed as met**; meeting it
+again needs a precompiled prelude or a smaller one, which is a Phase 6 decision.
+
+The earlier, uninterleaved figures this section first recorded (26.31 / 26.98 ms
+for 0.5.0 against 24.96 / 24.80 for 0.4.0, measured hours apart at load 3.6 and
+4.9-5.5) are superseded by the table above: they had the direction right and the
+magnitude roughly twice too large.

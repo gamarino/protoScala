@@ -332,15 +332,35 @@ kernel's cost, not protoScala's frontend. `list_ops`'s 0.24× is partly the
 Python twin's O(n) `insert(0, i)` against an O(log n) `::` — the row says the
 prepend-and-fold surface is cheap, not that protoScala is four times CPython.
 
-Cold start (`benchmarks/cold-start.sh`, 21 runs, target < 25 ms): script
-21.02 [19.44-22.68] ms, REPL 21.77 [20.37-23.28] ms (RelWithDebInfo); script
-21.05 [19.50-22.26] ms, REPL 22.59 [20.42-24.33] ms (Release). **Verdict: MET**
-for all four rows — every individual sample, including the worst, stayed
-below the 25 ms target (the closest approach was the Release REPL's worst
-sample at 24.33 ms, still under target). This is a real verdict, not a
-close call disguised as one: unlike an earlier informal pass that saw the
-median straddle 25 ms under heavier load, this interleaved run's full spread
-never touched the target.
+Cold start (`benchmarks/cold-start.sh`, 21 runs, target < 25 ms). **Verdict for
+0.5.0: NOT MET, by about 1 ms, and the reason is measured rather than guessed.**
+0.4.0 and 0.5.0 measured interleaved in the same window, three rounds of 21
+verified runs each, medians of the round medians:
+
+| binary | script | REPL |
+|---|---:|---:|
+| 0.4.0 | 23.91 ms | 24.46 ms |
+| 0.5.0 | 25.22 ms | 25.58 ms |
+| 0.5.0 + 20 more prelude exception classes (probe, not shipped) | 26.41 ms | — |
+
+The REPL column comes from a two-binary interleave and the script column from a
+three-binary one, so compare down a column and never across; the 0.4.0 script
+median was 23.84 ms in the two-binary run and 23.91 ms in the three-binary one,
+which is the size of the run-to-run error here.
+
+Phase 4 cost **+1.31 ms** and grew the prelude from 156 to 200 lines — twenty
+exception classes, `StringContext` and the `Priority` enum — which is parsed,
+desugared, compiled and run at every start-up with nothing cached between runs.
+Adding twenty *more* classes of the same shape to a probe build costs a further
+**+1.19 ms**, so roughly 60 µs per prelude class accounts for the whole
+regression: it is the prelude's size, not the exception machinery in the engine
+(the per-frame retry loop was measured free by `perf stat -r 3`). Meeting the
+budget again needs a precompiled prelude or a smaller one, which is a Phase 6
+decision.
+
+Earlier phases met the target: the 0.3.0 run measured script 21.02
+[19.44-22.68] ms and REPL 21.77 [20.37-23.28] ms with every individual sample,
+worst included, under 25 ms.
 
 **Reading.** Short rows measure start-up more than work: protoScala starts in
 about 17-18 ms (`factorial_100` is almost pure start-up) and CPython in about

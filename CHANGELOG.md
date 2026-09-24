@@ -134,11 +134,16 @@ from protoCore** (P3). Phase 5 shipped out of order as 0.3.0 and Phase 3 as
 
 ### Known issues
 
-- **Cold start is above the < 25 ms budget** and this phase made it worse: 26.31 ms
-  (script) / 26.98 ms (REPL) against 24.96 / 24.80 on 0.4.0, on a busy host in both
-  cases. The cause is known: the prelude grew by twenty exception classes,
-  `StringContext` and the `Priority` enum, and it is compiled at every start-up.
-  Not claimed as met.
+- **Cold start is above the < 25 ms budget** by about 1 ms, and the cause is
+  measured, not guessed: 0.4.0 and 0.5.0 interleaved in one window over three
+  rounds of 21 verified runs give 23.91 ms against 25.22 ms (script) and 24.46
+  against 25.58 ms (REPL), and a probe build with twenty *more* prelude exception
+  classes costs a further +1.19 ms -- monotone in all three rounds. At roughly
+  60 us per prelude class, the prelude's growth from 156 to 200 lines (twenty
+  exception classes, `StringContext` and the `Priority` enum, all compiled at
+  every start-up) accounts for the whole regression, which rules out the engine's
+  exception machinery as the cause. Not claimed as met; a precompiled prelude is
+  a Phase 6 decision.
 - **The foreign half of named arguments is unexercised**: UMD is Phase 6, so
   `tests/conformance/23-named-arguments/foreign-python-*.scala` are `XFAIL` with
   their expected output recorded.

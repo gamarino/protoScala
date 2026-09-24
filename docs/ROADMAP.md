@@ -192,7 +192,7 @@ provider, and with protoST's provider when both are built); CPack produces a
 `.deb` and a `.tar.gz` that install and run `protoscala` without
 `LD_LIBRARY_PATH`. Release `0.6.0`.
 
-Three things Phase 4 leaves for this phase to finish:
+Four things Phase 4 leaves for this phase to finish:
 
 - **Convert `tests/conformance/23-named-arguments/foreign-python-keyword.scala`
   and `foreign-python-open-encoding.scala` from `XFAIL` to `EXPECT`.** Their
@@ -208,6 +208,13 @@ Three things Phase 4 leaves for this phase to finish:
 - **Decide whether extension methods gain import scoping** (D82). The import
   mechanism arrives here, and scoping an extension is a public-surface change that
   needs it.
+- **Precompile or cache the prelude, and reclaim the cold-start budget.** 0.5.0
+  misses DESIGN §1's < 25 ms by about 1 ms, and the cause is measured: roughly
+  60 µs per prelude class, so the growth from 156 to 200 lines costs +1.31 ms
+  (a probe build with twenty more classes of the same shape costs a further
+  +1.19 ms — benchmarks/RESULTS.md). The prelude is parsed, desugared, compiled
+  and run at every start-up with nothing cached. Module loading arrives in this
+  phase, which is where a serialised prelude belongs.
 
 ## Documentation track (every phase)
 

@@ -662,17 +662,32 @@ See DESIGN §11 for the full table. Unchanged this phase: R2, R4, R5, R8.
   calls `ProtoContext::safepoint()` at every back-edge (Q21). The scheduler
   unit test's polling loop learned this the hard way under
   `PROTOCORE_HEAP_LIMIT_CELLS=20000`.
-- **Cold start — above target, and Phase 4 made it worse. Not claimed as met.**
-  The < 25 ms budget (DESIGN §1) measured 24.96 ms (script) / 24.80 ms (REPL) on
-  the 0.4.0 build at load average ~3.6, and **26.31 ms / 26.98 ms on the 0.5.0
-  build at load average ~5.0**, with the Release build at 25.87 / 27.56 ms. The
-  host was busy in both cases, so neither figure is clean — but the direction is
-  real and the cause is known: the prelude grew by **twenty exception classes,
-  `StringContext` and the `Priority` enum**, and the prelude is parsed, desugared,
-  compiled and run at every start-up. Nothing is cached between runs. Re-measure
-  on a quiet host; if the budget is to be met, the prelude needs either a
-  precompiled form or fewer classes, and that is a Phase 6 decision rather than a
-  bug in this phase.
+- **Cold start — about 1 ms above target, and the cause is measured. Not claimed
+  as met.** The < 25 ms budget (DESIGN §1) was re-measured with the 0.4.0 and
+  0.5.0 binaries **interleaved in one window** — 0.4.0 built from `941f577` in a
+  scratch worktree against the same protoCore — three rounds of 21 verified runs
+  each, plus a third binary that is **not shipped**: 0.5.0 with twenty more
+  exception classes of the same shape in its prelude.
+
+  | binary | script median | REPL median |
+  |---|---:|---:|
+  | 0.4.0 (`941f577`) | 23.91 ms | 24.46 ms |
+  | 0.5.0 (shipped) | 25.22 ms | 25.58 ms |
+  | 0.5.0 + 20 probe prelude classes | 26.41 ms | — |
+
+  Per-round script medians: 0.4.0 24.21 / 23.91 / 23.83, 0.5.0 25.53 / 24.98 /
+  25.22, probe 26.60 / 26.05 / 26.41 — monotone in all three rounds. Phase 4 cost
+  **+1.31 ms** and twenty further classes **+1.19 ms**, so at roughly **60 µs per
+  prelude class** the prelude's growth from 156 to 200 lines (twenty exception
+  classes, `StringContext` and the `Priority` enum) accounts for essentially the
+  whole regression. That **rules out the engine's exception machinery**: the
+  per-frame retry loop measured free with `perf stat -r 3`, and mutable class
+  prototypes make class creation cheaper. The prelude is parsed, desugared,
+  compiled and run at every start-up with nothing cached between runs. Meeting the
+  budget again needs a precompiled prelude, which is listed in Phase 6 and is not
+  a bug in this phase. The earlier uninterleaved figures (26.31 / 26.98 ms against
+  24.96 / 24.80, measured hours apart) had the direction right and the magnitude
+  about twice too large.
 - **Phase 5 / mailbox size.** With the CAS-list fallback, a backlog of N
   messages on one actor is an N-element `ProtoList` plus N envelopes, and every
   push rebuilds an O(log N) path. `tests/cli/actors-stress.sh` queues 200000
