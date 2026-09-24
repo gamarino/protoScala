@@ -1,5 +1,6 @@
 #include "runtime/Primitives.h"
 #include "runtime/Format.h"
+#include "support/FormatSpec.h"
 #include "runtime/Errors.h"
 #include "runtime/ExecutionEngine.h"
 #include "runtime/Hashing.h"
@@ -314,6 +315,10 @@ const ProtoObject* toDouble(ProtoContext* ctx, const ProtoObject* self, const Pr
 #define NAMED(fn, helper, method) \
     PRIM(fn) { return helper(ctx, self, args, method); }
 
+// Like NAMED, for a helper that also takes one flag.
+#define NAMED2(fn, helper, flag, method) \
+    PRIM(fn) { return helper(ctx, self, args, flag, method); }
+
 NAMED(num_toInt, identity, "toInt")        // Int
 NAMED(num_toLong, identity, "toLong")      // Int
 NAMED(num_toDouble, toDouble, "toDouble")  // Int, Char
@@ -607,6 +612,328 @@ PRIM(string_toDouble) {
     return ctx->fromDouble(std::strtod(s.substr(0, numberEnd).c_str(), nullptr));
 }
 
+
+// --- Phase 3: the String surface the rest of the phase needs -------------------
+//
+// getSlice and getAt are used wherever a single position is wanted, so a rope is
+// never flattened for a character access (the protoJS rope-flatten lesson).
+// split, replace, stripMargin and format do need one linear walk each, and
+// flatten once, which is said at each of them.
+
+PRIM(string_lastIndexOf) {
+    const unsigned long n = argCount(ctx, args);
+    if (n != 1 && n != 2) wrongArgCount("lastIndexOf", "1 or 2", n);
+    const std::string needle = textArg(ctx, args->getAt(ctx, 0), "lastIndexOf");
+    const std::string s = selfText(ctx, self);   // one walk: a backward search
+    std::size_t limit = s.size();
+    if (n == 2) {
+        const long long from = intArg(ctx, args->getAt(ctx, 1), "lastIndexOf");
+        if (from < 0) return ctx->fromInteger(-1);
+        limit = byteOffsetOf(s, from) + needle.size();
+        if (limit > s.size()) limit = s.size();
+    }
+    const std::size_t at = s.rfind(needle, limit == 0 ? 0 : limit - 1);
+    return ctx->fromInteger(at == std::string::npos ? -1 : codePointsBefore(s, at));
+}
+
+// D70: a LITERAL separator, not a regular expression. protoScala has no regex
+// engine and adding one for `split` alone is out of proportion; `split(",")` --
+// the common case -- is identical, and `split(".")` differs, which the fixture
+// says. D69: the result is a List, not an Array, because there is no Array type
+// (D12 already routes varargs to List).
+PRIM(string_split) {
+    const std::string sep = textArg(ctx, arg(ctx, args, 0, "split", 1), "split");
+    if (sep.empty())
+        throw ScalaError("IllegalArgumentException", "String.split needs a non-empty separator");
+    const std::string s = selfText(ctx, self);   // one walk, then slices
+    ListBuilder b(ctx);
+    std::size_t from = 0;
+    while (true) {
+        const std::size_t at = s.find(sep, from);
+        if (at == std::string::npos) {
+            b.add(str(b.context(), s.substr(from)));
+            break;
+        }
+        b.add(str(b.context(), s.substr(from, at - from)));
+        from = at + sep.size();
+    }
+    return b.finish();
+}
+
+PRIM(string_replace) {
+    const std::string from = textArg(ctx, arg(ctx, args, 0, "replace", 2), "replace");
+    const std::string to = textArg(ctx, args->getAt(ctx, 1), "replace");
+    if (from.empty()) return self;
+    const std::string s = selfText(ctx, self);   // one walk
+    std::string out;
+    std::size_t at = 0;
+    while (true) {
+        const std::size_t hit = s.find(from, at);
+        if (hit == std::string::npos) {
+            out += s.substr(at);
+            break;
+        }
+        out += s.substr(at, hit - at);
+        out += to;
+        at = hit + from.size();
+    }
+    return str(ctx, out);
+}
+
+// stripMargin(margin = '|'): on each line, drop the leading whitespace up to and
+// including the first margin character; a line without one is left alone.
+PRIM(string_stripMargin) {
+    const unsigned long n = argCount(ctx, args);
+    if (n > 1) wrongArgCount("stripMargin", "0 or 1", n);
+    std::string margin = "|";
+    if (n == 1) {
+        margin = textArg(ctx, args->getAt(ctx, 0), "stripMargin");
+        if (margin.empty())
+            throw ScalaError("IllegalArgumentException",
+                             "stripMargin needs a margin character");
+    }
+    const std::string s = selfText(ctx, self);   // one walk
+    std::string out;
+    std::size_t i = 0;
+    while (i <= s.size()) {
+        const std::size_t eol = s.find('\n', i);
+        const std::size_t end = eol == std::string::npos ? s.size() : eol;
+        std::size_t k = i;
+        while (k < end && (s[k] == ' ' || s[k] == '\t')) ++k;
+        if (s.compare(k, margin.size(), margin) == 0) out += s.substr(k + margin.size(), end - k - margin.size());
+        else out += s.substr(i, end - i);
+        if (eol == std::string::npos) break;
+        out += '\n';
+        i = eol + 1;
+    }
+    return str(ctx, out);
+}
+
+PRIM(string_stripPrefix) {
+    const std::string p = textArg(ctx, arg(ctx, args, 0, "stripPrefix", 1), "stripPrefix");
+    const std::string s = selfText(ctx, self);
+    return s.rfind(p, 0) == 0 ? str(ctx, s.substr(p.size())) : self;
+}
+
+PRIM(string_stripSuffix) {
+    const std::string p = textArg(ctx, arg(ctx, args, 0, "stripSuffix", 1), "stripSuffix");
+    const std::string s = selfText(ctx, self);
+    return !p.empty() && s.size() >= p.size() && s.compare(s.size() - p.size(), p.size(), p) == 0
+               ? str(ctx, s.substr(0, s.size() - p.size()))
+               : self;
+}
+
+PRIM(string_compareTo) {
+    const ProtoObject* other = arg(ctx, args, 0, "compareTo", 1);
+    if (!proto::ProtoObject::isStringTagFast(other)) wrongType(ctx, "compareTo", "a String", other);
+    return ctx->fromInteger(self->compare(ctx, other));
+}
+
+PRIM(string_equalsIgnoreCase) {
+    const std::string a = selfText(ctx, self);
+    const std::string b = textArg(ctx, arg(ctx, args, 0, "equalsIgnoreCase", 1), "equalsIgnoreCase");
+    if (a.size() != b.size()) return PROTO_FALSE;
+    for (std::size_t i = 0; i < a.size(); ++i)
+        if (std::tolower(static_cast<unsigned char>(a[i])) !=
+            std::tolower(static_cast<unsigned char>(b[i])))
+            return PROTO_FALSE;
+    return PROTO_TRUE;   // ASCII only, as toUpperCase/toLowerCase already are
+}
+
+PRIM(string_capitalize) {
+    expectArgs(ctx, args, "capitalize", 0);
+    const long long n = stringLength(ctx, self);
+    if (n == 0) return self;
+    const std::string s = selfText(ctx, self);
+    std::string out = s;
+    out[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(s[0])));
+    return str(ctx, out);
+}
+
+// A single position, taken with getAt / getSlice: no flattening.
+const ProtoObject* stringEnd(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+                             bool wantLast, const char* method) {
+    expectArgs(ctx, args, method, 0);
+    const long long n = stringLength(ctx, self);
+    if (n == 0) throw ScalaError("NoSuchElementException", std::string(method) + " of empty string");
+    return asStr(self)->getAt(ctx, static_cast<int>(wantLast ? n - 1 : 0));
+}
+NAMED2(string_head, stringEnd, false, "head")
+NAMED2(string_last, stringEnd, true, "last")
+
+const ProtoObject* stringSlice(ProtoContext* ctx, const ProtoObject* self, long long from,
+                               long long to) {
+    const long long n = stringLength(ctx, self);
+    const long long a = from < 0 ? 0 : (from > n ? n : from);
+    const long long b = to < a ? a : (to > n ? n : to);
+    return asStr(self)->getSlice(ctx, static_cast<int>(a), static_cast<int>(b))->asObject(ctx);
+}
+
+PRIM(string_init) {
+    expectArgs(ctx, args, "init", 0);
+    const long long n = stringLength(ctx, self);
+    if (n == 0) throw ScalaError("UnsupportedOperationException", "init of empty string");
+    return stringSlice(ctx, self, 0, n - 1);
+}
+
+PRIM(string_take) {
+    return stringSlice(ctx, self, 0, intArg(ctx, arg(ctx, args, 0, "take", 1), "take"));
+}
+
+PRIM(string_drop) {
+    return stringSlice(ctx, self, intArg(ctx, arg(ctx, args, 0, "drop", 1), "drop"),
+                       stringLength(ctx, self));
+}
+
+// The number of leading characters the predicate accepts.
+long long stringWhilePrefix(ProtoContext* ctx, const ProtoObject* self, const ProtoObject* p,
+                            const char* method) {
+    const long long n = stringLength(ctx, self);
+    for (long long i = 0; i < n; ++i) {
+        ProtoContext step(ctx->space, ctx);
+        if (!truth(&step, callOne(&step, p, asStr(self)->getAt(&step, static_cast<int>(i))), method))
+            return i;
+    }
+    return n;
+}
+
+PRIM(string_takeWhile) {
+    const long long k = stringWhilePrefix(ctx, self, arg(ctx, args, 0, "takeWhile", 1), "takeWhile");
+    return stringSlice(ctx, self, 0, k);
+}
+
+PRIM(string_dropWhile) {
+    const long long k = stringWhilePrefix(ctx, self, arg(ctx, args, 0, "dropWhile", 1), "dropWhile");
+    return stringSlice(ctx, self, k, stringLength(ctx, self));
+}
+
+// toList/map/filter/foreach walk by position with getAt, so a rope stays a rope.
+PRIM(string_toList) {
+    expectArgs(ctx, args, "toList", 0);
+    const long long n = stringLength(ctx, self);
+    ListBuilder b(ctx);
+    for (long long i = 0; i < n; ++i) b.add(asStr(self)->getAt(b.context(), static_cast<int>(i)));
+    return b.finish();
+}
+
+// `s.map(f).mkString` is the Scala idiom; `map` itself answers a String when
+// every result is a Char or a String, as Scala's StringOps does, and a List
+// otherwise.
+PRIM(string_map) {
+    const ProtoObject* f = arg(ctx, args, 0, "map", 1);
+    const long long n = stringLength(ctx, self);
+    ProtoContext scope(ctx->space, ctx);
+    scope.resizeAutomaticLocals(2);
+    const ProtoObject** slot = scope.getAutomaticLocals();
+    slot[0] = scope.newList()->asObject(&scope);
+    bool allText = true;
+    for (long long i = 0; i < n; ++i) {
+        slot[1] = callOne(&scope, f, asStr(self)->getAt(&scope, static_cast<int>(i)));
+        allText = allText && (isCharFast(slot[1]) ||
+                              proto::ProtoObject::isStringTagFast(slot[1]));
+        slot[0] = slot[0]->asList(&scope)->appendLast(&scope, slot[1])->asObject(&scope);
+    }
+    if (!allText) return slot[0];
+    const RuntimeLayout& L = layoutOf();
+    const proto::ProtoList* xs = slot[0]->asList(&scope);
+    std::string out;
+    for (long long i = 0; i < n; ++i) out += show(&scope, L, xs->getAt(&scope, static_cast<int>(i)));
+    return str(&scope, out);
+}
+
+PRIM(string_filter) {
+    const ProtoObject* p = arg(ctx, args, 0, "filter", 1);
+    const long long n = stringLength(ctx, self);
+    std::string out;
+    const RuntimeLayout& L = layoutOf();
+    for (long long i = 0; i < n; ++i) {
+        ProtoContext step(ctx->space, ctx);
+        const ProtoObject* c = asStr(self)->getAt(&step, static_cast<int>(i));
+        if (truth(&step, callOne(&step, p, c), "filter")) out += show(&step, L, c);
+    }
+    return str(ctx, out);
+}
+
+PRIM(string_foreach) {
+    const ProtoObject* f = arg(ctx, args, 0, "foreach", 1);
+    const long long n = stringLength(ctx, self);
+    for (long long i = 0; i < n; ++i) {
+        ProtoContext step(ctx->space, ctx);
+        (void)callOne(&step, f, asStr(self)->getAt(&step, static_cast<int>(i)));
+    }
+    return layoutOf().unit;
+}
+
+PRIM(string_mkString) {
+    const unsigned long argn = argCount(ctx, args);
+    std::string start, sep, end;
+    if (argn == 1) {
+        sep = textArg(ctx, args->getAt(ctx, 0), "mkString");
+    } else if (argn == 3) {
+        start = textArg(ctx, args->getAt(ctx, 0), "mkString");
+        sep = textArg(ctx, args->getAt(ctx, 1), "mkString");
+        end = textArg(ctx, args->getAt(ctx, 2), "mkString");
+    } else if (argn != 0) {
+        wrongArgCount("mkString", "0, 1 or 3", argn);
+    }
+    if (argn == 0) return self;
+    const RuntimeLayout& L = layoutOf();
+    const long long n = stringLength(ctx, self);
+    std::string out = start;
+    for (long long i = 0; i < n; ++i) {
+        if (i) out += sep;
+        out += show(ctx, L, asStr(self)->getAt(ctx, static_cast<int>(i)));
+    }
+    return str(ctx, out + end);
+}
+
+PRIM(string_toBoolean) {
+    expectArgs(ctx, args, "toBoolean", 0);
+    const std::string s = selfText(ctx, self);
+    if (s == "true") return PROTO_TRUE;
+    if (s == "false") return PROTO_FALSE;
+    throw ScalaError("IllegalArgumentException", "For input string: \"" + s + "\"");
+}
+
+// "n=%03d".format(7): the receiver is a printf string, formatted with the Task 4
+// formatter, so `format` and the f-interpolator cannot disagree.
+PRIM(string_format) {
+    const RuntimeLayout& L = layoutOf();
+    const std::string fmt = selfText(ctx, self);   // one walk
+    const unsigned long argn = argCount(ctx, args);
+    std::string out;
+    unsigned long next = 0;
+    std::size_t i = 0;
+    while (i < fmt.size()) {
+        if (fmt[i] != '%') { out += fmt[i++]; continue; }
+        if (i + 1 < fmt.size() && fmt[i + 1] == '%') { out += '%'; i += 2; continue; }
+        // The specifier runs to and including the conversion character.
+        std::size_t k = i + 1;
+        while (k < fmt.size() && (fmt[k] == '-' || fmt[k] == '+' || fmt[k] == ' ' ||
+                                  fmt[k] == '0' || fmt[k] == ',' || fmt[k] == '#')) ++k;
+        while (k < fmt.size() && fmt[k] >= '0' && fmt[k] <= '9') ++k;
+        if (k < fmt.size() && fmt[k] == '.') {
+            ++k;
+            while (k < fmt.size() && fmt[k] >= '0' && fmt[k] <= '9') ++k;
+        }
+        if (k >= fmt.size())
+            throw ScalaError("IllegalArgumentException", "format: a specifier needs a conversion");
+        const std::string spec = fmt.substr(i, k - i + 1);
+        FormatSpec parsed;
+        try {
+            parsed = parseFormatSpec(spec);
+        } catch (const std::invalid_argument& e) {
+            throw ScalaError("IllegalArgumentException", e.what());
+        }
+        if (next >= argn)
+            throw ScalaError("IllegalArgumentException",
+                             "format: not enough arguments for '" + fmt + "'");
+        out += formatOne(ctx, L, parsed, args->getAt(ctx, static_cast<int>(next++)));
+        i = k + 1;
+    }
+    return str(ctx, out);
+}
+
 // ---------------------------------------------------------------------------
 // List
 // ---------------------------------------------------------------------------
@@ -739,7 +1066,19 @@ void installPrimitives(ProtoContext* ctx, const RuntimeLayout& L) {
         {"trim", &string_trim}, {"contains", &string_contains}, {"startsWith", &string_startsWith},
         {"endsWith", &string_endsWith}, {"indexOf", &string_indexOf}, {"reverse", &string_reverse},
         {"*", &string_times}, {"+", &string_plus}, {"concat", &string_concat},
-        {"toInt", &string_toInt}, {"toDouble", &string_toDouble}};
+        {"toInt", &string_toInt}, {"toDouble", &string_toDouble},
+        // Phase 3
+        {"split", &string_split}, {"replace", &string_replace},
+        {"stripMargin", &string_stripMargin}, {"stripPrefix", &string_stripPrefix},
+        {"stripSuffix", &string_stripSuffix}, {"lastIndexOf", &string_lastIndexOf},
+        {"toList", &string_toList}, {"head", &string_head}, {"last", &string_last},
+        {"init", &string_init}, {"take", &string_take}, {"drop", &string_drop},
+        {"takeWhile", &string_takeWhile}, {"dropWhile", &string_dropWhile},
+        {"map", &string_map}, {"filter", &string_filter}, {"foreach", &string_foreach},
+        {"mkString", &string_mkString}, {"compareTo", &string_compareTo},
+        {"equalsIgnoreCase", &string_equalsIgnoreCase}, {"capitalize", &string_capitalize},
+        {"repeat", &string_times}, {"toBoolean", &string_toBoolean},
+        {"toLong", &string_toInt}, {"format", &string_format}};
     // `::` is List-only: prepending to a Vector is `+:`. Every other List
     // method is the shared List/Vector implementation of
     // CollectionPrimitives.cpp, installed there on both prototypes.

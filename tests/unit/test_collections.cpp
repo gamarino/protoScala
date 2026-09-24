@@ -289,3 +289,45 @@ TEST(SetSurface, AlgebraAndSubset) {
     EXPECT_EQ(h.eval("Set(1, 2).## == Set(2, 1).##"), "true");
     EXPECT_EQ(h.eval("Map(1 -> 1) == Set(1)"), "false");
 }
+
+// --- Phase 3: the String surface ----------------------------------------------
+
+TEST(StringSurface, SplitIsLiteralNotRegex) {
+    EvalHarness h;
+    // D70: a literal separator. Scala reads the argument as a regex, so it
+    // answers List() for the first case; the divergence is documented, not
+    // accidental.
+    EXPECT_EQ(h.eval("\"a.b.c\".split(\".\")"), "List(a, b, c)");
+    EXPECT_EQ(h.eval("\"abc\".split(\",\")"), "List(abc)");
+    EXPECT_EQ(h.eval("\"\".split(\",\")"), "List()");
+    EXPECT_EQ(h.eval("\"a,,b\".split(\",\")"), "List(a, , b)");
+    EXPECT_EQ(h.eval("\"abc\".split(\"\")"),
+              "error: IllegalArgumentException: String.split needs a non-empty separator");
+}
+
+TEST(StringSurface, StripMarginHandlesEveryLine) {
+    EvalHarness h;
+    EXPECT_EQ(h.eval("\"|a\\n  |b\".stripMargin"), "a\nb");
+    EXPECT_EQ(h.eval("\"a\\nb\".stripMargin"), "a\nb");          // no margin: unchanged
+    EXPECT_EQ(h.eval("\"#a\\n #b\".stripMargin(\"#\")"), "a\nb");  // a chosen margin
+    EXPECT_EQ(h.eval("\"\".stripMargin"), "");
+}
+
+TEST(StringSurface, FormatAndTheFInterpolatorAgree) {
+    EvalHarness h;
+    EXPECT_EQ(h.eval("\"%05d\".format(42)"), "00042");
+    EXPECT_EQ(h.eval("val n = 42; f\"$n%05d\""), "00042");
+    EXPECT_EQ(h.eval("\"%s and %s\".format(1, \"x\")"), "1 and x");
+    EXPECT_EQ(h.eval("\"100%%\".format()"), "100%");
+    EXPECT_EQ(h.eval("\"%d\".format(\"x\")"),
+              "error: IllegalArgumentException: %d expects an integer, got String");
+}
+
+TEST(StringSurface, SliceOperationsClampAndEndsThrow) {
+    EvalHarness h;
+    EXPECT_EQ(h.eval("\"abc\".take(99)"), "abc");
+    EXPECT_EQ(h.eval("\"abc\".drop(99)"), "");
+    EXPECT_EQ(h.eval("\"abc\".take(-1)"), "");
+    EXPECT_EQ(h.eval("\"\".head"), "error: NoSuchElementException: head of empty string");
+    EXPECT_EQ(h.eval("\"\".init"), "error: UnsupportedOperationException: init of empty string");
+}
