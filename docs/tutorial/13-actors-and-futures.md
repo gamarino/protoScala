@@ -109,9 +109,10 @@ urgent
 
 A band guarantees **order within itself** and that a worker drains a
 higher band before a lower one when it picks the next message. It does **not**
-pre-empt: a message already being handled runs to completion. `Priority.High`,
-`Medium` and `Low` are the integers `0`, `1` and `2` on an object, not an
-`enum` (D52) — `enum` arrives in Phase 4.
+pre-empt: a message already being handled runs to completion. `Priority` is a
+real `enum` (chapter 12) whose ordinals are `0`, `1` and `2`; a plain `Int` is
+still accepted for the band, so code written before it became an `enum` keeps
+working.
 
 ## 13.5 Futures
 
@@ -184,17 +185,16 @@ or inside `Thread.start` — `await` simply blocks, which is always safe.
 
 ## 13.7 When a handler fails
 
-A handler that raises completes that message's future with
-`Failure(RuntimeError(className, message))`, reports the error on stderr, and
-leaves the actor alive with its previous state. There is no supervision in
-0.3.0.
+A handler that raises completes that message's future with `Failure(e)` carrying
+the **exception value itself**, reports the error on stderr, and leaves the actor
+alive with its previous state. There is no supervision.
 
 ```scala
 val fragile = Actor.spawn(0) { (s, m) => (s, s / m) }
 val f = fragile ? 0
 while !f.isCompleted do ()
 val name = f.value match
-  case Some(Failure(e)) => e.className
+  case Some(Failure(e)) => e.getClass
   case other            => "none"
 println(name + " " + fragile.value.toString)
 ```
@@ -203,11 +203,41 @@ println(name + " " + fragile.value.toString)
 ArithmeticException 0
 ```
 
-Until exceptions arrive in Phase 4 there are no exception *values*, so a failed
-future carries a `RuntimeError` case class and `Try`/`Success`/`Failure` wrap it
-(D44). Every value a handler returns is a valid result — a pair, or a bare new
-state (D45) — so the only rejected result is no value at all, which fails that
-message the same way, with `IllegalArgumentException`.
+Every value a handler returns is a valid result — a pair, or a bare new state
+(D45) — so the only rejected result is no value at all, which fails that message
+the same way, with `IllegalArgumentException`.
+
+Because a failed future carries a real `Throwable`, an `await` on one **raises it
+at the `await`'s own call site**, and an enclosing `try` in the suspended handler
+catches it:
+
+Fixture: [`tests/conformance/tutorial/13-actors-catch-a-failed-await.scala`](../../tests/conformance/tutorial/13-actors-catch-a-failed-await.scala)
+
+```scala
+@main def run(): Unit =
+  val divider = Actor.spawn(0) { (s, m) =>
+    if m == 0 then throw new ArithmeticException("cannot divide by zero") else (s, 100 / m)
+  }
+  val caller = Actor.spawn(0) { (s, m) =>
+    var out = "none"
+    try
+      out = (divider ? 0).await.toString
+    catch
+      case e: ArithmeticException => out = "recovered: " + e.getMessage
+    (s, out)
+  }
+  println((caller ? 1).await)
+```
+
+```text
+recovered: cannot divide by zero
+```
+
+A `catch` body and a `finally` body are ordinary code, so they may `await` too.
+What a suspension does **not** do is run a `finally`: a parked actor is going to be
+resumed, not abandoned, so the cleanup of the `try` it suspended inside has not
+been reached. If the future never completes, it never runs (D75) — chapter 11,
+§11.7.
 
 ## 13.8 Threads and time
 
@@ -269,18 +299,22 @@ copied by hand into this chapter.
 | Id | Deviation |
 |---|---|
 | D43 | `await` suspends only a chain of protoScala frames each stopped at a call instruction; inside a native higher-order method or a `Future` continuation it raises `UnsupportedOperationException` |
-| D44 | There are no exception values yet: a failed `Future` carries `RuntimeError(className, message)`, wrapped by `Try`/`Success`/`Failure` |
 | D45 | An actor handler returns `(newState, reply)` or a bare `newState`; with no reply, `?` completes with `()`. A `Tuple2` is always read as the pair form |
 | D46 | An actor lives as long as the session; `Future.apply` creates one actor per call |
 | D47 | `Future.apply` takes its body by name: `Future(expr)`, `Future { … }` |
 | D53 | A by-name parameter is honoured only where the compiler can name the callee; elsewhere the argument is evaluated (chapter 5, §5.9) |
 | D48 | Continuations run on the thread that completes the future (or on the caller when it is already complete); there is no `ExecutionContext`, and a continuation may not `await` |
 | D49 | `Thread` and `System` are runtime facilities, not the JVM's |
-| D50 | Awaiting a future that fails, inside an actor, abandons the rest of the handler; that message's future inherits the failure |
 | D51 | `actor.value` reads the state without sending a message, so it may observe a state older than a queued send |
-| D52 | `Priority.High` / `Medium` / `Low` are the integers `0` / `1` / `2` on an object, not an `enum` |
+| D75 | An actor suspended on a future that never completes never runs the `finally` of the `try` it suspended inside; the shutdown diagnostic reports how many actors are parked |
 
-Also missing, by design in 0.3.0: supervision trees, `ExecutionContext`, actor
+Three deviations this chapter carried in 0.3.0 are **retired**: D44 (a failed
+`Future` carried a `RuntimeError` case class rather than a `Throwable`), D50
+(awaiting a failed future abandoned the rest of the handler) and D52 (`Priority`
+was three integers on an object rather than an `enum`). All three were provisional
+behaviours that existed only because exceptions and `enum` had not landed yet.
+
+Also missing, by design: supervision trees, `ExecutionContext`, actor
 timeouts and `Await.result(f, duration)` — an `await` waits forever, and the
 shutdown reports any actor still parked on a future that never completed.
 

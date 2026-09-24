@@ -563,7 +563,100 @@ runs something else, and resumes it when the answer arrives.
 bands, futures and their combinators, what happens when a handler fails, and
 `Thread`/`System`.
 
-## 2.15 Where to go next
+## 2.15 Errors: `raise`/`except` and `throw`/`catch`
+
+Fixture: [`tests/conformance/tutorial/02-python-js-exceptions.scala`](../../tests/conformance/tutorial/02-python-js-exceptions.scala)
+
+```scala
+@main def run(): Unit =
+  def parse(s: String): String =
+    try
+      s.toInt.toString
+    catch
+      case e: NumberFormatException => "cannot parse '" + s + "'"
+    finally
+      ()
+  var log = ""
+  try
+    throw new IllegalStateException("x")
+  catch
+    case e: IllegalStateException => log = "cleaned up"
+  println(parse("abc") + " | " + log)
+```
+
+```text
+cannot parse 'abc' | cleaned up
+```
+
+| Python | JavaScript | protoScala |
+|---|---|---|
+| `raise ValueError("x")` | `throw new Error("x")` | `throw new IllegalArgumentException("x")` |
+| `except ValueError as e:` | `catch (e) { if (…) }` | `case e: IllegalArgumentException =>` |
+| `finally:` | `finally { }` | `finally` |
+| `else:` clause | — | none |
+
+Two things are different in kind, not just in spelling. A `try` **has a value**,
+so you write `val n = try … catch …` instead of assigning inside both branches.
+And a `catch` clause is a **pattern**, so the test and the extraction of the
+exception's fields are one thing — Python needs an `if` inside the `except` body
+and a bare `raise` to put the value back when the `if` does not match.
+[Chapter 11](11-exceptions.md) is the whole story.
+
+## 2.16 Enumerations, and the thing Python does not have
+
+Fixture: [`tests/conformance/tutorial/02-python-js-enums.scala`](../../tests/conformance/tutorial/02-python-js-enums.scala)
+
+```scala
+enum Colour:
+  case Red, Green, Blue
+enum Tree:
+  case Leaf(n: Int)
+  case Node(l: Tree, r: Tree)
+@main def run(): Unit =
+  val described = Tree.Leaf(3) match
+    case Tree.Leaf(n)    => "leaf " + n
+    case Tree.Node(_, _) => "node"
+  println(Colour.Red.toString + " " + Colour.Red.ordinal + " " + Colour.values.length +
+    " | " + described)
+```
+
+```text
+Red 0 3 | leaf 3
+```
+
+`Colour` is Python's `Enum` with `ordinal` where Python has `value`, and
+`Colour.values` where Python has `list(Colour)`. `Tree` is the other thing: a
+closed set of alternatives **that carry different data**, which TypeScript
+approximates with a discriminated union and JavaScript has no form for at all.
+The `match` tests which case it is and pulls the data out in one step, with no tag
+field to maintain. [Chapter 12](12-enums-and-sealed-hierarchies.md) is the whole
+story.
+
+## 2.17 Keyword arguments
+
+Fixture: [`tests/conformance/tutorial/02-python-js-keyword-arguments.scala`](../../tests/conformance/tutorial/02-python-js-keyword-arguments.scala)
+
+```scala
+def box(width: Int, height: Int, depth: Int = 1): String =
+  "w=" + width + " h=" + height + " d=" + depth
+@main def run(): Unit = println(box(height = 3, width = 2))
+```
+
+```text
+w=2 h=3 d=1
+```
+
+This is Python's call, character for character, defaults included. In JavaScript
+the same thing is an options object — `box({ height: 3, width: 2 })` — with the
+destructuring and the defaults written by hand in the function; here the
+parameter list *is* the interface, and a name you did not declare is an error
+rather than a silently ignored property.
+
+The arguments are evaluated where they are written, in source order, however the
+names reorder them. [Chapter 5](05-functions-and-closures.md) §5.10 has the rest,
+including where a mistake is reported.
+
+## 2.18 Where to go next
 
 - [Chapter 4](04-values-and-expressions.md): literals, operators (which are
   methods), strings, equality, `if` and `while` in detail.
@@ -575,6 +668,9 @@ bands, futures and their combinators, what happens when a handler fails, and
   `Option`, and every form of pattern.
 - [Chapter 9](09-for-comprehensions.md): `for … yield`, what it is rewritten
   into, and the placeholder `_`.
+- [Chapter 11](11-exceptions.md) and
+  [chapter 12](12-enums-and-sealed-hierarchies.md): exceptions, and enums as
+  algebraic data types.
 - [Chapter 13](13-actors-and-futures.md): actors, futures and concurrency
   without a GIL.
 - [Chapter 14](14-repl-and-tooling.md): the REPL, for trying each idea

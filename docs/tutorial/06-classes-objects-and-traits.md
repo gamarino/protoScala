@@ -336,7 +336,147 @@ object whose `apply` runs its body — so `scale(1)` is `scale.apply(1)`, the
 same rewrite again. Functions are objects, objects with `apply` are functions,
 and nothing in the language distinguishes them.
 
-## 6.7 For Scala developers
+## 6.7 `super[T].m`: naming the ancestor
+
+`super.m` takes the next definition of `m` in the linearization after the class
+the call is written in (§6.4). `super[T].m` names the ancestor **explicitly**:
+
+Fixture: [`tests/conformance/tutorial/06-classes-super-qualified.scala`](../../tests/conformance/tutorial/06-classes-super-qualified.scala)
+
+```scala
+trait Greeter:
+  def greet: String = "hello"
+trait Loud extends Greeter:
+  override def greet: String = "HELLO"
+class Polite extends Loud:
+  override def greet: String = "good day"
+  def asLoud: String = super[Loud].greet
+@main def run(): Unit =
+  val p = new Polite()
+  println((if p.asLoud == "HELLO" then 2 else 0).toString + " " +
+    (if p.greet == "good day" then 9 else 0))
+```
+
+```text
+2 9
+```
+
+The search starts **at** `T`, so `super[T].m` finds `T`'s own `m` when `T` defines
+one and the `m` that `T` inherits when it does not — which is what "the member `m`
+as seen from `T`" means. `super[T]` inside `T` itself would call itself, so it is
+a compile error, and an ancestor that is not in the receiver's linearization at all
+is a `NoSuchMethodError` naming the spelling that failed.
+
+Scala requires `T` to be a **direct** parent; protoScala accepts any ancestor in
+the linearization (**D76**), because it keeps no direct-parent list — a class's
+description carries the flattened linearization. It is permissiveness, not a
+semantic mismatch: no program scalac accepts behaves differently here.
+
+## 6.8 Extension methods
+
+An `extension` adds a method to a type you do not own:
+
+Fixture: [`tests/conformance/tutorial/06-classes-extension-methods.scala`](../../tests/conformance/tutorial/06-classes-extension-methods.scala)
+
+```scala
+extension (n: Int) def triple: Int = n * 3
+extension (s: String) def shout: String = s.toUpperCase
+class Point(val x: Int, val y: Int)
+extension (p: Point) def manhattan: Int = p.x + p.y
+@main def run(): Unit =
+  println(2.triple.toString + " " + "shout".shout + " " + new Point(2, 3).manhattan)
+```
+
+```text
+6 SHOUT 5
+```
+
+Several methods at once is a **collective** extension, written with the members on
+the following indented lines or in braces — and, as in Scala, with no `:` before
+them:
+
+```scala
+extension (n: Int)
+  def plus(m: Int): Int = n + m
+  def times(m: Int): Int = n * m
+```
+
+What the declaration does here is install the method as a member of the receiver
+type's **prototype**, which has two consequences worth knowing.
+
+The first is that dispatch is on the **runtime** value, not the static type
+(**D6**): a value reached through `Any` answers an extension too, and
+`(2: Any).asInstanceOf[Int].triple` is `6`. Scala resolves an extension
+statically, so a value typed `Any` would not find it there.
+
+The second is that an extension is **global and session-wide** (**D82**). There is
+no import to scope it with — `import` is parsed and ignored until UMD arrives — so
+a method defined at the top level is visible to every piece of code that runs
+after it, including inside definitions written later in the same file. An
+extension on a builtin type mutates that type for the whole session (**D83**), so
+two files cannot define conflicting extensions of the same name on the same type.
+For the same reason a collision with a member the type **already** has is refused:
+
+```text
+error: extension: String already has a member named 'length'
+```
+
+Silently shadowing a builtin method would be unrecoverable within a session.
+Re-running the *same* extension definition replaces it, so a reloaded script or a
+repeated REPL line is fine.
+
+One thing extensions bring with them: a **custom string interpolator** is just an
+extension on `StringContext` (chapter 10, §10.8).
+
+## 6.9 Templates inside an `object`
+
+A `class`, `trait` or `object` may be written inside an `object`, which is how you
+group a small family of types under one name:
+
+Fixture: [`tests/conformance/tutorial/06-classes-templates-in-an-object.scala`](../../tests/conformance/tutorial/06-classes-templates-in-an-object.scala)
+
+```scala
+object Geometry:
+  case class P(x: Int, y: Int)
+  object Origin:
+    val distance: Int = 5
+@main def run(): Unit =
+  println(Geometry.P(1, 2).toString + " " + Geometry.Origin.distance)
+```
+
+```text
+P(1,2) 5
+```
+
+Nesting is arbitrarily deep, the name is `Geometry.P` from outside and plain `P`
+inside `Geometry`, and the `toString` shows the simple name — all as in Scala.
+
+What is **not** supported (**D80**): a template nested in a `class` or a `trait`, a
+local class inside a block, and the anonymous-class form `new T { … }`. Each of
+those captures the enclosing instance, which needs a per-instance class, and that
+is a different feature; the roadmap records it for a later phase.
+
+A constructor may also be written with several parameter lists, which
+**concatenate** into one flat list (**D84**):
+
+Fixture: [`tests/conformance/tutorial/06-classes-ctor-parameter-lists.scala`](../../tests/conformance/tutorial/06-classes-ctor-parameter-lists.scala)
+
+```scala
+class Rect(val w: Int)(val h: Int)
+@main def run(): Unit =
+  val r = new Rect(1)(2)
+  println(r.w + r.h)
+```
+
+```text
+3
+```
+
+So `new Rect(1)(2)` and `new Rect(1, 2)` are the same call here, where scalac
+accepts only the curried spelling. Partial application of a constructor does not
+exist.
+
+## 6.10 For Scala developers
 
 What differs from Scala 3 on the JVM, beyond the erased types of D4:
 
@@ -360,6 +500,9 @@ What differs from Scala 3 on the JVM, beyond the erased types of D4:
   classes and tuples get structural equality (chapter 7).
 - **The default `toString`** of a plain instance is `Name@<identity hash>`;
   for an `object` it prints `O@…` where the JVM prints `O$@…`.
+- **`super[T].m` accepts any ancestor** (D76), **extensions are global** (D82,
+  D83), **templates nest only in an `object`** (D80) and **constructor parameter
+  lists concatenate** (D84) — §6.7 to §6.9 above.
 
 Everything else in this chapter — the linearization algorithm, the
 right-to-left rule, stackable `super`, trait parameters, trait initialisation

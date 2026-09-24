@@ -879,5 +879,7 @@ immediately. Override both, or let a `case class` synthesise both for you.
   runtime, not classes in a package, so a top-level `val Map = 1` replaces the
   companion for the rest of the file (D25). Shadowing them is legal and
   silent; do not.
-- `Failure` carries a `RuntimeError(className, message)` rather than an
-  exception value, because exception values arrive in Phase 4 (D44).
+- `Failure` carries the `Throwable` itself, exactly as Scala's does, so
+  `recover` and `recoverWith` receive the exception and can pattern-match on it
+  (chapter 11). Until Phase 4 it carried a `RuntimeError` case class; that
+  deviation (D44) is retired.

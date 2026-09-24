@@ -288,3 +288,89 @@ still right; what is lost is the laziness.
 
 Two forms are rejected, exactly as scalac rejects them: a by-name parameter on a
 function literal, and a `val`, `var` or case-class constructor parameter.
+
+## 5.10 Named and default arguments
+
+A parameter may carry a default value, and a call site may name the parameter it
+is filling.
+
+Fixture: [`tests/conformance/tutorial/05-functions-named-arguments.scala`](../../tests/conformance/tutorial/05-functions-named-arguments.scala)
+
+```scala
+def volume(width: Int, height: Int = 1, depth: Int = 1): Int = width * height * depth
+var log = ""
+def side(tag: String, v: Int): Int =
+  log = log + tag + " "
+  v
+@main def run(): Unit =
+  val reordered = volume(depth = 3, width = 1)
+  val order = volume(height = side("b", 1), width = side("a", 3))
+  println(volume(3).toString + " " + volume(1, 13) + " " + reordered + " | " + log.trim)
+```
+
+Prints:
+
+```text
+3 13 3 | b a
+```
+
+Three things to read off that:
+
+- a parameter with a default may be **omitted**, and the callee fills it;
+- a named argument may appear in **any order**, and names and positions may be
+  mixed as long as every positional argument comes first;
+- the arguments are still **evaluated at the call site in source order**, which is
+  why the log says `b a` and not `a b`. Naming reorders the *binding*, never the
+  evaluation. That is Scala's rule.
+
+A default may read the parameters declared before it, and any enclosing local:
+
+Fixture: [`tests/conformance/tutorial/05-functions-default-reads-an-earlier-parameter.scala`](../../tests/conformance/tutorial/05-functions-default-reads-an-earlier-parameter.scala)
+
+```scala
+def span(from: Int, to: Int = from + 1): String = from.toString + " " + to
+@main def run(): Unit = println(span(1) + " | " + span(5))
+```
+
+```text
+1 2 | 5 6
+```
+
+Named arguments work on a `def`, a method, a constructor, a case class's `apply`
+and `copy`, a function value and a local function — and, once UMD lands, on a
+foreign callable, because they travel in protoCore's own calling convention with
+no adapter at the boundary (`docs/INTEROP.md` §7).
+
+**Where this departs from Scala.** The binding happens in the **callee**, not at
+the call site. A protoCore runtime may resolve at run time what its source
+language resolves at compile time, and doing so is what makes a named argument
+work even where the compiler cannot tell which callee a call reaches. The price is
+the moment the mistake is reported:
+
+Fixture: [`tests/conformance/tutorial/05-functions-named-argument-errors.scala`](../../tests/conformance/tutorial/05-functions-named-argument-errors.scala)
+
+```scala
+def area(width: Int, height: Int): Int = width * height
+@main def run(): Unit = println(area(width = 2, depth = 3))
+```
+
+```text
+05-functions-named-argument-errors.scala:6: error: IllegalArgumentException: area has no parameter named 'depth'
+```
+
+scalac rejects that at compile time (**D81**). Here it is a run-time error — but a
+**loud** one that names the method and the parameter, and the same is true of an
+argument given twice (`area received parameter 'width' twice`) and one left
+unfilled (`area is missing argument 'height'`). Late detection is accepted on this
+platform; a silently dropped argument would not be.
+
+Two smaller departures in the same area. A default may read a parameter of the
+**same** list, which scalac requires to come from a previous list (**D88**) — the
+curried spelling `def f(a: Int)(b: Int = a + 1)` works here too. And a named
+argument on a **function value** binds against the names written in the function
+literal, where scalac rejects it because `Function2.apply`'s parameters are called
+`v1` and `v2` (**D89**). Both accept strictly more programs than Scala does.
+
+A default value is not supported on a method that also takes a repeated
+parameter: the callee could not tell an omitted default from an empty repeated
+argument, so it is a compile error rather than a guess.

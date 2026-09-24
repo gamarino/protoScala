@@ -524,10 +524,6 @@ Actors, priority bands and futures are described in
   back into Scala without being a call site (`==` reaching a user `equals`),
   it raises `UnsupportedOperationException` instead of suspending; the ask's
   future receives that failure and the actor stays alive.
-- **D44** — until Phase 4 there are no exception values: a failed `Future`
-  carries `RuntimeError(className, message)`, and `Try`/`Success`/`Failure`
-  (moved up from Phase 3) wrap it. `await` on a failed future raises the same
-  error on the awaiting thread, which no user code can catch yet.
 - **D45** — an actor handler returns `(newState, reply)` or a bare `newState`,
   which means there is no reply to give; `?` then completes with `()`. A
   `Tuple2` result is always read as the pair form, so an actor whose state is a
@@ -548,19 +544,21 @@ Actors, priority bands and futures are described in
   `Thread.start(() => …)`, `t.join()`, `System.nanoTime()`,
   `System.currentTimeMillis()`, `System.getenv(name)` (`""` when unset).
   `nanoTime` is a monotonic clock; only differences are meaningful.
-- **D50** — awaiting a future that fails, inside an actor, abandons the rest
-  of the handler and the message's own future inherits the failure (there is
-  no `try`/`catch` to resume into until Phase 4).
 - **D51** — `actor.value` reads the state without sending a message, so it may
   observe a state older than a send that is still queued.
-- **D52** — `Priority.High` / `Medium` / `Low` are the integers `0` / `1` / `2`
-  on an object, not an `enum` (enums arrive in Phase 4).
 - **D53** — a by-name parameter is honoured only where the compiler can name the
   callee: a call by name to a top-level or local `def`, a method of the template
   being compiled, a method of an `object`, a class's primary constructor, and the
   runtime's own by-name signatures. A method reached through a dynamic send, and
   a `def` taken as a function value, evaluate the argument once at the call.
   Scala resolves all of these from static types.
+
+**Retired by Phase 4.** Three ids in this group were provisional behaviours that
+existed only because exceptions and `enum` had not landed: **D44** (a failed
+`Future` carried `RuntimeError(className, message)` rather than a `Throwable`),
+**D50** (awaiting a failed future abandoned the rest of the handler) and **D52**
+(`Priority` was three integers on an object). All three are gone; chapters 11 and
+12 describe what replaced them.
 
 ### Collections and strings (Phase 3, D54–D71)
 
@@ -580,10 +578,6 @@ runs with the test suite.
   locale (`,` always groups with an ASCII comma and the decimal point is
   always `.`), and no `%h`, `%a`, `%t` or argument index (`%1$s`). The `#`
   flag is parsed but currently emits no `0x`/`0` prefix.
-- **D56** — an interpolator that is not `s`, `f` or `raw` is a compile error
-  (`unknown string interpolator 'json'`), where Scala dispatches it to an
-  extension method on `StringContext`. Extension methods arrive in Phase 4 and
-  bring custom interpolators with them.
 - **D58** — `Map` and `Set` iterate in ascending order of their internal
   hashes, which is neither insertion order nor the keys' own order and may
   change between releases. Scala guarantees no order either; every fixture in
@@ -637,6 +631,72 @@ value key, so `'a'` and `97` are one key), `(0 until 3) == List(0, 1, 2)` is
 parameters have landed. The ids are not reused, because documents already
 cite them.
 
+### Exceptions, enums, arguments and extensions (Phase 4, D72–D89)
+
+Described in [chapter 11](11-exceptions.md), [chapter 12](12-enums-and-sealed-hierarchies.md),
+[chapter 5](05-functions-and-closures.md) §5.10 and
+[chapter 6](06-classes-objects-and-traits.md) §6.7–§6.9; each ends with its own
+departures section, and this is the catalogue. **D78 is deliberately unused:** the
+plan proposed accepting an `enum` case without its qualifier, and matching Scala —
+which requires `Colour.Red` — costs nothing, so no deviation was taken.
+
+- **D72** — a `finally` body that itself throws replaces the in-flight exception.
+  Scala does the same and warns about it; protoScala has no warnings (D4).
+- **D73** — exception class names are unqualified (`ArithmeticException`, never
+  `java.lang.ArithmeticException`) and the hierarchy is the small one of chapter
+  11 §11.5; there is no `java` namespace to qualify with (D8).
+- **D74** — a protoScala defect (a `std::logic_error` from the compiler or the VM)
+  is deliberately **not** catchable, so a bug in the language can never be masked
+  by `catch { case e: Throwable => }`.
+- **D75** — an actor suspended on a future that never completes never runs the
+  `finally` of the `try` it suspended inside; the shutdown diagnostic reports how
+  many actors are parked, and that is the only notice.
+- **D76** — `super[T].m` accepts any ancestor in the linearization, where scalac
+  requires `T` to be a **direct** parent. A class's description carries the
+  flattened linearization and no direct-parent list. Permissiveness only.
+- **D77** — `enum` `values` answers a `List`, where Scala answers an `Array`; the
+  elements and their order are identical.
+- **D79** — a `derives` clause on an `enum` is parsed and ignored, as on every
+  other template (D3).
+- **D80** — a `class`, `trait` or `object` nested in a **`class`** or **`trait`**, a
+  local class inside a block, and the anonymous-class form `new T { … }` are
+  rejected. Each captures the enclosing instance, which needs a per-instance
+  class. Nesting in an `object` **is** supported.
+- **D81** — a named argument is bound in the callee, so a typo in a parameter name
+  is a **run-time** `IllegalArgumentException` (`f has no parameter named 'z'`)
+  where scalac rejects it at compile time. The same holds for an argument given
+  twice and one left unfilled. Every message names the method and the parameter.
+- **D82** — an extension is **global and session-wide**, with no import scoping:
+  it is visible to every piece of code that runs after its definition. Scoping
+  needs an import mechanism, which arrives with UMD in Phase 6.
+- **D83** — an extension on a builtin type mutates that prototype for the whole
+  session, so two units cannot define conflicting extensions of the same name on
+  the same type; a collision with an existing member of the type is refused, where
+  scalac allows the shadowing and simply never reaches the extension.
+- **D84** — multiple constructor parameter lists concatenate into one flat list,
+  so `new C(1)(2)` and `new C(1, 2)` are the same call and a constructor cannot be
+  partially applied. scalac accepts only the curried spelling.
+- **D85** — `catch someFunction` is accepted and rewritten to
+  `case e => someFunction(e)`, which is what `catch` of a total function means. A
+  genuine `PartialFunction` rethrows in Scala and raises `MatchError` here.
+- **D86** — `Throwable.getClass` answers the class's simple name as a `String`;
+  protoScala has no `Class[_]` values.
+- **D87** — the cleanup a `return` inlines is excluded from its own `try`'s
+  handler range, which is what makes a throwing cleanup on a `return` path
+  propagate correctly. The multi-level variant is not implemented: with two or
+  more nested `try` constructs, an inner handler may see an exception raised by an
+  outer cleanup during a `return`.
+- **D88** — a default value may read a parameter of the **same** parameter list,
+  which scalac requires to come from a previous one. The curried spelling works
+  here too.
+- **D89** — a named argument on a **function value** binds against the names
+  written in the function literal, where scalac rejects it because
+  `Function2.apply`'s parameters are called `v1` and `v2`.
+
+**Retired by Phase 4.** **D56** — an interpolator other than `s`, `f` or `raw` was
+a compile error; it is now lowered to `StringContext(<literals>).<name>(<args>)`
+and supplied as an extension method, exactly as in Scala (chapter 10 §10.8).
+
 ## 3.3 What is missing
 
 Out of scope by design: implicits and givens (D3), the static type checker
@@ -662,7 +722,7 @@ Not implemented yet, with the phase that brings each (see
 
 | Feature | Phase |
 |---|---|
-| Exceptions (`try`/`catch`/`finally`/`throw`), `enum`, exhaustiveness, named and default arguments, extension methods, local/nested/anonymous classes, multiple constructor parameter lists, `super[T]` | 4 |
+| Exhaustiveness checking for `match` (D4: types are erased), local and anonymous classes and templates nested in a `class` (D80) | later (v0.7+) |
 | Modules and polyglot imports (UMD), packaging | 6 |
 
 ## 3.4 What is new

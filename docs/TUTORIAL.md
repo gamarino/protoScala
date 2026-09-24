@@ -13,19 +13,22 @@ tracker of what works and of every deviation is [STATUS.md](STATUS.md). How the
 runtime is built is in [DESIGN.md](DESIGN.md); the cross-runtime story is in
 [INTEROP.md](INTEROP.md).
 
-> **What runs today (protoScala 0.4.0).** Chapters 1 to 10, 13 and 14 describe
-> what the binary runs: values and expressions,
-> `val`/`var`/`lazy val`/`def`, `if`/`while`, lambdas and closures, recursion,
-> integer and string arithmetic, `println` and the REPL — and, since Phase 2,
-> the whole object model: **classes, objects and companions, traits with
-> Scala's linearization and stackable `super`, case classes and case objects,
-> tuples, `Option`, `List`, pattern matching and for-comprehensions**, in both
-> brace and indentation syntax; since Phase 5, **actors with three
-> priority bands, futures with a cooperative `await`, `Thread` and `System`**;
-> and, since Phase 3, **the collection library — `List`, `Vector`, `Range`,
-> `Map`, `Set`, `Either` and `Try` — string interpolation (`s"…"`, `f"…"`,
-> `raw"…"`) and the `String` method surface**. Exceptions, `enum`, extension
-> methods and modules are planned; their chapters are written together with the
+> **What runs today (protoScala 0.5.0).** Every chapter describes what the binary
+> runs: values and expressions, `val`/`var`/`lazy val`/`def`, `if`/`while`,
+> lambdas and closures, recursion, integer and string arithmetic, `println` and
+> the REPL — and, since Phase 2, the whole object model: **classes, objects and
+> companions, traits with Scala's linearization and stackable `super`, case
+> classes and case objects, tuples, `Option`, `List`, pattern matching and
+> for-comprehensions**, in both brace and indentation syntax; since Phase 5,
+> **actors with three priority bands, futures with a cooperative `await`,
+> `Thread` and `System`**; since Phase 3, **the collection library — `List`,
+> `Vector`, `Range`, `Map`, `Set`, `Either` and `Try` — string interpolation and
+> the `String` method surface**; and, since Phase 4, **`try`/`catch`/`finally`
+> and `throw` with pattern-matched handlers, the `Throwable` hierarchy, `enum`
+> and sealed hierarchies, named and default arguments, extension methods (and
+> the custom string interpolators they bring), `super[T].m`, templates nested in
+> an `object`, and multiple constructor parameter lists**. What remains is
+> modules and polyglot imports (UMD), whose chapter is written together with the
 > phase that implements them. Every runnable snippet in the tutorial is a
 > conformance fixture under `tests/conformance/tutorial/`, run with the test
 > suite.
@@ -74,8 +77,8 @@ ends with a section listing what differs from Scala 3 in its area.
 | 8 | [Collections](tutorial/08-collections.md) | `List` and its full surface, `Vector`, `Range`, `Map`, `Set`, `Option` as a collection, `Either` and `Try`, conversions, and what immutability buys. |
 | 9 | [For-comprehensions](tutorial/09-for-comprehensions.md) | `for … yield` and `for … do`, the rewrite to `flatMap`/`withFilter`/`map`, patterns and value definitions, `Option` and your own types, the placeholder `_`. |
 | 10 | [Strings and interpolation](tutorial/10-strings-and-interpolation.md) | Literals and triple-quoted strings, `s"…"`, `raw"…"`, `f"…"` and its specifier table, `stripMargin`, `format`, and the `String` method surface. |
-| 11 | Exceptions | *Planned* (Phase 4). |
-| 12 | Enums and sealed hierarchies | *Planned* (Phase 4). |
+| 11 | [Exceptions](tutorial/11-exceptions.md) | `throw` and the `Throwable` hierarchy, `try`/`catch` as an expression, `catch` as a pattern match, `finally`, what the runtime raises on its own, `Try` as the value-oriented alternative, exceptions across an actor turn and a suspended `await`. |
+| 12 | [Enums and sealed hierarchies](tutorial/12-enums-and-sealed-hierarchies.md) | `enum` with simple and parameterised cases, `ordinal`/`values`/`valueOf`/`fromOrdinal`, enums as algebraic data types, `sealed trait` hierarchies, and why exhaustiveness is not checked. |
 | 13 | [Actors and futures](tutorial/13-actors-and-futures.md) | Actors, telling and asking, priority bands, futures and their combinators, cooperative `await`, handler failures, threads and time, tuning. |
 | 14 | [The REPL and tooling](tutorial/14-repl-and-tooling.md) | The REPL, multi-line input, commands, classes at the prompt, running scripts, error messages, `--disassemble`. |
 
