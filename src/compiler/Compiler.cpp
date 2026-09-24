@@ -632,9 +632,17 @@ const std::vector<std::uint32_t>* Compiler::byNameMasksOfCalleeHead(const Node& 
         if (!g->byNameMasks.empty()) return &g->byNameMasks;
         // `C(args)` on a class name: its primary constructor (a case class's
         // synthesised companion apply, or the universal creator apply).
-        if (g->kind == BindingKind::Object)
+        if (g->kind == BindingKind::Object) {
             if (const ClassInfo* cls = globals_.findType(name))
                 if (!cls->primaryByNameMasks.empty()) return &cls->primaryByNameMasks;
+            // `O(args)` on an object is `O.apply(args)` (DESIGN §5.1), so it
+            // resolves to the same declaration and honours the same by-name
+            // parameters. Without this, `Try { … }` would evaluate the block on
+            // the caller while `Try.apply { … }` would not -- the sugar and the
+            // spelling it stands for must not disagree.
+            if (const std::vector<std::uint32_t>* m = byNameMasksOfObjectMember(name, "apply"))
+                return m;
+        }
         return nullptr;
     }
     if (fn->kind != NodeKind::Select) return nullptr;

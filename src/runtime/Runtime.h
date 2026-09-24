@@ -131,6 +131,8 @@ struct RuntimeLayout {
         const proto::ProtoObject* success = nullptr;
         const proto::ProtoObject* failure = nullptr;
         const proto::ProtoObject* runtimeError = nullptr;
+        const proto::ProtoObject* left = nullptr;     // Phase 3: __mkLeft
+        const proto::ProtoObject* right = nullptr;    // Phase 3: __mkRight
         bool bound = false;
     } hooks;
 

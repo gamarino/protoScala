@@ -557,6 +557,8 @@ void bindPreludeHooks(proto::ProtoContext* ctx, RuntimeLayout& layout, const Glo
     layout.hooks.failure = resolve("__mkFailure");
     layout.hooks.runtimeError = resolve("__mkRuntimeError");
     layout.hooks.actorStats = resolve("__mkActorStats");
+    layout.hooks.left = resolve("__mkLeft");
+    layout.hooks.right = resolve("__mkRight");
     layout.hooks.bound = true;
 }
 

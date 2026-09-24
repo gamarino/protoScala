@@ -139,6 +139,37 @@ PRIM(prim_fmt) {
     return str(ctx, out);
 }
 
+// __tryOf(f): runs f() and wraps the result. Until Phase 4 there is no `catch`
+// in the language, so the catch lives here: a ScalaError becomes
+// Failure(RuntimeError(class, message)) (D44). `Try { e }` reaches this with a
+// thunk, because Try.apply declares its argument by-name and the compiler's
+// by-name lowering wraps the block in a zero-argument function; `Try(() => e)`
+// reaches it with the same shape. Phase 4 replaces this with a Scala-level
+// try/catch in the prelude and deletes the primitive.
+PRIM(prim_try_of) {
+    const RuntimeLayout& L = layoutOf();
+    const ProtoObject* f = arg(ctx, args, 0, "Try.apply", 1);
+    if (!compiledModuleOf(ctx, L, f) && !f->isMethod(ctx))
+        throw ScalaError("IllegalArgumentException",
+                         "Try.apply expects a block or a function, got " + typeName(ctx, L, f));
+    ExecutionEngine* engine = activeCallContext()->engine;
+    proto::ProtoContext scope(ctx->space, ctx);
+    scope.resizeAutomaticLocals(2);
+    const ProtoObject** slot = scope.getAutomaticLocals();
+    try {
+        slot[0] = engine->invoke(&scope, f, nullptr, 0);
+        slot[1] = engine->invoke(&scope, L.hooks.success, &slot[0], 1);
+    } catch (const ScalaError& e) {
+        slot[0] = str(&scope, e.className());
+        slot[1] = str(&scope, e.message());
+        const ProtoObject* err = engine->invoke(&scope, L.hooks.runtimeError, slot, 2);
+        slot[0] = err;
+        slot[1] = engine->invoke(&scope, L.hooks.failure, slot, 1);
+    }
+    scope.returnValue = slot[1];
+    return slot[1];
+}
+
 // ---------------------------------------------------------------------------
 // Any
 // ---------------------------------------------------------------------------
@@ -878,7 +909,7 @@ const std::vector<std::string>& builtinGlobalNames() {
     static const std::vector<std::string> names = [] {
         std::vector<std::string> v = {"println", "print", "List", "Nil", "__raise",
                                       "Actor", "Priority", "Future", "Thread", "System",
-                                      "__fmt"};
+                                      "__fmt", "__tryOf"};
         for (unsigned n = 2; n <= kMaxTupleArity; ++n) v.push_back("Tuple" + std::to_string(n));
         return v;
     }();
@@ -888,7 +919,7 @@ const std::vector<std::string>& builtinGlobalNames() {
 void installPrimitives(ProtoContext* ctx, const RuntimeLayout& L) {
     static constexpr MethodEntry globals[] = {
         {"println", &prim_println}, {"print", &prim_print}, {"__raise", &prim_raise},
-        {"__fmt", &prim_fmt}};
+        {"__fmt", &prim_fmt}, {"__tryOf", &prim_try_of}};
     static constexpr MethodEntry any[] = {
         {"toString", &any_toString}, {"equals", &any_equals}, {"==", &any_eqeq},
         {"!=", &any_noteq}, {"eq", &any_eq}, {"ne", &any_ne},
