@@ -656,7 +656,98 @@ The arguments are evaluated where they are written, in source order, however the
 names reorder them. [Chapter 5](05-functions-and-closures.md) §5.10 has the rest,
 including where a mistake is reported.
 
-## 2.18 Where to go next
+## 2.18 Modules: the second file
+
+A protoScala module is a **`.scala` file**, reached by its path with dots where
+a directory separator would be, and its top level **runs when it is imported**,
+once — exactly as in both of your languages. Put this in `util/Strings.scala`:
+
+```scala
+def shout(s: String): String = s.toUpperCase + "!"
+def initials(s: String): String = s.split(" ").map(w => w.substring(0, 1)).mkString(".")
+val greeting: String = "hello"
+```
+
+and beside it:
+
+Fixture: [`tests/conformance/tutorial/02-python-js-modules-import.scala`](../../tests/conformance/tutorial/02-python-js-modules-import.scala)
+
+```scala
+import util.Strings
+@main def run(): Unit =
+  println(Strings.shout("hello") + " " + Strings.greeting)
+```
+
+```text
+HELLO! hello
+```
+
+There is nothing to export and nothing to declare: whatever you write at the
+top level of the file is what an importer can reach. There is also no package
+system, no `__init__.py` and no `package.json` — a module is found by looking
+for the file, in the importing file's own directory first, then in each
+colon-separated entry of `PROTOSCALA_PATH`, then in the working directory.
+
+The forms map almost one to one onto what you already write:
+
+| Python | JavaScript | protoScala |
+|---|---|---|
+| `import util.strings` | `import * as Strings from "./util/Strings.js"` | `import util.Strings` |
+| `import numpy as np` | `import np from "numpy"` | `import util.Strings as S` |
+| `from util.strings import shout` | `import { shout } from "./util/Strings.js"` | `import util.Strings.{shout}` |
+| `from util.strings import initials as short` | `import { initials as short } from …` | `import util.Strings.{initials as short}` |
+| `from util.strings import *` | — | `import util.Strings.*` (or `._`) |
+
+Fixture: [`tests/conformance/tutorial/02-python-js-modules-from-import.scala`](../../tests/conformance/tutorial/02-python-js-modules-from-import.scala)
+
+```scala
+import util.Strings.{shout, initials as short}
+@main def run(): Unit =
+  println(shout("hello") + " " + short("Ada Lovelace"))
+```
+
+```text
+HELLO! A.L
+```
+
+**The one form with no counterpart.** A selector may name a **type**, and then
+the imported name works everywhere a type works — in a constructor call, in a
+type test, and, the interesting one, in a pattern:
+
+Fixture: [`tests/conformance/tutorial/02-python-js-modules-a-type.scala`](../../tests/conformance/tutorial/02-python-js-modules-a-type.scala)
+
+With `util/Shapes.scala` containing `case class Point(x: Int, y: Int)` and a
+`def area(p: Point): Int`:
+
+```scala
+import util.Shapes.{Point, area}
+@main def run(): Unit =
+  Point(3, 4) match
+    case Point(x, y) => println(area(Point(x, y)))
+```
+
+```text
+12
+```
+
+In Python, `from shapes import Point` binds **one** thing: the class object.
+You call it, or you hand it to `isinstance`. Here the same import binds *two*
+things under one name — the value that `Point(3, 4)` calls, and the type that
+`case Point(x, y) =>` consults — and the position decides which one an
+occurrence means. That is possible because an `import` is resolved while the
+importing file is **compiled**, so the class's field list is known before the
+`match` is turned into code. It is the ordinary way data structures move
+between files here, and it has no equivalent in either language you know.
+
+There is one more prefix worth recognising even though you cannot use it yet:
+`import py.numpy as np` routes to another *runtime* in the same process, not to
+a file. The routing works; no runtime registers the `py` alias today, so it
+stops with a clear message.
+[Chapter 15](15-modules-and-polyglot-interop.md) is the whole story — the five
+forms, where files are found, importing types, the polyglot prefixes, and what
+each failure prints.
+
+## 2.19 Where to go next
 
 - [Chapter 4](04-values-and-expressions.md): literals, operators (which are
   methods), strings, equality, `if` and `while` in detail.
@@ -675,3 +766,5 @@ including where a mistake is reported.
   without a GIL.
 - [Chapter 14](14-repl-and-tooling.md): the REPL, for trying each idea
   interactively.
+- [Chapter 15](15-modules-and-polyglot-interop.md): modules, the five import
+  forms, and importing from another language's runtime.

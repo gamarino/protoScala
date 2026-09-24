@@ -79,10 +79,22 @@ foreach(conf_file ${PROTOSCALA_CONFORMANCE_FILES})
     if(conf_file MATCHES "(^|/)_")
         continue()
     endif()
-    if(conf_file MATCHES "^24-modules/")
+    if(conf_file MATCHES "^tutorial/00-readme-a-module")
+        set_tests_properties("conformance/${conf_file}" PROPERTIES
+            ENVIRONMENT
+            "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/tutorial/_readme")
+    elseif(conf_file MATCHES "^24-modules/")
         set_tests_properties("conformance/${conf_file}" PROPERTIES
             ENVIRONMENT
             "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/24-modules/_modules")
+    elseif(conf_file MATCHES "^tutorial/")
+        # The chapter 15 (and chapter 2 "Modules") fixtures import the helper
+        # module tree at tests/conformance/tutorial/_modules, exactly as the
+        # 24-modules fixtures do. Every other tutorial fixture is unaffected by
+        # a PROTOSCALA_PATH it never consults.
+        set_tests_properties("conformance/${conf_file}" PROPERTIES
+            ENVIRONMENT
+            "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/tutorial/_modules")
     elseif(conf_file MATCHES "^25-interop/")
         # The stand-in provider fixtures also get PROTOSCALA_PROVIDERS, which
         # points at the test double built by tests/unit (Task 6). Every other

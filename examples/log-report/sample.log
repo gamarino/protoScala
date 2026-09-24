@@ -1,0 +1,14 @@
+INFO auth user ada signed in
+INFO auth user grace signed in
+DEBUG cache warming 128 entries
+WARN cache eviction rate 0.83 above threshold
+ERROR db connection refused by replica 2
+INFO http GET /orders 200
+WARN http slow response 1.4s on /orders
+ERROR db replica 2 still unreachable
+INFO http GET /orders 200
+ERROR queue dead letter for job 7741
+INFO auth user ada signed out
+*** truncated by logrotate ***
+DEBUG cache 12 entries expired
+ERROR

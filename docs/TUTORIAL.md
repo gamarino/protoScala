@@ -13,25 +13,29 @@ tracker of what works and of every deviation is [STATUS.md](STATUS.md). How the
 runtime is built is in [DESIGN.md](DESIGN.md); the cross-runtime story is in
 [INTEROP.md](INTEROP.md).
 
-> **What runs today (protoScala 0.5.0).** Every chapter describes what the binary
+> **What runs today (protoScala 0.6.0).** Every chapter describes what the binary
 > runs: values and expressions, `val`/`var`/`lazy val`/`def`, `if`/`while`,
 > lambdas and closures, recursion, integer and string arithmetic, `println` and
-> the REPL — and, since Phase 2, the whole object model: **classes, objects and
-> companions, traits with Scala's linearization and stackable `super`, case
-> classes and case objects, tuples, `Option`, `List`, pattern matching and
-> for-comprehensions**, in both brace and indentation syntax; since Phase 5,
-> **actors with three priority bands, futures with a cooperative `await`,
-> `Thread` and `System`**; since Phase 3, **the collection library — `List`,
-> `Vector`, `Range`, `Map`, `Set`, `Either` and `Try` — string interpolation and
-> the `String` method surface**; and, since Phase 4, **`try`/`catch`/`finally`
-> and `throw` with pattern-matched handlers, the `Throwable` hierarchy, `enum`
-> and sealed hierarchies, named and default arguments, extension methods (and
-> the custom string interpolators they bring), `super[T].m`, templates nested in
-> an `object`, and multiple constructor parameter lists**. What remains is
-> modules and polyglot imports (UMD), whose chapter is written together with the
-> phase that implements them. Every runnable snippet in the tutorial is a
-> conformance fixture under `tests/conformance/tutorial/`, run with the test
-> suite.
+> the REPL — and the whole object model: **classes, objects and companions,
+> traits with Scala's linearization and stackable `super`, case classes and case
+> objects, tuples, `Option`, `List`, pattern matching and for-comprehensions**,
+> in both brace and indentation syntax; **actors with three priority bands,
+> futures with a cooperative `await`, `Thread` and `System`**; **the collection
+> library — `List`, `Vector`, `Range`, `Map`, `Set`, `Either` and `Try` —
+> string interpolation and the `String` method surface**; **`try`/`catch`/
+> `finally` and `throw` with pattern-matched handlers, the `Throwable`
+> hierarchy, `enum` and sealed hierarchies, named and default arguments,
+> extension methods (and the custom string interpolators they bring),
+> `super[T].m`, templates nested in an `object`, and multiple constructor
+> parameter lists**; and, new in 0.6.0, **modules: a `.scala` file reached by its
+> path, all five `import` forms, a selector that names a type — so a case class
+> from another file can be destructured in a `match` here — and the four
+> polyglot prefixes `py.`, `js.`, `st.` and `clj.` routed to protoCore's
+> provider registry**. Chapter 15 covers all of it, including the honest limit:
+> the prefixes route, but no runtime in the family registers `py`, `js` or `clj`
+> yet, so those imports stop with `no provider registered for '<alias>'`. Every
+> runnable snippet in the tutorial is a conformance fixture under
+> `tests/conformance/tutorial/`, run with the test suite.
 
 ## How to use this tutorial
 
@@ -47,8 +51,12 @@ compares `match` with Python's `match` and JavaScript's `switch`, and chapter
 9 compares `for … yield` with list comprehensions and `flatMap` chains.
 Chapter 8 then maps `dict`, `set`, `list` and `range()` onto `Map`, `Set`,
 `List`/`Vector` and `Range`, and chapter 10 maps f-strings and template
-literals onto `s"…"` and `f"…"`. Chapter 3 you can skim — it documents
-departures from a language you do not know yet.
+literals onto `s"…"` and `f"…"`. Chapter 15 is the one to read when your
+program outgrows a single file: it maps Python's `import`/`from … import` and
+JavaScript's `import`/`require` onto protoScala's five forms, and covers the one
+form neither language has — importing a **type**, which is what lets a case
+class defined in another file be destructured in a `match` here. Chapter 3 you
+can skim — it documents departures from a language you do not know yet.
 
 **If you are a Scala programmer.** Skim chapter 2 and read chapter 3
 carefully: it lists every departure from Scala 3 on the JVM — no static
@@ -61,7 +69,11 @@ interpolation strategy, the `f` conversion set, `Map`/`Set` iteration order,
 sequence hashing, `Range` bounds, `sorted` without an `Ordering`, no
 `collect`, no `Seq`/`Iterable`, and `split`). Then use chapters 4, 5, 6, 7, 8,
 9, 10 and 14 as a reference for the details; each of chapters 6, 7, 8, 9 and 10
-ends with a section listing what differs from Scala 3 in its area.
+ends with a section listing what differs from Scala 3 in its area. Read chapter
+15 early rather than last: a module here is a **file**, not a package — there is
+no `package` clause and no classpath — and its D90–D96 are the choices that
+follow from that, including a module's top level running at import and an
+`import` being hoisted to its whole unit.
 
 ## Chapters
 
@@ -81,6 +93,8 @@ ends with a section listing what differs from Scala 3 in its area.
 | 12 | [Enums and sealed hierarchies](tutorial/12-enums-and-sealed-hierarchies.md) | `enum` with simple and parameterised cases, `ordinal`/`values`/`valueOf`/`fromOrdinal`, enums as algebraic data types, `sealed trait` hierarchies, and why exhaustiveness is not checked. |
 | 13 | [Actors and futures](tutorial/13-actors-and-futures.md) | Actors, telling and asking, priority bands, futures and their combinators, cooperative `await`, handler failures, threads and time, tuning. |
 | 14 | [The REPL and tooling](tutorial/14-repl-and-tooling.md) | The REPL, multi-line input, commands, classes at the prompt, running scripts, error messages, `--disassemble`. |
+| 15 | [Modules and polyglot interop](tutorial/15-modules-and-polyglot-interop.md) | A module is a file, the five import forms, where modules are found, importing a type, the four polyglot prefixes and what each needs, named arguments across the boundary, and what each failed import prints. |
+| — | [**Worked example**](tutorial/worked-example.md) | One complete program, `examples/log-report/`, rather than one feature at a time: three files and two imports, an `enum` with methods, case classes and pattern matching, `Try` and a `catch` for a malformed line, `Map` aggregation, `for … yield`, interpolation, and actors fanned out with `?` and folded back with `await`. |
 
 ## Running the examples
 

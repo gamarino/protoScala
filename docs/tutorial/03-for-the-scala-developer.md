@@ -189,7 +189,8 @@ Scala's. In force since Phase 3; D58 below states what the order actually is
 and what the tutorial does about it.
 
 **D8 — No Java interop.** There are no `java.*` classes. Cross-language
-interop goes through protoCore's Unified Module Discovery (Phase 6).
+interop goes through protoCore's Unified Module Discovery, which is what the
+`py.`, `js.`, `st.` and `clj.` import prefixes reach (chapter 15).
 
 ### Provisional deviations (Phase 1)
 
@@ -307,8 +308,8 @@ parameters (`@main def m(n: Int, s: String)`, parsed from the command line)
 are rejected. Convert the strings yourself (`args(0).toInt`).
 
 By-name parameters (`x: => Int`) were rejected in Phase 1 and now work, with
-the resolution limit D53 records. `import` is parsed and ignored until modules
-arrive in Phase 6.
+the resolution limit D53 records. `import` was parsed and ignored until modules
+arrived; it now loads a module and binds names (chapter 15, D90-D96).
 
 ### Provisional deviations (Phase 2)
 
@@ -671,8 +672,11 @@ which requires `Colour.Red` — costs nothing, so no deviation was taken.
   where scalac rejects it at compile time. The same holds for an argument given
   twice and one left unfilled. Every message names the method and the parameter.
 - **D82** — an extension is **global and session-wide**, with no import scoping:
-  it is visible to every piece of code that runs after its definition. Scoping
-  needs an import mechanism, which arrives with UMD in Phase 6.
+  it is visible to every piece of code that runs after its definition. The import
+  mechanism arrived with modules, and scoping extensions to it was then
+  **considered and declined**, because protoScala hoists an import to its unit
+  (D96), so a "scoped" extension would mean per-*unit* — a third behaviour that
+  is neither Scala's per-block scoping nor today's session-wide visibility.
 - **D83** — an extension on a builtin type mutates that prototype for the whole
   session, so two units cannot define conflicting extensions of the same name on
   the same type; a collision with an existing member of the type is refused, where
@@ -696,6 +700,58 @@ which requires `Colour.Red` — costs nothing, so no deviation was taken.
 - **D89** — a named argument on a **function value** binds against the names
   written in the function literal, where scalac rejects it because
   `Function2.apply`'s parameters are called `v1` and `v2`.
+
+### Modules and polyglot imports (D90–D96)
+
+Modules and the `import` that reaches them are described in
+[chapter 15](15-modules-and-polyglot-interop.md), which ends with its own
+departures section; this is the catalogue. The framing to keep in mind is that
+Scala has **no file-level modules** to diverge from — it has packages resolved
+against a classpath by a build tool — so most of what follows is a choice with
+no Scala counterpart rather than a departure from one.
+
+- **D90** — a module's top level runs **when it is imported**, during the
+  importing unit's compilation, and not lazily on first member access the way an
+  `object`'s body does. Python and JavaScript both run a module at import, and a
+  module that exists for its effects would otherwise never run at all. The load
+  is keyed by the file's canonical absolute path, so it happens exactly once per
+  file per session.
+- **D91** — a module **is an `object`**: `util/Shapes.scala` becomes
+  `object Shapes`, its classes are `Shapes.Point`, and its name comes from the
+  **file** rather than from anything written inside it. There is no `package`
+  clause, no classpath and no `package object`. A module may not define an
+  `@main`, which is refused (`a module may not define an @main method: Shapes is
+  imported, not run`) rather than ignored, because a silently ignored entry point
+  in a library file is a trap.
+- **D92** — a **wildcard import of a foreign module** (`import py.numpy.*`) is
+  refused: a foreign object's attribute names cannot be enumerated, and binding a
+  guessed set would fail silently at the first wrong name. Named selectors work,
+  and a wildcard over a protoScala module is unaffected.
+- **D93** — `given` selectors (`import M.given`, `import M.{given T}`) are parsed
+  and **ignored**, as every other given is (D3): there are no type classes to
+  resolve. Ignored rather than rejected, so a file written for Scala 3 still
+  compiles.
+- **D94** — a **foreign module binds no types**: `new`, a type pattern and
+  `isInstanceOf` on a class reached through `py.`, `js.`, `st.` or `clj.` are
+  unavailable, because a foreign value carries no class description. Its members
+  resolve by name at run time, which is what INTEROP's type-mapping table already
+  says; the detection is late, and loud.
+- **D95** — `--disassemble` **resolves imports**, and therefore runs the top
+  level of every module the file imports. A file cannot be compiled without its
+  imports, and an import is resolved by loading (D90).
+- **D96** — an `import` is **hoisted to its compilation unit** and is visible for
+  the whole unit, where Scala scopes it lexically: an import written inside a
+  block or a method binds for the whole file and its binding outlives the block.
+  Lexical scoping needs a scope-aware name resolver the compiler does not have,
+  and D82's extensions have the same shape, so the two are scoped together or not
+  at all.
+
+**What did not diverge**, and is worth stating because you will look for it: the
+five import forms have Scala's meaning; `as` and `=>` are both accepted as
+renames and `*` and `_` are both accepted as wildcards; a selector that names
+nothing is an error rather than a silent no-op; and a selector may name a
+**type**, which is usable in a `new`, a type test and a constructor pattern,
+because an import is resolved when the importing file is compiled.
 
 **Retired by Phase 4.** **D56** — an interpolator other than `s`, `f` or `raw` was
 a compile error; it is now lowered to `StringContext(<literals>).<name>(<args>)`
@@ -727,7 +783,8 @@ Not implemented yet, with the phase that brings each (see
 | Feature | Phase |
 |---|---|
 | Exhaustiveness checking for `match` (D4: types are erased), local and anonymous classes and templates nested in a `class` (D80) | later (v0.7+) |
-| Modules and polyglot imports (UMD), packaging | 6 |
+| A `py`, `js` or `clj` provider for the polyglot import prefixes — cross-repository work, not a protoScala change (chapter 15, §15.5) | later (Track Y) |
+| A wildcard import of a foreign module (D92), lexical import scoping (D96) | later |
 
 ## 3.4 What is new
 
@@ -740,7 +797,8 @@ is still ahead (see [DESIGN.md](../DESIGN.md)):
 - **Concurrency without a GIL.** Native actors with lock-free mailboxes,
   three priority bands and a cooperative `await` (Phase 5, DESIGN §8).
 - **Polyglot interop in memory.** Python, JavaScript, Smalltalk and Clojure
-  modules consumed through Unified Module Discovery, without serialisation
-  (Phase 6, [INTEROP.md](../INTEROP.md)).
+  modules consumed through Unified Module Discovery, without serialisation. The
+  boundary is built and exercised; what is missing is a provider on the other
+  side (chapter 15, §15.5 and [INTEROP.md](../INTEROP.md)).
 - **Instant start-up.** No JVM to warm up: the REPL prompt is the target of a
   cold-start budget measured every release.
