@@ -15,7 +15,7 @@ protoScala is also a **platform validation project**: protoCore aims to be a sol
 
 ## A flavour of the language
 
-Every line below runs on 0.5.0 today.
+Every line below runs on 0.6.0 today.
 
 ```scala
 case class Increment(by: Int)
@@ -62,6 +62,144 @@ println(3.squared)                            // 9
 
 println(try "x".toInt catch case e: NumberFormatException => -1)   // -1
 ```
+
+## protoScala in 10 minutes — for Scala programmers
+
+Install a package (`.deb` or `.tar.gz` — neither needs `LD_LIBRARY_PATH`), or
+build from source; then run a script or start the REPL:
+
+```
+$ protoscala hello.scala
+$ protoscala
+scala> 1 + 1
+val res0 = 2
+```
+
+Five things are different, and you will hit all five in the first ten minutes.
+
+**1. There is no static typechecker.** Type annotations are parsed and erased, so
+a type error is not a compile error:
+
+```scala
+def add(a: Int, b: Int): String = a + b
+println(add(1, 2))                            // 3 — no complaint about String
+println("abc".lenght)                         // NoSuchMethodError at run time
+```
+
+The second line fails when it runs, naming the method and the receiver. That is
+the trade: the platform is late-binding, so detection is late, but it is never
+silent.
+
+**2. Integers never overflow.** `Int`, `Long` and `BigInt` are one arbitrary-
+precision type (D1):
+
+```scala
+println(2147483647 + 1)                       // 2147483648, not -2147483648
+def factorial(n: Int): Int = if n == 0 then 1 else n * factorial(n - 1)
+println(factorial(30))                        // 265252859812191058636308480000000
+```
+
+**3. There are no implicits and no givens** (D3). `given`, `using` and implicit
+conversions are refused at the point they are written:
+
+```scala
+given x: Int = 1                              // error: implicits and givens are
+                                              // not supported (D3)
+```
+
+Type classes, `Ordering`, `ExecutionContext` and everything built on them are
+therefore absent. Extension methods exist and are session-wide (D82).
+
+**4. There is no Java, and the exception hierarchy is twenty unqualified names.**
+
+```scala
+println(new java.io.File("x"))                // error: Not found: type java.io.File
+
+try throw new IllegalStateException("bad")
+catch case e: Exception => println(e.getMessage)    // bad
+```
+
+`catch { case e: java.io.IOException => }` does not compile: there is no `java`
+namespace (D8, D73).
+
+**5. Modules instead of packages.** There is no `package` clause and no
+classpath. A `.scala` file *is* a module, reached by its path, and an import is
+resolved when the file is compiled — which is why an imported class is usable as a
+type:
+
+```scala
+import util.Shapes.{Point, area}
+println(area(Point(3, 4)))                    // 12
+```
+
+The full catalogue of departures, keyed to the `D<n>` ids, is
+[tutorial chapter 3](docs/tutorial/03-for-the-scala-developer.md).
+
+## protoScala in 10 minutes — for Python and JavaScript developers
+
+Install a package, or build from source; then run a script or start the REPL:
+
+```
+$ protoscala hello.scala
+$ protoscala
+scala> 1 + 1
+val res0 = 2
+```
+
+Five things are new if you are coming from Python or JavaScript.
+
+**1. `val` and immutability by default.** `val` is a binding you cannot reassign —
+`const`, or a name you agree not to rebind. Collections go further: they are
+persistent, so an "update" returns a *new* collection and the old one is
+unchanged and still cheap, because the two share their structure:
+
+```scala
+val stock = Map("a" -> 1)
+val more = stock + ("b" -> 2)
+println((stock.size, more.size))              // (1,2) — `stock` never changed
+```
+
+There is no defensive copying to remember, and no aliasing bug to find.
+
+**2. Almost everything is an expression.** `if`, `match` and a block all have a
+value, so there is no separate ternary and no "assign in every branch":
+
+```scala
+println(if 2 > 1 then "yes" else "no")        // yes
+```
+
+**3. `match` replaces the chain of `isinstance`.** It destructures while it
+tests:
+
+```scala
+case class P(x: Int, y: Int)
+val p = P(1, 2)
+println(p.copy(y = 9))                        // P(1,9)
+println(p match { case P(x, _) => x })        // 1
+```
+
+**4. Actors instead of threads and `async`.** An actor owns its state; you send
+it a message and it processes one at a time, on real OS threads with no global
+lock. `?` asks and returns a future; `await` waits for one:
+
+```scala
+val counter = Actor.spawn(0)((state, msg) => (state + msg, state + msg))
+counter ! 5
+println((counter ? 0).await)                  // 5
+println(Future(6 * 7).await)                  // 42
+```
+
+Inside an actor, `await` *suspends the turn* rather than blocking the thread, so
+an actor waiting on a future does not consume one.
+
+**5. Integers with no ceiling, and no floats pretending to be integers.**
+
+```scala
+println(2147483647 + 1)                       // 2147483648
+```
+
+The bridge from Python and JavaScript, concept by concept, is
+[tutorial chapter 2](docs/tutorial/02-for-the-python-or-javascript-developer.md).
 
 ## What polyglot interop does and does not do today
 
@@ -139,12 +277,15 @@ recorded under R5 in [docs/STATUS.md](docs/STATUS.md).
 
 ## Project status
 
-**Phase 4 complete (version 0.5.0) — not production ready, open for community
+**Phase 6 complete (version 0.6.0) — not production ready, open for community
 review.** Phase 5 was implemented before Phases 3 and 4, so the minor version went
 0.2.0 → 0.3.0 (actors) → 0.4.0 (collections) → 0.5.0 (exceptions, enums,
-arguments and extensions); modules and polyglot imports (UMD, Phase 6) are what
-remain. The binary runs Scala 3 scripts and offers a REPL, in both brace and
-significant-indentation syntax:
+arguments and extensions) → 0.6.0 (modules, UMD and packaging). Every phase the
+roadmap named is now closed; what remains is listed in
+[docs/ROADMAP.md](docs/ROADMAP.md) as tracks rather than phases, and the one that
+decides whether `import py.numpy` will ever work is **Track Y**, which is work in
+protoPython rather than here. The binary runs Scala 3 scripts and offers a REPL,
+in both brace and significant-indentation syntax:
 
 - `val`/`var`/`lazy val`/`def`, `if`/`while`, lambdas and closures, placeholder
   syntax (`_ + 1`), recursion (with `StackOverflowError` instead of a crash),
@@ -525,7 +666,9 @@ protoscala
 - [docs/STATUS.md](docs/STATUS.md) — living implementation tracker
 - [docs/DESIGN.md](docs/DESIGN.md) — the approved design specification
 - [docs/ROADMAP.md](docs/ROADMAP.md) — phases with verifiable done-when criteria
-- [docs/INTEROP.md](docs/INTEROP.md) — UMD polyglot interop
+- [docs/tutorial/15-modules-and-polyglot-interop.md](docs/tutorial/15-modules-and-polyglot-interop.md) — modules and polyglot interop, chapter by chapter
+- [docs/tutorial/worked-example.md](docs/tutorial/worked-example.md) — the worked example, where the pieces are shown working together
+- [docs/INTEROP.md](docs/INTEROP.md) — UMD polyglot interop: what routes where, and what is reachable today
 - [docs/platform/](docs/platform/) — protoCore extensions specified by this project
 - [docs/plans/](docs/plans/) — task-level implementation plans
 

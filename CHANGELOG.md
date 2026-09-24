@@ -29,6 +29,119 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `def` taken as a function value, evaluate the argument once at the call.
   Scala resolves all of these from static types.
 
+## [0.6.0] - 2026-09-24
+
+Phase 6: modules, UMD, the precompiled prelude and packaging. Built against
+protoCore `983bbf98` (2.1.0) — **Phase 6 needed nothing new from protoCore**
+(P3), and the one place it might have is recorded as an escalation rather than
+patched.
+
+### Added
+
+- **`import` is a binding form.** It resolves at **compile time**, through a
+  `ModuleLoader` seam the compiler holds a pointer to, which is what makes an
+  imported class usable as a **type**: `new Point(1, 2)`, `case p: Point` and
+  `case Point(x, y)` all compile. No `ProtoObject*` crosses that seam, so the AST
+  and the compiler still hold no protoCore pointer (DESIGN §3.3).
+- **A module is a `.scala` file reached by its path**, desugared into a synthetic
+  `object` named after the file (D91), so Phase 4's nested-template lifting gives
+  its classes their qualified names and their companions with no new mechanism.
+  Its top level runs **when it is imported** (D90), once per canonical absolute
+  path, with cycle detection and a failed load deliberately not cached.
+- **All five import forms**, with `as` and `=>` both accepted as renames and `*`
+  and `_` both as wildcards; `given` selectors parsed and ignored (D93). Modules
+  are searched in the importing file's directory, then `PROTOSCALA_PATH`, then the
+  working directory, and a miss names every path it tried.
+- **`ScalaModuleProvider`** — alias `scala`, GUID `protoScala-source-v1` — so
+  protoCore's resolution chain and another runtime can load a protoScala module.
+  Registered once per process; its session is found through a `ProtoSpace`-keyed
+  registry, never a thread-local, which would answer "module not found" on every
+  actor worker. `provider:scala` is **prepended** to the chain, never substituted
+  for it.
+- **Prefix routing** for `py.`, `js.`, `st.` and `clj.`, from a closed four-name
+  list. A prefixed import calls the named provider's `tryLoad` directly and does
+  not go through `getImportModule`, because protoCore's `SharedModuleCache` is
+  keyed by logical path with no `ProtoSpace` component.
+- **Provider plug-ins**, `dlopen`'d from `PROTOSCALA_PROVIDERS` and from
+  `<prefix>/lib/protoscala/providers`, with a two-symbol C ABI. protoScala ships
+  none; `--version` reports what it found and where it looked.
+- **The mandatory boundary catch shape** (`src/umd/ForeignBoundary.h`): six
+  clauses in ROADMAP's order plus `catch (const std::logic_error&) { throw; }`
+  before the `std::exception` arm, which ROADMAP's list omits and D74 requires —
+  without it this template would have retired D74 silently. One unit test per
+  clause.
+- **`ImportError`**, one new prelude class. Within protoScala an import failure is
+  a compile error; the class is what a caller in *another* runtime receives.
+- **The prelude is compiled at build time.** `protoscala-precompile` emits static
+  tables that a hand-written reconstruction walks, with no lexer, parser,
+  desugarer or compiler in the start-up path. It is a **build product** with a
+  CMake `DEPENDS` on `lib/prelude.scala`, not a cache, so it cannot go stale; a
+  format version and an FNV-1a-64 of the source guard a hand-copied file and fall
+  back to the source rather than failing. `PROTOSCALA_PRELUDE_NO_IMAGE=1` takes
+  the source path, so both live in one binary.
+- Tutorial chapter 15, the worked example, and two "protoScala in 10 minutes"
+  sections in the README — one per audience, every snippet a fixture.
+
+### Fixed
+
+- **A native from a provider plug-in that threw a non-`std::exception` terminated
+  the process.** `ExecutionEngine::callNative` gained the last-resort clause;
+  `std::logic_error` still passes through untouched, so D74 survives.
+- `GlobalTable::bind` and `aliasType` now seed the key counters. A name installed
+  from the prelude image or from an import never goes through `declare`, so a REPL
+  redefinition of a prelude name would have been handed the prelude's own key and
+  **silently overwritten it**.
+- A module could not import another module: `desugarModule` moved the import
+  inside the synthetic object, where a template body *skips* `Import` nodes. A
+  template-level import is now compiled rather than skipped, which was correct
+  while `import` was parsed-and-ignored and is a silent trap now.
+- `import M.given` swallowed the following line: `given` was missing from the
+  layout pass's `canEndStatement`.
+- Forcing a module's singleton segfaulted when its top level called a native: it
+  is forced from the compiler, not from `run()`, so nothing had installed the
+  thread's active call context.
+
+### Packaging
+
+The installer phase (merged 2026-09-23) delivered the CPack block, the DEB
+generator, `install(TARGETS)`, the `INSTALL_RPATH $ORIGIN/../lib` that removes the
+need for `LD_LIBRARY_PATH`, and `docs/INSTALLATION.md`. **The changelog never
+recorded any of it; this entry is where that gap is closed**, not backdated into
+0.3.0, because it landed after 0.3.0 was cut and a changelog that rewrites history
+is worse than one with a gap.
+
+0.6.0 adds what the installer phase left: the `.tar.gz` half was configured and
+**never built**; the only artefact was at version 0.3.0; and `build_pkg/` was
+untracked and unignored. Both artefacts now exist at 0.6.0, and both were
+*extracted and run* under `env -u LD_LIBRARY_PATH`, with `ldd` confirming
+libprotoCore resolved from inside the package rather than from a system copy.
+The package also creates `lib/protoscala/providers`, so the path `--version`
+prints exists on an installed system. `tests/cli/package.sh` re-runs that smoke
+test on demand and skips, visibly, when there is no archive to test.
+
+RPM, macOS DragNDrop and Windows NSIS/ZIP remain configured but never built,
+which the installer phase recorded as its own deliberate gap.
+
+### Known limitations
+
+- **No runtime in the family registers a `py`, `js` or `clj` provider.**
+  protoScala routes all four family prefixes and reports
+  `ImportError: no provider registered for '<alias>'`; protoPython registers
+  `native`, `python_stdlib`, `compiled` and `hpy`, and protoJS and protoClojure
+  register none. `tests/conformance/23-named-arguments/foreign-python-*.scala`
+  stay `XFAIL` with their recorded output and a directive that now names the real
+  blocker. ROADMAP's **Track Y** is the cross-repository work. The keyword
+  convention itself *is* now exercised across a real provider boundary.
+- **A provider serves only callers that share its `ProtoSpace`.** Two runtimes
+  were made co-resident in one process and both providers stayed reachable — R5's
+  first real evidence since Phase 0 — but a cross-runtime import misses, because
+  `ModuleProvider::tryLoad` receives the caller's context. This is the UMD
+  contract, not a defect in either runtime.
+- **A wildcard import of a foreign module is refused** (D92), and **imports are
+  hoisted to their unit rather than scoped lexically** (D96), which is the same
+  question as scoping extension methods (D82) and is decided with it.
+- See "Cold start" below for DESIGN §1's budget.
+
 ## [0.5.0] - 2026-09-24
 
 Phase 4: exceptions, `super[T]`, enums, named and default arguments, extension
