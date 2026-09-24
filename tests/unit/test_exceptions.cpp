@@ -9,6 +9,7 @@
 #include "compiler/BytecodeModule.h"
 #include "runtime/Errors.h"
 #include "runtime/FutureYield.h"
+#include "umd/ForeignBoundary.h"
 
 #include <gtest/gtest.h>
 
@@ -210,4 +211,107 @@ TEST(KeywordConvention, EveryParameterNameOfALinkedModuleIsInterned) {
               "pos=[] kw=[height=3,width=2]");
     EXPECT_EQ(proto::ProtoString::createSymbol(ctx, "width"),
               proto::ProtoString::createSymbol(ctx, "width"));
+}
+
+// ---------------------------------------------------------------------------
+// The foreign-boundary catch shape (Phase 6, ROADMAP's second hand-off,
+// protoST's mandatory exceptions §6)
+// ---------------------------------------------------------------------------
+//
+// SIX clauses in this order, and the order is the contract. Each case below
+// throws one thing through translateForeignException and asserts what comes out
+// the other side; removing any clause turns exactly one of them red. The one
+// ROADMAP's prescribed five do not mention -- std::logic_error -- is the one that
+// would retire D74 silently, because std::logic_error IS a std::exception.
+
+TEST(ForeignBoundary, AFutureYieldPassesThroughUntouched) {
+    // Not a std::exception, and first anyway: a later catch(...) would eat a
+    // cooperative suspension and the actor would never resume.
+    EXPECT_THROW(translateForeignException([]() -> const proto::ProtoObject* {
+                     throw FutureYield(PROTO_NONE);
+                 }),
+                 FutureYield);
+}
+
+TEST(ForeignBoundary, AScalaThrowKeepsItsValue) {
+    // ScalaThrow IS a std::exception. Without its clause the std::exception arm
+    // would rewrite every Scala exception crossing a module boundary into a
+    // RuntimeException, losing its class and its payload.
+    const proto::ProtoObject* marker = PROTO_TRUE;
+    try {
+        translateForeignException(
+            [&]() -> const proto::ProtoObject* { throw ScalaThrow(marker); });
+        FAIL() << "expected a ScalaThrow";
+    } catch (const ScalaThrow& t) {
+        EXPECT_EQ(t.value, marker);
+    }
+}
+
+TEST(ForeignBoundary, AScalaErrorKeepsItsClassName) {
+    // Already a translation; re-translating it would replace a precise class
+    // name with RuntimeException.
+    try {
+        translateForeignException([]() -> const proto::ProtoObject* {
+            throw ScalaError("IllegalArgumentException", "bad");
+        });
+        FAIL() << "expected a ScalaError";
+    } catch (const ScalaError& e) {
+        EXPECT_EQ(e.className(), "IllegalArgumentException");
+        EXPECT_EQ(e.message(), "bad");
+    }
+}
+
+TEST(ForeignBoundary, AVmDefectIsNotTranslated) {
+    // D74 stays true across the boundary: a compiler or VM defect must never be
+    // maskable by `catch { case e: Throwable => }`. It is re-thrown BEFORE the
+    // std::exception arm, which would otherwise catch it.
+    EXPECT_THROW(translateForeignException([]() -> const proto::ProtoObject* {
+                     throw std::logic_error("compiler bug");
+                 }),
+                 std::logic_error);
+    // And specifically NOT as a ScalaError, which is the silent failure this
+    // clause exists to prevent.
+    try {
+        translateForeignException(
+            []() -> const proto::ProtoObject* { throw std::logic_error("compiler bug"); });
+        FAIL() << "expected a std::logic_error";
+    } catch (const ScalaError&) {
+        FAIL() << "a VM defect was translated into a catchable Scala exception (D74)";
+    } catch (const std::logic_error&) {
+    }
+}
+
+TEST(ForeignBoundary, AStdExceptionBecomesARuntimeExceptionCarryingWhat) {
+    try {
+        translateForeignException([]() -> const proto::ProtoObject* {
+            throw std::runtime_error("provider exploded");
+        });
+        FAIL() << "expected a ScalaError";
+    } catch (const ScalaError& e) {
+        EXPECT_EQ(e.className(), "RuntimeException");
+        EXPECT_NE(e.message().find("provider exploded"), std::string::npos);
+    }
+}
+
+TEST(ForeignBoundary, AnUnknownThrowBecomesANamedRuntimeException) {
+    // The last resort says so rather than inventing a message.
+    try {
+        translateForeignException([]() -> const proto::ProtoObject* { throw 42; });
+        FAIL() << "expected a ScalaError";
+    } catch (const ScalaError& e) {
+        EXPECT_EQ(e.className(), "RuntimeException");
+        EXPECT_EQ(e.message(), "native exception");
+    }
+}
+
+TEST(ForeignBoundary, TheTemplateInstantiatesForEveryReturnTypeTheSitesNeed) {
+    // Its return type is decltype(call()), so one template covers the
+    // ProtoObject* of the three UMD sites and the int of the plug-in entry point
+    // with no second overload. A value passes through untouched.
+    EXPECT_EQ(translateForeignException([] { return 0; }), 0);
+    EXPECT_EQ(translateForeignException([]() -> const proto::ProtoObject* { return PROTO_TRUE; }),
+              PROTO_TRUE);
+    int side = 0;
+    translateForeignException([&] { side = 7; });  // void
+    EXPECT_EQ(side, 7);
 }

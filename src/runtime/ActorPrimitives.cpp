@@ -579,7 +579,8 @@ void bindPreludeHooks(proto::ProtoContext* ctx, RuntimeLayout& layout, const Glo
             "NullPointerException", "NumberFormatException",
             "UnsupportedOperationException", "MatchError", "UninitializedFieldError",
             "InterruptedException", "NoSuchMethodError", "StackOverflowError",
-            "OutOfMemoryError"};
+            "OutOfMemoryError",
+            "ImportError"};  // Phase 6: a UMD module load that failed
         layout.hooks.throwableClasses.clear();
         for (const char* name : kThrowables) {
             const ClassInfo* info = globals.findType(name);

@@ -11,10 +11,14 @@
 #include "compiler/BytecodeModule.h"
 #include "compiler/Compiler.h"
 #include "compiler/GlobalTable.h"
+#include "compiler/ModuleLoader.h"
+#include "repl/ModuleTable.h"
 #include "runtime/ExecutionEngine.h"
+#include "umd/ScalaModuleProvider.h"
 #include "runtime/Runtime.h"
 #include "protoCore.h"
 
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -28,10 +32,13 @@ struct EvalOutcome {
     std::vector<std::string> echo;  // REPL lines to print on stdout
 };
 
-class Session {
+// Session is the ModuleLoader the Compiler consults (Phase 6 A0-1) and the
+// ModuleHost ScalaModuleProvider resolves through (A0-5), because it is what owns
+// the ProtoSpace, the engine and the globals.
+class Session : public ModuleLoader, public ModuleHost {
 public:
     Session();
-    ~Session();
+    ~Session() override;
     Session(const Session&) = delete;
     Session& operator=(const Session&) = delete;
 
@@ -48,8 +55,30 @@ public:
     bool needsMoreInput(const std::string& source) const;
     // :load — runs a file in this session (its definitions stay visible).
     bool loadFile(const std::string& path);
-    // --disassemble: prints the compiled bytecode of a file; exit code.
+    // --disassemble: prints the compiled bytecode of a file; exit code. Because
+    // an import is resolved by loading (D90), this RUNS the top level of every
+    // module the file imports (D95).
     int disassemble(const std::string& path);
+
+    // --- ModuleLoader (compiler side; no ProtoObject* crosses it) ----------
+    const ModuleExports& load(const std::string& providerSpec, const std::string& logicalPath,
+                              const std::string& importerDir, SourcePos pos) override;
+    std::string bindForeignMember(const ModuleExports& mod, const std::string& name,
+                                  SourcePos pos) override;
+
+    // --- ModuleHost (provider side) ---------------------------------------
+    std::string findModuleFile(const std::string& logicalPath,
+                               const std::string& importerDir) override;
+    std::string triedPathsOf(const std::string& logicalPath,
+                             const std::string& importerDir) override;
+    const LoadedModule& loadModuleFile(proto::ProtoContext* ctx, const std::string& absPath,
+                                       const std::string& logicalPath) override;
+
+    // The provider plug-ins this session loaded, in load order (--version).
+    const std::vector<std::string>& providerPlugins() const { return pluginPaths_; }
+    // The space this session owns, for the UMD tests: the provider resolves its
+    // host through it, so a test has to be able to name it.
+    proto::ProtoSpace& space() { return space_; }
 
 private:
     proto::ProtoSpace space_;  // first member: destroyed last
@@ -58,6 +87,30 @@ private:
     GlobalTable globals_;
     std::vector<std::unique_ptr<BytecodeModule>> modules_;
     int resultCounter_ = 0;
+
+    // --- Phase 6: modules -------------------------------------------------
+    // The table a module is compiled against: the session's, right after the
+    // prelude. The module sees the prelude (it needs List, Option, println) and
+    // nothing of the importer, and the COPY shares the key counters, so a
+    // module's `trim` becomes `trim` or `trim#1` and can never collide with a
+    // session global of the same name (A0-16, D25's machinery).
+    GlobalTable preludeGlobals_;
+    ModuleTable modulesByPath_;
+    std::map<std::string, ModuleExports> foreignModules_;  // spec/path -> exports
+    int moduleCounter_ = 0;               // fresh keys for foreign module globals
+    std::vector<std::string> pluginPaths_;
+    // a.b.C -> the files findModuleFile will try, in order.
+    std::vector<std::string> candidatePathsOf(const std::string& logicalPath,
+                                              const std::string& importerDir) const;
+    // A prefixed import. It calls the named provider's tryLoad DIRECTLY and does
+    // NOT go through ProtoSpace::getImportModule: protoCore's SharedModuleCache
+    // is keyed by logical path with no ProtoSpace component
+    // (core/ModuleCache.cpp), so in a two-runtime process a cached module could
+    // be handed to whichever runtime asked second (A0-4).
+    const ModuleExports& loadForeign(const std::string& providerSpec,
+                                     const std::string& logicalPath, SourcePos pos);
+    ModuleExports collectExports(const GlobalTable& table, const std::string& objectName) const;
+    const proto::ProtoObject* forceGlobal(proto::ProtoContext* ctx, const std::string& key);
 
     // Parses, compiles and runs one unit. Reports errors on stderr.
     // allowIncomplete: a parse error at end-of-input in Repl mode is

@@ -36,6 +36,12 @@ class MatchError(message: String) extends RuntimeException(message)
 // scala.UninitializedFieldError extends RuntimeException despite its name, and
 // matching that is free.
 class UninitializedFieldError(message: String) extends RuntimeException(message)
+// Phase 6. Scala has no ImportError, so nothing is diverged from; a failed
+// module load needs a name that says what failed. Within protoScala an import is
+// resolved at COMPILE time (D90), so a failed import is a compile error and not
+// a catchable Throwable; this class is what a caller in ANOTHER runtime receives
+// when a protoScala module it imported through UMD fails to load.
+class ImportError(message: String) extends RuntimeException(message)
 class InterruptedException(message: String) extends Exception(message)
 class NoSuchMethodError(message: String) extends Error(message)
 class StackOverflowError(message: String) extends Error(message)

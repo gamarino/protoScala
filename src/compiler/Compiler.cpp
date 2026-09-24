@@ -11,6 +11,7 @@
  *    local defs).
  */
 #include "compiler/Compiler.h"
+#include "umd/Prefixes.h"
 #include "support/FormatSpec.h"
 #include "runtime/StackGuard.h"
 
@@ -649,6 +650,14 @@ void Compiler::compileExpr(const Node& n) {
 }
 
 void Compiler::compileIdent(const Ident& id) {
+    // An imported member alias rewrites to the member access the qualified
+    // spelling compiles to. Consulted after locals and members (an inner scope
+    // wins) and before globals (an import shadows an outer binding).
+    if (const ImportedTerm* t = importedTerm(id.name); t && !localOrMemberShadows(id.name)) {
+        const NodePtr sel = importedTermSelect(*t, id.pos);
+        compileExpr(*sel);
+        return;
+    }
     const Resolution r = resolve(id.name, id.pos);
     if (r.ref == RefKind::Member) {  // this.name (virtual: an override in a subclass wins)
         loadThis(id.pos);
@@ -764,6 +773,17 @@ void Compiler::compileApply(const Apply& a) {
     if (const std::string path = liftedGlobalPath(*fn); !path.empty()) {
         lifted = std::make_unique<Ident>(fn->pos, path);
         fn = lifted.get();
+    }
+    // `shout("hi")` after `import util.Strings.{shout}` is `Strings.shout("hi")`,
+    // so the callee is rewritten here and every path below -- SEND_APPLY,
+    // SEND_KW, the by-name masks -- is the one the qualified spelling takes.
+    NodePtr importedSelect;
+    if (fn->kind == NodeKind::Ident) {
+        const auto& id = as<Ident>(*fn);
+        if (const ImportedTerm* t = importedTerm(id.name); t && !localOrMemberShadows(id.name)) {
+            importedSelect = importedTermSelect(*t, fn->pos);
+            fn = importedSelect.get();
+        }
     }
     const std::uint32_t byName = byNameMaskOfCallee(*a.fn);
     bool named = false;
@@ -1055,7 +1075,14 @@ void Compiler::compileStats(const std::vector<NodePtr>& stats, std::size_t from,
     for (std::size_t k = from; k < stats.size(); ++k) {
         const Node& s = *stats[k];
         const bool last = (k + 1 == stats.size());
-        if (s.kind == NodeKind::DefDef || s.kind == NodeKind::Import) continue;
+        if (s.kind == NodeKind::Import) {
+            // Hoisted out of the block (D96): the binding is installed in the
+            // unit's tables and outlives the block, so it takes effect from here
+            // to the end of the unit rather than to the end of the block.
+            compileImport(as<Import>(s));
+            continue;
+        }
+        if (s.kind == NodeKind::DefDef) continue;
         if (s.kind == NodeKind::ValDef) {
             const auto& v = as<ValDef>(s);
             if (v.isLazy) continue;  // hoisted (step 2)
@@ -1244,6 +1271,203 @@ void Compiler::compileLazyThunk(const Node& rhs, SourcePos pos) {
 }
 
 // ---------------------------------------------------------------------------
+// Imports (Phase 6, DESIGN §9)
+// ---------------------------------------------------------------------------
+
+namespace {
+// The name a selector import binds the module object to, so an imported member
+// compiles through exactly the same Select path the qualified spelling takes.
+// `$` cannot occur in a protoScala identifier, so this is invisible to a user
+// and cannot collide: `import util.Strings.{shout}` binds `shout` and NOT
+// `Strings`, exactly as Scala does.
+std::string hiddenModuleName(const std::string& moduleName) {
+    return "__module$" + moduleName;
+}
+
+std::string joinPath(const std::vector<std::string>& p, std::size_t from, std::size_t to) {
+    std::string out;
+    for (std::size_t i = from; i < to; ++i) {
+        if (!out.empty()) out += '.';
+        out += p[i];
+    }
+    return out;
+}
+}  // namespace
+
+const ClassInfo* Compiler::moduleClassOf(const ModuleExports& mod) const {
+    return mod.moduleTypeKey.empty() ? nullptr : globals_.findTypeByKey(mod.moduleTypeKey);
+}
+
+const Compiler::ImportedTerm* Compiler::importedTerm(const std::string& name) const {
+    auto it = importedTerms_.find(name);
+    return it == importedTerms_.end() ? nullptr : &it->second;
+}
+
+NodePtr Compiler::importedTermSelect(const ImportedTerm& t, SourcePos pos) const {
+    return std::make_unique<Select>(pos, std::make_unique<Ident>(pos, t.moduleKey), t.memberName);
+}
+
+// True when a local or a member of the template being compiled shadows `name`.
+// An inner scope wins over an import; an import wins over an outer global,
+// which is Scala's rule.
+bool Compiler::localOrMemberShadows(const std::string& name) {
+    for (FunctionState* f = fn_; f; f = f->parent)
+        if (findInFunction(f, name)) return true;
+    return memberOf(name) != nullptr;
+}
+
+// Binds the module object under a name no user can write, and returns it. Every
+// imported member is compiled as a Select on that name, so the emitted code is
+// exactly what the qualified spelling emits (plan A0-8: no new opcode).
+std::string Compiler::bindHiddenQualifier(const ModuleExports& mod) {
+    const std::string hidden = hiddenModuleName(mod.moduleName);
+    globals_.bind(hidden, GlobalBinding{mod.moduleKind, mod.moduleKey, {}});
+    // So a call through the alias still honours the callee's by-name parameters
+    // (D47): byNameMasksOfObjectMember looks the class up as `<name>.type`.
+    if (!mod.moduleTypeKey.empty()) globals_.aliasType(hidden + ".type", mod.moduleTypeKey);
+    return hidden;
+}
+
+void Compiler::adoptExportedNames(const ModuleExports& mod) {
+    // Phase 4 lifted the module's nested templates to qualified top-level names
+    // (`Shapes.Point`) with their companions, so copying those names and their
+    // ClassInfos is all a module needs: no new resolution rule, no new opcode.
+    for (const auto& kv : mod.types) {
+        globals_.defineType(kv.second);
+        globals_.aliasType(kv.first, kv.second.key);
+    }
+    for (const auto& kv : mod.terms) globals_.bind(kv.first, kv.second);
+    for (const auto& kv : mod.byNameSelectors) globals_.noteByNameSelector(kv.first, {kv.second});
+}
+
+void Compiler::importWildcard(const ModuleExports& mod, SourcePos pos) {
+    if (mod.foreign)
+        throw CompileError("a wildcard import of a foreign module is not supported: name the "
+                           "members you need, as in `import " + mod.moduleName +
+                               ".{a, b}` (D92)",
+                           pos);
+    const ClassInfo* cls = moduleClassOf(mod);
+    if (!cls) throw CompileError("ImportError: " + mod.moduleName + " exports nothing", pos);
+    const std::string hidden = bindHiddenQualifier(mod);
+    for (const auto& kv : cls->members) {
+        // `<init>` and the setters of a var are not names a user can import.
+        if (kv.first == kPrimaryCtorKey || kv.first.rfind("<init>", 0) == 0) continue;
+        if (kv.first.size() > 2 && kv.first.compare(kv.first.size() - 2, 2, "_=") == 0) continue;
+        if (kv.first.find("::") != std::string::npos) continue;  // a private member (D5)
+        importedTerms_[kv.first] =
+            ImportedTerm{hidden, mod.moduleName, kv.first, !mod.foreign};
+    }
+    // Every nested type of the module, under its simple name, plus its
+    // companion term so `Point(1, 2)` works.
+    const std::string prefix = mod.moduleName + ".";
+    for (const auto& kv : mod.types) {
+        if (kv.first.compare(0, prefix.size(), prefix) != 0) continue;
+        const std::string rest = kv.first.substr(prefix.size());
+        if (rest.find('.') != std::string::npos) continue;  // deeper nesting stays qualified
+        globals_.aliasType(rest, kv.second.key);
+    }
+    for (const auto& kv : mod.terms) {
+        if (kv.first.compare(0, prefix.size(), prefix) != 0) continue;
+        const std::string rest = kv.first.substr(prefix.size());
+        if (rest.find('.') != std::string::npos) continue;
+        globals_.bind(rest, kv.second);
+    }
+}
+
+void Compiler::compileImport(const Import& imp) {
+    if (!loader_) throw CompileError("imports are not available here", imp.pos);
+    if (imp.path.empty()) throw CompileError("import selector expected", imp.pos);
+
+    // Segment 0 is a family prefix, or it is part of the path (plan A0-4). One
+    // segment is never a prefix: `import py` names a module called `py`.
+    std::string spec;
+    std::size_t first = 0;
+    if (imp.path.size() >= 2 && isFamilyPrefix(imp.path[0])) {
+        spec = providerSpecFor(imp.path[0]);
+        first = 1;
+    }
+
+    // The longest dotted prefix that resolves wins; the rest are members.
+    const ModuleExports* mod = nullptr;
+    std::vector<std::string> trailing;
+    std::string lastError;
+    for (std::size_t end = imp.path.size(); end > first; --end) {
+        try {
+            mod = &loader_->load(spec, joinPath(imp.path, first, end), sourceDir_, imp.pos);
+            for (std::size_t k = end; k < imp.path.size(); ++k) trailing.push_back(imp.path[k]);
+            break;
+        } catch (const CompileError& e) {
+            // The FIRST attempt is the longest path and its message names every
+            // candidate file, which is the one a typo needs; keep it and report
+            // it if nothing shorter resolves either.
+            if (lastError.empty()) lastError = e.what();
+        }
+    }
+    if (!mod) throw CompileError(lastError, imp.pos);
+
+    // `import a.b.C` where C is a member of module a.b, and `import a.b.C.{x}`
+    // where C is a member, are the same thing: the trailing segments name
+    // members, and only the last one can be bound.
+    if (trailing.size() > 1)
+        throw CompileError("ImportError: " + mod->moduleName + " has no member named '" +
+                               trailing.front() + "." + trailing[1] + "'",
+                           imp.pos);
+
+    if (!mod->foreign) adoptExportedNames(*mod);
+
+    // The module itself, under its own name or the `as` alias.
+    if (imp.selectors.empty() && trailing.empty()) {
+        const std::string bound = imp.moduleAlias.empty() ? mod->moduleName : imp.moduleAlias;
+        globals_.bind(bound, GlobalBinding{mod->moduleKind, mod->moduleKey, {}});
+        if (!mod->foreign && !mod->moduleTypeKey.empty())
+            globals_.aliasType(bound + ".type", mod->moduleTypeKey);
+        return;
+    }
+
+    // One selector list, or one trailing member segment, which is the same form.
+    std::vector<ImportSelector> selectors = imp.selectors;
+    if (!trailing.empty()) {
+        ImportSelector sel;
+        sel.name = trailing.front();
+        sel.alias = imp.moduleAlias;
+        sel.pos = imp.pos;
+        selectors.insert(selectors.begin(), sel);
+    }
+
+    for (const ImportSelector& s : selectors) {
+        if (s.given) continue;               // parsed and ignored (D3, D93)
+        if (s.wildcard) { importWildcard(*mod, s.pos); continue; }
+        const std::string as = s.alias.empty() ? s.name : s.alias;
+        if (mod->foreign) {
+            globals_.bind(as, GlobalBinding{BindingKind::Val,
+                                            loader_->bindForeignMember(*mod, s.name, s.pos), {}});
+            continue;
+        }
+        // A nested TYPE of the module: alias the type and its companion term, so
+        // `Point(1, 2)`, `new Point(1, 2)` and `case Point(x, y)` all compile.
+        const std::string qualified = mod->moduleName + "." + s.name;
+        bool bound = false;
+        for (const auto& kv : mod->types) {
+            if (kv.first != qualified) continue;
+            globals_.aliasType(as, kv.second.key);
+            bound = true;
+        }
+        for (const auto& kv : mod->terms) {
+            if (kv.first != qualified) continue;
+            globals_.bind(as, kv.second);
+            bound = true;
+        }
+        if (bound) continue;
+        const ClassInfo* cls = moduleClassOf(*mod);
+        if (!cls || !cls->members.count(s.name))
+            throw CompileError("ImportError: " + mod->moduleName + " has no member named '" +
+                                   s.name + "'",
+                               s.pos);
+        importedTerms_[as] = ImportedTerm{bindHiddenQualifier(*mod), mod->moduleName, s.name, true};
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Compilation units
 // ---------------------------------------------------------------------------
 
@@ -1263,6 +1487,13 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
         fn_ = &top;
         boxed_.clear();
         globals_.beginUnit();
+        importedTerms_.clear();
+        // 0. Imports first, and for the whole unit (D96). They are resolved by
+        //    LOADING the module (D90), which is why a module's top level runs
+        //    during the importing unit's compilation -- and why --disassemble
+        //    runs them too (D95).
+        for (const auto& s : unit.stats)
+            if (s->kind == NodeKind::Import) compileImport(as<Import>(*s));
         // 1. Declare every top-level name; validate @main.
         const DefDef* main = nullptr;
         std::vector<const TemplateDef*> templates;
@@ -1334,6 +1565,17 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
             out.mainName = main->name;
             out.mainKey = globalKey(main->name);
             out.mainTakesArgs = varargs;
+        }
+        // 1a. A name this unit declares and an import also binds is ambiguous.
+        //     Scala reports it; reporting it here turns a silent shadow -- which
+        //     of the two wins would depend on the compiler's lookup order -- into
+        //     an error the programmer can act on.
+        for (const auto& kv : importedTerms_) {
+            if (!globals_.declaredInUnit().count(kv.first)) continue;
+            if (globals_.binding(kv.first) == nullptr) continue;
+            throw CompileError("'" + kv.first + "' is both imported from " +
+                                   kv.second.moduleName + " and defined here; rename one of them",
+                               unit.stats.empty() ? SourcePos{} : unit.stats.front()->pos);
         }
         // 1b. Describe the templates, parents first, and link the companions.
         const std::vector<const TemplateDef*> sorted = sortTemplates(templates);

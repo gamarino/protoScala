@@ -17,7 +17,7 @@ add_subdirectory(unit)
 foreach(cli_test help version unknown-option script-errors main-args
                  repl-basic repl-multiline repl-errors repl-load repl-history-hygiene
                  repl-redefinition repl-results repl-indented-input repl-classes deep-source
-                 tutorial-repl actors-shutdown actors-stress)
+                 tutorial-repl actors-shutdown actors-stress modules)
     add_test(NAME cli/${cli_test}
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/cli/${cli_test}.sh" "$<TARGET_FILE:protoscala>")
 endforeach()
@@ -56,14 +56,47 @@ file(GLOB_RECURSE PROTOSCALA_CONFORMANCE_FILES
     CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/conformance/*.scala")
 
+# A `_` prefix marks a helper, on a FILE name or on any DIRECTORY component of
+# the path: tests/conformance/24-modules/_modules/util/Strings.scala is a module
+# another fixture imports, not a fixture that runs on its own.
 foreach(conf_file ${PROTOSCALA_CONFORMANCE_FILES})
     get_filename_component(basename "${conf_file}" NAME)
     string(SUBSTRING "${basename}" 0 1 first_char)
+    if("${conf_file}" MATCHES "(^|/)_")
+        set(first_char "_")
+    endif()
     if(NOT "${first_char}" STREQUAL "_")
         add_test(NAME "conformance/${conf_file}"
             COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/conformance/run.sh"
                     "$<TARGET_FILE:protoscala>"
                     "${CMAKE_CURRENT_SOURCE_DIR}/conformance/${conf_file}")
+    endif()
+endforeach()
+
+# tests/conformance/24-modules/ and 25-interop/ import from the helper module
+# tree beside them (`_modules`, a `_`-prefixed directory the runner ignores).
+foreach(conf_file ${PROTOSCALA_CONFORMANCE_FILES})
+    if(conf_file MATCHES "(^|/)_")
+        continue()
+    endif()
+    if(conf_file MATCHES "^24-modules/")
+        set_tests_properties("conformance/${conf_file}" PROPERTIES
+            ENVIRONMENT
+            "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/24-modules/_modules")
+    elseif(conf_file MATCHES "^25-interop/")
+        # The stand-in provider fixtures also get PROTOSCALA_PROVIDERS, which
+        # points at the test double built by tests/unit (Task 6). Every other
+        # 25-interop fixture runs with NO provider loaded, which is what makes
+        # `no provider registered for '<alias>'` the honest expected message.
+        if(conf_file MATCHES "^25-interop/(stand-in-|a-provider-failure)")
+            set_tests_properties("conformance/${conf_file}" PROPERTIES
+                ENVIRONMENT
+                "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/25-interop/_modules;PROTOSCALA_PROVIDERS=$<TARGET_FILE:protoscala_probe_provider>")
+        else()
+            set_tests_properties("conformance/${conf_file}" PROPERTIES
+                ENVIRONMENT
+                "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/25-interop/_modules")
+        endif()
     endif()
 endforeach()
 

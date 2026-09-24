@@ -862,6 +862,46 @@ void desugar(CompilationUnit& unit) {
     ds.stats(unit.stats);
 }
 
+void desugarModule(CompilationUnit& unit, const std::string& objectName) {
+    // A module file is a library: an @main in it would never be called, and a
+    // silently ignored one is a trap (D91).
+    for (const NodePtr& s : unit.stats) {
+        if (s->kind == NodeKind::DefDef && static_cast<const DefDef&>(*s).isMain())
+            throw ParseError("a module may not define an @main method: " + objectName +
+                                 " is imported, not run",
+                             s->pos, false);
+    }
+    auto obj = std::make_unique<TemplateDef>(unit.stats.empty() ? SourcePos{}
+                                                                : unit.stats.front()->pos);
+    obj->kind = TemplateKind::Object;
+    obj->name = objectName;
+    obj->synthetic = true;
+    // Two kinds of statement stay OUTSIDE the synthetic object, because neither
+    // is a member of anything:
+    //   - an `import`, which the compiler resolves for the whole unit (D96). A
+    //     module that imports another module would otherwise have its import
+    //     silently skipped, because a template body ignores Import nodes.
+    //   - an `extension`, which must be at the top level of a file and is
+    //     session-wide once installed (D82). Its body therefore sees the
+    //     module's globals, not its members.
+    std::vector<NodePtr> hoisted;
+    std::vector<NodePtr> members;
+    for (NodePtr& s : unit.stats) {
+        if (s->kind == NodeKind::Import || s->kind == NodeKind::ExtensionDef)
+            hoisted.push_back(std::move(s));
+        else
+            members.push_back(std::move(s));
+    }
+    obj->body = std::move(members);
+    unit.stats.clear();
+    for (NodePtr& s : hoisted) unit.stats.push_back(std::move(s));
+    unit.stats.push_back(std::move(obj));
+    // From here it is an ordinary unit with one `object` in it, so Phase 4's
+    // lifting, companion synthesis and sibling qualification all apply
+    // unchanged: a module needs no lifting code of its own.
+    desugar(unit);
+}
+
 NodePtr desugarExpr(NodePtr e) {
     Desugarer ds;
     return ds.expr(std::move(e));

@@ -104,6 +104,7 @@ private:
     NodePtr parseDefDef(SourcePos pos, std::vector<std::string> annotations);
     std::vector<Param> parseParamClause();
     NodePtr parseImport();
+    void parseImportSelectors(Import& node);
     bool atDefinitionStart() const;
     void checkEndMarker(const Node& previous, const Token& marker) const;
 

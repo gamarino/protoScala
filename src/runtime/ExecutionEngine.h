@@ -67,6 +67,12 @@ public:
     // echo, unit tests). Throws ScalaError.
     std::string showTopLevel(proto::ProtoContext* ctx, const proto::ProtoObject* v);
 
+    // Materialises a lazy holder (a `lazy val`, an `object` singleton) and
+    // returns its value; any other value passes through. Public because a module
+    // import forces the module's object singleton, which is what runs its top
+    // level (Phase 6 D90).
+    const proto::ProtoObject* force(proto::ProtoContext* ctx, const proto::ProtoObject* v);
+
     // Installs `engine`/`layout` as this thread's active call context for the
     // guard's lifetime. A worker thread re-enters the VM from C++ that never
     // came through run(), so it installs the context itself (protoClojure's
@@ -219,7 +225,6 @@ private:
     const proto::ProtoObject* callNative(proto::ProtoContext* ctx, proto::ProtoMethod fn,
                                          const proto::ProtoObject* self,
                                          const proto::ProtoObject* const* args, unsigned argc);
-    const proto::ProtoObject* force(proto::ProtoContext* ctx, const proto::ProtoObject* v);
     [[gnu::noinline]] const proto::ProtoObject* slowBinary(proto::ProtoContext* ctx, Op op,
                                                            const proto::ProtoObject* a,
                                                            const proto::ProtoObject* b);

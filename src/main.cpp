@@ -10,6 +10,7 @@
 #include "runtime/Errors.h"
 #include "runtime/Mailbox.h"
 #include "repl/Session.h"
+#include "umd/ProviderPlugins.h"
 #include "runtime/StackGuard.h"
 
 #include <cstdio>
@@ -34,6 +35,17 @@ void printVersion() {
 #else
     std::printf("prelude: compiled at start-up (no precompiled image in this build)\n");
 #endif
+    // Which providers this binary can reach. protoScala ships no plug-in, so a
+    // stock install prints only the directory it looks in -- which is the honest
+    // answer to "can I `import py.numpy` yet?".
+    const std::vector<std::string> plugins = protoScala::describeProviderPlugins();
+    std::printf("provider plug-ins: %s\n",
+                plugins.empty() ? "none found" : "");
+    for (const std::string& line : plugins) std::printf("  %s\n", line.c_str());
+    std::printf("  searched: PROTOSCALA_PROVIDERS, then %s\n",
+                protoScala::providerPluginDirectory().c_str());
+    std::printf("import prefixes routed: py, js, st, clj (a prefix with no "
+                "registered provider reports it)\n");
 }
 
 void printHelp() {

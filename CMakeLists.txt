@@ -249,11 +249,18 @@ add_library(protoscala_runtime STATIC
     src/runtime/Mailbox.cpp
     src/runtime/Prelude.cpp
     src/runtime/PreludeImage.cpp
+    src/umd/ScalaModuleProvider.cpp
+    src/umd/ProviderPlugins.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/generated/PreludeSource.cpp
 )
 target_link_libraries(protoscala_runtime PUBLIC protoscala_compiler protoscala_support
     ${PROTOCORE_LIBRARY} pthread)
 target_compile_options(protoscala_runtime PRIVATE -Wall -Wextra -Wpedantic)
+# Provider plug-ins are dlopen'd (src/umd/ProviderPlugins.cpp); the installed
+# directory is baked in so a relocated install finds its own.
+target_link_libraries(protoscala_runtime PUBLIC ${CMAKE_DL_LIBS})
+target_compile_definitions(protoscala_runtime
+    PRIVATE PROTOSCALA_INSTALL_LIBDIR="${CMAKE_INSTALL_LIBDIR}")
 if(NOT CMAKE_CROSSCOMPILING)
     target_sources(protoscala_runtime PRIVATE "${PROTOSCALA_PRELUDE_IMAGE}")
     target_compile_definitions(protoscala_runtime PUBLIC PROTOSCALA_HAVE_PRELUDE_IMAGE)
@@ -282,6 +289,7 @@ endif()
 # --- REPL and session (script runner + interactive loop share Session) -----------
 add_library(protoscala_repl STATIC
     src/repl/Session.cpp
+    src/repl/ModuleTable.cpp
     src/repl/Repl.cpp
 )
 target_link_libraries(protoscala_repl PUBLIC protoscala_runtime protoscala_compiler

@@ -39,6 +39,11 @@ bool canEndStatement(TokenKind k) {
         case TokenKind::KwType: case TokenKind::Underscore: case TokenKind::RParen:
         case TokenKind::RBracket: case TokenKind::RBrace: case TokenKind::EndMarker:
         case TokenKind::Outdent:
+        // `import M.given` is the only statement that can END with the keyword
+        // `given`: a `given` DEFINITION is refused by the parser (D3), and a
+        // `using`/`given` parameter list is inside brackets. Without this the
+        // next line would be read as a continuation of the import.
+        case TokenKind::KwGiven:
             return true;
         default:
             return false;

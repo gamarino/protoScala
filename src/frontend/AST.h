@@ -208,7 +208,27 @@ struct DefDef : Node {
         return false;
     }
 };
-struct Import : Node { Import(SourcePos p) : Node(NodeKind::Import, p) {} std::string text; };
+// One entry of an `import` selector list. `given` selectors are parsed and
+// ignored (D3: there are no givens), so they carry the flag and no name.
+struct ImportSelector {
+    std::string name;       // the member's name; "*" when wildcard is true
+    std::string alias;      // `as` / `=>` rename; empty when the name is kept
+    bool wildcard = false;  // `*` or `_`
+    bool given = false;     // `given` or `given T`
+    SourcePos pos;
+};
+
+// `import` (Phase 6). `path` is the dotted path with the family prefix, if any,
+// still in segment 0; the compiler asks umd/Prefixes.h whether segment 0 is one
+// of the four. `text` keeps the original spelling for messages and for the AST
+// rendering the parser tests assert on.
+struct Import : Node {
+    Import(SourcePos p) : Node(NodeKind::Import, p) {}
+    std::string text;
+    std::vector<std::string> path;
+    std::vector<ImportSelector> selectors;  // empty: the module itself is bound
+    std::string moduleAlias;                // `import a.b.C as X`
+};
 
 enum class TemplateKind : uint8_t { Class, Trait, Object, Enum };
 

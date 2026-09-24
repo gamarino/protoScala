@@ -26,6 +26,12 @@ bool isLayoutToken(TokenKind k) {
            k == TokenKind::EndMarker || k == TokenKind::ColonEol;
 }
 
+// `*` or `_` in an import: both spell a wildcard (Scala 3 and Scala 2).
+bool isImportWildcard(const Token& t) {
+    return t.kind == TokenKind::Underscore ||
+           (t.kind == TokenKind::Identifier && t.isOperator && !t.backquoted && t.text == "*");
+}
+
 // How a token is named in an error message: its spelling, or its kind for
 // synthetic layout tokens, which have none.
 std::string spelling(const Token& t) {
@@ -1264,34 +1270,115 @@ NodePtr Parser::parseDefDef(SourcePos pos, std::vector<std::string> annotations)
     return node;
 }
 
-// `import` selectors: parsed as raw text and ignored by the compiler (Q8).
-// Tokens are concatenated without blanks, except `, ` after a comma and
-// blanks around `as` and `=>`, so `import a.{b, c as d}` round-trips.
+// `import` (Phase 6): a dotted path, then optionally `as <alias>`, a wildcard
+// (`*` or `_`) or a brace selector list. The structure is what the compiler
+// consults; `text` keeps the original spelling for messages and for the AST
+// rendering, so tokens are still concatenated without blanks except `, ` after a
+// comma and blanks around `as` and `=>`.
 NodePtr Parser::parseImport() {
     auto node = std::make_unique<Import>(expect(TokenKind::KwImport, "'import'").pos);
-    int depth = 0;
     for (;;) {
         const Token& t = peek();
-        const TokenKind k = t.kind;
-        if (k == TokenKind::EndOfFile) {
-            if (depth > 0 || node->text.empty()) fail("import selector expected", t);
-            break;
+        if (t.kind != TokenKind::Identifier && t.kind != TokenKind::KwThis)
+            fail("import selector expected", t);
+        node->path.push_back(t.text);
+        node->text += t.backquoted ? "`" + t.text + "`" : spelling(t);
+        advance();
+        if (peek().kind != TokenKind::Dot) break;
+        node->text += ".";
+        advance();
+        // `a.b.{...}`, `a.b.*`, `a.b._` and `a.b.given` end the path.
+        if (peek().kind == TokenKind::LBrace) { parseImportSelectors(*node); return node; }
+        if (isImportWildcard(peek())) {
+            ImportSelector sel;
+            sel.wildcard = true;
+            sel.name = "*";
+            sel.pos = peek().pos;
+            node->text += spelling(peek());
+            advance();
+            node->selectors.push_back(std::move(sel));
+            return node;
         }
-        if (depth == 0 && (k == TokenKind::Newline || k == TokenKind::Semicolon ||
-                           k == TokenKind::Outdent || k == TokenKind::RBrace ||
-                           k == TokenKind::EndMarker))
-            break;
-        if (k == TokenKind::LBrace) ++depth;
-        if (k == TokenKind::RBrace) --depth;
-        if (k == TokenKind::Comma) node->text += ", ";
-        else if ((k == TokenKind::Identifier && !t.backquoted && t.text == "as") ||
-                 k == TokenKind::Arrow)
-            node->text += " " + t.text + " ";
-        else node->text += t.backquoted ? "`" + t.text + "`" : spelling(t);
+        if (peek().kind == TokenKind::KwGiven) {
+            ImportSelector sel;
+            sel.given = true;
+            sel.pos = peek().pos;
+            node->text += spelling(peek());
+            advance();
+            node->selectors.push_back(std::move(sel));
+            return node;
+        }
+    }
+    if (peek().kind == TokenKind::Identifier && !peek().backquoted && peek().text == "as") {
+        node->text += " as ";
+        advance();
+        const Token& a = expect(TokenKind::Identifier, "an alias after 'as'");
+        node->moduleAlias = a.text;
+        node->text += a.backquoted ? "`" + a.text + "`" : a.text;
+    }
+    return node;
+}
+
+// `{a, b as c, d => e, given, given T, *}`. A `given` selector is parsed and
+// ignored (D3: there are no givens), so it carries the flag and no name.
+void Parser::parseImportSelectors(Import& node) {
+    node.text += "{";
+    expect(TokenKind::LBrace, "'{'");
+    for (;;) {
+        while (isLayoutToken(peek().kind)) advance();
+        if (peek().kind == TokenKind::RBrace) break;
+        ImportSelector sel;
+        sel.pos = peek().pos;
+        if (peek().kind == TokenKind::KwGiven) {
+            sel.given = true;
+            node.text += spelling(peek());
+            advance();
+            // `given T`: the type is parsed and dropped with the selector.
+            if (peek().kind == TokenKind::Identifier && peek().text != "as") {
+                node.text += " " + spelling(peek());
+                advance();
+            }
+        } else if (isImportWildcard(peek())) {
+            sel.wildcard = true;
+            sel.name = "*";
+            node.text += spelling(peek());
+            advance();
+        } else {
+            const Token& n = peek();
+            if (n.kind != TokenKind::Identifier && n.kind != TokenKind::KwThis)
+                fail("import selector expected", n);
+            sel.name = n.text;
+            node.text += n.backquoted ? "`" + n.text + "`" : spelling(n);
+            advance();
+            const bool renamedAs = peek().kind == TokenKind::Identifier && !peek().backquoted &&
+                                   peek().text == "as";
+            if (renamedAs || peek().kind == TokenKind::Arrow) {
+                node.text += " " + spelling(peek()) + " ";
+                advance();
+                if (isImportWildcard(peek())) {
+                    // `x => _` hides `x`. Nothing is bound, so it is a no-op
+                    // selector rather than a wildcard import.
+                    sel.name.clear();
+                    sel.given = true;  // "carries no binding"
+                    node.text += spelling(peek());
+                    advance();
+                } else {
+                    const Token& a = peek();
+                    if (a.kind != TokenKind::Identifier) fail("an alias was expected", a);
+                    sel.alias = a.text;
+                    node.text += a.backquoted ? "`" + a.text + "`" : spelling(a);
+                    advance();
+                }
+            }
+        }
+        node.selectors.push_back(std::move(sel));
+        while (isLayoutToken(peek().kind)) advance();
+        if (peek().kind != TokenKind::Comma) break;
+        node.text += ", ";
         advance();
     }
-    if (node->text.empty()) fail("import selector expected", peek());
-    return node;
+    expect(TokenKind::RBrace, "'}' to close the import selectors");
+    node.text += "}";
 }
 
 // ---------------------------------------------------------------------------

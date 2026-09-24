@@ -3,6 +3,10 @@
 
 #include <gtest/gtest.h>
 
+#include <memory>
+#include <string>
+#include <vector>
+
 using protoScala::ParseError;
 using protoScala::dump;
 using protoScala::parseExpressionSource;
@@ -344,6 +348,79 @@ TEST(ParserDefs, ModifiersAndOtherAnnotationsAreKeptOrIgnored) {
 TEST(ParserDefs, Imports) {
     EXPECT_EQ(u("import scala.math.*"), "(unit (import scala.math.*))");
     EXPECT_EQ(u("import a.{b, c as d}"), "(unit (import a.{b, c as d}))");
+}
+
+// Phase 6: an `import` carries structure, not just text. Asserted before
+// anything consumes it, because every later task reads these fields.
+TEST(ParserImports, ParsesEveryAcceptedForm) {
+    using protoScala::CompilationUnit;
+    using protoScala::Import;
+    using protoScala::NodeKind;
+    auto imp = [](const char* src) {
+        std::unique_ptr<CompilationUnit> unit = protoScala::parseSource(src);
+        EXPECT_EQ(unit->stats.front()->kind, NodeKind::Import) << src;
+        return unit;
+    };
+    {
+        auto u2 = imp("import util.Strings\n");
+        const auto& i = static_cast<const Import&>(*u2->stats.front());
+        EXPECT_EQ(i.path, (std::vector<std::string>{"util", "Strings"}));
+        EXPECT_TRUE(i.selectors.empty());
+        EXPECT_EQ(i.moduleAlias, "");
+    }
+    {
+        auto u2 = imp("import py.numpy as np\n");
+        const auto& i = static_cast<const Import&>(*u2->stats.front());
+        EXPECT_EQ(i.path, (std::vector<std::string>{"py", "numpy"}));
+        EXPECT_EQ(i.moduleAlias, "np");
+        EXPECT_TRUE(i.selectors.empty());
+    }
+    {
+        auto u2 = imp("import util.Strings.{trim, pad as p}\n");
+        const auto& i = static_cast<const Import&>(*u2->stats.front());
+        EXPECT_EQ(i.path, (std::vector<std::string>{"util", "Strings"}));
+        ASSERT_EQ(i.selectors.size(), 2u);
+        EXPECT_EQ(i.selectors[0].name, "trim");
+        EXPECT_EQ(i.selectors[0].alias, "");
+        EXPECT_EQ(i.selectors[1].name, "pad");
+        EXPECT_EQ(i.selectors[1].alias, "p");
+    }
+    {
+        // The Scala 2 rename arrow is accepted too.
+        auto u2 = imp("import util.Strings.{pad => p}\n");
+        const auto& i = static_cast<const Import&>(*u2->stats.front());
+        ASSERT_EQ(i.selectors.size(), 1u);
+        EXPECT_EQ(i.selectors[0].name, "pad");
+        EXPECT_EQ(i.selectors[0].alias, "p");
+    }
+    for (const char* src : {"import util.Strings.*\n", "import util.Strings._\n"}) {
+        auto u2 = imp(src);
+        const auto& i = static_cast<const Import&>(*u2->stats.front());
+        EXPECT_EQ(i.path, (std::vector<std::string>{"util", "Strings"})) << src;
+        ASSERT_EQ(i.selectors.size(), 1u) << src;
+        EXPECT_TRUE(i.selectors[0].wildcard) << src;
+    }
+    {
+        auto u2 = imp("import util.Strings.given\n");
+        const auto& i = static_cast<const Import&>(*u2->stats.front());
+        ASSERT_EQ(i.selectors.size(), 1u);
+        EXPECT_TRUE(i.selectors[0].given);
+        EXPECT_FALSE(i.selectors[0].wildcard);
+    }
+    {
+        auto u2 = imp("import util.Strings.{shout, given}\n");
+        const auto& i = static_cast<const Import&>(*u2->stats.front());
+        ASSERT_EQ(i.selectors.size(), 2u);
+        EXPECT_EQ(i.selectors[0].name, "shout");
+        EXPECT_TRUE(i.selectors[1].given);
+    }
+    {
+        // A single-segment path is a module name, never a family prefix: the
+        // prefix rule needs at least two segments (plan A0-4).
+        auto u2 = imp("import py\n");
+        const auto& i = static_cast<const Import&>(*u2->stats.front());
+        EXPECT_EQ(i.path, (std::vector<std::string>{"py"}));
+    }
 }
 
 TEST(ParserDefs, UnsupportedDefinitionsAreReportedClearly) {

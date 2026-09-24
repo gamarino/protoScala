@@ -96,7 +96,28 @@ const proto::ProtoObject* ExecutionEngine::callNative(proto::ProtoContext* ctx, 
     // and the destructor lowers it on unwinding too, so a FutureYield passing
     // through does not leave it raised (D43, A0-2).
     NativeDepthGuard depth;
-    const proto::ProtoObject* r = fn(&scope, self, nullptr, list, nullptr);
+    const proto::ProtoObject* r = nullptr;
+    // The C++ boundary to a native. runLoop's chain below already translates
+    // every std:: exception through DESIGN §7's table, and already passes
+    // FutureYield and ScalaThrow through, so the one clause that was missing is
+    // the last resort: a native from a dlopen'd provider plug-in that throws
+    // something which is not a std::exception at all would otherwise escape the
+    // VM and terminate the process (Phase 6 plan A0-7). std::logic_error reaches
+    // the std::exception arm and is re-thrown untouched, so D74 survives: a VM
+    // defect stays uncatchable.
+    try {
+        r = fn(&scope, self, nullptr, list, nullptr);
+    } catch (FutureYield&) {
+        throw;  // a cooperative suspension, not an error
+    } catch (ScalaThrow&) {
+        throw;  // a Scala exception already in flight
+    } catch (ScalaError&) {
+        throw;  // a native throw site's own translation
+    } catch (const std::exception&) {
+        throw;  // runLoop translates it, and attaches the source line
+    } catch (...) {
+        throw ScalaError("RuntimeException", "native exception");
+    }
     if (!r) r = PROTO_NONE;
     scope.returnValue = r;
     return r;

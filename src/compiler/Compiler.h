@@ -12,6 +12,7 @@
 #include "compiler/BytecodeModule.h"
 #include "compiler/ClassInfo.h"
 #include "compiler/GlobalTable.h"
+#include "compiler/ModuleLoader.h"
 #include "frontend/AST.h"
 
 #include <deque>
@@ -59,6 +60,14 @@ struct CompiledUnit {
 class Compiler {
 public:
     explicit Compiler(GlobalTable& globals) : globals_(globals) {}
+
+    // The loader an `import` consults (Phase 6 plan A0-1). Left null, an
+    // `import` raises "imports are not available here", which is what compiling
+    // the prelude and the precompile tool both want: the prelude has no imports.
+    void setModuleLoader(ModuleLoader* loader) { loader_ = loader; }
+    // The directory of the file being compiled, so an import can name a module
+    // relative to it (INTEROP §2). Empty in the REPL.
+    void setSourceDir(std::string dir) { sourceDir_ = std::move(dir); }
 
     CompiledUnit compileUnit(const CompilationUnit& unit, UnitMode mode,
                              int replResultIndex = 0);
@@ -116,6 +125,19 @@ private:
     };
 
     GlobalTable& globals_;
+    ModuleLoader* loader_ = nullptr;
+    std::string sourceDir_;
+    // A selector import binds a name that rewrites to a member access on the
+    // module: `trim` becomes `Strings.trim`. Both halves are compile-time
+    // strings, so the emitted code is exactly what the qualified spelling emits
+    // and no new opcode is needed (plan A0-8).
+    struct ImportedTerm {
+        std::string moduleKey;   // the global holding the module object
+        std::string moduleName;  // for messages
+        std::string memberName;
+        bool forceModule = true;  // a Scala module is an `object`: FORCE it
+    };
+    std::unordered_map<std::string, ImportedTerm> importedTerms_;
     FunctionState* fn_ = nullptr;
     const TemplateScope* tmpl_ = nullptr;
     std::unordered_set<const Node*> boxed_;  // declarations kept in Cells
@@ -130,6 +152,27 @@ private:
     LocalInfo declareLocal(const std::string& name, BindingKind kind, bool boxed,
                            std::vector<std::uint32_t> byNameMasks = {});
     Resolution resolve(const std::string& name, SourcePos pos);
+
+    // --- Imports (Phase 6) ------------------------------------------------
+    void compileImport(const Import& imp);
+    // Copies a module's qualified terms and types into this unit's tables, so
+    // `Shapes.Point(1, 2)` and `case Shapes.Point(x, y)` compile with no new
+    // resolution rule: Phase 4's lifting already gave them those names.
+    void adoptExportedNames(const ModuleExports& mod);
+    void importWildcard(const ModuleExports& mod, SourcePos pos);
+    // The member alias `name` denotes, or nullptr. Consulted AFTER locals and
+    // members (an inner scope wins) and BEFORE globals (an import shadows an
+    // outer binding, as in Scala).
+    const ImportedTerm* importedTerm(const std::string& name) const;
+    // `<module>.<member>` as a synthetic Select, so an imported member compiles
+    // through exactly the same path as the qualified spelling.
+    NodePtr importedTermSelect(const ImportedTerm& t, SourcePos pos) const;
+    // Every exported member name of a Scala module (its object's ClassInfo).
+    const ClassInfo* moduleClassOf(const ModuleExports& mod) const;
+    // Binds the module object under a name no user can write (`__module$M`) and
+    // returns it, so an imported member compiles as a Select on a plain global.
+    std::string bindHiddenQualifier(const ModuleExports& mod);
+    bool localOrMemberShadows(const std::string& name);
     // The names `name` may denote, as seen from the template being compiled: a
     // template nested in an `object` is lifted to a top-level definition with a
     // dotted name, and Scala's scoping sees the enclosing object's members

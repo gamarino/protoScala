@@ -157,6 +157,14 @@ struct RuntimeLayout {
     proto::ProtoObject* enumProto = nullptr;
     const proto::ProtoString* throwableKey = nullptr;      // "@Throwable": the THROW marker
 
+    // Phase 6: UMD. `exportsKey` is the attribute ProtoSpace::getImportModule
+    // creates on its wrapper object, pointing at the module itself. It lives
+    // here, never in a function-local static: symbols are per ProtoSpace, and a
+    // static would bind to the first space and break in the multi-runtime
+    // process this phase makes possible (protoST's prim_Import_from records the
+    // bug).
+    const proto::ProtoString* exportsKey = nullptr;        // "exports"
+
     // Prelude values the natives construct, resolved after the prelude is
     // compiled (a REPL redefinition gives `Some#1`, so a name cannot be
     // hard-coded). Filled by bindPreludeHooks.

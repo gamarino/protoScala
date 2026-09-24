@@ -98,6 +98,7 @@ Runtime::Runtime(proto::ProtoSpace& space) : space_(space) {
     L.listKey = key("__list__");
     L.predsKey = key("__preds__");
     L.initKey = key(kPrimaryCtorKey);
+    L.exportsKey = key("exports");  // Phase 6: getImportModule's wrapper attribute
     L.toStringName = key("toString");
     L.equalsName = key("equals");
     L.hashCodeName = key("hashCode");

@@ -603,6 +603,14 @@ void Compiler::compileConstructor(const TemplateDef& t, const ClassInfo& info) {
         emit(Op::STORE_FIELD, fn_->mod->addSymbol(info.members.at(v.name).key), v.pos, -1);
     }
     for (const NodePtr& s : t.body) {  // template statements, in order
+        if (s->kind == NodeKind::Import) {
+            // Hoisted out of the template to the unit (D96): the binding is
+            // installed in the unit's tables and outlives the class body. Left
+            // skipped it would be silently ignored, which is exactly the trap
+            // "parsed and ignored" was in Phase 1.
+            compileImport(as<Import>(*s));
+            continue;
+        }
         if (s->kind == NodeKind::ValDef) {
             const auto& v = as<ValDef>(*s);
             if (v.isLazy || !v.rhs) continue;
