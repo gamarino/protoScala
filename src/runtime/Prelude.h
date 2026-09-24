@@ -17,6 +17,22 @@ class ExecutionEngine;
 
 const char* preludeSource();
 
+// Per-stage wall time of the last loadPrelude call, in microseconds. Filled
+// unconditionally (five clock reads per process start, no allocation) and
+// printed when PROTOSCALA_PRELUDE_TIMING is set to a non-empty value. Phase 6
+// Task 1 uses it to attribute the cold-start miss of DESIGN §1; Task 2 uses it
+// to prove the prelude image removed what it claims to remove.
+struct PreludeTiming {
+    double parseUs = 0.0;    // parseSource
+    double desugarUs = 0.0;  // desugar
+    double compileUs = 0.0;  // Compiler::compileUnit (or buildPreludeImage)
+    double linkUs = 0.0;     // BytecodeModule::linkSymbols
+    double runUs = 0.0;      // ExecutionEngine::run (MAKE_CLASS, MAKE_FN, STORE_GLOBAL, ...)
+    double totalUs = 0.0;
+    bool fromImage = false;  // the precompiled image path was taken
+};
+const PreludeTiming& preludeTiming();
+
 // Parses, compiles and runs the prelude under `parent`: its definitions join
 // `globals`, its modules `modules` (retained for the session). Throws
 // std::logic_error when the prelude fails — a build defect, never user input.

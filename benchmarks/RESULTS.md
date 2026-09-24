@@ -393,3 +393,43 @@ The earlier, uninterleaved figures this section first recorded (26.31 / 26.98 ms
 for 0.5.0 against 24.96 / 24.80 for 0.4.0, measured hours apart at load 3.6 and
 4.9-5.5) are superseded by the table above: they had the direction right and the
 magnitude roughly twice too large.
+
+### Where the prelude's time goes (Phase 6 Task 1, 2026-09-24)
+
+The 0.5.0 attribution above is at the level of "the prelude costs ~60 µs per
+class", which is enough to rule out the engine and not enough to design a fix. A
+precompiled image can remove parse, desugar and compile; it can remove nothing of
+`linkSymbols` or of *running* the compiled prelude. So the split was measured
+before anything was built.
+
+`src/runtime/Prelude.h`'s `PreludeTiming` takes five `steady_clock` reads per
+process start and `PROTOSCALA_PRELUDE_TIMING=1` prints them. 21 runs of
+`build_release/protoscala examples/hello.scala`, medians, on this host
+(AMD Ryzen 5 5500U, load average 5.15 — a shared machine with sibling work
+running; the stage split is a within-process measurement and is insensitive to
+that, and it reproduced to within 0.5 % across two separate 21-run batches taken
+at load 11.2 and load 5.2).
+
+| stage | median | share of the prelude |
+|---|---:|---:|
+| parse | 2,640 µs | 59.6 % |
+| desugar | 115 µs | 2.6 % |
+| compile | 997 µs | 22.5 % |
+| link (`linkSymbols`) | 342 µs | 7.7 % |
+| run (`MAKE_CLASS`, `MAKE_FN`, `STORE_GLOBAL`, …) | 177 µs | 4.0 % |
+| **total** | **4,426 µs** | |
+
+`lib/prelude.scala` is 200 lines / 10,176 bytes with 30 top-level `class` /
+`trait` / `object` / `enum` declarations and 103 `def`s — the same file the 0.5.0
+row above was measured against, so the 60 µs/class rate is being *checked*, not
+re-derived. 4,426 µs over 30 declarations is ~148 µs per declaration for the
+whole pipeline; the 60 µs/class figure was a *marginal* cost measured by adding
+twenty classes, and a marginal cost below the average is what a parser with
+fixed set-up work produces. The two measurements agree.
+
+**The decision rule** (Task 1 Step 3, stated before the number was known): let
+`R = run / total`. `R = 177 / 4,426 = 0.040`, far below the 0.55 threshold, so
+**Task 2 proceeds and E5 does not fire on this rule**. An image that removes
+parse + desugar + compile removes 3,752 µs — **84.8 %** of the prelude's cost —
+and leaves link (342 µs) and run (177 µs), which no protoScala-side change can
+remove.
