@@ -133,13 +133,17 @@ cannot forget to handle the empty case — there is no field to dereference on
 hierarchy of the case class `Some` and the case object `None`. It carries
 `isEmpty`, `isDefined`, `nonEmpty`, `get`, `getOrElse`, `orElse`, `map`,
 `flatMap`, `filter`, `withFilter`, `foreach`, `contains`, `exists` and
-`toList`. Because it has `map`, `flatMap` and `withFilter`, it works in a
-for-comprehension (chapter 9, §9.5).
+`toList`, and Phase 3 added `fold`, `forall`, `count`, `zip`, `toRight`,
+`toLeft`, `orNull`, `iterator` and `toSeq` (chapter 8, §8.6). Because it has
+`map`, `flatMap` and `withFilter`, it works in a for-comprehension (chapter 9,
+§9.5).
 
 > **Deviation D33.** `getOrElse(default)` evaluates its default **eagerly**.
 > In Scala the parameter is by-name, so `Some(1).getOrElse(expensive())` never
-> runs `expensive()`; here it does. By-name parameters arrive in Phase 4;
-> until then, guard an expensive default with `if o.isEmpty then … else o.get`.
+> runs `expensive()`; here it does. By-name parameters *do* exist in the
+> language now (`def f(x: => T)`, and `Try { … }` uses one), but the prelude's
+> `getOrElse` has not been re-declared with one, so the deviation stands as
+> written; guard an expensive default with `if o.isEmpty then … else o.get`.
 > Chapter 3 has the fixture.
 
 **For Python and JavaScript readers.** `Option` is what `None` and `undefined`

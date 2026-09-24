@@ -3,10 +3,10 @@
 > **Implementation status.** This chapter uses only what protoScala runs
 > today. Classes, objects and traits (chapter 6), case classes and pattern
 > matching (chapter 7) and for-comprehensions (chapter 9) now run, and §§2.9
-> to 2.11 introduce them. `Vector`, `Map` and `Set` (chapter 8) and string
-> interpolation such as `s"Hi $name"` (chapter 10) are not implemented yet and
-> are left to their own chapters. See [STATUS.md](../STATUS.md) for the exact
-> list.
+> to 2.11 introduce them. Since Phase 3 the collections — `Vector`, `Map`,
+> `Set`, `Range`, `Either`, `Try` (chapter 8) — and string interpolation
+> (`s"Hi $name"`, chapter 10) run too, and §2.12 and §2.13 introduce them. See
+> [STATUS.md](../STATUS.md) for the exact list.
 
 Scala looks like a cross between the languages you know. From JavaScript it
 takes braces, arrow functions and `val`/`var` that feel like `const`/`let`;
@@ -443,7 +443,100 @@ A `for` without `yield` needs `do` and is a plain loop:
 `for (x <- xs) do println(x)`. Chapter 9 covers nesting, guards, patterns and
 what happens when you iterate over an `Option` instead of a `List`.
 
-## 2.12 Concurrency without a GIL
+## 2.12 Collections: `dict`, `set`, `list`, `range`
+
+Fixture: [`tests/conformance/tutorial/02-python-js-collections.scala`](../../tests/conformance/tutorial/02-python-js-collections.scala)
+
+```scala
+@main def run(): Unit =
+  val names = Vector("Ada", "Alan")          // Python list / JavaScript Array
+  val ages = Map("Ada" -> 36, "Alan" -> 41)  // Python dict / JavaScript Map
+  val tags = Set("pioneer", "pioneer")       // Python set / JavaScript Set
+  val withGrace = ages + ("Grace" -> 30)     // no ages[k] = v: a new map
+  println(names(0) + " " + ages("Alan") + " " + tags.size + " " +
+    ages.size + " " + withGrace.size + " " + (for i <- 0 until 3 yield i * i))
+```
+
+Prints:
+
+```text
+Ada 41 1 2 3 List(0, 1, 4)
+```
+
+The names map almost one to one:
+
+| Python | JavaScript | protoScala |
+|---|---|---|
+| `dict` | `Map` | `Map`, written `Map("a" -> 1)` |
+| `set` | `Set` | `Set` |
+| `list` | `Array` | `Vector` for indexed access, `List` for a sequence |
+| `range(n)` | — | `0 until n` (`1 to n` includes the bound) |
+| `d[k]`, `xs[i]` | `m.get(k)`, `xs[i]` | `d(k)`, `xs(i)` — parentheses, not brackets |
+
+Two differences are worth the paragraph each.
+
+**`list` is two types here, and neither is Python's.** A `Vector` is the
+indexed container you are used to; a `List` is a sequence you usually build and
+walk from the front. Neither can be modified — the difference from Python is
+not the shape but that `xs[0] = v`, `append` and `sort()` do not exist. You
+write `xs.updated(0, v)`, `xs :+ v` and `xs.sorted`, and each answers a new
+collection while the old one stays valid. `Vector` is the name to reach for
+when you would have written `list` or `Array`.
+
+**A map is immutable, and that is cheap.** `ages + ("Grace" -> 30)` answers a
+*new* map with three entries; `ages` still has two, as the output shows. In
+Python that would be `{**ages, "Grace": 30}` and would copy the whole
+dictionary. Here the two maps share nearly all of their internal structure, so
+the new one costs a path, not a copy. That is why nothing in Scala has to
+defend itself against a collection changing underneath it — including two
+threads reading the same map at once (chapter 8, §8.9 has the long version).
+
+One habit to change immediately: a Python `dict` preserves insertion order and
+a Scala `Map` promises **no** order at all. If the order of your output
+matters, sort: `ages.toList.sortBy(_._1)`. Every example in this tutorial does.
+
+Chapter 8 covers all of it, plus `Option` as a collection of at most one, and
+`Either`/`Try` for computations that can fail.
+
+## 2.13 Strings: f-strings and template literals
+
+Fixture: [`tests/conformance/tutorial/02-python-js-interpolation.scala`](../../tests/conformance/tutorial/02-python-js-interpolation.scala)
+
+```scala
+@main def run(): Unit =
+  val name = "Ada"
+  val total = 12.5
+  println(s"$name spent ${total * 2} in all" + " | " + f"$name spent $total%.2f each")
+```
+
+Prints:
+
+```text
+Ada spent 25.0 in all | Ada spent 12.50 each
+```
+
+`s"…"` is the f-string and the template literal you already write. The letter
+in front of the quote names the interpolator, and there are three:
+
+| Python | JavaScript | protoScala |
+|---|---|---|
+| `f"Hi {name}"` | `` `Hi ${name}` `` | `s"Hi $name"` |
+| `f"{a + b}"` | `` `${a + b}` `` | `s"${a + b}"` |
+| `f"{x:.2f}"` | `x.toFixed(2)` | `f"$x%.2f"` |
+| `f"{n:05d}"` | `String(n).padStart(5, "0")` | `f"$n%05d"` |
+| `r"C:\new"` | a `String.raw` template | `raw"C:\new"` |
+| `"{}".format(x)` | — | `"%s".format(x)` |
+
+`${expr}` is JavaScript's bracket exactly; `$name` is the short form for a
+single name, which Python does not have and which is what you will write most.
+`f"…"` adds a `printf` specifier after a hole — `%.2f`, `%05d`, `%,d`,
+`%-10s` — so a column of aligned output takes one line. `raw"…"` leaves
+backslashes alone, like a Python `r"…"` string.
+
+Chapter 10 has the full specifier table, `stripMargin` for multi-line text, and
+the `String` methods.
+
+## 2.14 Concurrency without a GIL
 
 Python has a global interpreter lock, so two threads never run bytecode at the
 same time; JavaScript has one event loop per worker and copies anything you
@@ -470,7 +563,7 @@ runs something else, and resumes it when the answer arrives.
 bands, futures and their combinators, what happens when a handler fails, and
 `Thread`/`System`.
 
-## 2.13 Where to go next
+## 2.15 Where to go next
 
 - [Chapter 4](04-values-and-expressions.md): literals, operators (which are
   methods), strings, equality, `if` and `while` in detail.

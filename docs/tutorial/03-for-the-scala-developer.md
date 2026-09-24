@@ -18,11 +18,14 @@ its keep on protoCore, protoScala diverges — and every divergence has a stable
 > `@main` and the REPL — and the Phase 2 object model: classes, objects and
 > companions, traits with Scala's linearization and stackable `super`, case
 > classes and case objects, tuples, `Option`, `match` with the full pattern
-> vocabulary, user extractors, `List`, and for-comprehensions. Not implemented
-> yet: collections beyond `List` (`Vector`, `Range`, `Map`, `Set`), string
-> interpolation, exceptions, `enum`, extension methods, actors, and modules
-> (§3.3 gives the phase for each). D6 and D7 below describe features that do
-> not exist yet.
+> vocabulary, user extractors, `List`, and for-comprehensions; the Phase 5
+> concurrency layer: actors, priority bands, futures and
+> `Try`/`Success`/`Failure`; and the Phase 3 collection and string layer:
+> `Vector`, `Range`, `Map`, `Set`, `Either`, the full `List` surface, string
+> interpolation (`s"…"`, `f"…"`, `raw"…"`) and the `String` methods. Not
+> implemented yet: exceptions, `enum`, extension methods and modules (§3.3
+> gives the phase for each). D6 below describes a feature that does not exist
+> yet.
 
 ## 3.1 What is identical
 
@@ -64,6 +67,20 @@ These behave as in Scala 3:
   `foreach`, lazy guards, value definitions (`y = e`), `case` generators, and
   `for` over any type that provides the methods.
 - **The universal `apply` rule** and `a(i) = v` as `a.update(i, v)`.
+- **Collections, where they exist.** `List`, `Vector`, `Range`, `Map`, `Set`,
+  `Option`, `Either` and `Try` carry Scala's method names with Scala's
+  meanings (chapter 8 lists the surface of each). Sequence equality and
+  hashing agree across `List`, `Vector` and `Range`, so
+  `List(1,2) == Vector(1,2) == (1 to 2)` and a `Map` keyed by one is found by
+  another. `Map` and `Set` classify keys as Scala does — by value for numbers,
+  strings, `Char`s, `Boolean`s, tuples, case classes and sequences, by
+  identity for a plain class that does not override `equals` — with
+  cooperative numeric equality, so `1`, `1L` and `1.0` are one key. `Either`
+  is right-biased, `sorted` is stable, and `Try { … }` takes its block by
+  name.
+- **String interpolation.** `s"…"`, `f"…"` and `raw"…"` with both hole forms
+  (`$name`, `${expr}`), `$$`, interpolated triple-quoted literals, nested
+  interpolations, and `stripMargin`.
 
 ## 3.2 Departures
 
@@ -166,7 +183,8 @@ of failing.
 type. Applies from Phase 4.
 
 **D7 — `Map` and `Set` iteration order is unspecified** and may differ from
-Scala's. Applies from Phase 3.
+Scala's. In force since Phase 3; D58 below states what the order actually is
+and what the tutorial does about it.
 
 **D8 — No Java interop.** There are no `java.*` classes. Cross-language
 interop goes through protoCore's Unified Module Discovery (Phase 6).
@@ -286,9 +304,9 @@ and the lambda returns its last value.
 parameters (`@main def m(n: Int, s: String)`, parsed from the command line)
 are rejected. Convert the strings yourself (`args(0).toInt`).
 
-By-name parameters (`x: => Int`) are parsed and rejected with
-`by-name parameters are not supported yet`, and `import` is parsed and
-ignored until modules arrive in Phase 6.
+By-name parameters (`x: => Int`) were rejected in Phase 1 and now work, with
+the resolution limit D53 records. `import` is parsed and ignored until modules
+arrive in Phase 6.
 
 ### Provisional deviations (Phase 2)
 
@@ -430,8 +448,9 @@ Prints:
 ```
 
 Scala prints `1 ` — the trailing empty `log` shows that `fallback()` never
-ran. The same applies to `orElse`. Until by-name parameters arrive (Phase 4),
-keep expensive or effectful defaults out of `getOrElse`.
+ran. The same applies to `orElse`. By-name parameters themselves landed in
+Phase 3 (D53) and `Try { … }` uses one; the prelude's `getOrElse` has not been
+converted to one yet, so keep expensive or effectful defaults out of it.
 
 **D34 — `{ case … }` takes exactly one argument.** A pattern-matching function
 literal is always a one-parameter function here; Scala 3 also accepts it where
@@ -543,6 +562,81 @@ Actors, priority bands and futures are described in
   a `def` taken as a function value, evaluate the argument once at the call.
   Scala resolves all of these from static types.
 
+### Collections and strings (Phase 3, D54–D71)
+
+The collection library and string interpolation are described in
+[chapter 8](08-collections.md) and
+[chapter 10](10-strings-and-interpolation.md); each ends with its own
+departures section, and this is the catalogue. Every id has a fixture that
+runs with the test suite.
+
+- **D54** — `s"…"` and `raw"…"` compile to a `CONCAT` opcode rather than to
+  a call on `StringContext`, so a user-defined or shadowed `StringContext` is
+  never consulted. The string produced for a given input is Scala's; only the
+  strategy differs.
+- **D55** — the `f` interpolator supports `%s %b %c %d %o %x %X %e %E %f %g %G
+  %%` with the flags `-`, `+`, space, `0`, `,` and `#` and a
+  `width.precision`, and nothing else: there is no `%n` (write `\n`), no
+  locale (`,` always groups with an ASCII comma and the decimal point is
+  always `.`), and no `%h`, `%a`, `%t` or argument index (`%1$s`). The `#`
+  flag is parsed but currently emits no `0x`/`0` prefix.
+- **D56** — an interpolator that is not `s`, `f` or `raw` is a compile error
+  (`unknown string interpolator 'json'`), where Scala dispatches it to an
+  extension method on `StringContext`. Extension methods arrive in Phase 4 and
+  bring custom interpolators with them.
+- **D58** — `Map` and `Set` iterate in ascending order of their internal
+  hashes, which is neither insertion order nor the keys' own order and may
+  change between releases. Scala guarantees no order either; every fixture in
+  the suite sorts before printing, and so should your code. There is no
+  `ListMap` or `SortedMap`.
+- **D59** — `Vector(1, 2).hashCode` equals `List(1, 2).hashCode`, as `==`
+  requires, and both differ from the JVM's `Seq` hash. Case classes, tuples,
+  strings and numbers remain bit-identical to the JVM's (D39 is the `List`
+  half of the same statement).
+- **D61** — a `Range` bound must fit a 54-bit integer
+  (`a Range bound must fit a 54-bit integer`), which keeps every `Range`
+  method allocation-free. Scala's `Range` is limited to `Int` bounds, so no
+  Scala program is affected.
+- **D62** — `sorted` uses the runtime's own ordering and fails with
+  `sorted needs comparable elements; use sortWith` on anything it cannot
+  order, because there is no `Ordering` to resolve (D3). Numbers, strings,
+  `Char`s and `Boolean`s sort exactly as in Scala; `sortBy` and `sortWith`
+  cover the rest.
+- **D63** — there is no `collect`: it takes a `PartialFunction`, which does
+  not exist here. Write `filter(p).map(f)`, or `flatMap` with a `match` that
+  answers `List(x)` or `Nil`.
+- **D65** — `Seq` and `Iterable` are not provided and are not scheduled.
+  `List`, `Vector`, `Range`, `Map` and `Set` share no common ancestor, and
+  `case xs: Seq[_]` is rejected at compile time with `Not found: type Seq`. An
+  annotation `xs: Seq[Int]` is harmless, since annotations are erased (D4).
+- **D66** — `%e`, `%f` and `%g` convert through a `Double`, so an integer
+  above 2^53 prints rounded; `%d` is exact at any size (D1). Matching the JVM
+  would need a big-decimal formatter.
+- **D67** — `Either` and `Try` have no `withFilter`, so a guard in a
+  comprehension over them fails with `withFilter is not a member of Right`.
+  Scala's needs a `Left` to fall back to, which needs the static type.
+- **D68** — `Range.map` and a `for … yield` over a `Range` answer a `List`,
+  where Scala answers an `IndexedSeq`. The elements and their order are
+  Scala's; `IndexedSeq` is a `Seq` trait, which D65 rules out.
+- **D69** — `String.split` answers a `List`, not an `Array`; there is no
+  `Array` type (D12 already routes varargs to a `List`). Printing the result
+  gives `List(a, b, c)` where the JVM gives `[Ljava.lang.String;@…`.
+- **D70** — `String.split` takes a **literal** separator, not a regular
+  expression: `"a.b.c".split(".")` is `List(a, b, c)` here and an empty
+  sequence in Scala. protoScala has no regular-expression engine and would not
+  add one for `split`; `split(",")`, the common case, is identical.
+- **D71** — a key that overrides `equals` but not `hashCode` misses its own
+  entry at once. Scala's `Map1`…`Map4` compare small maps by `==` alone, so
+  the same bug is hidden there until the map reaches five entries; protoScala
+  is hashed from the first entry and reports it immediately.
+
+**D57, D60 and D64 are unused ids.** They were drafted for divergences that
+the rulings of 2026-09-23 removed: `Char` keys follow Scala (a `Char` is a
+value key, so `'a'` and `97` are one key), `(0 until 3) == List(0, 1, 2)` is
+`true` as in Scala, and `Try { … }` takes its block by name now that by-name
+parameters have landed. The ids are not reused, because documents already
+cite them.
+
 ## 3.3 What is missing
 
 Out of scope by design: implicits and givens (D3), the static type checker
@@ -553,19 +647,22 @@ Delivered in Phase 2, so no longer on this list: classes, objects,
 companions, traits with linearization and stackable `super`, case classes and
 case objects, tuples, `Option`, the universal `apply` rule, `List`, pattern
 matching and for-comprehensions. Delivered in Phase 5: actors, priority bands,
-futures and `Try`/`Success`/`Failure`.
+futures and `Try`/`Success`/`Failure`. Delivered in Phase 3: `Vector`,
+`Range`, `Map`, `Set`, `Either`, the rest of the `List` surface, string
+interpolation and the `String` methods.
 
 Still missing in the concurrency area, and not scheduled: supervision trees,
-`ExecutionContext`, actor timeouts and `Await.result(f, duration)`.
+`ExecutionContext`, actor timeouts and `Await.result(f, duration)`. Still
+missing in the collection area, and not scheduled: `Seq` and `Iterable` as
+traits (D65), `collect` (D63), `Ordering` (D62), `Array`, `SortedMap`/
+`ListMap` (D58) and regular expressions (D70).
 
 Not implemented yet, with the phase that brings each (see
 [ROADMAP.md](../ROADMAP.md)):
 
 | Feature | Phase |
 |---|---|
-| Collections beyond `List` (`Vector`, `Range`, `Map`, `Set`), `Either`, the rest of the `List` API | 3 |
-| String interpolation (`s"…"`, `f"…"`) | 3 |
-| Exceptions (`try`/`catch`/`finally`/`throw`), `enum`, exhaustiveness, named and default arguments, by-name parameters, extension methods, local/nested/anonymous classes, multiple constructor parameter lists, `super[T]` | 4 |
+| Exceptions (`try`/`catch`/`finally`/`throw`), `enum`, exhaustiveness, named and default arguments, extension methods, local/nested/anonymous classes, multiple constructor parameter lists, `super[T]` | 4 |
 | Modules and polyglot imports (UMD), packaging | 6 |
 
 ## 3.4 What is new

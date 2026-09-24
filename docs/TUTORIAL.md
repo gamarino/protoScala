@@ -13,19 +13,22 @@ tracker of what works and of every deviation is [STATUS.md](STATUS.md). How the
 runtime is built is in [DESIGN.md](DESIGN.md); the cross-runtime story is in
 [INTEROP.md](INTEROP.md).
 
-> **What runs today (protoScala 0.3.0).** Chapters 1, 2, 3, 4, 5, 6, 7, 9, 13
-> and 14 describe what the binary runs: values and expressions,
+> **What runs today (protoScala 0.4.0).** Chapters 1 to 10, 13 and 14 describe
+> what the binary runs: values and expressions,
 > `val`/`var`/`lazy val`/`def`, `if`/`while`, lambdas and closures, recursion,
 > integer and string arithmetic, `println` and the REPL — and, since Phase 2,
 > the whole object model: **classes, objects and companions, traits with
 > Scala's linearization and stackable `super`, case classes and case objects,
 > tuples, `Option`, `List`, pattern matching and for-comprehensions**, in both
-> brace and indentation syntax; and, since Phase 5, **actors with three
-> priority bands, futures with a cooperative `await`, `Thread` and `System`**.
-> Collections beyond `List`, string interpolation, exceptions, `enum`,
-> extension methods and modules are planned; their chapters are written together with the phase that implements
-> them. Every runnable snippet in the tutorial is a conformance fixture under
-> `tests/conformance/tutorial/`, run with the test suite.
+> brace and indentation syntax; since Phase 5, **actors with three
+> priority bands, futures with a cooperative `await`, `Thread` and `System`**;
+> and, since Phase 3, **the collection library — `List`, `Vector`, `Range`,
+> `Map`, `Set`, `Either` and `Try` — string interpolation (`s"…"`, `f"…"`,
+> `raw"…"`) and the `String` method surface**. Exceptions, `enum`, extension
+> methods and modules are planned; their chapters are written together with the
+> phase that implements them. Every runnable snippet in the tutorial is a
+> conformance fixture under `tests/conformance/tutorial/`, run with the test
+> suite.
 
 ## How to use this tutorial
 
@@ -39,8 +42,10 @@ counterpart in the languages you know, so they carry the most bridging prose:
 chapter 6 compares traits with Python's MRO and JavaScript mixins, chapter 7
 compares `match` with Python's `match` and JavaScript's `switch`, and chapter
 9 compares `for … yield` with list comprehensions and `flatMap` chains.
-Chapter 3 you can skim — it documents departures from a language you do not
-know yet.
+Chapter 8 then maps `dict`, `set`, `list` and `range()` onto `Map`, `Set`,
+`List`/`Vector` and `Range`, and chapter 10 maps f-strings and template
+literals onto `s"…"` and `f"…"`. Chapter 3 you can skim — it documents
+departures from a language you do not know yet.
 
 **If you are a Scala programmer.** Skim chapter 2 and read chapter 3
 carefully: it lists every departure from Scala 3 on the JVM — no static
@@ -48,9 +53,12 @@ typechecker, no implicits, integers that never overflow, no Java interop —
 each with its `D<n>` id, plus the provisional behaviours chosen in Phases 1
 and 2 (D28–D34: construction of immutable instances, type tests,
 uninitialised fields, no overloading, tuple arity, eager `getOrElse`, and the
-arity of `{ case … }`). Then use chapters 4, 5, 6, 7, 9 and 14 as a reference
-for the details; each of chapters 6, 7 and 9 ends with a section listing what
-differs from Scala 3 in its area.
+arity of `{ case … }`), and those chosen in Phase 3 (D54–D71: the
+interpolation strategy, the `f` conversion set, `Map`/`Set` iteration order,
+sequence hashing, `Range` bounds, `sorted` without an `Ordering`, no
+`collect`, no `Seq`/`Iterable`, and `split`). Then use chapters 4, 5, 6, 7, 8,
+9, 10 and 14 as a reference for the details; each of chapters 6, 7, 8, 9 and 10
+ends with a section listing what differs from Scala 3 in its area.
 
 ## Chapters
 
@@ -63,9 +71,9 @@ differs from Scala 3 in its area.
 | 5 | [Functions and closures](tutorial/05-functions-and-closures.md) | `def`, currying, varargs, lambdas, closures, local recursion, `lazy val`, parameterless `def`. |
 | 6 | [Classes, objects and traits](tutorial/06-classes-objects-and-traits.md) | Classes and constructors, mutable fields, `object` and companions, traits, abstract members, linearization and stackable `super`, privacy, `apply` and `update`. |
 | 7 | [Case classes and pattern matching](tutorial/07-case-classes-and-pattern-matching.md) | Case classes, tuples, `Option`, algebraic data types, every pattern form, extractors, `MatchError`. |
-| 8 | Collections | *Planned* (Phase 3). |
+| 8 | [Collections](tutorial/08-collections.md) | `List` and its full surface, `Vector`, `Range`, `Map`, `Set`, `Option` as a collection, `Either` and `Try`, conversions, and what immutability buys. |
 | 9 | [For-comprehensions](tutorial/09-for-comprehensions.md) | `for … yield` and `for … do`, the rewrite to `flatMap`/`withFilter`/`map`, patterns and value definitions, `Option` and your own types, the placeholder `_`. |
-| 10 | Strings and interpolation | *Planned* (Phase 3). |
+| 10 | [Strings and interpolation](tutorial/10-strings-and-interpolation.md) | Literals and triple-quoted strings, `s"…"`, `raw"…"`, `f"…"` and its specifier table, `stripMargin`, `format`, and the `String` method surface. |
 | 11 | Exceptions | *Planned* (Phase 4). |
 | 12 | Enums and sealed hierarchies | *Planned* (Phase 4). |
 | 13 | [Actors and futures](tutorial/13-actors-and-futures.md) | Actors, telling and asking, priority bands, futures and their combinators, cooperative `await`, handler failures, threads and time, tuning. |
