@@ -1446,16 +1446,31 @@ void Compiler::compileImport(const Import& imp) {
         // A nested TYPE of the module: alias the type and its companion term, so
         // `Point(1, 2)`, `new Point(1, 2)` and `case Point(x, y)` all compile.
         const std::string qualified = mod->moduleName + "." + s.name;
+        const std::string nestedPrefix = qualified + ".";
         bool bound = false;
         for (const auto& kv : mod->types) {
-            if (kv.first != qualified) continue;
-            globals_.aliasType(as, kv.second.key);
-            bound = true;
+            if (kv.first == qualified) {
+                globals_.aliasType(as, kv.second.key);
+                bound = true;
+            } else if (kv.first.compare(0, nestedPrefix.size(), nestedPrefix) == 0) {
+                // Importing a type brings its NESTED names with it, as in Scala:
+                // `import m.Levels.{Level}` must make `Level.Debug` reachable.
+                // An `enum`'s cases are lifted to the top level as
+                // `Levels.Level.Debug`, so without this the case is only
+                // reachable under a name the import did not bind.
+                globals_.aliasType(as + "." + kv.first.substr(nestedPrefix.size()),
+                                   kv.second.key);
+                bound = true;
+            }
         }
         for (const auto& kv : mod->terms) {
-            if (kv.first != qualified) continue;
-            globals_.bind(as, kv.second);
-            bound = true;
+            if (kv.first == qualified) {
+                globals_.bind(as, kv.second);
+                bound = true;
+            } else if (kv.first.compare(0, nestedPrefix.size(), nestedPrefix) == 0) {
+                globals_.bind(as + "." + kv.first.substr(nestedPrefix.size()), kv.second);
+                bound = true;
+            }
         }
         if (bound) continue;
         const ClassInfo* cls = moduleClassOf(*mod);

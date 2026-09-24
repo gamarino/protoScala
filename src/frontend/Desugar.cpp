@@ -214,12 +214,31 @@ public:
     void expandEnums(std::vector<NodePtr>& ss) {
         std::vector<NodePtr> out;
         for (NodePtr& s : ss) {
-            if (!s || s->kind != NodeKind::TemplateDef ||
-                as<TemplateDef>(*s).kind != TemplateKind::Enum) {
+            if (!s) {
                 out.push_back(std::move(s));
                 continue;
             }
-            expandEnum(as<TemplateDef>(*s), out);
+            if (s->kind == NodeKind::TemplateDef) {
+                TemplateDef& t = as<TemplateDef>(*s);
+                if (t.kind == TemplateKind::Enum) {
+                    expandEnum(t, out);
+                    continue;
+                }
+                // Recurse into the body: an `enum` nested in an `object` must be
+                // expanded into its sealed class, its companion and its cases
+                // BEFORE liftNestedTemplates runs, or the lift moves an
+                // unexpanded Enum template to the top level and every reference
+                // to it fails with "Not found". A `class` or a `trait` body is
+                // walked too; a template nested in one is refused by the lift
+                // (D80), and expanding first makes that message the one a reader
+                // sees instead of a resolution failure.
+                //
+                // This matters much more since Phase 6, because a module file is
+                // desugared into an `object` (D91): without it, a module that
+                // defines an `enum` is unusable.
+                expandEnums(t.body);
+            }
+            out.push_back(std::move(s));
         }
         ss = std::move(out);
     }
@@ -234,8 +253,13 @@ public:
     // capture the enclosing instance, which needs a per-instance class (D80).
     void liftNestedTemplates(std::vector<NodePtr>& ss) {
         std::vector<NodePtr> lifted;
+        LiftScope unitScope;
+        for (const NodePtr& s : ss)
+            if (s && s->kind == NodeKind::TemplateDef)
+                unitScope.names.push_back(as<TemplateDef>(*s).name);
+        std::vector<LiftScope> scopes{std::move(unitScope)};
         for (auto& s : ss)
-            if (s->kind == NodeKind::TemplateDef) liftFrom(as<TemplateDef>(*s), lifted);
+            if (s->kind == NodeKind::TemplateDef) liftFrom(as<TemplateDef>(*s), lifted, scopes);
         if (lifted.empty()) return;
         // The lifted templates come FIRST, so the object they were written in can
         // reference them from its own body.
@@ -283,14 +307,28 @@ private:
     // the siblings themselves are renamed: `case class Leaf(...) extends T`
     // inside `object Ast` has to become `... extends Ast.T`, because the parent
     // is resolved before any template scope exists.
-    static void qualifySibling(TypeTree& ty, const std::string& prefix,
-                               const std::vector<std::string>& siblings) {
+    // One enclosing level: the qualified prefix of the templates declared there
+    // ("" at the unit's top level) and their names.
+    struct LiftScope {
+        std::string prefix;
+        std::vector<std::string> names;
+    };
+
+    // Resolves a parent name against the enclosing scopes, INNERMOST FIRST, which
+    // is Scala's scoping. Qualifying against the immediate siblings alone was
+    // enough while only hand-written templates nested, and stopped being enough
+    // when `enum` started expanding inside an `object`: the generated
+    // `case object Debug extends Level` sits in the companion `E.Level`, while
+    // `Level` is a sibling of the OUTER object `E`, so it has to become
+    // `E.Level` and one level of siblings cannot see that.
+    static void qualifySibling(TypeTree& ty, const std::vector<LiftScope>& scopes) {
         if (ty.kind != TypeTree::Kind::Name && ty.kind != TypeTree::Kind::Applied) return;
-        for (const std::string& sib : siblings)
-            if (ty.name == sib) {
-                ty.name = prefix + "." + sib;
-                return;
-            }
+        for (auto it = scopes.rbegin(); it != scopes.rend(); ++it)
+            for (const std::string& name : it->names)
+                if (ty.name == name) {
+                    if (!it->prefix.empty()) ty.name = it->prefix + "." + name;
+                    return;  // a top-level name needs no prefix, and must not be shadowed
+                }
     }
 
     // A `Name` type tree, for a generated parent reference.
@@ -392,12 +430,14 @@ private:
         out.push_back(std::move(companion));
     }
 
-    void liftFrom(TemplateDef& t, std::vector<NodePtr>& out) {
+    void liftFrom(TemplateDef& t, std::vector<NodePtr>& out, std::vector<LiftScope>& scopes) {
         checkNativeStack(StackUse::Source);
         const bool isObject = t.kind == TemplateKind::Object;
-        std::vector<std::string> siblings;
+        LiftScope own;
+        own.prefix = t.name;
         for (const NodePtr& m : t.body)
-            if (m->kind == NodeKind::TemplateDef) siblings.push_back(as<TemplateDef>(*m).name);
+            if (m && m->kind == NodeKind::TemplateDef) own.names.push_back(as<TemplateDef>(*m).name);
+        scopes.push_back(std::move(own));
         std::vector<NodePtr> keep;
         for (NodePtr& m : t.body) {
             if (!m || m->kind != NodeKind::TemplateDef) {
@@ -410,11 +450,12 @@ private:
                                  "of a file or in an object",
                                  n.pos, false);
             for (ParentRef& p : n.parents)
-                if (p.type) qualifySibling(*p.type, t.name, siblings);
+                if (p.type) qualifySibling(*p.type, scopes);
             n.name = t.name + "." + n.name;
-            liftFrom(n, out);          // deeper nesting first
+            liftFrom(n, out, scopes);  // deeper nesting first
             out.push_back(std::move(m));
         }
+        scopes.pop_back();
         t.body = std::move(keep);
     }
 
