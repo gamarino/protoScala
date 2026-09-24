@@ -112,6 +112,7 @@ private:
     Modifiers parseModifiers(bool* isLazy);
     NodePtr parseTemplateDef(Modifiers mods);           // at `case`, `class`, `trait` or `object`
     NodePtr parseEnumDef(Modifiers mods);               // at `enum` (Phase 4)
+    NodePtr parseExtension();                           // at `extension` (Phase 4)
     // While parsing an `enum` body: where a `case` clause appends its cases.
     TemplateDef* enumTarget_ = nullptr;
     void parseEnumCases(TemplateDef& target);           // at `case` inside an enum body

@@ -164,9 +164,12 @@ private:
     // the capture pushes and MAKE_FN. Def and Method bodies allow `return`.
     // `allowByName`: this callee is named at its call sites, so by-name
     // parameters can be honoured there (D47).
+    // `selfAlias`: an extra name bound to slot 0 of a Method, which is how an
+    // extension's receiver (`extension (x: T) def m = x`) reaches `this`.
     void compileFunction(const std::string& name, const std::vector<Param>& params,
                          const Node& body, FnShape shape, SourcePos pos,
-                         bool paramless = false, bool allowByName = false);
+                         bool paramless = false, bool allowByName = false,
+                         const std::string& selfAlias = {});
     // Bit k set: argument k of the application whose callee expression is `fn`
     // is by-name (D47). Zero unless the compiler resolves `fn` to a declaration
     // that says so; an unresolved callee evaluates its arguments (D53).
@@ -218,6 +221,16 @@ private:
     // keyword names; `positional` gets the count before the first named one.
     std::vector<std::string> splitNamedArgs(const std::vector<NodePtr>& args,
                                             std::size_t* positional);
+
+    // --- Extension methods (Phase 4, D6) ---------------------------------
+    // Installs each member as an attribute of the receiver type's PROTOTYPE, so
+    // dispatch is the ordinary prototype walk and the installation is global and
+    // session-wide (D82, D83).
+    void compileExtension(const ExtensionDef& n);
+    // The prototype target `__installExtension` resolves: a type key `@C` for a
+    // type the compiler knows, or a builtin value type's name (`Int`, `String`,
+    // `List`, ...). Empty when the type is not extendable.
+    std::string extensionTarget(const std::string& typeName) const;
 
     void compileLazyThunk(const Node& rhs, SourcePos pos);  // thunk + MAKE_LAZY
     void compileStats(const std::vector<NodePtr>& stats, std::size_t from, SourcePos pos);

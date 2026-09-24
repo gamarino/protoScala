@@ -1040,6 +1040,63 @@ PRIM(function_apply) {
     return r;
 }
 
+// __installExtension(target, name, fn): installs an extension method on a
+// prototype (D6, D82, D83). `target` is a type key `@C` for a type the compiler
+// describes, or the name of a primitive type, which has no global of its own —
+// which is the whole reason this is a native rather than a PUSH_GLOBAL and a
+// SET_FIELD. The installation is session-wide and cannot be undone, so a
+// collision with a member the type already has is refused HERE too: the compiler
+// cannot see the members of a primitive prototype.
+PRIM(prim_install_extension) {
+    const RuntimeLayout& L = layoutOf();
+    const std::string target = stringArg(ctx, arg(ctx, args, 0, "__installExtension", 3),
+                                        "__installExtension");
+    const std::string name = stringArg(ctx, args->getAt(ctx, 1), "__installExtension");
+    const ProtoObject* fn = args->getAt(ctx, 2);
+    ProtoObject* proto = nullptr;
+    if (!target.empty() && target[0] == '@') {
+        const ProtoObject* v =
+            L.globals->getOwnAttributeDirect(ctx, proto::ProtoString::createSymbol(ctx, target.c_str()));
+        if (v && v != PROTO_NONE) proto = const_cast<ProtoObject*>(v);
+    } else {
+        if (target == "Int" || target == "Long" || target == "Short" || target == "Byte" ||
+            target == "BigInt")
+            proto = L.intProto;
+        else if (target == "Double" || target == "Float") proto = L.doubleProto;
+        else if (target == "Boolean") proto = L.booleanProto;
+        else if (target == "Char") proto = L.charProto;
+        else if (target == "String") proto = L.stringProto;
+        else if (target == "List") proto = L.listProto;
+        else if (target == "Unit") proto = L.unitProto;
+        else if (target == "Any") proto = L.anyProto;
+        else if (target == "AnyRef") proto = L.anyRefProto;
+    }
+    if (!proto)
+        throw ScalaError("IllegalArgumentException",
+                         "extension: " + target + " is not a protoScala type");
+    const auto* key = proto::ProtoString::createSymbol(ctx, name.c_str());
+    // The marker that says "this member IS an extension", so re-running the same
+    // definition (a REPL line, a reloaded script) replaces it instead of being
+    // refused, while a genuine member of the type is still protected.
+    const std::string markerName = "$ext$" + name;
+    const auto* marker = proto::ProtoString::createSymbol(ctx, markerName.c_str());
+    if (proto->hasAttribute(ctx, key) == PROTO_TRUE &&
+        proto->hasOwnAttribute(ctx, marker) != PROTO_TRUE) {
+        const ProtoObject* nameAttr = proto->getAttribute(ctx, L.nameKey);
+        const std::string shown =
+            nameAttr && proto::ProtoObject::isStringTagFast(nameAttr)
+                ? reinterpret_cast<const proto::ProtoString*>(nameAttr)->toStdString(ctx)
+                : target;
+        throw ScalaError("IllegalArgumentException",
+                         "extension: " + shown + " already has a member named '" + name + "'");
+    }
+    if (proto->setAttribute(ctx, key, fn) != proto)
+        throw ScalaError("UnsupportedOperationException",
+                         "extension: the prototype of " + target + " is immutable");
+    proto->setAttribute(ctx, marker, PROTO_TRUE);
+    return L.unit;
+}
+
 #undef NUMERIC_BINARY
 #undef NAMED
 #undef PRIM
@@ -1056,6 +1113,7 @@ const std::vector<std::string>& builtinGlobalNames() {
         std::vector<std::string> v = {"println", "print", "List", "Nil", "__raise",
                                       "Actor", "Future", "Thread", "System",
                                       "__fmt", "__tryOf", "__classNameOf", "__kwprobe",
+                                      "__installExtension",
                                       "Vector", "Map", "Set"};
         for (unsigned n = 2; n <= kMaxTupleArity; ++n) v.push_back("Tuple" + std::to_string(n));
         return v;
@@ -1067,7 +1125,8 @@ void installPrimitives(ProtoContext* ctx, const RuntimeLayout& L) {
     static constexpr MethodEntry globals[] = {
         {"println", &prim_println}, {"print", &prim_print}, {"__raise", &prim_raise},
         {"__fmt", &prim_fmt}, {"__tryOf", &prim_try_of},
-        {"__classNameOf", &prim_class_name_of}};
+        {"__classNameOf", &prim_class_name_of},
+        {"__installExtension", &prim_install_extension}};
     static constexpr MethodEntry any[] = {
         {"toString", &any_toString}, {"equals", &any_equals}, {"==", &any_eqeq},
         {"!=", &any_noteq}, {"eq", &any_eq}, {"ne", &any_ne},

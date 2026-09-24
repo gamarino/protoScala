@@ -172,6 +172,19 @@ public:
                 }
                 case TokenKind::RParen: case TokenKind::RBracket: case TokenKind::RBrace:
                     closesCondition = closeBracket(t);
+                    // Phase 4: the header of a collective extension opens an
+                    // indented region, which is the idiomatic Scala 3 spelling and
+                    // the only one it accepts (`extension (n: Int):` is rejected
+                    // by scalac). `extension` is a soft keyword, so it is
+                    // recognised by text on a line of its own, and the closing
+                    // bracket of its header is treated exactly as the `)` of an
+                    // old-style condition is: it opens a region when the next line
+                    // is more indented.
+                    if (!closesCondition && extensionHeaderLine_ >= 0 &&
+                        t.pos.line == extensionHeaderLine_ && raw_[i + 1].firstOnLine) {
+                        closesCondition = true;
+                        extensionHeaderLine_ = -1;
+                    }
                     if (closesCondition) conditionClosed();
                     break;
                 case TokenKind::Semicolon:
@@ -184,6 +197,10 @@ public:
                 default:
                     break;
             }
+            if (t.kind == TokenKind::Identifier && t.firstOnLine && !t.backquoted &&
+                t.text == "extension" &&
+                (raw_[i + 1].kind == TokenKind::LParen || raw_[i + 1].kind == TokenKind::LBracket))
+                extensionHeaderLine_ = t.pos.line;
             Token copy = t;
             if (t.kind == TokenKind::Colon && raw_[i + 1].firstOnLine)
                 copy.kind = TokenKind::ColonEol;
@@ -200,6 +217,8 @@ private:
     std::vector<Region> regions_;
     TokenKind prevKind_ = TokenKind::EndOfFile;
     bool prevClosesCondition_ = false;
+    // The line a collective extension's header starts on, or -1.
+    int extensionHeaderLine_ = -1;
 
     static bool isConditionKeyword(TokenKind k) {
         return k == TokenKind::KwIf || k == TokenKind::KwWhile || k == TokenKind::KwFor;

@@ -160,16 +160,38 @@ public:
                 if (t.finallyBody) t.finallyBody = expr(std::move(t.finallyBody));
                 return n;
             }
+            case NodeKind::ExtensionDef: {
+                // Each member is an ordinary def; the compiler installs it on the
+                // receiver type's prototype.
+                auto& e = as<ExtensionDef>(*n);
+                for (auto& m : e.members) m = expr(std::move(m));
+                return n;
+            }
             case NodeKind::For: return expr(forExpr(as<For>(*n)));  // rewrite, then desugar it
             case NodeKind::InterpString: {
                 auto& s = as<InterpString>(*n);
-                if (s.interpolator != "s" && s.interpolator != "raw" && s.interpolator != "f")
-                    throw ParseError("unknown string interpolator '" + s.interpolator +
-                                         "': only s, f and raw are available "
-                                         "(custom interpolators need extension methods)",
-                                     n->pos, false);
                 for (NodePtr& a : s.args) a = expr(std::move(a));
-                return n;   // the compiler lowers it (s/raw -> CONCAT, f -> __fmt)
+                // s / raw / f are compiled directly (CONCAT, or a call of __fmt).
+                if (s.interpolator == "s" || s.interpolator == "raw" || s.interpolator == "f")
+                    return n;
+                // Phase 4: any other interpolator is lowered to
+                // `StringContext(<literals>).<name>(<args>)`, exactly as Scala
+                // lowers it, so a custom interpolator is an EXTENSION METHOD on
+                // StringContext and needs nothing else. This is what closes Phase
+                // 3's restriction to s, f and raw. `new` rather than the companion
+                // apply, so the lowering does not depend on a companion existing.
+                auto ctor = std::make_unique<New>(s.pos);
+                ctor->type = nameType("StringContext", s.pos);
+                ctor->hasArgs = true;
+                for (const std::string& lit : s.literals) {
+                    auto piece = std::make_unique<StringLit>(s.pos);
+                    piece->value = lit;
+                    ctor->args.push_back(std::move(piece));
+                }
+                auto call = std::make_unique<Apply>(
+                    s.pos, std::make_unique<Select>(s.pos, std::move(ctor), s.interpolator));
+                for (NodePtr& a : s.args) call->args.push_back(std::move(a));
+                return call;   // its arguments are already desugared
             }
             default:
                 return n;  // literals, identifiers, imports

@@ -329,7 +329,21 @@ const proto::ProtoObject* ExecutionEngine::makeClass(proto::ProtoContext* ctx,
     const RuntimeLayout& L = layout_;
     proto::ProtoContext scope(ctx->space, ctx);  // every intermediate shape is young in `scope`
     const proto::ProtoList* chain = scope.newList(spec.argc, base);
-    const proto::ProtoObject* shape = L.anyProto->newChild(&scope, false)->setParents(&scope, chain);
+    // The prototype is MUTABLE (Phase 4). Two things need it, and neither has an
+    // alternative that keeps the object model intact:
+    //
+    //  - an extension method is installed on it after the class exists, and every
+    //    instance already created must see it (D6, D82). An immutable prototype's
+    //    setAttribute answers a NEW object, which the existing instances' chains
+    //    would not point at;
+    //  - `superSend` finds the defining class in the linearization by POINTER
+    //    identity, so the prototype's identity must survive any later write.
+    //
+    // It also makes class creation cheaper: the members below now mutate one
+    // object instead of building a fresh immutable copy per member. Instances are
+    // unaffected — their own mutability is the separate `__mutable__` decision.
+    const proto::ProtoObject* shape =
+        L.anyProto->newChild(&scope, /*isMutable=*/true)->setParents(&scope, chain);
     for (std::size_t k = 0; k < spec.nameSymbols.size(); ++k)
         shape = shape->setAttribute(&scope, spec.nameSymbols[k], base[spec.argc + k]);
     shape = shape->setAttribute(&scope, spec.keySymbol, PROTO_TRUE);

@@ -390,7 +390,12 @@ TEST(ParserDefs, MoreUnsupportedAndInvalidDefinitions) {
     EXPECT_NE(unitError("enum E { }").find("at least one case"), std::string::npos);
     EXPECT_NE(unitError("type T = Int").find("'type' definitions are not implemented yet"),
               std::string::npos);
-    EXPECT_NE(unitError("extension (x: Int) def y = x").find("not implemented yet"),
+    // Extension methods are implemented (Phase 4). What is rejected is a `:`
+    // before the body, which scalac rejects too, and a member that is not a def.
+    EXPECT_EQ(unitError("extension (x: Int) def y = x"), "");
+    EXPECT_NE(unitError("extension (x: Int):\n  def y = x").find("takes no ':'"),
+              std::string::npos);
+    EXPECT_NE(unitError("extension (x: Int) { val y = 1 }").find("must be a def"),
               std::string::npos);
     EXPECT_NE(unitError("implicit val x: Int = 1").find("(D3)"), std::string::npos);
     EXPECT_NE(unitError("def f(implicit x: Int) = x").find("(D3)"), std::string::npos);

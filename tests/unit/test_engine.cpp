@@ -515,3 +515,48 @@ TEST(NamedArguments, ANativeThatIgnoresKeywordsFailsLoudly) {
     EXPECT_NE(err.find("substring"), std::string::npos) << err;
     EXPECT_NE(err.find("error:"), std::string::npos) << err;
 }
+
+// --- Extension methods (Phase 4, D6) ---------------------------------------
+
+TEST(Extensions, DispatchIsOnTheRuntimePrototype) {
+    EvalHarness h;
+    h.eval("extension (n: Int) def triple: Int = n * 3");
+    EXPECT_EQ(h.eval("2.triple"), "6");
+    EXPECT_EQ(h.eval("(2: Any).asInstanceOf[Int].triple"), "6");
+    EXPECT_NE(h.eval("\"x\".triple").find("is not a member of String"), std::string::npos);
+}
+
+TEST(Extensions, ACollisionWithAnExistingMemberIsRejected) {
+    EvalHarness h;
+    // A primitive prototype's members are not in the compiler's type namespace,
+    // so this one is caught by the installing native; a user class's collision is
+    // caught at compile time.
+    EXPECT_NE(h.eval("extension (s: String) def length: Int = 0")
+                  .find("already has a member named 'length'"),
+              std::string::npos);
+    // A user class's collision is caught at COMPILE time, so it escapes the
+    // harness as a CompileError rather than being shown as a value.
+    h.eval("class Box(val v: Int)");
+    EXPECT_THROW(h.eval("extension (b: Box) def v: Int = 0"), protoScala::CompileError);
+}
+
+TEST(Extensions, AnExtensionOnAUserClassReachesInstancesThatAlreadyExist) {
+    EvalHarness h;
+    // The reason a class prototype is mutable: the installation must be visible
+    // to an instance created BEFORE it. An immutable prototype's setAttribute
+    // answers a new object, which the existing instance's chain does not point at.
+    h.eval("class Point(val x: Int, val y: Int)");
+    h.eval("val p = new Point(2, 3)");
+    h.eval("extension (q: Point) def sum: Int = q.x + q.y");
+    EXPECT_EQ(h.eval("p.sum"), "5");
+}
+
+TEST(Extensions, ACustomInterpolatorIsAnExtensionOnStringContext) {
+    EvalHarness h;
+    h.eval("extension (sc: StringContext) def bars(args: Any*): String = "
+           "args.mkString(\"[\", \"|\", \"]\")");
+    EXPECT_EQ(h.eval("bars\"${1}${2}\""), "[1|2]");
+    // An interpolator nothing defines still fails loudly, naming the member it
+    // looked for on StringContext.
+    EXPECT_NE(h.eval("nope\"${1}\"").find("nope"), std::string::npos);
+}

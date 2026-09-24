@@ -77,6 +77,12 @@ case object None extends Option[Nothing]:
   def isEmpty: Boolean = true
   def get: Nothing = throw new NoSuchElementException("None.get")
 
+// Phase 4: the receiver a custom string interpolator extends. `name"a${x}b"` is
+// lowered to `StringContext("a", "b").name(x)`, exactly as Scala lowers it, and
+// the interpolator itself is an extension method on this class — which is what
+// closes Phase 3's restriction to `s`, `f` and `raw`.
+final case class StringContext(parts: String*)
+
 // Phase 4: a real enum, retiring D52. The ordinals are 0 / 1 / 2, which is
 // exactly the band index the scheduler already uses, so nothing in
 // ActorScheduler changes; `send`/`ask` accept a Priority case or a plain Int.

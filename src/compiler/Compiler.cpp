@@ -1178,7 +1178,8 @@ std::vector<std::string> Compiler::splitNamedArgs(const std::vector<NodePtr>& ar
 
 void Compiler::compileFunction(const std::string& name, const std::vector<Param>& params,
                                const Node& body, FnShape shape, SourcePos pos,
-                               bool paramless, bool allowByName) {
+                               bool paramless, bool allowByName,
+                               const std::string& selfAlias) {
     for (const Param& p : params)
         if (p.defaultValue && !params.empty() && params.back().repeated)
             throw CompileError("a default parameter value is not supported on a method with a "
@@ -1203,6 +1204,7 @@ void Compiler::compileFunction(const std::string& name, const std::vector<Param>
         const LocalInfo self{newSlot(), BindingKind::Param, false, false, {}};
         fs.scopes.back()["this"] = self;
         if (tmpl_ && !tmpl_->selfName.empty()) fs.scopes.back()[tmpl_->selfName] = self;
+        if (!selfAlias.empty()) fs.scopes.back()[selfAlias] = self;
     }
     for (std::size_t k = 0; k < params.size(); ++k) {
         const Param& p = params[k];
@@ -1359,7 +1361,8 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
             if (s->kind == NodeKind::ValDef) {
                 if (!as<ValDef>(*s).isLazy) analyseCaptures({}, rhsOf(as<ValDef>(*s)));
             } else if (s->kind != NodeKind::DefDef && s->kind != NodeKind::Import &&
-                       s->kind != NodeKind::TemplateDef) {
+                       s->kind != NodeKind::TemplateDef &&
+                       s->kind != NodeKind::ExtensionDef) {
                 analyseCaptures({}, *s);
             }
         }
@@ -1370,6 +1373,12 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
             if (s.kind == NodeKind::DefDef || s.kind == NodeKind::Import ||
                 s.kind == NodeKind::TemplateDef)
                 continue;
+            if (s.kind == NodeKind::ExtensionDef) {
+                // In source order, so a later definition sees the member and an
+                // earlier one does not (D82).
+                compileExtension(as<ExtensionDef>(s));
+                continue;
+            }
             if (s.kind == NodeKind::ValDef) {
                 const auto& v = as<ValDef>(s);
                 if (v.isLazy) continue;  // hoisted (step 2)
@@ -1398,6 +1407,76 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
         globals_ = snapshot;
         throw;
     }
+}
+
+// The types an extension may be installed on that the compiler's type namespace
+// does not describe: the primitive prototypes the Runtime rebinds, which have no
+// ClassInfo because a type pattern tests them by TypeCode rather than by a marker
+// key. Anything else must be a declared type.
+std::string Compiler::extensionTarget(const std::string& typeName) const {
+    static const char* const kBuiltins[] = {"Int",    "Long",   "Short",  "Byte",  "BigInt",
+                                            "Double", "Float",  "Boolean", "Char", "String",
+                                            "List",   "Unit",   "Any",    "AnyRef"};
+    for (const char* b : kBuiltins)
+        if (typeName == b) return typeName;
+    for (const std::string& candidate : scopedNames(typeName))
+        if (const ClassInfo* c = globals_.findType(candidate)) return c->key;
+    return {};
+}
+
+// extension (x: T) def m(a: A): R becomes a method installed on T's prototype
+// with `x` as slot 0, i.e. exactly the shape a method of T has. Dispatch is
+// therefore the ordinary prototype walk (D6), and the installation is global and
+// session-wide (D82): there is no import mechanism to scope it with until UMD
+// lands in Phase 6.
+void Compiler::compileExtension(const ExtensionDef& n) {
+    std::string typeName = n.receiverType->kind == TypeTree::Kind::Name ||
+                                   n.receiverType->kind == TypeTree::Kind::Applied
+                               ? n.receiverType->name
+                               : "";
+    if (n.receiverType->kind == TypeTree::Kind::Tuple)
+        typeName = "Tuple" + std::to_string(n.receiverType->args.size());
+    for (const char* prefix : {"scala.", "java.lang."})
+        if (typeName.rfind(prefix, 0) == 0)
+            typeName = typeName.substr(std::char_traits<char>::length(prefix));
+    const std::string target = extensionTarget(typeName);
+    if (target.empty())
+        throw CompileError("extension: " + (typeName.empty() ? "that" : typeName) +
+                               " is not a protoScala type",
+                           n.pos);
+    // A collision with a member the type already has is a compile error where the
+    // compiler can see it: silently shadowing a builtin method would be
+    // unrecoverable within a session. The run-time half of the check covers the
+    // primitive prototypes, whose members the compiler does not describe.
+    const ClassInfo* info = target[0] == '@' ? globals_.findTypeByKey(target) : nullptr;
+    for (const NodePtr& m : n.members) {
+        const auto& d = as<DefDef>(*m);
+        if (info && info->members.count(d.name))
+            throw CompileError("extension: " + typeName + " already has a member named '" +
+                                   d.name + "'",
+                               d.pos);
+        if (d.paramLists.size() > 1)
+            throw CompileError("an extension member takes at most one parameter list", d.pos);
+        // __installExtension(target, name, fn): the one native that can reach a
+        // primitive prototype, which has no global of its own to PUSH_GLOBAL.
+        emit(Op::PUSH_GLOBAL, fn_->mod->addSymbol(globalKey("__installExtension")), d.pos, +1);
+        emit(Op::PUSH_CONST, fn_->mod->addString(target), d.pos, +1);
+        emit(Op::PUSH_CONST, fn_->mod->addString(d.name), d.pos, +1);
+        compileFunction(d.name, paramsOf(d), bodyOf(d), FnShape::Method, d.pos,
+                        /*paramless=*/d.paramLists.empty(), /*allowByName=*/false,
+                        n.receiverName);
+        emit(Op::CALL, 3, d.pos, -3);
+        emit(Op::POP, 0, d.pos, -1);
+    }
+    // Recorded in the type namespace too, so a later collision is caught at
+    // compile time rather than only at run time.
+    if (ClassInfo* mut = target[0] == '@' ? globals_.mutableTypeByKey(target) : nullptr)
+        for (const NodePtr& m : n.members) {
+            const auto& d = as<DefDef>(*m);
+            mut->members[d.name] = MemberInfo{
+                d.paramLists.empty() ? MemberKind::ParamlessDef : MemberKind::Def, d.name, true,
+                {}, false};
+        }
 }
 
 // s"a${x}b" pushes "a", x, "b" and joins them with one CONCAT. Empty literal

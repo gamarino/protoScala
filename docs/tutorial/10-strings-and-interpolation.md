@@ -507,7 +507,37 @@ follows `Locale.getDefault()`. There is no locale database to consult, and
 adding one is out of scope for an interpolator. `%h`, `%a`, `%t` and the
 argument-index syntax (`%1$s`) are not supported.
 
-**D56 — an interpolator other than `s`, `f` or `raw` is a compile error.**
+**D56 is retired (Phase 4).** An interpolator other than `s`, `f` or `raw` is
+lowered to `StringContext(<literals>).<name>(<args>)`, exactly as Scala lowers
+it, so you supply it as an extension method on `StringContext`:
+
+Fixture: [`tests/conformance/tutorial/10-strings-custom-interpolator.scala`](../../tests/conformance/tutorial/10-strings-custom-interpolator.scala)
+
+```scala
+extension (sc: StringContext)
+  def shout(args: Any*): String =
+    var out = sc.parts(0)
+    var i = 0
+    while i < args.length do
+      out = out + args(i) + sc.parts(i + 1)
+      i += 1
+    out.toUpperCase
+
+@main def run(): Unit =
+  val who = "world"
+  println(shout"hello $who")
+```
+
+```text
+HELLO WORLD
+```
+
+`sc.parts` is the list of literal pieces — `List("hello ", "")` here — and
+`args` the values of the holes, so `parts` always has exactly one more element
+than `args` and an interpolator decides for itself how to weave them together.
+
+An interpolator nothing defines is now a **run-time** error naming the member it
+looked for, because types are erased (D4):
 
 Fixture: [`tests/conformance/tutorial/10-strings-unknown-interpolator.scala`](../../tests/conformance/tutorial/10-strings-unknown-interpolator.scala)
 
@@ -517,17 +547,9 @@ Fixture: [`tests/conformance/tutorial/10-strings-unknown-interpolator.scala`](..
   println(json"value is $n")
 ```
 
-It is rejected with:
-
 ```text
-10-strings-unknown-interpolator.scala:4:11: error: unknown string interpolator 'json': only s, f and raw are available (custom interpolators need extension methods)
+10-strings-unknown-interpolator.scala:4: error: NoSuchMethodError: value json is not a member of StringContext
 ```
-
-In Scala, `json"…"` is `StringContext("value is ", "").json(n)`, and you supply
-`json` with `extension (sc: StringContext) def json(args: Any*)`. Extension
-methods arrive in Phase 4 and bring custom interpolators with them; accepting
-the syntax before then would build a `StringContext` that nothing could
-dispatch on.
 
 **D66 — `%e`, `%f` and `%g` convert through a `Double`.** An integer above
 2^53 therefore prints rounded, as §10.5 showed. Matching the JVM would need a

@@ -572,9 +572,13 @@ val s = s"$a")");
     EXPECT_TRUE(has(asm_, "CONCAT 2")) << asm_;
 }
 
-TEST(CompilerInterpolation, AnUnknownInterpolatorIsRejectedWhileDesugaring) {
-    // The desugarer raises a ParseError, not a CompileError (D56).
-    EXPECT_THROW(listing(R"(val s = json"$x")"), ParseError);
+TEST(CompilerInterpolation, AnUnknownInterpolatorBecomesAStringContextCall) {
+    // Phase 4: any interpolator that is not s, f or raw is lowered to
+    // `StringContext(<literals>).<name>(<args>)`, exactly as Scala lowers it, so a
+    // custom interpolator is an extension method on StringContext. This fixture
+    // compiles without the prelude, so `StringContext` does not exist here and the
+    // failure is a type error rather than the pre-Phase-4 "unknown interpolator".
+    EXPECT_TRUE(has(compileError(R"(val s = json"$x")"), "StringContext"));
 }
 
 // --- Exceptions (Phase 4, DESIGN §7) ---------------------------------------

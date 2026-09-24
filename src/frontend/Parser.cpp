@@ -1080,7 +1080,11 @@ NodePtr Parser::parseDefinition(std::vector<std::string> annotations) {
         case TokenKind::KwExport:
             notImplemented("'" + t.text + "' definitions", t);
         default:
-            if (isExtensionStart(t, peek(1))) notImplemented("'extension' definitions", t);
+            if (isExtensionStart(t, peek(1))) {
+                if (isLazy || !annotations.empty())
+                    fail("an extension takes no modifiers", t);
+                return parseExtension();
+            }
             fail("definition expected but '" + spelling(t) + "' found", t);
     }
 }
@@ -1540,6 +1544,77 @@ void Parser::parseEnumCases(TemplateDef& target) {
             fail("only enum cases without parameters may be listed after a comma", kw);
         advance();
     }
+}
+
+// Extension ::= 'extension' ['[' TypeParams ']'] '(' id ':' Type ')'
+//               ( DefDef | (':' | '{') {DefDef} )
+//
+// A single `def` on the same line is the short form; a body, braced or indented,
+// is a collective extension and installs each member. Every member must be a
+// `def`: a `val` extension would need a per-instance field, which is a different
+// feature.
+NodePtr Parser::parseExtension() {
+    const Token& start = advance();                     // `extension`
+    auto node = std::make_unique<ExtensionDef>(start.pos);
+    if (at(TokenKind::LBracket)) parseTypeParams();     // erased, like every other
+    expect(TokenKind::LParen, "'(' and the extended receiver");
+    node->receiverName = expect(TokenKind::Identifier, "the receiver's name").text;
+    expect(TokenKind::Colon, "':' and the extended type");
+    node->receiverType = parseType();
+    expect(TokenKind::RParen, "')'");
+    if (at(TokenKind::LBracket)) parseTypeParams();     // `extension (x: T)[A] def ...`
+    auto member = [&]() -> NodePtr {
+        std::vector<std::string> annotations;
+        while (at(TokenKind::At)) {
+            advance();
+            annotations.push_back(expect(TokenKind::Identifier, "an annotation name").text);
+        }
+        bool isLazy = false;
+        const Modifiers mods = parseModifiers(&isLazy);
+        if (isLazy) fail("'lazy' is not allowed on an extension member", peek());
+        if (!at(TokenKind::KwDef)) fail("an extension member must be a def", peek());
+        const Token& kw = advance();
+        NodePtr d = parseDefDef(kw.pos, std::move(annotations));
+        as<DefDef>(*d).mods = mods;
+        return d;
+    };
+    // scalac rejects `extension (n: Int):` ("no `:` expected here"), so protoScala
+    // does too: a collective extension is written with braces, or with its defs
+    // on the following, more deeply indented lines.
+    if (at(TokenKind::ColonEol) || at(TokenKind::Colon))
+        fail("an extension body takes no ':': write the defs in braces or on the "
+             "following indented lines", peek());
+    if (at(TokenKind::LBrace)) {
+        advance();
+        const TokenKind terminator = TokenKind::RBrace;
+        for (;;) {
+            while (skipOneNewline()) {}
+            if (at(terminator)) break;
+            if (at(TokenKind::EndOfFile)) fail("", peek());
+            node->members.push_back(member());
+            const TokenKind k = peek().kind;
+            if (k != TokenKind::Newline && k != TokenKind::Semicolon && k != terminator)
+                fail("';' or newline expected but '" + spelling(peek()) + "' found", peek());
+        }
+        expect(terminator, "'}'");
+    } else if (at(TokenKind::Indent)) {
+        // `extension (n: Int)` with the members on deeper lines and no `:`.
+        advance();
+        for (;;) {
+            while (skipOneNewline()) {}
+            if (at(TokenKind::Outdent)) break;
+            if (at(TokenKind::EndOfFile)) fail("", peek());
+            node->members.push_back(member());
+            const TokenKind k = peek().kind;
+            if (k != TokenKind::Newline && k != TokenKind::Semicolon && k != TokenKind::Outdent)
+                fail("';' or newline expected but '" + spelling(peek()) + "' found", peek());
+        }
+        expect(TokenKind::Outdent, "end of the extension body");
+    } else {
+        node->members.push_back(member());
+    }
+    if (node->members.empty()) fail("an extension needs at least one def", start);
+    return node;
 }
 
 // enum Name[TypeParams](Params) extends Parents: <cases and members>
