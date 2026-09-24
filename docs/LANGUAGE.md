@@ -34,7 +34,7 @@
 | `if`/`then`/`else`, `while`/`do`, blocks as expressions, `return` | 1 |
 | lambdas `x => e`, `(x, y) => e`, placeholder syntax `_ + 1` | 1 (placeholders: 2 ✅) |
 | infix, prefix (`-x`, `!b`, `~n`) and postfix-free method application | 1 |
-| string interpolation `s""`, `f""`, `raw""` | 3 |
+| string interpolation `s""`, `f""`, `raw""` | 3 ✅ |
 | `for` comprehensions (generators, guards, value definitions, patterns, `yield` and `do`) | 2 ✅ |
 | `match` with the patterns of DESIGN §5.3, pattern `val`s, `{ case ... }` literals | 2 ✅ |
 | `try`/`catch`/`finally`, `throw` | 4 |
@@ -112,26 +112,89 @@ Later phases:
 
 ## 4. Standard library (Phases 3–5)
 
-Phase 2 ships a subset ahead of Phase 3, because for-comprehensions and
-extractors need it: `Option`/`Some`/`None` from the embedded prelude
+Phase 2 shipped a subset ahead of Phase 3, because for-comprehensions and
+extractors needed it: `Option`/`Some`/`None` from the embedded prelude
 (`lib/prelude.scala`), and `List(...)`, `Nil`, `::`, `map`, `flatMap`,
 `filter`, `withFilter`, `foreach`, `length`, `tail`, `drop`, `mkString`.
+**Phase 3 completed the rest**; §4.2 is the surface as delivered.
 
-The full target surface:
+Delivered:
 
 - `Any`, `AnyRef`, `Nothing`, `Unit`, `Int`, `Long`, `Double`, `Boolean`,
   `Char`, `String`, `BigInt` (all dynamic, DESIGN §4.1).
-- `List` (`Nil`, `::`), `Vector`, `Map`, `Set`, `Range`, `Seq`/`Iterable`
-  as traits, `Option`/`Some`/`None`, `Either`/`Left`/`Right`,
+- `List` (`Nil`, `::`), `Vector`, `Map`, `Set`, `Range`,
+  `Option`/`Some`/`None`, `Either`/`Left`/`Right`,
   `Try`/`Success`/`Failure`, `TupleN`.
-- Common collection methods: `map`, `flatMap`, `filter`, `withFilter`,
-  `foreach`, `foldLeft`, `foldRight`, `reduce`, `zip`, `zipWithIndex`,
-  `take`, `drop`, `head`, `tail`, `isEmpty`, `size`, `contains`, `exists`,
-  `forall`, `find`, `groupBy`, `sortBy`, `sorted`, `mkString`, `toList`,
-  `toVector`, `toMap`, `toSet`, `reverse`, `++`, `+:`, `:+`, `updated`,
-  `getOrElse`, `get`, `keys`, `values`.
-- `println`, `print`, `sys.exit`, `scala.math` basics.
+- The collection methods of §4.2.
+- `println`, `print`, `scala.math` basics.
 - `Actor`, `Future`, `Priority`, `Thread`, `System` (Phase 5, §4.1).
+
+Still ahead: `sys.exit`, and the `scala.math` surface beyond the basics.
+
+**Not provided, and not scheduled.** `Seq` and `Iterable` are **not** traits of
+this dialect and no phase's done-when contains them: `case xs: Seq[_]` and
+`x.isInstanceOf[Seq[_]]` are rejected at compile time (D65), and `List`,
+`Vector`, `Range`, `Map` and `Set` share no ancestor below `AnyRef` — although
+they *do* compare and hash as Scala `Seq`s do, so `List(1,2) == Vector(1,2) ==
+(1 to 2)`. `collect` is not provided either (D63): a `PartialFunction` needs the
+compiler to emit a second entry point per `{ case … }` literal, which belongs
+with Phase 4's pattern-matched `catch`; write `xs.filter(p).map(f)`. There is no
+`Ordering` (D62), no `SortedMap`/`ListMap`, no `Array` (D69) and no regular
+expressions (D70).
+
+### 4.2 The collection surface as delivered (Phase 3)
+
+Every method below is implemented and covered by a conformance fixture. A method
+that is not listed does not exist and fails with `NoSuchMethodError`.
+
+- **`List` and `Vector`** (one implementation, installed on both, so the two
+  cannot drift; a result is of the receiver's own kind): `length`, `size`,
+  `isEmpty`, `nonEmpty`, `apply`, `head`, `last`, `headOption`, `lastOption`,
+  `tail`, `init`, `take`, `drop`, `takeWhile`, `dropWhile`, `splitAt`,
+  `reverse`, `++`, `:+`, `+:`, `updated`, `contains`, `indexOf`, `exists`,
+  `forall`, `count`, `find`, `partition`, `map`, `flatMap`, `filter`,
+  `filterNot`, `withFilter`, `foreach`, `zip`, `zipWithIndex`, `distinct`,
+  `flatten`, `toList`, `toSeq`, `toVector`, `toSet`, `toMap`, `groupBy`,
+  `iterator`, `foldLeft`, `foldRight`, `fold`, `reduce`, `reduceLeft`,
+  `reduceRight`, `sum`, `product`, `min`, `max`, `minBy`, `maxBy`, `sorted`,
+  `sortBy`, `sortWith`, `mkString` (0, 1 or 3 arguments). `List` also has `::`;
+  prepending to a `Vector` is `+:`. `foldLeft`/`foldRight` accept both the Scala
+  spelling `xs.foldLeft(z)(f)` and the one-list `xs.foldLeft(z, f)`.
+- **`Range`** (`0 until 5`, `1 to 5`, `… by step`): `length`, `size`,
+  `isEmpty`, `nonEmpty`, `apply`, `head`, `last`, `contains`, `sum`, `by`,
+  `map`, `flatMap`, `filter`, `withFilter`, `foreach`, `exists`, `forall`,
+  `count`, `find`, `reverse`, `toList`, `toSeq`, `toVector`, `toSet`,
+  `mkString`, `toString`. `length`, `apply`, `head`, `last` and `sum` are O(1)
+  arithmetic: a `Range` is never materialised except by `toList`, `toVector`,
+  `toSet` and `mkString`.
+- **`Map`**: `apply`, `get`, `getOrElse`, `contains`, `isDefinedAt`, `size`,
+  `length`, `isEmpty`, `nonEmpty`, `keys`, `keySet`, `values`, `head`, `toList`,
+  `toSeq`, `iterator`, `+`, `updated`, `-`, `removed`, `++`, `--`, `foreach`,
+  `map`, `flatMap`, `filter`, `filterNot`, `withFilter`, `count`, `exists`,
+  `forall`, `find`, `foldLeft`, `toMap`, `toSet`, `mkString`, `toString`,
+  `equals`, `hashCode`, `##`. A function may be written `(k, v) => …` or
+  `p => p._1`; the arity of the value decides.
+- **`Set`**: the same list, plus `union`/`|`, `intersect`/`&`, `diff`/`&~` and
+  `subsetOf`; `s(x)` is `contains(x)`.
+- **`Option`**: `isEmpty`, `isDefined`, `nonEmpty`, `get`, `getOrElse`,
+  `orElse`, `map`, `flatMap`, `filter`, `withFilter`, `foreach`, `contains`,
+  `exists`, `forall`, `count`, `fold`, `zip`, `toRight`, `toLeft`, `orNull`,
+  `toList`, `toSeq`, `iterator`.
+- **`Either`** (right-biased): `isLeft`, `isRight`, `map`, `flatMap`,
+  `foreach`, `getOrElse`, `fold`, `swap`, `toOption`, `toList`, `exists`,
+  `forall`, `contains`. No `withFilter` (D67).
+- **`Try`**: `isSuccess`, `isFailure`, `get`, `getOrElse`, `toOption`, `map`,
+  `flatMap`, `foreach`, `recover`, `recoverWith`, `orElse`, `toEither`.
+  `Try { … }` takes its body by name. No `filter`/`withFilter` (D67).
+- **`String`**: `length`, `isEmpty`, `nonEmpty`, `charAt`, `apply`,
+  `substring`, `toUpperCase`, `toLowerCase`, `trim`, `contains`, `startsWith`,
+  `endsWith`, `indexOf`, `lastIndexOf`, `reverse`, `*`, `+`, `concat`,
+  `toInt`, `toLong`, `toDouble`, `toBoolean`, `split`, `replace`,
+  `stripMargin`, `stripPrefix`, `stripSuffix`, `capitalize`, `repeat`,
+  `compareTo`, `equalsIgnoreCase`, `format`, `toList`, `head`, `last`, `init`,
+  `take`, `drop`, `takeWhile`, `dropWhile`, `map`, `filter`, `foreach`,
+  `mkString`.
+- **`Any`**: `->`, so `k -> v` is the `Tuple2` `(k, v)`.
 
 ### 4.1 Concurrency (Phase 5)
 
@@ -210,9 +273,32 @@ message)` ahead of Phase 3 (D44).
 | D52 | `Priority.High` / `Medium` / `Low` are the integers `0` / `1` / `2` on an object, not an `enum` | `enum` arrives in Phase 4 |
 | D53 | A by-name parameter is honoured only where the compiler resolves the call site to the declaration: a call by name to a top-level or local `def` (any parameter list, including a curried one), a method of the template being compiled, a method of an `object`, a class's primary constructor, and a builtin whose by-name signature the runtime declares (`Future.apply`). At any other call site — a method reached through a dynamic send, or a `def` taken as a function value — the argument is evaluated once at the call and each read of the parameter yields that value. scalac resolves all of these statically, so it stays lazy where protoScala does not | dynamic dispatch: a send carries no signature |
 
+| D54 | `s"…"` and `raw"…"` compile directly to a concat opcode, so a user-defined `StringContext` is never consulted. The same input produces the same string | one rope join per interpolation instead of three allocations and two sends |
+| D55 | The `f` interpolator supports `%s %b %c %d %o %x %X %e %E %f %g %G %%`, the flags `-`, `+`, space, `0`, `,` and `#`, and `width.precision`. `%n` is not supported — write `\n` — and there is no locale, so the decimal separator is always `.` | a locale means a locale database |
+| D56 | An interpolator that is not `s`, `f` or `raw` is a compile error | a custom one needs `extension (sc: StringContext)`, which is Phase 4 |
+| D58 | `Map`/`Set` iteration — `toString`, `foreach`, `keys`, `values`, `toList`, `mkString` — is in ascending-hash order: deterministic for a given key set, unrelated to insertion order or to Scala's. The concrete consequence of D7 | Scala guarantees no order either |
+| D59 | `Vector.hashCode` equals `List.hashCode` for the same elements, and a `Range`'s equals both; all three differ from the JVM's (D39) | required for `Map(List(1) -> 1)(Vector(1))` to work |
+| D61 | `to`, `until` and `by` require bounds that fit a 54-bit integer | matching means boxing every bound, an allocation on every `Range` method |
+| D62 | `sorted` orders numbers, `Char`s, strings and booleans with the runtime's own comparison; any other pair raises `IllegalArgumentException: sorted needs comparable elements; use sortWith`. `sorted`, `sortBy` and `sortWith` are stable, as Scala's are | there is no `Ordering` without implicits (D3) |
+| D63 | `collect` is not provided; write `xs.filter(p).map(f)` | a `PartialFunction` needs a second entry point per `{ case … }` literal, which belongs with Phase 4 |
+| D65 | `Seq` and `Iterable` are not provided: `case xs: Seq[_]` is rejected at compile time, and the collections share no ancestor below `AnyRef` — although they compare and hash as Scala `Seq`s do | no phase's done-when contains them |
+| D66 | `%e`, `%f` and `%g` convert through a `Double`, so an integer above 2^53 prints rounded; `%d` is exact | matching means a bignum decimal formatter |
+| D67 | Neither `Either` nor `Try` has `filter`/`withFilter`, so `for (x <- e if p)` over one raises `NoSuchMethodError` | Scala's needs a `Left`, or an exception value, that only the static type supplies |
+| D68 | `Range.map`, `flatMap` and `filter` answer a `List` where Scala answers an `IndexedSeq`; the elements and their order are Scala's. `Range.reverse` does answer a `Range` | `IndexedSeq` is a `Seq` trait (D65) |
+| D69 | `String.split` answers a `List[String]`, not an `Array[String]` | there is no `Array` type (D12) |
+| D70 | `String.split` takes a **literal** separator: `"a.b".split(".")` yields `List(a, b)` where Scala, reading a regex, yields `List()`. `split(",")` is identical | matching means a regex engine |
+| D71 | A key that overrides `equals` but not `hashCode` misses at once. Scala's `Map1`..`Map4` compare by `==` alone and hide the classic defect up to four entries; at five and beyond Scala answers the same as protoScala | matching means a second, unhashed small-map representation |
+
 D9–D25 are the provisional Phase 1 departures, D28–D42 the provisional
-Phase 2 departures and D43–D53 the provisional Phase 5 departures listed in
-[STATUS.md](STATUS.md#intentional-deviations). The maintainer reviewed all of
-them on 2026-09-23: approved as recorded, except D45 and D47, which were
+Phase 2 departures, D43–D53 the provisional Phase 5 departures and D54–D71 the
+provisional Phase 3 departures listed in
+[STATUS.md](STATUS.md#intentional-deviations). The maintainer reviewed the first
+three groups on 2026-09-23: approved as recorded, except D45 and D47, which were
 overturned (the rows above carry the replacement behaviour) and which brought
-D53 with them.
+D53 with them. The Phase 3 group is **pending review**.
+
+**D57, D60 and D64 do not exist**, and are not reused. They were reserved for a
+`Char`-key divergence, a `Range == List` divergence and a `Try.apply` divergence
+that the rulings of 2026-09-23 and the arrival of by-name parameters each
+removed. Ids are stable references, so the gaps are left open rather than closed
+by renumbering.

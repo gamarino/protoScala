@@ -3,16 +3,22 @@
 > Living tracker of the gap between [LANGUAGE.md](LANGUAGE.md) and the
 > implementation. Update it with every change.
 >
-> **Current state (2026-09-23):** Phase 5 complete (0.3.0): everything Phases 1
-> and 2 delivered, plus **actors with three priority bands, futures with a
-> cooperative `await`, `Try`/`Success`/`Failure`, `Thread` and `System`**.
-> Phases 3 and 4 are still ahead: Phase 5 was implemented out of order, so the
-> minor version went from 0.2.0 to 0.3.0.
-> **Tests:** 694 total (`ctest --test-dir build_release -N`) — 274 unit
-> (GoogleTest, including the separate `unit/actors` binary), 388 conformance
-> fixtures, 22 CLI checks, 10 benchmark smoke checks. All green, also under
-> `PROTOCORE_HEAP_LIMIT_CELLS=20000` (the whole suite, unfiltered) and at
-> `PROTOSCALA_ACTOR_WORKERS=1` and `=16`. Last verified 2026-09-23.
+> **Current state (2026-09-24):** Phase 3 complete (**0.4.0**): everything
+> Phases 1, 2 and 5 delivered, plus **`Vector`, `Range`, `Map` and `Set` (the
+> last two on protoCore's `ProtoMap`), the full `List` surface, `Either`, an
+> extended `Option` and `Try`, the `String` surface, and string interpolation
+> — `s"…"`, `f"…"` and `raw"…"` — executing**. Phase 5 was implemented out of
+> order, so the minor version went 0.2.0 → 0.3.0 (Phase 5) → 0.4.0 (Phase 3);
+> Phase 4 (exceptions and `enum`) is what remains.
+> **Tests:** 911 total (`ctest --test-dir build_release -N`) — 316 unit
+> (GoogleTest, including the separate `unit/actors` binary), 561 conformance
+> fixtures, 22 CLI checks, 12 benchmark smoke checks. All green, and green at
+> `PROTOSCALA_ACTOR_WORKERS=1` and `=16`. Under
+> `PROTOCORE_HEAP_LIMIT_CELLS=20000` (the whole suite, unfiltered) 910 of 911
+> pass: `Mailbox.EightProducersLoseNothingAndDuplicateNothing` aborts, which was
+> verified to be **pre-existing** — it fails the same way on `main` at `bca0352`
+> with the Phase 3 work stashed — and is recorded under "Open bugs".
+> Last verified 2026-09-23.
 
 ## Implemented
 
@@ -22,8 +28,8 @@ Per [LANGUAGE.md](LANGUAGE.md) §1–§2, the rows delivered in Phase 1:
 - [x] Hard and soft keywords (§1's full lists, including `this`).
 - [x] Literals: decimal/hex/binary integers with `_` and `L`; floating point;
       characters with escapes and `\u`; strings, triple-quoted strings;
-      `s`/`f`/`raw` interpolators lexed as structured tokens (execution
-      arrives in Phase 3).
+      `s`/`f`/`raw` interpolators lexed as structured tokens (Phase 3
+      executes them; see below).
 - [x] Comments: `//` line, nested `/* ... */` block.
 - [x] Significant indentation (offside rule) and braces, mixable; `end`
       markers.
@@ -138,6 +144,78 @@ Delivered in Phase 5 (DESIGN §8), the concurrency block:
 - [x] The seven benchmark modes of DESIGN §8.5, each self-reporting and
       verified by the runner; tutorial chapter 13.
 
+### Phase 3 — collections, prelude and string interpolation
+
+Per [LANGUAGE.md](LANGUAGE.md) §4.2, which lists the delivered surface method by
+method. Every item below is covered by conformance fixtures, and every fixture
+whose behaviour should match Scala was verified against
+`tools/scala3-3.9.0` (`bin/scalac` plus `java -cp "$SCALA_HOME/lib/*:out"`).
+
+- [x] **String interpolation executes.** `s"…"` and `raw"…"` lower to the new
+      `CONCAT` opcode, which joins the pieces with `ProtoString::appendLast`, an
+      O(log n) rope join, so `s"$a$b"` on two strings copies neither (D54).
+      `f"…"` lowers to a call of the native `__fmt` with the specifiers as
+      compile-time constants, so a malformed one is a compile error at the
+      interpolation's position (D55). An interpolator that is not `s`, `f` or
+      `raw` is rejected at compile time (D56). A hole is parsed by the same
+      Lexer/Layout/Parser pipeline as the file, so it may hold any expression,
+      including another interpolation.
+- [x] **The full `List` surface** — 40 methods beyond Phase 2's, including
+      `foldLeft`/`foldRight` (both the Scala `xs.foldLeft(z)(f)` spelling and
+      the one-list `xs.foldLeft(z, f)`), `sorted`/`sortBy`/`sortWith` (a stable
+      merge sort, D62), `groupBy`, `zip`, `zipWithIndex`, `partition`,
+      `splitAt`, `distinct` and `flatten`.
+- [x] **`Vector`**, an object holding a `ProtoList` under one attribute. `List`
+      and `Vector` are *one* implementation installed on both prototypes, so
+      the two surfaces cannot drift; a result is of the receiver's own kind.
+- [x] **`Range`** (`0 until 5`, `1 to 5`, `… by step`): `length`, `apply`,
+      `head`, `last`, `sum` and `contains` are O(1) arithmetic and it is never
+      materialised except by `toList`/`toVector`/`toSet`/`mkString`. A bound
+      must fit a `SmallInteger` (D61); `map`/`flatMap`/`filter` answer a `List`
+      (D68); `reverse` answers a `Range`, as Scala's does.
+- [x] **`Map` and `Set` on protoCore's `ProtoMap`**, read and written only
+      through `proto::hashedPut`/`hashedGet`/`hashedRemove`/`hashedForEach` with
+      one `proto::KeySemantics` whose callbacks are protoScala's own
+      `scalaIsIdentityKey`, `scalaHash` and `valuesEqual` — so a `Map` can never
+      disagree with `==`, and Scala's cooperative numeric equality makes `1`,
+      `1L` and `1.0` one key. The identity/value classification is DESIGN §6.1's,
+      decided by an exact pointer comparison against the single `equals` on
+      `anyProto`; `Char` and parameterised `enum` cases are value keys (the
+      maintainer's rulings C1 and C2 of 2026-09-23). Iteration is ascending-hash
+      (D58).
+- [x] **Cross-kind `Seq` equality and hashing**: `List(1,2) == Vector(1,2) ==
+      (1 to 2)`, all three hash alike, and a `Map` keyed by one is found by
+      another (D59). Decided once, in `valuesEqual` and `scalaHash`, over one
+      allocation-free `SeqView`, so `==` and `.equals` cannot split.
+- [x] **`Either`/`Left`/`Right`** (right-biased), an **extended `Option`**
+      (`fold`, `toRight`, `toLeft`, `orNull`, `forall`, `count`, `zip`,
+      `iterator`, `toSeq`) and an **extended `Try`** (`map`, `flatMap`,
+      `foreach`, `recover`, `recoverWith`, `orElse`, `toEither`), with
+      `Try { … }` taking its body by name. Neither `Either` nor `Try` has
+      `withFilter` (D67). `Failure` still carries `RuntimeError` for Phase 4 to
+      migrate (D44).
+- [x] **The `String` surface**: `split` (literal separator, answering a `List`
+      — D69, D70), `replace`, `stripMargin`, `stripPrefix`, `stripSuffix`,
+      `lastIndexOf`, `capitalize`, `equalsIgnoreCase`, `compareTo`,
+      `toBoolean`, `format` (through the same formatter as the `f`
+      interpolator), and the collection-like `toList`, `head`, `last`, `init`,
+      `take`, `drop`, `takeWhile`, `dropWhile`, `map`, `filter`, `foreach`,
+      `mkString`.
+- [x] `->` on `Any`, so `k -> v` is the `Tuple2` `(k, v)` — a case-class
+      instance, never a `ProtoTuple` (DESIGN §4.6).
+- [x] **Benchmark suite v1** (`fib`, `tak`, `sum_loop`, `list_ops`,
+      `map_build`), each printing the work it did and verified by the runner
+      before any rate is computed; recorded in
+      [../benchmarks/RESULTS.md](../benchmarks/RESULTS.md).
+- [x] Tutorial chapters 8 (Collections) and 10 (Strings and interpolation),
+      with a conformance fixture per runnable snippet.
+
+**Delivered beyond the phase's done-when:** the `unary_-`/`unary_!`/binary
+operator symbols are no longer interned on every execution (a measured 10.0 %
+cycle reduction on an operator-overload loop), `->` on `Any`, the `String`
+surface above, and `O(args)` on an object now honouring `apply`'s by-name
+parameters as `O.apply(args)` already did.
+
 ## Not yet implemented
 
 - Nested, local and anonymous classes (`new T { ... }`) — Q6; nested
@@ -147,14 +225,15 @@ Delivered in Phase 5 (DESIGN §8), the concurrency block:
 - `enum`, extension methods, named and default arguments for Scala-defined
   methods (native methods already accept them, Q9) — Phase 4.
 - Exceptions (`try`/`catch`/`finally`/`throw`) — Phase 4.
-- The Phase 3 collections (`Vector`, `Map`, `Set`, `Range`, `Either`, `Try`,
-  the full `List` surface) and string-interpolation execution — Phase 3.
 - UMD and packaging — Phase 6.
 - Supervision trees, `ExecutionContext`, actor timeouts and
   `Await.result(f, duration)` — not scheduled. An `await` waits forever; the
   shutdown reports any actor still parked on a future that never completed.
 - Actor mailboxes on protoCore's `ProtoMPSCQueue` — Phase P2 (the `Mailbox`
   seam is in place; switching is a one-file change once protoCore merges it).
+- `collect` and `PartialFunction` (D63), `Seq`/`Iterable` as traits (D65),
+  `Ordering` (D62), `SortedMap`/`ListMap`, `Array` (D69) and regular
+  expressions (D70) — see the Phase 3 deviations for what each would cost.
 
 See [ROADMAP.md](ROADMAP.md).
 
@@ -206,7 +285,8 @@ their reserved ranges.
 | 36 | `NEG` | `[a] -> [-a]` | |
 | 37 | `NOT` | `[b] -> [!b]` | |
 | 38 | `FORCE_THUNK` | `[v] -> [v()]` | a read of a by-name parameter (D47): runs a zero-argument function, passes any other value through (D53) |
-| 39..63 | reserved | | Phase 1 additions |
+| 39 | `CONCAT` | `[v1 .. vn] -> [str]` | operand: n >= 2; each `vi` is converted with `toScalaString` and the pieces are joined with `ProtoString::appendLast`, an O(log n) rope join that copies neither side. `s"…"` and `raw"…"` lower to this (D54) |
+| 40..63 | reserved | | Phase 1 additions |
 | 64 | `MAKE_CLASS` | `[p1..pk m1..mn] -> [cls]` | operand: a ClassSpec constant |
 | 65 | `NEW` | `[cls a1..an] -> [obj]` | operand: SendSite (constructor key, n) |
 | 66 | `INVOKE_INIT` | `[cls this a1..an] -> [this']` | operand: SendSite (constructor key, n); returns the rebuilt instance (D28) |
@@ -327,10 +407,77 @@ revisit; the behaviour is unchanged.
 | D52 | `Priority.High` / `Medium` / `Low` are the integers `0` / `1` / `2` on an object, not an `enum` (enums arrive in Phase 4) | Phase 4 |
 | D53 | A by-name parameter is honoured only where the compiler resolves the call site to the declaration: a call by name to a top-level or local `def` (any parameter list, including a curried one), a method of the template being compiled, a method of an `object`, a class's primary constructor, and a builtin whose by-name signature the runtime declares (`Future.apply`). At any other call site — a method reached through a dynamic send, or a `def` taken as a function value — the argument is evaluated once at the call and each read of the parameter yields that value. scalac resolves all of these statically, so it stays lazy where protoScala does not | later |
 
+### Phase 3 deviations — recorded 2026-09-23, pending review
+
+Decided by the implementing agent under the maintainer's standing authorisation
+([DECISIONS-LOG.md](DECISIONS-LOG.md), "Phase 3"). The plan
+([plans/2026-09-23-phase-3-collections.md](plans/2026-09-23-phase-3-collections.md))
+escalated nothing: six of its items were **ruled** by the maintainer on
+2026-09-23 and sixteen were **decided on cost** under the standing rule *follow
+Scala where matching is cheap; document the divergence where matching would cost
+real machinery and only unusual code could notice*. The "How" column says which.
+
+| Id | Deviation | Plan item | How | Track |
+|---|---|---|---|---|
+| D54 | `s"…"` and `raw"…"` are compiled directly to the `CONCAT` opcode, so a user-defined `StringContext` is never consulted. The same input produces the same string; only a program that redefines `StringContext.s` sees a difference | A0-1 | ruled (R4) | Phase 4 |
+| D55 | The `f` interpolator supports `%s %b %c %d %o %x %X %e %E %f %g %G %%`, the flags `-`, `+`, space, `0`, `,` (ASCII grouping) and `#`, and `width.precision`. `%n` is **not** supported — write `\n` — and there is no locale support, so the decimal separator is always `.`. Anything else is a compile error at the interpolation's position | A0-2 | on cost (C2): a locale means a locale database | later |
+| D56 | An interpolator that is not `s`, `f` or `raw` is a compile error: `unknown string interpolator 'json': only s, f and raw are available (custom interpolators need extension methods)`. Accepting one would mean building a `StringContext` nothing can dispatch on | A0-3 | on cost (C3) | Phase 4 |
+| D57 | **Unused.** It was reserved for "a `Char` key and a numerically equal `Int` key are distinct". The maintainer's ruling C1 of 2026-09-23 removed that divergence — a `Char` is a value-equality key and `Map[Any, Int]('a' -> 1, 97 -> 1)` has one key, as in Scala — so there is nothing to record. The id is left unused rather than reassigned, because ids are stable references | A0-5 | ruled (R2) | — |
+| D58 | `Map`/`Set` iteration — `toString`, `foreach`, `keys`, `values`, `toList`, `mkString` — yields **ascending-hash order**: deterministic for a given key set and across runs, and unrelated to insertion order or to Scala's. D7 already said the order is unspecified; this is its concrete consequence. Every conformance fixture that prints more than one entry sorts first, so the suite pins behaviour and never pins the order | A0-6 | on cost (C5): Scala guarantees no order either, so there is nothing to match; `SortedMap`/`ListMap` are a different type | (perm) |
+| D59 | `Vector.hashCode` equals `List.hashCode` for the same elements, and a `Range`'s equals both — required for `Map(List(1) -> 1)(Vector(1))` to work. All three differ from the JVM's (D39, unchanged) | A0-7 | on cost (C6) | (perm) |
+| D60 | **Unused.** It was reserved for `(0 until 3) == List(0, 1, 2)` being `false`. Decided on cost and reversed: an allocation-free `SeqView` — which *replaces* the helper the `Vector` work needed anyway — makes it `true`, as scalac answers, in about 58 lines with an O(1) length short-circuit. The id is left unused rather than reassigned | A0-8 | on cost (C1) | — |
+| D61 | `to`, `until` and `by` require bounds that fit a `SmallInteger` and raise `IllegalArgumentException: a Range bound must fit a 54-bit integer` otherwise | A0-9 | on cost (C7): matching means boxing both bounds, an allocation on every `Range` method, to serve ranges of more than 2^53 elements | (perm) |
+| D62 | `sorted` orders with the runtime's own comparison: numbers by exact value across `Int`/`BigInt`/`Double`, `Char` by code point, strings by content, booleans `false < true`. Any other pair raises `IllegalArgumentException: sorted needs comparable elements; use sortWith`. `sortBy(f)` orders by `f`'s results and `sortWith(lt)` takes the comparator; all three are **stable** (merge sort), as Scala's are | A0-10 | on cost (C8): matching needs `Ordering`, i.e. implicits (D3) — a whole subsystem, for an answer that is identical on numbers and strings | later |
+| D63 | `collect` is not provided: `xs.collect(…)` fails with `NoSuchMethodError`. A `PartialFunction` needs the compiler to emit a second entry point per `{ case … }` literal, which belongs with Phase 4's pattern-matched `catch`. Write `xs.filter(p).map(f)` | A0-11 | ruled (R5) | Phase 4 |
+| D64 | **Unused.** It was reserved for `Try.apply` taking a function, `Try(() => expr)`. By-name parameters landed on `main` on 2026-09-23 (`bca0352`), so `Try { risky() }` works as in Scala and there is no divergence. The id is left unused rather than reassigned. Note that `Try(() => expr)` is still accepted and means what Scala means by it — a `Try` of a function value, `Success(<function0>)` | A0-12 | on cost (C9) | — |
+| D65 | `Seq` and `Iterable` are **not** provided and are not scheduled: `case xs: Seq[_]` and `x.isInstanceOf[Seq[_]]` are rejected at compile time (`Not found: type Seq`), and `List`, `Vector`, `Range`, `Map` and `Set` share no common ancestor below `AnyRef`. LANGUAGE §4 used to promise them; the promise was removed rather than left to contradict the code | A0-14 | ruled (R6): ROADMAP's done-when governs | later |
+| D66 | `%e`, `%f` and `%g` convert their argument to a `Double` first, so an integer above 2^53 prints rounded. `%d` is exact for a promoted `LargeInteger` (D1) and is what an integer wants | Task 4 | on cost (C16): matching means a bignum decimal formatter | later |
+| D67 | Neither `Either` nor `Try` has `filter`/`withFilter`, so `for (x <- e if p)` over one fails with `NoSuchMethodError`. Scala's `Either.withFilter` needs a `Left` to fall back to, and `Try`'s a failed filter's exception value; both need the static type | Task 5 | on cost (C15) | Phase 4 |
+| D68 | `Range.map`, `flatMap` and `filter` answer a `List`, where Scala answers an `IndexedSeq` (rendered `Vector(…)`). The elements and their order are Scala's. `Range.reverse` *does* answer a `Range`, as Scala's does, because that was cheap | Task 6 | on cost (C14): `IndexedSeq` is a `Seq` trait, which R6 keeps out of this phase | later |
+| D69 | `String.split` answers a `List[String]`, not an `Array[String]`. There is no `Array` type (D12 already routes varargs to `List`) | Task 11 | on cost (C13) | (perm) |
+| D70 | `String.split` splits on a **literal** separator, not a regular expression: `"a.b".split(".")` yields `List(a, b)` where Scala, reading the argument as a regex, yields `List()`. `split(",")` — the common case — is identical | Task 11 | on cost (C12): matching means a regex engine, a dependency this dialect does not have | later |
+| D71 | A key that overrides `equals` but **not** `hashCode` is a value key that hashes by identity, so two `==` instances land in different slots and never find each other. Scala's `Map1`..`Map4` compare by `==` alone and so hide the classic `equals`/`hashCode` defect for the first four entries; protoScala is hashed from the first entry and exposes it at once. **At five entries and beyond scalac answers exactly what protoScala answers** (verified: a six-entry map of such keys gives `size=6` and a miss in both). Not foreseen by the plan, which expected no divergence here | Task 9 | on cost: matching means a second, unhashed small-map representation `ProtoMap` does not offer, to preserve a behaviour Scala itself loses at five entries and that only the classic bug can observe | (perm) |
+
+**Three ids in the D54–D70 block are unused — D57, D60 and D64 — and stay that
+way.** Two of the three were withdrawn because a ruling removed the divergence
+they described and the third because by-name parameters landed. They are not
+renumbered to close the gaps: ids are stable references, and three short notes
+cost less than a renumber that invalidates every document already citing them.
+D71 continues the numbering past the block.
+
+**What did *not* diverge, and is worth stating because a reader will look for
+it:** `Map` and `Set` keys follow Scala on every kind DESIGN §6.1 classifies,
+including `Char` and parameterised `enum` cases (rulings C1 and C2); `Seq`
+equality and hashing are cross-kind, so `List(1,2) == Vector(1,2) == (1 to 2)`
+and a `Map` keyed by one is found by another; and `Try { … }` takes its body by
+name. All three were verified against `tools/scala3-3.9.0`.
+
 ## Known issues / platform dependencies
 
 See DESIGN §11 for the full table. Unchanged this phase: R2, R4, R5, R8.
 
+- **Phase 3 / one entry cell per value-equality key.** DESIGN §6.1's scheme
+  stores an identity key as the `ProtoMap` slot key itself, but a value key as a
+  two-element `ProtoList` entry inside the slot (and a list of entries on a
+  genuine hash collision). A `Map` of value keys therefore costs one extra list
+  per entry over a hypothetical flat one — the price of Scala's `==`/`hashCode`
+  semantics on a map whose keys the collector traces. `map_build` (50000 String
+  keys) is the workload that shows it: 354.9 ms against CPython's mutable
+  `dict` at 80.0 ms.
+- **Phase 3 / `Map` and `Set` iteration is ascending-hash (D58).** Deterministic
+  for a given key set and across runs, and unrelated to insertion order or to
+  Scala's. Every conformance fixture that prints more than one entry sorts
+  first, so the suite pins behaviour and never pins the order; a program that
+  depends on the order is depending on something neither dialect promises.
+- **Phase 3 / cold start — inside the budget on a load-3.9 host, and at the
+  line.** Measured on the suite-v1 run: 24.43 ms (script) and 24.24 ms (REPL)
+  for the RelWithDebInfo build, 22.71 ms and 23.72 ms for the Release build, all
+  21/21 verified, at load average 3.90. That is inside DESIGN §1's < 25 ms, and
+  it supersedes the Phase 5 entry below. It is not comfortable: an earlier
+  measurement during this phase read 27.05 ms at load average 4.03, after the
+  prelude grew by `Either` and the extended `Option`/`Try`. The figure is only
+  meaningful with its load average beside it, and the prelude is compiled at
+  every start-up, so each phase that grows it should re-measure.
 - **Phase 5 / R1.** A C++ thread that polls an actor's state must reach a
   safepoint between polls, or a stop-the-world pause waits for it and every
   worker stalls; a Scala spin loop gets this for free because `JUMP_BACK`
@@ -440,14 +587,19 @@ Smaller notes:
 
 ## Open bugs
 
-None known. 694/694 tests pass (`ctest --test-dir build_release`), 694/694
-under `PROTOCORE_HEAP_LIMIT_CELLS=20000`, and 693/693 at
-`PROTOSCALA_ACTOR_WORKERS=1` and `=16`.
+**One, pre-existing.** `Mailbox.EightProducersLoseNothingAndDuplicateNothing`
+aborts under `PROTOCORE_HEAP_LIMIT_CELLS=20000`: 910 of 911 pass in that
+configuration. It is **not** a Phase 3 regression — it fails the same way on
+`main` at `bca0352` with the Phase 3 work stashed, which was checked before the
+first Phase 3 commit. It is Phase 5 code and was left undiagnosed rather than
+fixed outside this phase's scope, but it is recorded here rather than left to be
+rediscovered. Every other configuration is fully green: 911/911 plain, 911/911 at
+`PROTOSCALA_ACTOR_WORKERS=1` and at `=16`.
 
-Not run in this phase, and therefore not claimed: the ThreadSanitizer build of
-the plan's Task 8 Step 4. The machine was shared with other builds while
-Phase 5 was implemented and a TSan run would have invalidated the benchmark
-table measured on it; it is the first thing to run on a quiet host.
+Not run in this phase either, and therefore still not claimed: the
+ThreadSanitizer build of the Phase 5 plan's Task 8 Step 4. Phase 3 adds no
+concurrency, so it neither needs nor supplies that evidence; it remains the first
+thing to run on a quiet host.
 
 ## History
 

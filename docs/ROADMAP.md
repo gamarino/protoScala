@@ -75,7 +75,7 @@ classes, traits, objects and case classes, and the `attr_lookup` and
 `object_tree` benchmarks. Provisional deviations D28–D42 are recorded in
 [STATUS.md](STATUS.md#provisional-deviations-phase-2--pending-maintainer-decision).
 
-## Phase 3 — Fast paths, collections, prelude
+## Phase 3 — Fast paths, collections, prelude ✅ (2026-09-23, 0.4.0)
 
 **Goal:** a usable standard library.
 **Done when:** SmallInteger fast paths with LargeInteger promotion are
@@ -83,9 +83,31 @@ covered by boundary fixtures (±2^53); `List`, `Vector`, `Range`, `Option`,
 `Either`, `Try`, tuples and string interpolation pass their fixtures
 (`Option`, tuples and a minimal `List` already landed in Phase 2 — Q7, Q8 —
 so this phase completes the `List` surface and adds the rest);
-`Map`/`Set` pass on `ProtoMap` (requires P1); benchmark suite
+`Map`/`Set` pass on `ProtoMap` (P1, ✅ merged and released in protoCore 2.0.0,
+with the hashed-collection helper); benchmark suite
 v1 (`fib`, `tak`, `sum-loop`, `list-ops`, `map-build`) self-reports and is
 recorded in `benchmarks/RESULTS.md`.
+
+**Every clause is met.** 911 tests green (561 conformance, 316 unit, 22 CLI,
+12 benchmark), and green at `PROTOSCALA_ACTOR_WORKERS=1` and `=16`; under
+`PROTOCORE_HEAP_LIMIT_CELLS=20000` one pre-existing Phase 5 mailbox test aborts
+(STATUS "Open bugs"). Plan:
+[plans/2026-09-23-phase-3-collections.md](plans/2026-09-23-phase-3-collections.md).
+Deviations D54–D71 (D57, D60 and D64 unused), pending review.
+
+**Delivered beyond the criteria:** the `unary_-`, `unary_!` and binary operator
+symbols are no longer interned on every execution (a measured 10.0 % cycle
+reduction on an operator-overload loop, `perf stat -r 3`); `->` on `Any`; the
+`String` surface of the plan's Task 11 (`split`, `replace`, `stripMargin`,
+`format`, and the collection-like methods); and `O(args)` on an object now
+honours `apply`'s by-name parameters as `O.apply(args)` already did, which
+widens D53's reach.
+
+**Not delivered, and deliberately:** the plan's Task 1 Step 2, a SmallInteger
+fast path on `EQ`/`NE`. It was written, measured and backed out under the plan's
+own 3 % rule — `valuesEqual` already fast-paths two SmallIntegers, so it bought
+nothing on its own workload and cost 8 % of `sum_loop`'s cycles through code
+layout. The measurement is recorded at the opcode and in DECISIONS-LOG.
 
 ## Phase 4 — Exceptions, super, enums
 
@@ -94,6 +116,17 @@ recorded in `benchmarks/RESULTS.md`.
 native error translation, `super[T].m`, `enum`, sealed
 hierarchies, named and default arguments for Scala-defined methods, extension
 methods and templates nested in an `object` pass.
+
+**Ordering coupling with Phase 3 (recorded 2026-09-23):** Phase 3 extended
+`Try` with combinators but did **not** re-point `Failure`'s payload off
+`RuntimeError` (plan A0-13). Phase 4 does it, in one prelude edit plus the
+`await` raise path, and closes D44 and D50 with it. Phase 3 also left two
+`XFAIL` fixtures waiting on `enum`
+(`tests/conformance/18-maps-and-sets/map-enum-case-keys.scala` and
+`map-parameterised-enum-case-keys.scala`), whose `EXPECT` lines are already the
+right ones: a singleton `enum` case is an identity key and a parameterised one is
+a value key. Phase 4's `enum` task converts them. D56 (an unknown string
+interpolator is a compile error) is closed by Phase 4's extension methods.
 
 **Landed early (2026-09-23), with the D47 ruling:** by-name parameters
 (`x: => T`). They were not scheduled for any phase; `Future(expr)` needs them,

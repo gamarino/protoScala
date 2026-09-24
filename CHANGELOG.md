@@ -29,6 +29,95 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `def` taken as a function value, evaluate the argument once at the call.
   Scala resolves all of these from static types.
 
+## [0.4.0] - 2026-09-23
+
+Phase 3: fast paths, collections, the prelude and string interpolation. Built
+against protoCore `983bbf98` (2.1.0), which supplies `ProtoMap` and the
+hashed-collection helper. Phase 5 shipped out of order as 0.3.0, so Phase 3 is
+0.4.0 and Phase 4 will be 0.5.0.
+
+### Added
+
+- **String interpolation executes.** `s"…"` and `raw"…"` compile to the new
+  `CONCAT` opcode (39), which converts each piece with `toScalaString` and joins
+  them with `ProtoString::appendLast` — an O(log n) rope join that copies
+  neither side, so `s"$a$b"` on two strings allocates one node. `f"…"` compiles
+  to a call of the native `__fmt` with every specifier a compile-time constant,
+  so a malformed one is a *compile* error at the interpolation's position, as
+  scalac reports it. A hole is parsed by the same Lexer/Layout/Parser pipeline
+  as the file, so it may hold any expression, nested interpolations included.
+- **`Vector`, `Range`, `Map` and `Set`.** `Map` and `Set` are built on
+  protoCore's `ProtoMap` and are read and written only through
+  `proto::hashedPut`/`hashedGet`/`hashedRemove`/`hashedForEach` with one
+  `KeySemantics` whose callbacks are protoScala's own `scalaHash` and
+  `valuesEqual` — so a `Map` can never disagree with `==`, and Scala's
+  cooperative numeric equality makes `1`, `1L` and `1.0` one key. `Range` is
+  arithmetic: `length`, `apply`, `head`, `last`, `sum` and `contains` are O(1)
+  and it is never materialised except by an explicit conversion.
+- **The full `List` surface**, and `Vector` sharing *one* implementation with it
+  installed on both prototypes, so the two cannot drift; a result is of the
+  receiver's own kind. `sorted`/`sortBy`/`sortWith` are a stable merge sort;
+  `foldLeft`/`foldRight` accept both `xs.foldLeft(z)(f)` and `xs.foldLeft(z, f)`.
+- **Cross-kind `Seq` equality and hashing**: `List(1,2) == Vector(1,2) ==
+  (1 to 2)`, all three hash alike, and a `Map` keyed by one is found by another.
+  Decided once, in `valuesEqual` and `scalaHash`, over one allocation-free
+  `SeqView`, so `==` and `.equals` cannot split and
+  `(0 until 1000000000) == List(1)` is O(1).
+- **`Either`/`Left`/`Right`**, an extended `Option` (`fold`, `toRight`,
+  `toLeft`, `orNull`, `forall`, `count`, `zip`, `iterator`, `toSeq`) and an
+  extended `Try` (`map`, `flatMap`, `foreach`, `recover`, `recoverWith`,
+  `orElse`, `toEither`), with `Try { … }` taking its body by name.
+- **The `String` surface**: `split`, `replace`, `stripMargin`, `stripPrefix`,
+  `stripSuffix`, `lastIndexOf`, `capitalize`, `equalsIgnoreCase`, `compareTo`,
+  `toBoolean`, `format` (through the same formatter as the `f` interpolator) and
+  the collection-like `toList`, `head`, `last`, `init`, `take`, `drop`,
+  `takeWhile`, `dropWhile`, `map`, `filter`, `foreach`, `mkString`.
+- **`->` on `Any`**, so `k -> v` is the `Tuple2` `(k, v)` — a case-class
+  instance, never a `ProtoTuple`.
+- **Benchmark suite v1** completed with `list_ops` and `map_build`, both printing
+  the work they did and verified by the runner before any rate is computed;
+  recorded in `benchmarks/RESULTS.md` with the machine, both commits and the
+  load average.
+- **Tutorial chapters 8 and 10**, with a conformance fixture per runnable
+  snippet, and the two bridge chapters extended.
+- **Deviations D54–D71** (D57, D60 and D64 unused — the divergences they were
+  reserved for were removed by the rulings of 2026-09-23 and by by-name
+  parameters landing). D71 is new and was not foreseen by the plan.
+
+### Fixed
+
+- The dispatch loop interned `unary_-`, `unary_!` and every binary operator
+  symbol on **every execution**. All three families now read their interned
+  names from `RuntimeLayout`: 1.630 → 1.466 Gcycles on a 200000-iteration
+  operator-overload loop (`perf stat -r 3`), 10.0 % fewer.
+- A name read inside an interpolation hole was never boxed as a capture, so
+  `var v = 1; val f = () => s"$v"` would have read a stale value.
+- The lexer scanned `$name` with the full identifier rule, in which `$` is a
+  legal character, so `s"$a$b"` lexed as one hole named `a$b`; scalac reads it
+  as two, which is what the parser now does.
+- The 22 `-Wmissing-field-initializers` warnings the by-name work left behind,
+  so the tree builds warning-free again.
+
+### Changed
+
+- `O(args)` on an object honours `apply`'s by-name parameters, as
+  `O.apply(args)` already did. Without it `Try { … }` would have evaluated its
+  block on the caller while `Try.apply { … }` would not, and DESIGN §5.1 makes
+  the two the same call.
+- `Map`/`Set` iteration is ascending-hash (D58) — deterministic for a given key
+  set, unrelated to insertion order or to Scala's. Every fixture that prints
+  more than one entry sorts first.
+
+### Not done, deliberately
+
+- A SmallInteger fast path on the `EQ`/`NE` opcodes. It was written, measured
+  and backed out: `valuesEqual` already fast-paths two SmallIntegers, so it won
+  nothing on its own workload (inside the error bars) and cost 8 % of
+  `sum_loop`'s cycles through code layout in the hottest function. The
+  measurement is recorded at the opcode.
+- `Failure`'s payload still carries `RuntimeError`; Phase 4 re-points it and
+  closes D44 and D50 with it.
+
 ## [0.3.0] - 2026-09-23
 
 Phase 5: actors, priority bands and cooperative futures. Built against

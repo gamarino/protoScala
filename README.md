@@ -15,7 +15,7 @@ protoScala is also a **platform validation project**: protoCore aims to be a sol
 
 ## A flavour of the language
 
-Every line below runs on 0.3.0 today.
+Every line below runs on 0.4.0 today.
 
 ```scala
 case class Increment(by: Int)
@@ -34,16 +34,25 @@ println(Future(6 * 7).await)                 // 42 — Future takes its body by 
 val squares = for x <- List(1, 2, 3) yield x * x
 println(squares)                              // List(1, 4, 9)
 
+val stock = Map("apples" -> 3, "pears" -> 0)
+val restocked = stock + ("pears" -> 12)       // a new Map; `stock` is unchanged
+println(restocked.toList.sortBy(_._1))        // List((apples,3), (pears,12))
+
+val name = "Ada"
+println(s"Hello, $name!")                     // Hello, Ada!
+println(f"pi is ${3.14159}%.2f")              // pi is 3.14
+
 def factorial(n: Int): Int = if n == 0 then 1 else n * factorial(n - 1)
 println(factorial(100).toString.length)       // 158 — integers never overflow
 ```
 
 ## Project status
 
-**Phase 5 complete (version 0.3.0) — not production ready, open for community
-review.** Phase 5 was implemented before Phases 3 and 4, so 0.2.0 is followed
-by 0.3.0. The binary runs Scala 3 scripts and offers a REPL, in both brace and
-significant-indentation syntax:
+**Phase 3 complete (version 0.4.0) — not production ready, open for community
+review.** Phase 5 was implemented before Phases 3 and 4, so the minor version
+went 0.2.0 → 0.3.0 (actors) → 0.4.0 (collections); Phase 4, exceptions and
+`enum`, is what remains. The binary runs Scala 3 scripts and offers a REPL, in
+both brace and significant-indentation syntax:
 
 - `val`/`var`/`lazy val`/`def`, `if`/`while`, lambdas and closures, placeholder
   syntax (`_ + 1`), recursion (with `StackOverflowError` instead of a crash),
@@ -70,8 +79,16 @@ significant-indentation syntax:
 - **for-comprehensions** (generators, guards, value definitions, patterns,
   `yield` and `do`) over `List`, `Option` and any class with
   `map`/`flatMap`/`withFilter`/`foreach`, with a lazy `withFilter`;
-- `Option`/`Some`/`None` from a prelude written in protoScala, and a minimal
-  `List`;
+- **the collections**: the full `List` surface, `Vector`, `Range`, and `Map` and
+  `Set` on protoCore's `ProtoMap` with GC-traced keys — all immutable, all
+  sharing structure, so `m + (k -> v)` is a new map that shares almost
+  everything with the old one. `List(1,2) == Vector(1,2) == (1 to 2)`, and all
+  three hash alike, so a `Map` keyed by one is found by another;
+- **`Option`/`Some`/`None`, `Either`/`Left`/`Right` and `Try`** from a prelude
+  written in protoScala, with the combinators you expect (`map`, `flatMap`,
+  `fold`, `getOrElse`, `recover`, `toEither`, …);
+- **string interpolation**: `s"…"`, `f"…"` with the printf specifiers, and
+  `raw"…"`;
 - **actors and futures, without a GIL**: `Actor.spawn(state)(handler)`, `!`,
   `?`, three priority bands, `Actor.stats`; `Future` with `await`, `map`,
   `flatMap`, `recover` and `Future(e)` — the body is taken by name; a worker
@@ -262,6 +279,25 @@ printed result verified; `—` means the runtime has no twin of that workload.
 | `attr_lookup` (3 field reads × 100000) | 35.8 [33.9-38.7] | 36.8 [34.0-37.9] | 210.0 [197.6-227.6] | 45.6 [42.0-47.1] | 161.6 [157.2-167.9] | 123.6 [117.6-129.4] | — | 0.79× |
 | `object_tree` (131071-object tree: build, path-copy, fold) | 406.9 [383.7-629.9] | 404.7 [379.6-613.6] | 255.0 [216.0-384.1] | 209.1 [195.6-261.0] | 3657.1 [3619.2-4142.0] | — | — | 1.95× |
 | **Geomean vs CPython** (rows) | 0.86× (10) | 0.87× (10) | 3.72× (10) | 1.00× | 2.82× (10) | 1.84× (5) | 1.11× (4) | **0.86×** |
+
+**Suite v1 completed in 0.4.0.** Phase 3 added the last two workloads the
+ROADMAP's benchmark suite v1 names, measured on 2026-09-23 at load average 3.90
+against protoCore `983bbf98` (2.1.0) — full table:
+[benchmarks/reports/2026-09-23-phase3-v1.md](benchmarks/reports/2026-09-23-phase3-v1.md),
+reading: [benchmarks/RESULTS.md](benchmarks/RESULTS.md).
+
+| Workload | protoScala | CPython 3.14 | protoScala ÷ CPython |
+|---|---:|---:|---:|
+| `list_ops` (map / filter / foldLeft over 100000 elements) | 465.5 [454.4-492.4] | 1934.7 [1876.3-2041.2] | 0.24× |
+| `map_build` (build and read back 50000 entries) | 354.9 [345.7-355.3] | 80.0 [74.6-84.3] | 4.43× |
+| **Geomean vs CPython**, all 12 workloads | 0.91× | 1.00× | **0.91×** |
+
+`map_build` is the honest cost of an immutable map: each of the 50000 inserts
+returns a new `ProtoMap` version where CPython's `dict` mutates one object in
+place. protopy runs the same twin in 935.0 ms, so it is the shared object
+kernel's cost, not protoScala's frontend. `list_ops`'s 0.24× is partly the
+Python twin's O(n) `insert(0, i)` against an O(log n) `::` — the row says the
+prepend-and-fold surface is cheap, not that protoScala is four times CPython.
 
 Cold start (`benchmarks/cold-start.sh`, 21 runs, target < 25 ms): script
 21.02 [19.44-22.68] ms, REPL 21.77 [20.37-23.28] ms (RelWithDebInfo); script

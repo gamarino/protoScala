@@ -166,7 +166,7 @@ Performed on the AST before code generation:
 | `a op b` | `a.op(b)`; `a op: b` → `b.op:(a)` (right-associative) |
 | `a(i) = v` | `a.update(i, v)` |
 | `x op= y` (no `op=` member) | `x = x op y` |
-| `s"a $x b"` | `StringContext("a ", " b").s(x)` compiled to a fast concat primitive |
+| `s"a $x b"` | the pieces joined by the `CONCAT` opcode (Phase 3, 2026-09-23, D54): `s` and `raw` lower directly to it and `f` to a call of the native `__fmt`, so no `StringContext` is built and a user-defined one is not consulted. Each piece is converted with `toScalaString` and joined with `ProtoString::appendLast`, an O(log n) rope join, so `s"$a$b"` on two strings copies neither |
 | `e match { case ... }` | a decision cascade (§5.3) |
 
 ### 3.5 Compiler and bytecode
@@ -362,8 +362,18 @@ sequence patterns with `_*`, and guards.
 | `Option`/`Some`/`None`, `Either`, `Try` | written in protoScala in `lib/` |
 | `Range` | an object with `start/end/step` and lazy iteration |
 
-`List(1,2) == Vector(1,2)` is `true` (Scala `Seq` equality) — implemented in
-the `equals` of both.
+`List(1,2) == Vector(1,2)` is `true` (Scala `Seq` equality).
+
+**Implemented once, over one allocation-free view (Phase 3, 2026-09-23).** A
+`SeqView` (`src/runtime/Values.cpp`) reads a `List`, a `Vector`'s `__vec__` list
+and a `Range` — the last arithmetically, never materialised — and both
+`valuesEqual` and `scalaHash` decide over it. So `List(1,2) == Vector(1,2) ==
+(1 to 2)`, the three hash alike, and a `Map` keyed by one is found by another.
+Deciding it in `valuesEqual`, before any prototype dispatch, is what keeps the
+`EQ` opcode — which never dispatches — in agreement with `a.equals(b)`; two
+`equals` methods would have reintroduced the classic `a == b` ≠ `a.equals(b)`
+split. Because the view allocates nothing and the length check short-circuits,
+`(0 until 1000000000) == List(1)` answers `false` in O(1).
 
 ### 6.1 Map and Set on `ProtoMap` *(platform)*
 
@@ -376,24 +386,44 @@ full specification, including the tagged-pointer budget, is in
 [platform/PROTOMAP-SPEC.md](platform/PROTOMAP-SPEC.md). protoScala uses it as follows:
 
 - **Identity-equality keys** — objects whose `==` is `eq` (instances of
-  classes with the default `equals`, `object`s, `case object`s, enum cases,
-  symbols, booleans, chars): the key is the object itself. It is traced by the
-  GC and recovered directly; the value slot holds `v`. No buckets, no
+  classes with the default `equals`, `object`s, `case object`s, **singleton**
+  enum cases, symbols, booleans): the key is the object itself. It is traced by
+  the GC and recovered directly; the value slot holds `v`. No buckets, no
   collisions.
-- **Value-equality keys** — numbers, strings, case classes (including
-  tuples), collections, and classes that override `equals`: the key is the
+- **Value-equality keys** — numbers, **chars**, strings, case classes
+  (including tuples and **parameterised enum cases, which are case classes**),
+  collections, and classes that override `equals`: the key is the
   Scala `hashCode` encoded as a `SmallInteger` word (non-pointer, so the GC
   ignores it and it can never collide with an identity key). The value slot
   holds an entry `(k, v)` — a two-element `ProtoList`, *never* a `ProtoTuple`
   (§4.6) — or, on a genuine hash collision, a `ProtoList` of entries compared
   with `==`.
+- **`Char` is a value-equality key** (maintainer ruling, 2026-09-23). An
+  earlier version of this section listed it among the identity keys. That was
+  wrong on this section's own criterion: a `Char`'s `==` is **not** `eq`,
+  because Scala's cooperative equality makes `'a' == 97` true and `'a'.##`
+  equal to `97`, so `Map('a' -> 1)` and a lookup by `97` must find one key.
+  `Char` is therefore the one kind the classification function special-cases
+  explicitly, rather than pretending it behaves like the other immediates.
+- **A parameterised `enum` case is a case class, so it is a value-equality
+  key** (maintainer ruling, 2026-09-23). Writing `case Leaf(n: Int)` inside an
+  `enum` *is* writing a case class, so it is classified as one and two
+  separately built `Leaf(1)`s are one key, as in Scala. Only a **singleton**
+  enum case (a `case object`) is an identity key. Before this ruling the two
+  bullets above overlapped and disagreed for a parameterised case.
 - `Set` uses the same scheme with the element as the entry.
 - The language supplies equality and hash (Scala's cooperative numeric
   equality: `1 == 1L == 1.0`, and `##`). protoCore supplies the traced-key
   structure and, if the platform spec adopts it, a shared hashed-collection
   helper parameterised by the language's `hash`/`equals`.
 
-Until the protoCore work lands, `Map`/`Set` conformance fixtures are `XFAIL`.
+The classification follows Scala wherever Scala has an answer; a divergence
+needs a *platform* reason, not a convenience. `Char` and parameterised enum
+cases are the two places that rule was applied (2026-09-23).
+
+protoCore's `ProtoMap`, and the hashed-collection helper this section relies
+on, were merged and released in **protoCore 2.0.0**; the `Map`/`Set`
+conformance fixtures are therefore live, not `XFAIL`.
 
 ---
 
