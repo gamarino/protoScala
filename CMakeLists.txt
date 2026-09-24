@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(protoScala VERSION 0.4.0 LANGUAGES CXX)
+project(protoScala VERSION 0.5.0 LANGUAGES CXX)
 
 # Default to RelWithDebInfo so casual builds are not -O0 (protoST convention).
 # Override with -DCMAKE_BUILD_TYPE=Release for a stripped -O3.

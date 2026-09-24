@@ -109,24 +109,42 @@ own 3 % rule — `valuesEqual` already fast-paths two SmallIntegers, so it bough
 nothing on its own workload and cost 8 % of `sum_loop`'s cycles through code
 layout. The measurement is recorded at the opcode and in DECISIONS-LOG.
 
-## Phase 4 — Exceptions, super, enums
+## Phase 4 — Exceptions, super, enums ✅ (2026-09-24, 0.5.0)
 
 **Goal:** complete core semantics.
 **Done when:** `try`/`catch`/`finally`/`throw` with pattern-matched handlers,
-native error translation, `super[T].m`, `enum`, sealed
-hierarchies, named and default arguments for Scala-defined methods, extension
-methods and templates nested in an `object` pass.
+native error translation, `super[T].m`, `enum`, sealed hierarchies, named and
+default arguments for Scala-defined methods, **multiple constructor parameter
+lists**, extension methods and templates nested in an `object` pass. ✅ All of
+them, in both brace and indentation syntax, with the tutorial chapters written
+and the suite green in four configurations.
 
-**Ordering coupling with Phase 3 (recorded 2026-09-23):** Phase 3 extended
-`Try` with combinators but did **not** re-point `Failure`'s payload off
-`RuntimeError` (plan A0-13). Phase 4 does it, in one prelude edit plus the
-`await` raise path, and closes D44 and D50 with it. Phase 3 also left two
-`XFAIL` fixtures waiting on `enum`
+*(The done-when gained `multiple constructor parameter lists` on 2026-09-24:
+LANGUAGE §3 assigned them to this phase, ROADMAP's list omitted them and STATUS
+listed them with no phase at all. The contradiction was resolved in favour of
+LANGUAGE and all three documents now agree — D84.)*
+
+**Delivered beyond the criteria:** `Priority` became a real prelude `enum`
+(retiring **D52**); `Failure` carries the `Throwable` itself and `RuntimeError` is
+gone from the prelude (retiring **D44**); a failed `await` raises at its own call
+site so an enclosing `try` catches it across a cooperative suspension (retiring
+**D50**); a custom string interpolator is an extension method on a new prelude
+`StringContext` (retiring **D56**); the keyword-argument convention is documented
+in [INTEROP.md](INTEROP.md) §7 and exercised end to end against a stand-in
+callee; and a default value may read an enclosing local as well as an earlier
+parameter.
+
+**Ordering coupling with Phase 3 (resolved):** Phase 3 extended `Try` with
+combinators but deliberately did not re-point `Failure`'s payload off
+`RuntimeError`; Phase 4 did it, in one prelude edit plus the `await` raise path.
+Phase 3's two `XFAIL` fixtures waiting on `enum`
 (`tests/conformance/18-maps-and-sets/map-enum-case-keys.scala` and
-`map-parameterised-enum-case-keys.scala`), whose `EXPECT` lines are already the
-right ones: a singleton `enum` case is an identity key and a parameterised one is
-a value key. Phase 4's `enum` task converts them. D56 (an unknown string
-interpolator is a compile error) is closed by Phase 4's extension methods.
+`map-parameterised-enum-case-keys.scala`) are flipped and verified against scalac
+— and the *prose* of the first one was corrected: a singleton `enum` case is a
+case object, so it carries the synthesised `product_equals` and takes the **value**
+path, not the identity path. The two are indistinguishable at run time because a
+case object has exactly one instance, which is why only the white-box test in
+`tests/unit/test_collections.cpp` can tell.
 
 **Landed early (2026-09-23), with the D47 ruling:** by-name parameters
 (`x: => T`). They were not scheduled for any phase; `Future(expr)` needs them,
@@ -136,11 +154,14 @@ cannot resolve to a declaration, which needs more than erased types give.
 
 **Already done in Phase 2** (Open question Q5): plain `super.m` is the same
 DESIGN §4.4 algorithm whether or not stackable traits are involved, so
-stackable traits work today — the classic
-`Doubling`/`Incrementing` queue example is the fixture
-`tests/conformance/07-classes/stackable-traits.scala`. What remains for this
-phase is `super[T].m`, which names the ancestor explicitly instead of taking
-the next one in the linearization, and its done-when fixture.
+stackable traits worked before this phase; what this phase added is `super[T].m`.
+
+**Not delivered, and deliberately:** a `class`, `trait` or `object` nested in a
+**`class`** or **`trait`**, a local class inside a block, and the anonymous-class
+form `new T { … }` (**D80**). Each captures the enclosing instance, which needs a
+per-instance class — real machinery, and a different feature. It is the one item
+of this phase a reasonably common Scala idiom touches, so it is recorded under
+"Later" below rather than left only as a deviation.
 
 ## Phase 5 — Actors and futures ✅ (2026-09-23, 0.3.0)
 
@@ -170,6 +191,23 @@ the next one in the linearization, and its done-when fixture.
 provider, and with protoST's provider when both are built); CPack produces a
 `.deb` and a `.tar.gz` that install and run `protoscala` without
 `LD_LIBRARY_PATH`. Release `0.6.0`.
+
+Three things Phase 4 leaves for this phase to finish:
+
+- **Convert `tests/conformance/23-named-arguments/foreign-python-keyword.scala`
+  and `foreign-python-open-encoding.scala` from `XFAIL` to `EXPECT`.** Their
+  expected output is already recorded, so it is not invented then. The protoScala
+  half of the keyword-argument convention ships in 0.5.0 and is documented in
+  [INTEROP.md](INTEROP.md) §7; what is missing is only `import py.…` routing.
+- **Add the boundary catch shape at every UMD and foreign-call site**, in this
+  order: `catch (FutureYield&) { throw; }`, `catch (ScalaThrow&) { throw; }`,
+  `catch (ScalaError&) { throw; }`, `catch (const std::exception& e) { throw
+  ScalaError("RuntimeException", e.what()); }`, `catch (...) { throw
+  ScalaError("RuntimeException", "native exception"); }` — the control signals
+  pass through and everything else is translated (protoST's mandatory §6).
+- **Decide whether extension methods gain import scoping** (D82). The import
+  mechanism arrives here, and scoping an extension is a public-surface change that
+  needs it.
 
 ## Documentation track (every phase)
 
@@ -207,7 +245,11 @@ full protoST suite passes. Requires P1 and P2.
 
 ## Later (v0.7+)
 
+- **Templates nested in a `class` or a `trait`, local classes inside a block, and
+  anonymous classes `new T { … }`** — a reasonably common Scala idiom that Phase 4
+  deliberately left out (D80), because a class-nested template captures the
+  enclosing instance and needs a per-instance class.
 - Implicits/givens with a dynamic resolution scheme (if a sound design
-  exists), `SortedMap`/`ListMap`, lazy collections (`LazyList`, views),
-  threaded-goto dispatch if profiling justifies it, debugger (DAP) following
-  protoST, editor integration.
+  exists), `PartialFunction` and `collect` (D63), `SortedMap`/`ListMap`, lazy
+  collections (`LazyList`, views), threaded-goto dispatch if profiling justifies
+  it, debugger (DAP) following protoST, editor integration.

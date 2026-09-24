@@ -273,9 +273,21 @@ platform option of a protoCore "lookup after parent" API is recorded as R6.
 
 Delivered in **Phase 2** (Q5): plain `super.m` is the same algorithm whether or
 not stackable traits are involved, so stackable traits already work
-(`tests/conformance/07-classes/stackable-traits.scala`). `super[T].m`, which
-names the ancestor explicitly instead of taking the next one in the
-linearization, stays in Phase 4.
+(`tests/conformance/07-classes/stackable-traits.scala`).
+
+**Amended 2026-09-24 (Phase 4).** `super[T].m` names the ancestor explicitly. The
+site records `T`'s type key and an `exact` flag, and step 3 above becomes: probe
+`T` **itself** first and only then continue after it. `super[A].m` therefore finds
+`A`'s own `m` when `A` defines one and the `m` that `A` inherits when it does not,
+which is what "the member `m` as seen from `A`" means. Starting strictly after `T`
+would skip precisely the definition the programmer named.
+
+Two consequences, both recorded: Scala additionally requires `T` to be a **direct**
+parent, and protoScala checks only membership in the receiver's linearization,
+because `ClassInfo` stores the flattened linearization and no direct-parent list
+(**D76**, permissiveness only — no program scalac accepts behaves differently
+here). And `super[T].m` written *inside* `T` would find `T`'s own `m` and recurse
+for ever, so it is refused at compile time.
 
 ### 4.5 Case classes
 
@@ -323,6 +335,59 @@ is the same convention every proto* runtime understands.
 
 Named arguments are passed in the keyword `ProtoSparseList` keyed by interned
 parameter names. Default values are compiled into the callee's prologue.
+
+**Amended 2026-09-24 (Phase 4), with the rationale the section did not state.**
+
+*The key convention.* The `keywordParameters` key is the **address of the interned
+`ProtoString` symbol** for the parameter's name, obtained with
+`ProtoString::createSymbol`. Interning guarantees exactly one address per name in
+a `ProtoSpace`, so the address *is* the name's identity; and because UMD is
+in-process, the same address is valid in every runtime, which is the unambiguity
+the convention buys. `fromUTF8String`, `fromUTF8` and `fromStdString` do **not**
+intern: they answer a different pointer for the same text, and a key built from
+one of them matches nothing — silently, exactly as if the argument had not been
+passed. The sharp edge is that protoCore embeds a **short** string in the pointer
+word itself, so a non-interning key works by accident for a short parameter name
+and fails only for one too long to embed; both halves are pinned by
+`tests/unit/test_exceptions.cpp`
+(`KeywordConvention.ANonInternedKeyMatchesNothing`).
+
+An **integer-keyed `ProtoSparseList` is correct here, not a concession.** Interned
+strings are perennial — never collected, never moved — so there is nothing for the
+collector to trace. `ProtoMap` was added to protoCore because `Map`/`Set` need
+arbitrary **collectable** object keys that the collector must trace; that is a
+different problem. It is the same principle that makes `ProtoTuple` interned and
+perennial, and the same reason transient data must never be mapped to it (§4.6).
+A future reader should not mistake the integer key for a GC hazard and propose
+migrating keyword dictionaries to `ProtoMap`.
+
+*Where the binding happens, and why.* In the **callee**, not the caller.
+`BytecodeModule` carries the parameter names (interned by `linkSymbols`) and one
+optional default block per parameter; `execute`'s prologue fills positional
+parameters, then each keyword argument into its parameter's slot by name, then each
+still-unfilled parameter from its default block. A caller that does not know its
+callee statically therefore still works. The maintainer's ruling of 2026-09-23, in
+their own words:
+
+> *"la plataforma es lazy binding, aunque Scala no lo sea"* — the platform is
+> late-binding even when the source language is not.
+
+A runtime built on protoCore may resolve at **run time** what its source language
+resolves at compile time; that follows directly from a prototype-based,
+dynamically dispatched, type-erased kernel, and it is why binding named arguments
+in the callee is the *right* design here rather than a fallback forced by D4. No
+future reader should mistake it for a limitation to be fixed by adding a static
+resolution path. **The behavioural bar is what late binding does not excuse:**
+every error names what was expected and what arrived — an unknown name, a
+duplicate and a missing argument each raise an `IllegalArgumentException`
+identifying the method and the parameter (**D81**). Late *detection* is accepted;
+silent failure is not.
+
+*Defaults.* Arguments are evaluated at the call site in **source order**, Scala's
+rule, however the names reorder the binding. A default block mirrors the callee's
+own slot prefix — its parameters, its locals and its captures — and is run with
+those slots as its arguments, so a default may read the parameters declared before
+it and any enclosing local, with no capture machinery of its own (**D88**).
 
 ### 5.3 Pattern matching
 
@@ -443,6 +508,83 @@ conformance fixtures are therefore live, not `XFAIL`.
 - Control-flow signals (e.g. `FutureYield`, §8) do not derive from
   `std::exception`, so no generic handler can intercept them.
 
+**Implemented 2026-09-24 (Phase 4).** Everything above is confirmed, including
+"protoST's separate handler stack is not needed"; the four points below record how
+the wording above is realised, because each was a real decision.
+
+*Where the in-flight value lives while the stack unwinds.* The throwing frame's
+`ProtoContext` is a C++ stack object that unwinding destroys, so "rooted in a slot
+of the throwing frame's context" needs an operational reading: **every frame the
+exception passes through re-roots the payload in its own
+`ProtoContext::returnValue`**, unconditionally and before the handler search.
+That slot is traced — protoCore's root scan reads `currentCtx->returnValue` for
+every context on the thread's context stack — and `~ProtoContext` anchors a
+non-null `returnValue` into the *parent's* young chain before submitting its own
+young generation, so the payload stays a root one frame at a time. It is also the
+slot the exception path never otherwise uses: `execute` assigns it only after the
+frame returns. Alternatives considered and rejected: a per-thread pin stack (one
+attribute write per throw, for a window this closes for free) and keeping the
+value only inside the C++ exception object (P1-violating: a `finally` body
+allocates).
+
+*Where the handler search happens.* **Outside the C++ catch block**, as a retry
+loop around `runLoop`: `ExecutionEngine::runFrame` is
+`for (;;) { try { return runLoop(...); } catch (ScalaThrow&) { … ; continue; } }`.
+Because the handler is entered by `continue` — after the catch block has been left
+— a `catch` or `finally` body runs with no live C++ handler, an ordinary `ip` and
+an ordinary operand stack, and therefore suspends cooperatively like any other
+bytecode. The load-bearing reason, measured rather than assumed, is stronger: the
+loop is what lets a frame catch a **second** exception — one raised by its own
+handler body, by the `RETHROW` a non-matching cascade emits, or by a `finally`.
+Entering the handler from inside the catch abandons the loop, so the frame's own
+handler table is never consulted again; doing so turns eleven conformance fixtures
+red (`nested-try`, `catch-in-a-loop`, `finally-in-a-loop`,
+`finally-runs-on-failure`, `rethrow-from-a-handler` among them) and grows the
+native stack once per caught exception.
+
+*How `finally` is implemented.* A `Finally` handler-table entry plus an **inline
+copy** on every normal exit, so the exceptional path has one mechanism (the entry
+fires, the body runs, `RETHROW` re-raises the saved value) and the normal path is
+straight-line code with no table lookup. For `try B catch C finally F` the compiler
+emits a `Catch` entry covering `B` and a `Finally` entry covering `B ∪ C`, in that
+order, and `handlerFor(pc)` answers the **first** entry in table order whose range
+contains `pc`; nested `try`s append before enclosing ones, so table order is
+Scala's search order. A handler body's pc lies outside its own range, so a handler
+can never catch its own exception, and the cleanup itself is not protected by its
+own entry — which is why a throwing `finally` replaces the in-flight exception
+(**D72**) rather than looping. A `return` emits every enclosing cleanup inline
+before its `RETURN`, innermost first and after the returned expression has been
+evaluated; each such inlined copy is **excluded** from its own `try`'s handler
+ranges, because the `try` has already been left (**D87**). RAII was rejected: the
+cleanup would run inside a destructor, where a Scala throw crosses a `noexcept`
+boundary and terminates the process.
+
+*The native-error translation table.*
+
+| Source | Becomes | Where |
+|---|---|---|
+| `ScalaError(cls, msg)` from any native throw site | an instance of the prelude class named `cls` | `runFrame`, **lazily**: the handler search runs first, so the uncaught path allocates nothing — it may be dying of `OutOfMemoryError` |
+| `ScalaError` whose `cls` names no prelude class | `RuntimeException(cls + ": " + msg)`, keeping the original name | `materialiseError` |
+| protoCore `std::runtime_error` | `RuntimeException(what())` | `runLoop` |
+| `std::invalid_argument` | `IllegalArgumentException(what())` | `runLoop`, caught by its **exact** type |
+| `std::out_of_range` | `IndexOutOfBoundsException(what())` | `runLoop`, caught by its **exact** type |
+| `std::overflow_error` | `ArithmeticException(what())` | `runLoop`, **before** the `runtime_error` clause |
+| `std::bad_alloc` and the `PROTOCORE_HEAP_LIMIT_CELLS` failure | `OutOfMemoryError` — an `Error`, so `case e: Exception` does not catch it | `runLoop` |
+| the native stack guard | `StackOverflowError` — an `Error` | unchanged site, now catchable |
+| `std::length_error` from bytecode limits | a **compile-time** failure reported by `Session` | not catchable |
+| `std::logic_error` (a compiler or VM bug) | **not translated**; reaches `main.cpp` as `protoscala: internal error: …` | **not catchable** (**D74**) |
+| `FutureYield` | **never translated, never catchable** | it is not a `std::exception` and `runLoop` catches it first |
+| a UMD provider's or foreign method's C++ exception | `RuntimeException`, through the boundary shape of ROADMAP Phase 6 | Phase 6 |
+
+`std::invalid_argument` and `std::out_of_range` both derive from
+`std::logic_error`, so they are caught by their exact types and the engine carries
+**no `std::logic_error` clause at all**: that is what keeps D74 true, and
+`tests/unit/test_exceptions.cpp` (`NativeTranslation.AVmDefectIsNotCatchable`)
+pins it. `ScalaThrow` derives from `std::exception` and deliberately **not** from
+`std::runtime_error`, because `runLoop`'s protoCore bridge would otherwise rewrite
+every Scala `throw` into a `RuntimeException`; a `static_assert` and a throw/catch
+test pin that too.
+
 ---
 
 ## 8. Concurrency: native actors
@@ -544,6 +686,56 @@ The printed form is distinct from other objects: `Actor(10)`.
 - `Future.apply { ... }` runs a computation on the worker pool;
   `map`/`flatMap`/`recover` chain without blocking; for-comprehensions over
   futures work through the ordinary desugaring.
+
+**Amended 2026-09-24 (Phase 4): how exceptions and a suspension interact.** Six
+invariants, each with a named test, because getting one wrong breaks this section
+silently rather than loudly.
+
+1. **`FutureYield` is never a Scala exception.** It does not derive from
+   `std::exception` (§7), `runLoop`'s `catch (FutureYield&)` stays the **first**
+   clause, and `runFrame` catches only `ScalaThrow` and `ScalaError`. A suspension
+   therefore passes straight through the retry loop untouched.
+   *(`ScalaThrowShape.AFutureYieldIsNotAStdException`, `await-inside-try.scala`.)*
+2. **No `finally` runs on a suspension.** A suspended frame is going to be
+   *resumed*, not abandoned, so its cleanup has not been reached. This falls out of
+   invariant 1, and it is the whole reason §7 puts the handler search outside the
+   catch rather than in it.
+   *(`finally-does-not-run-on-suspension.scala`, which prints from the cleanup
+   rather than counting in a local: the frame snapshot is taken before the retry
+   loop sees the suspension, so a counter a wrongly-run cleanup incremented would
+   be discarded by the resume and the fixture would pass with the bug present.)*
+3. **`resumeFrames` calls `runFrame`, never `runLoop`.** A resumed frame with no
+   handler table active would silently fail to catch anything raised after the
+   resume. *(`await-inside-finally.scala` goes red when this is broken.)*
+4. **The bound exception variable survives a suspension for free.**
+   `appendSuspendedFrame` saves `slots[0, pendingBase)` and `pendingBase` is an
+   operand-stack index, always `>= arity + localCount`, so every local slot — a
+   `catch` clause's bound `e` and the hidden `finally` save slot included — is
+   inside the saved prefix. *(`await-inside-catch.scala`.)*
+5. **A failed future resumes by raising, not by returning.** `await` on a failed
+   future raises the carried `Throwable` *at the `await`'s call site*, so an
+   enclosing `try` in the suspended handler catches it and the rest of the handler
+   still runs. The resume path calls `runFrameRaising` on the innermost frame,
+   which searches the handler table at the pc of the in-flight call (`ipOffset - 1`,
+   the same index `runLoop`'s own catch reports) and then falls into the ordinary
+   retry loop. **This retires D50.**
+   *(`await-a-failed-future-inside-try.scala`,
+   `await-a-failed-future-runs-the-finally.scala`.)*
+6. **A handler exception still leaves the actor alive.** `ActorScheduler::deliver`
+   catches, in this order, `FutureYield&` (rethrow — the suspension path),
+   `ScalaThrow&` (complete the ask with `Failure(t.value)`) and `ScalaError&`
+   (materialise, then complete). In both failure cases the actor keeps its previous
+   state and the error is reported on stderr (§8.4). `Thread.start`'s body has the
+   same chain minus the first clause, so a throwing thread reports and joins
+   instead of terminating the process.
+   *(`actor-survives-a-handler-exception.scala`, `thread-body-throws.scala`,
+   `14-futures/failed-ask-carries-the-exception.scala`.)*
+
+One residual limit, recorded as **D75**: an actor parked on a future that never
+completes never runs the `finally` of the `try` it suspended inside. The shutdown
+diagnostic reports how many actors are parked, and that is the only notice; Scala
+has no equivalent situation, and making it otherwise would mean running arbitrary
+user code during shutdown.
 
 ### 8.4 Corrections to protoClojure's implementation
 

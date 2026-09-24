@@ -272,3 +272,71 @@ grew by `Either` and the extended `Option`/`Try`. An earlier measurement during
 the phase read 27.05 ms at load 4.03; the budget is at the line and is
 load-sensitive, so the figure is only meaningful with its load average beside
 it.
+
+## Phase 4 workloads (2026-09-24, 0.5.0)
+
+- **Machine:** AMD Ryzen 5 5500U — 6 cores, 12 logical CPUs; Linux 7.0.0-31-generic.
+- **Commit:** the Phase 4 series on `main`; protoCore `983bbf98` (2.1.0) — unchanged
+  from 0.4.0, because Phase 4 needed nothing new from protoCore.
+- **Reports:** `benchmarks/reports/2026-09-24-phase4-baseline.md` (the 0.4.0 binary,
+  recorded before the first Phase 4 commit) and
+  `benchmarks/reports/2026-09-24-phase4.md`.
+- **Load average:** 3.61 at the baseline's start, 4.93–5.53 during the after-run.
+  **Both are well above 2.0, so the absolute milliseconds are a reference only and
+  no claim is made from them.** The ratio to CPython is the primary result, because
+  CPython moved with the host: it slowed by 8–23 % between the two runs.
+
+| | baseline (0.4.0) | after (0.5.0) |
+|---|---:|---:|
+| Geomean vs CPython, canonical build | 0.94× (12) | 0.95× (12) |
+| Geomean vs CPython, Release build | 0.95× (12) | 0.96× (12) |
+
+One hundredth of a geomean, on a host whose own reference moved by up to 23 %: no
+workload regression is claimed and none is visible. The individual rows move in
+both directions (`sum_loop` 0.88× → 0.75×, `fib30` 2.01× → 2.26×), which is what a
+contended host does to a 5-run median.
+
+Because the wall-clock comparison could not answer the question P5 asks, the two
+mechanisms this phase adds to hot paths were measured **directly**, by A/B on the
+same binary with `perf stat -r 3`. Instruction counts are load-independent and are
+reported beside the cycles.
+
+**The per-frame retry loop** (`execute` → `runFrame` → `runLoop`, one C++ `try`
+region per frame). Compared against a build where `execute` calls `runLoop`
+directly:
+
+| Workload | with the retry loop | without | verdict |
+|---|---:|---:|---|
+| `fib30` | 1.2505 Gcycles / 3.112 Ginstr | 1.3016 / 3.045 | **3.9 % fewer cycles with** |
+| `attr_lookup` | 122.1 Mcycles / 211.9 Minstr | 128.8 / 212.2 | **5.2 % fewer cycles with** |
+| `tak` | 91.4 Mcycles / 129.3 Minstr | 88.7 / 125.1 | 3.1 % more cycles with |
+
+All three inside the noise of a busy host, two of them faster *with* the loop, and
+none a regression: one C++ `try` region per frame is free on the non-throwing path
+of a zero-cost-exceptions ABI, which is what the phase assumed and now measures.
+No `[[gnu::cold]]` split of the catch block was needed.
+
+**Mutable class prototypes** (`MAKE_CLASS` builds a mutable shape, so an extension
+method installed after the class exists is visible to instances already created).
+Compared against a build with `isMutable=false`:
+
+| Workload | mutable (shipped) | immutable | delta |
+|---|---:|---:|---|
+| `object_tree` (131071 case-class objects) | 1.3933 Gcycles / 2.367 Ginstr | 1.3550 / 2.335 | **+2.8 % cycles, +1.4 % instructions** |
+| `attr_lookup` | 140.4 Mcycles / 211.4 Minstr | 138.1 / 215.0 | +1.6 % cycles (±6 % error bars), fewer instructions |
+
+`object_tree`'s +2.8 % is inside the phase's 3 % gate and is recorded rather than
+hidden: it is the one read-path cost this phase adds, and the reason for it is a
+correctness requirement, not an optimisation. Class *creation* is cheaper in
+exchange, because the members now mutate one object instead of building a fresh
+immutable copy per member.
+
+**Cold start** missed the < 25 ms budget of DESIGN §1 and this phase made it worse:
+26.31 ms (script) / 26.98 ms (REPL) for the canonical build and 25.87 / 27.56 ms for
+the Release build, against 24.96 / 24.80 and 22.60 / 23.80 on the 0.4.0 baseline.
+Load average was 3.6 then and 4.9–5.5 now, so neither figure is clean — but the
+direction is real and the cause is known: the prelude grew by **twenty exception
+classes, `StringContext` and the `Priority` enum**, and it is parsed, desugared,
+compiled and run at every start-up with nothing cached between runs. **The budget
+is not claimed as met.** Meeting it needs either a precompiled prelude or fewer
+prelude classes, which is a Phase 6 decision.

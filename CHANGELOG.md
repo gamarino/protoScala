@@ -29,6 +29,105 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `def` taken as a function value, evaluate the argument once at the call.
   Scala resolves all of these from static types.
 
+## [0.5.0] - 2026-09-24
+
+Phase 4: exceptions, `super[T]`, enums, named and default arguments, extension
+methods and templates nested in an `object`. Built against protoCore `983bbf98`
+(2.1.0) — the same commit 0.4.0 was built against; **Phase 4 needed nothing new
+from protoCore** (P3). Phase 5 shipped out of order as 0.3.0 and Phase 3 as
+0.4.0, so Phase 4 is 0.5.0.
+
+### Added
+
+- **`try` / `catch` / `finally` / `throw`, with pattern-matched handlers.** A
+  `catch` body is `compileMatch`'s own cascade with `RETHROW` instead of
+  `MATCH_ERROR`, so a handler may use constructor patterns, guards and type
+  patterns, and an exception no clause matches continues outward rather than
+  being replaced. `try` is an expression. Both syntaxes.
+- **The `Throwable` hierarchy** in `lib/prelude.scala`: twenty ordinary
+  protoScala classes, the JVM's names without the `java.lang.` prefix (D73), so
+  `case e: ArithmeticException` is the same per-class marker test as
+  `case p: Point`.
+- **Native error translation.** Every failure the runtime raises becomes a real
+  exception value of the class its name means, materialised lazily so the uncaught
+  path allocates nothing. A compiler or VM defect (`std::logic_error`) is
+  deliberately **not** catchable (D74).
+- **Exceptions across an actor turn and a suspended `await`.** A handler exception
+  fails that message with the exception value itself and leaves the actor alive;
+  a resumed frame runs with its handler table active; no `finally` runs on a
+  suspension (D75); and a failed `await` raises **at its call site**, so
+  `try { f.await } catch { … }` works across a cooperative suspension.
+- **`super[T].m`**, which probes `T` itself first and then continues after it
+  (D76).
+- **`enum` and sealed hierarchies**, lowered entirely in the frontend to a sealed
+  abstract class, one `case object` or `case class` per case, and a companion with
+  `values` / `valueOf` / `fromOrdinal` — whose messages are scalac's own, byte for
+  byte. `ordinal` is a `val` and `toString` is Product's, so `enum` needs no
+  native method and no new opcode (D77, D79).
+- **Named and default arguments** for Scala-defined methods, constructors,
+  case-class `apply`/`copy`, function values and local functions, bound in the
+  **callee** through protoCore's `keywordParameters` keyed by the address of the
+  interned parameter-name symbol — the same convention a foreign callee will
+  receive them by, documented in `docs/INTEROP.md` §7 (D81, D88, D89).
+- **Extension methods**, installed as attributes of the receiver type's prototype
+  so dispatch is the ordinary prototype walk (D6), global for the session (D82,
+  D83) — and with them **custom string interpolators**, over a new prelude
+  `StringContext`.
+- **Templates nested in an `object`**, lifted to the top level with a qualified
+  name and resolvable unqualified inside the object (D80 keeps `class`-nested,
+  local and anonymous classes out).
+- **Multiple constructor parameter lists**, concatenated into one flat list (D84).
+- New opcodes: `CALL_KW` (80), `THROW` (96), `RETHROW` (97).
+- Tutorial chapters 11 (Exceptions) and 12 (Enums and sealed hierarchies), plus
+  new sections in chapters 2, 5, 6, 10 and 13; a conformance fixture for every
+  runnable snippet.
+
+### Changed
+
+- **`Failure` carries a `Throwable`.** `RuntimeError` and `__mkRuntimeError` are
+  gone from the prelude, and `Try`'s `recover`/`recoverWith` take a `Throwable`,
+  so a failed `Future` and a `Try` both carry a value a `catch` clause can match.
+  **D44 retired.**
+- **`Priority` is a real `enum`** whose ordinals are the scheduler's own band
+  indices; a plain `Int` band is still accepted. **D52 retired.**
+- **A custom string interpolator** is an extension method on `StringContext`; an
+  undefined one is a run-time `NoSuchMethodError` naming the member it looked for
+  rather than a compile error. **D56 retired.**
+- **Class prototypes are mutable.** An extension is installed after the class
+  exists and every instance already created must see it. Measured cost:
+  `object_tree` +2.8 % cycles, `attr_lookup` inside its error bars — both within
+  the phase's 3 % gate, and class *creation* is cheaper.
+- `Throwable.getClass` answers the class's simple name as a `String` (D86); the
+  internal global `__classNameOf` supplies it, and `__installExtension` installs
+  an extension on a prototype the compiler cannot name.
+
+### Fixed
+
+- A parameter **default** may read an enclosing local. It previously did so only
+  when the body happened to read the same local — a local `def` is hoisted, so a
+  default that captured an unboxed slot read `null`. The capture analysis now
+  walks the defaults and a discarded pre-pass forces the callee's captures through
+  the ordinary resolver, so the same program no longer works or fails for an
+  unrelated reason.
+- Phase 3's two `XFAIL` fixtures waiting on `enum` are flipped and verified
+  against scalac; the prose of `map-enum-case-keys.scala` is corrected — a
+  singleton `enum` case is a case object, so it is a **value** key, not an
+  identity key. The two are indistinguishable at run time (a case object has one
+  instance), which is why only the white-box test can tell.
+
+### Known issues
+
+- **Cold start is above the < 25 ms budget** and this phase made it worse: 26.31 ms
+  (script) / 26.98 ms (REPL) against 24.96 / 24.80 on 0.4.0, on a busy host in both
+  cases. The cause is known: the prelude grew by twenty exception classes,
+  `StringContext` and the `Priority` enum, and it is compiled at every start-up.
+  Not claimed as met.
+- **The foreign half of named arguments is unexercised**: UMD is Phase 6, so
+  `tests/conformance/23-named-arguments/foreign-python-*.scala` are `XFAIL` with
+  their expected output recorded.
+- `Mailbox.EightProducersLoseNothingAndDuplicateNothing` still aborts under
+  `PROTOCORE_HEAP_LIMIT_CELLS=20000`, pre-existing on `bca0352`.
+
 ## [0.4.0] - 2026-09-23
 
 Phase 3: fast paths, collections, the prelude and string interpolation. Built

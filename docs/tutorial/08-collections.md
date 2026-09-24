@@ -570,8 +570,8 @@ The block is a **by-name** parameter, so the failure is caught inside `Try` and
 not at the call — `Try { … }` and `Try(expr)` both work, exactly as in Scala.
 `recover(f)` turns a failure back into a value, `recoverWith(f)` into another
 `Try`, `orElse` supplies an alternative, and `toEither`/`toOption` convert.
-Until `try`/`catch` and exception values arrive in Phase 4, `Try` is how a
-protoScala program handles a failure it expects.
+`Try` is how a protoScala program handles a failure it *expects*, as an ordinary
+value; `try`/`catch` (chapter 11) is for one it does not.
 
 `Either`: `isLeft`, `isRight`, `map`, `flatMap`, `foreach`, `exists`,
 `forall`, `getOrElse`, `fold`, `swap`, `toOption`.

@@ -589,7 +589,10 @@ void Compiler::compileExpr(const Node& n) {
         case NodeKind::Splice:
             throw CompileError("a splice must be the last argument of a function call", n.pos);
         case NodeKind::NamedArg:
-            throw CompileError("named arguments are not implemented yet", n.pos);
+            // Named arguments are implemented (Phase 4); what reaches here is a
+            // `name = value` written where an expression is expected, which is
+            // not an argument list. scalac rejects it too.
+            throw CompileError("a named argument is only allowed in an argument list", n.pos);
         case NodeKind::Ident: compileIdent(as<Ident>(n)); return;
         case NodeKind::Select: compileSelect(as<Select>(n)); return;
         case NodeKind::Apply: compileApply(as<Apply>(n)); return;

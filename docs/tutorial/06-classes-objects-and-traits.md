@@ -1,12 +1,13 @@
 # 6. Classes, Objects and Traits
 
 > **Implementation status.** Everything in this chapter runs today. What is
-> not implemented yet: classes, objects and traits nested in a block or inside
-> another template (they must be defined at the top level of a file —
-> `classes, traits and objects must be defined at the top level of a file`),
-> anonymous classes (`new T { ... }`), multiple constructor parameter lists
-> (`class C(a: Int)(b: Int)`) and qualified super calls (`super[T].m`); all
-> four arrive in Phase 4. Access modifiers are advisory except `private`,
+> not implemented: a template nested in a **`class`** or a **`trait`**, a local
+> class inside a block and an anonymous class (`new T { ... }`) — all three capture
+> the enclosing instance (D80), and the message says what is allowed:
+> `classes, traits and objects must be defined at the top level of a file or in an
+> object`. Nesting in an **`object`** works (§6.9), as do multiple constructor
+> parameter lists (§6.9, D84), qualified super calls (§6.7, D76) and extension
+> methods (§6.8). Access modifiers are advisory except `private`,
 > which is enforced at run time (D5). Methods cannot be overloaded (D31), and
 > Scala 3's *universal apply* — writing `Temp(1.0)` for a plain class with no
 > companion — needs an explicit companion `apply` here (§6.3).
@@ -490,9 +491,10 @@ What differs from Scala 3 on the JVM, beyond the erased types of D4:
 - **D31 — no overloading.** Two members of one template may not share a name.
   Auxiliary constructors are selected by their number of parameters, never by
   their types. Types are erased (D4), so there is nothing to dispatch on.
-- **Top-level templates only.** A `class`, `trait` or `object` must be defined
-  at the top level of a file; local, nested and anonymous classes arrive in
-  Phase 4 (plan Open question Q6).
+- **Top level or inside an `object`.** A `class`, `trait` or `object` nested in
+  an `object` is lifted with a qualified name (§6.9); one nested in a `class` or a
+  `trait`, a local class inside a block and an anonymous class `new T { … }` are
+  rejected, because each captures the enclosing instance (D80).
 - **`new` is still needed** for a plain class without a companion `apply`
   (§6.3). Case classes and companions behave as in Scala 3.
 - **`==` on a plain class is identity**, exactly as in Scala, unless you

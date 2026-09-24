@@ -1,7 +1,8 @@
 # 5. Functions and Closures
 
 > **Implementation status.** Everything in this chapter runs today, except
-> the forms listed here. Named and default arguments arrive in Phase 4.
+> the forms listed here. Named and default arguments work (§5.10), bound in the
+> callee, with the departures D81, D88 and D89 record.
 > By-name parameters (`x: => T`) work (§5.9), with the one limit D53 records.
 > Since Phase 2, `List` carries
 > `map`, `flatMap`, `filter`, `withFilter`, `foreach`, `head`, `tail`, `drop`,

@@ -3,22 +3,24 @@
 > Living tracker of the gap between [LANGUAGE.md](LANGUAGE.md) and the
 > implementation. Update it with every change.
 >
-> **Current state (2026-09-24):** Phase 3 complete (**0.4.0**): everything
-> Phases 1, 2 and 5 delivered, plus **`Vector`, `Range`, `Map` and `Set` (the
-> last two on protoCore's `ProtoMap`), the full `List` surface, `Either`, an
-> extended `Option` and `Try`, the `String` surface, and string interpolation
-> — `s"…"`, `f"…"` and `raw"…"` — executing**. Phase 5 was implemented out of
-> order, so the minor version went 0.2.0 → 0.3.0 (Phase 5) → 0.4.0 (Phase 3);
-> Phase 4 (exceptions and `enum`) is what remains.
-> **Tests:** 911 total (`ctest --test-dir build_release -N`) — 316 unit
-> (GoogleTest, including the separate `unit/actors` binary), 561 conformance
+> **Current state (2026-09-24):** Phase 4 complete (**0.5.0**): everything
+> Phases 1, 2, 3 and 5 delivered, plus **`try`/`catch`/`finally` and `throw` with
+> pattern-matched handlers, the `Throwable` hierarchy and native error
+> translation, `super[T].m`, `enum` and sealed hierarchies, named and default
+> arguments for Scala-defined methods (and for every other callable protoCore can
+> reach), extension methods, templates nested in an `object`, and multiple
+> constructor parameter lists**. Phase 5 was implemented out of order, so the
+> minor version went 0.2.0 → 0.3.0 (Phase 5) → 0.4.0 (Phase 3) → 0.5.0 (Phase 4);
+> UMD and packaging (Phase 6) are what remain.
+> **Tests:** 1102 total (`ctest --test-dir build_release -N`) — 353 unit
+> (GoogleTest, including the separate `unit/actors` binary), 715 conformance
 > fixtures, 22 CLI checks, 12 benchmark smoke checks. All green, and green at
 > `PROTOSCALA_ACTOR_WORKERS=1` and `=16`. Under
-> `PROTOCORE_HEAP_LIMIT_CELLS=20000` (the whole suite, unfiltered) 910 of 911
+> `PROTOCORE_HEAP_LIMIT_CELLS=20000` (the whole suite, unfiltered) 1101 of 1102
 > pass: `Mailbox.EightProducersLoseNothingAndDuplicateNothing` aborts, which was
 > verified to be **pre-existing** — it fails the same way on `main` at `bca0352`
-> with the Phase 3 work stashed — and is recorded under "Open bugs".
-> Last verified 2026-09-23.
+> — and is recorded under "Open bugs".
+> Last verified 2026-09-24.
 
 ## Implemented
 
@@ -34,7 +36,7 @@ Per [LANGUAGE.md](LANGUAGE.md) §1–§2, the rows delivered in Phase 1:
 - [x] Significant indentation (offside rule) and braces, mixable; `end`
       markers.
 - [x] `val`, `var`, `lazy val`, `def` (multiple parameter lists, varargs
-      `xs: Int*`); default and named arguments are Phase 4.
+      `xs: Int*`, default and named arguments — Phase 4).
 - [x] `if`/`then`/`else`, `while`/`do`, blocks as expressions, `return`
       (methods only — D11).
 - [x] Lambdas `x => e`, `(x, y) => e`.
@@ -65,8 +67,8 @@ Per LANGUAGE.md §2–§3, the rows delivered in Phase 2:
 - [x] `trait` with concrete and abstract members and trait parameters;
       Scala's linearization installed as a protoCore parent chain
       (DESIGN §4.3).
-- [x] `super.m`, including stackable traits (DESIGN §4.4). `super[T].m` is
-      Phase 4.
+- [x] `super.m`, including stackable traits (DESIGN §4.4); `super[T].m` arrived
+      in Phase 4.
 - [x] `this`, self-type aliases (`self =>`), `isInstanceOf[T]`,
       `asInstanceOf[T]` (D29).
 - [x] Case-class members: `apply`, `unapply`, `equals`, `hashCode` (bit-equal
@@ -133,8 +135,9 @@ Delivered in Phase 5 (DESIGN §8), the concurrency block:
       (DESIGN §8.3). An `await` whose chain cannot be snapshotted is refused
       (D43). Outside an actor, `await` blocks on a condition variable inside
       an `UnmanagedScope`.
-- [x] `Try` / `Success` / `Failure` and `RuntimeError(className, message)` in
-      the prelude, moved up from Phase 3 (D44).
+- [x] `Try` / `Success` / `Failure` in the prelude, moved up from Phase 3. Since
+      Phase 4 `Failure` carries the `Throwable` itself and `RuntimeError` is gone
+      (D44 retired).
 - [x] `Thread.start(() => …)`, `t.join()`, `System.nanoTime()`,
       `System.currentTimeMillis()`, `System.getenv(name)` (D49).
 - [x] The mailbox seam: protoCore's `ProtoMPSCQueue` when the linked protoCore
@@ -157,7 +160,9 @@ whose behaviour should match Scala was verified against
       `f"…"` lowers to a call of the native `__fmt` with the specifiers as
       compile-time constants, so a malformed one is a compile error at the
       interpolation's position (D55). An interpolator that is not `s`, `f` or
-      `raw` is rejected at compile time (D56). A hole is parsed by the same
+      `raw` is lowered to `StringContext(<literals>).<name>(<args>)` since
+      Phase 4, so a custom interpolator is an extension method on `StringContext`
+      and D56 is retired. A hole is parsed by the same
       Lexer/Layout/Parser pipeline as the file, so it may hold any expression,
       including another interpolation.
 - [x] **The full `List` surface** — 40 methods beyond Phase 2's, including
@@ -192,8 +197,8 @@ whose behaviour should match Scala was verified against
       `iterator`, `toSeq`) and an **extended `Try`** (`map`, `flatMap`,
       `foreach`, `recover`, `recoverWith`, `orElse`, `toEither`), with
       `Try { … }` taking its body by name. Neither `Either` nor `Try` has
-      `withFilter` (D67). `Failure` still carries `RuntimeError` for Phase 4 to
-      migrate (D44).
+      `withFilter` (D67). Since Phase 4 `Failure` carries the `Throwable` itself,
+      as Scala's does; `RuntimeError` is gone and D44 is retired.
 - [x] **The `String` surface**: `split` (literal separator, answering a `List`
       — D69, D70), `replace`, `stripMargin`, `stripPrefix`, `stripSuffix`,
       `lastIndexOf`, `capitalize`, `equalsIgnoreCase`, `compareTo`,
@@ -216,16 +221,98 @@ cycle reduction on an operator-overload loop), `->` on `Any`, the `String`
 surface above, and `O(args)` on an object now honouring `apply`'s by-name
 parameters as `O.apply(args)` already did.
 
+### Phase 4 — exceptions, `super[T]`, enums, arguments and extensions
+
+Per [LANGUAGE.md](LANGUAGE.md) §2, §3 and §3.1. Every item is covered by
+conformance fixtures, and every fixture whose behaviour should match Scala was
+verified against `tools/scala3-3.9.0` (`bin/scalac` plus
+`java -cp "$SCALA_HOME/lib/*:out"`).
+
+- [x] **`try` / `catch` / `finally` / `throw`, with pattern-matched handlers.**
+      Each `BytecodeModule` carries a handler table of
+      `{startPc, endPc, handlerPc, stackDepth, slot, kind}` in innermost-first
+      order, so a `try` costs nothing at run time until something throws and the
+      table holds no `ProtoObject*` (DESIGN §4.6). `ExecutionEngine::runFrame` is
+      a retry loop **outside** the C++ catch block: the handler body is entered by
+      `continue`, so it runs with no live C++ handler, suspends cooperatively like
+      any other bytecode, and — the load-bearing half — the frame can catch a
+      **second** exception raised by its own handler, by a non-matching cascade's
+      `RETHROW` or by a `finally`. A `catch` body is `compileMatch`'s own cascade
+      with `RETHROW` instead of `MATCH_ERROR`, so pattern-matched handlers are not
+      a second implementation of pattern matching. `finally` is a handler-table
+      entry plus an inline copy on every normal exit and before every `return`.
+- [x] **The `Throwable` hierarchy in the prelude** (twenty classes: `Throwable`,
+      `Exception`, `Error` and the seventeen below them), so
+      `case e: ArithmeticException` is the same per-class marker test as
+      `case p: Point`.
+- [x] **Native error translation.** Every failure the runtime raises becomes a
+      real exception value of the class its name means, materialised **lazily** —
+      the uncaught path allocates nothing, because it may be dying of
+      `OutOfMemoryError`. `std::invalid_argument` and `std::out_of_range` are
+      caught by their **exact** types and no `std::logic_error` clause exists, so
+      a VM or compiler defect can never be masked by `case e: Throwable` (D74).
+- [x] **Exceptions across an actor turn and a suspended `await`.** A handler
+      exception fails that message with the exception value itself and leaves the
+      actor alive; a throwing thread body reports and joins; `resumeFrames` runs a
+      resumed frame **with its handler table active**; no `finally` runs on a
+      suspension (D75); and a failed `await` raises **at its call site**, so
+      `try { f.await } catch { … }` works across a suspension.
+- [x] **`super[T].m`**: the search starts AT `T`, so `super[A].m` finds `A`'s own
+      `m` when `A` defines it and the `m` `A` inherits when it does not. Plain
+      `super.m` is unchanged (D76 for the direct-parent rule).
+- [x] **`enum` and sealed hierarchies**, lowered entirely in the frontend to a
+      sealed abstract class, one `case object` or `case class` per case inside the
+      companion, and generated `values` / `valueOf` / `fromOrdinal` — whose
+      messages are scalac's own, byte for byte. `ordinal` is a `val` the desugarer
+      writes and `toString` is Product's, so `enum` needs **no native method and
+      no new opcode**. `values` and `valueOf` exist only when every case is a
+      singleton, as in Scala.
+- [x] **Named and default arguments** for Scala-defined methods, constructors,
+      case-class `apply`/`copy`, function values and local functions — bound in
+      the **callee**, through protoCore's `keywordParameters` keyed by the address
+      of the interned parameter-name symbol, with no special case for a foreign
+      callee (`docs/INTEROP.md` §7). All three errors are loud and name the method
+      and the parameter (D81). `CALL_KW` (80) is the one new opcode this needed.
+- [x] **Extension methods**, installed as attributes of the receiver type's
+      prototype, so dispatch is the ordinary prototype walk (D6) and a collision
+      with an existing member is refused (D82, D83). Class prototypes are now
+      **mutable**, which is what lets an instance created before the extension see
+      it. `__installExtension` is the one new internal global.
+- [x] **Custom string interpolators**, which extension methods bring:
+      `name"…"` is lowered to `StringContext(<literals>).name(<args>)` over a new
+      prelude `StringContext`, exactly as Scala lowers it. **D56 retired.**
+- [x] **Templates nested in an `object`**, lifted to the top level with a
+      qualified name (`@O.C`), resolvable as `O.C` from outside and as `C` inside
+      `O`, with the simple name shown by `toString`. Nesting in a `class` or a
+      `trait` is still rejected (D80).
+- [x] **Multiple constructor parameter lists**, concatenated into one flat list
+      (D84), which LANGUAGE §3 assigned to this phase; ROADMAP's done-when and
+      this document's own "Not yet implemented" list have been corrected to agree.
+- [x] Tutorial chapters 11 (Exceptions) and 12 (Enums and sealed hierarchies),
+      with a conformance fixture per runnable snippet, plus new sections in
+      chapters 2, 5, 6, 10 and 13.
+
+**Delivered beyond the phase's done-when:** `Priority` became a real `enum`
+(retiring D52), `Failure` carries a `Throwable` (retiring D44), a failed `await`
+is catchable (retiring D50), custom interpolators work (retiring D56), the
+keyword-argument convention is documented in `docs/INTEROP.md` with a
+stand-in-callee fixture suite, and a default value may read an enclosing local as
+well as an earlier parameter.
+
 ## Not yet implemented
 
-- Nested, local and anonymous classes (`new T { ... }`) — Q6; nested
-  templates inside objects arrive in Phase 4 with `enum`.
-- Multiple constructor parameter lists.
-- `super[T].m` — Phase 4.
-- `enum`, extension methods, named and default arguments for Scala-defined
-  methods (native methods already accept them, Q9) — Phase 4.
-- Exceptions (`try`/`catch`/`finally`/`throw`) — Phase 4.
-- UMD and packaging — Phase 6.
+- A `class`, `trait` or `object` nested in a **`class`** or **`trait`**, a local
+  class inside a block, and the anonymous-class form `new T { ... }` (D80). Each
+  captures the enclosing instance, which needs a per-instance class; ROADMAP
+  records them for a later phase. Nesting in an **`object`** is implemented
+  (Phase 4).
+- Exhaustiveness checking for `match` (D4: types are erased).
+- UMD and packaging — Phase 6. **Named arguments already travel in protoCore's
+  `keywordParameters` for every callable, foreign ones included, but UMD itself
+  is not implemented, so the foreign half is unexercised: `docs/INTEROP.md` §7
+  records the convention and
+  `tests/conformance/23-named-arguments/foreign-python-*.scala` are `XFAIL` with
+  their expected output recorded for Phase 6 to convert.**
 - Supervision trees, `ExecutionContext`, actor timeouts and
   `Await.result(f, duration)` — not scheduled. An `await` waits forever; the
   shutdown reports any actor still parked on a future that never completed.
@@ -303,8 +390,11 @@ their reserved ranges.
 | 77 | `SEND_KW` | `[recv a1..an v1..vm] -> [r]` | operand: a KwSendSite constant (named arguments to native methods, Q9) |
 | 78 | `NEW_SPREAD` | `[cls a1..an list] -> [obj]` | operand: SendSite (constructor key, n); list elements follow a1..an |
 | 79 | `SEND_APPLY` | `[recv a1..an] -> [r]` | operand: SendSite (name, n); `recv.m(args)` written with an argument list: calls the member when it is a method, else applies its value (D10) |
-| 80..95 | reserved | | object model |
-| 96..127 | reserved | | exceptions, Phase 4: `THROW` (+ per-module handler table) |
+| 80 | `CALL_KW` | `[f a1..an v1..vm] -> [r]` | operand: a KwSendSite constant (positional count, keyword names); `f(x = 1)` on a function value, a global `def` or a local one, which `SEND_KW` cannot express because it has no receiver. The keyword `ProtoSparseList` is keyed by the ADDRESS of the interned parameter-name symbol — protoCore's own convention (DESIGN §5.2) |
+| 81..95 | reserved | | object model |
+| 96 | `THROW` | `[v] -> throws` | `v` must answer the `@Throwable` marker; `null` raises `NullPointerException` |
+| 97 | `RETHROW` | `[] -> throws` | operand: the local slot a `Finally` handler saved the in-flight value in. Also what a `catch` cascade emits when no case matches, so the exception continues outward rather than being replaced |
+| 98..127 | reserved | | exceptions |
 | 128..159 | reserved | | still reserved; Phase 5 shipped the actor surface as ordinary sends to native methods (plan Task 0 A0-11), so `SEND_ASYNC`, `ASK` and `AWAIT` were not needed. A dedicated opcode is a later optimisation to be justified by `perf stat -r 3` |
 
 ## Intentional deviations
@@ -396,16 +486,23 @@ revisit; the behaviour is unchanged.
 | Id | Deviation | Track |
 |---|---|---|
 | D43 | `await` suspends only a chain of protoScala frames each stopped at a call instruction. Inside a native higher-order method (`map`, `foreach`, `withFilter`, a `Future` continuation), or under an instruction that calls back into Scala without being a call site (`==` reaching a user `equals`, a `MatchError`'s `toString`), it raises `UnsupportedOperationException` instead of suspending; the ask's future receives that failure and the actor stays alive | later |
-| D44 | Until Phase 4 there are no exception values: a failed `Future` carries `RuntimeError(className, message)`, and `Try`/`Success`/`Failure` (moved up from Phase 3) wrap it. `await` on a failed future raises the same error on the awaiting thread, which no user code can catch yet | Phase 4 |
 | D45 | An actor handler returns **either `(newState, reply)` or a bare `newState`**; the bare form means there is no reply to give and the ask's future completes with `()`. A `Tuple2` result is always read as the pair form, so an actor whose state is itself a pair returns it inside one. Only a handler that produces no value at all is rejected, with `IllegalArgumentException`. The actor keeps its previous state when the handler fails. **Overturned by the maintainer on 2026-09-23** (least surprise): the original D45 required the pair form strictly | (perm) |
 | D46 | An actor lives as long as the session: it is anchored in a registry so the GC can reach it and everything it holds while it is only referenced by the (C++) ready stacks. `Future.apply` creates one actor per call | P1 |
 | D47 | `Future.apply` takes its body **by name**: `Future(expr)` and `Future { … }`, as in Scala. By-name parameters are honoured where the compiler can name the callee (D53). **Overturned by the maintainer on 2026-09-23** (least surprise): the original D47 took a function, `Future(() => expr)` | (perm) |
 | D48 | `map`/`flatMap`/`recover`/`onComplete` run their continuation on the thread that completes the future, or immediately on the caller when it is already complete — there is no `ExecutionContext`. A continuation may not `await` (D43) | later |
 | D49 | `Thread` and `System` are runtime facilities, not the JVM's: `Thread.start(() => …)`, `t.join()`, `System.nanoTime()`, `System.currentTimeMillis()`, `System.getenv(name)` (`""` when unset). `nanoTime` is a monotonic clock; only differences are meaningful | (perm) |
-| D50 | Awaiting a future that fails, inside an actor, abandons the rest of the handler and the message's own future inherits the failure (there is no `try`/`catch` to resume into until Phase 4) | Phase 4 |
 | D51 | `actor.value` reads the state without sending a message, so it may observe a state older than a send that is still queued (protoClojure's `@actor`) | (perm) |
-| D52 | `Priority.High` / `Medium` / `Low` are the integers `0` / `1` / `2` on an object, not an `enum` (enums arrive in Phase 4) | Phase 4 |
 | D53 | A by-name parameter is honoured only where the compiler resolves the call site to the declaration: a call by name to a top-level or local `def` (any parameter list, including a curried one), a method of the template being compiled, a method of an `object`, a class's primary constructor, and a builtin whose by-name signature the runtime declares (`Future.apply`). At any other call site — a method reached through a dynamic send, or a `def` taken as a function value — the argument is evaluated once at the call and each read of the parameter yields that value. scalac resolves all of these statically, so it stays lazy where protoScala does not | later |
+
+**D44, D50 and D52 are retired by Phase 4** and their rows are deleted rather
+than left to mislead. All three were provisional behaviours that existed only
+because exceptions and `enum` had not landed: a failed `Future` carried a
+`RuntimeError` case class rather than a `Throwable` (D44), awaiting a failed
+future abandoned the rest of the handler (D50), and `Priority` was three integers
+on an object (D52). `Failure` now carries the `Throwable` itself, a failed `await`
+raises at its call site so an enclosing `try` catches it, and `Priority` is a
+prelude `enum` whose ordinals are the scheduler's own band indices. Their ids are
+not reassigned.
 
 ### Phase 3 deviations — recorded 2026-09-23, pending review
 
@@ -419,20 +516,20 @@ real machinery and only unusual code could notice*. The "How" column says which.
 
 | Id | Deviation | Plan item | How | Track |
 |---|---|---|---|---|
-| D54 | `s"…"` and `raw"…"` are compiled directly to the `CONCAT` opcode, so a user-defined `StringContext` is never consulted. The same input produces the same string; only a program that redefines `StringContext.s` sees a difference | A0-1 | ruled (R4) | Phase 4 |
+| D54 | `s"…"` and `raw"…"` are compiled directly to the `CONCAT` opcode, so a user-defined `StringContext` is never consulted. The same input produces the same string; only a program that redefines `StringContext.s` sees a difference. (Every *other* interpolator does go through `StringContext` since Phase 4 — D56.) | A0-1 | ruled (R4) | (perm) |
 | D55 | The `f` interpolator supports `%s %b %c %d %o %x %X %e %E %f %g %G %%`, the flags `-`, `+`, space, `0`, `,` (ASCII grouping) and `#`, and `width.precision`. `%n` is **not** supported — write `\n` — and there is no locale support, so the decimal separator is always `.`. Anything else is a compile error at the interpolation's position | A0-2 | on cost (C2): a locale means a locale database | later |
-| D56 | An interpolator that is not `s`, `f` or `raw` is a compile error: `unknown string interpolator 'json': only s, f and raw are available (custom interpolators need extension methods)`. Accepting one would mean building a `StringContext` nothing can dispatch on | A0-3 | on cost (C3) | Phase 4 |
+| D56 | **Retired by Phase 4.** It recorded that an interpolator other than `s`, `f` or `raw` was a compile error. Since extension methods landed, any other interpolator is lowered to `StringContext(<literals>).<name>(<args>)`, exactly as Scala lowers it, and supplied as an extension method on a prelude `StringContext`; an undefined one is a run-time `NoSuchMethodError` naming the member it looked for (D4). The id is kept with this note rather than reassigned | A0-3 | on cost (C3), then delivered | — |
 | D57 | **Unused.** It was reserved for "a `Char` key and a numerically equal `Int` key are distinct". The maintainer's ruling C1 of 2026-09-23 removed that divergence — a `Char` is a value-equality key and `Map[Any, Int]('a' -> 1, 97 -> 1)` has one key, as in Scala — so there is nothing to record. The id is left unused rather than reassigned, because ids are stable references | A0-5 | ruled (R2) | — |
 | D58 | `Map`/`Set` iteration — `toString`, `foreach`, `keys`, `values`, `toList`, `mkString` — yields **ascending-hash order**: deterministic for a given key set and across runs, and unrelated to insertion order or to Scala's. D7 already said the order is unspecified; this is its concrete consequence. Every conformance fixture that prints more than one entry sorts first, so the suite pins behaviour and never pins the order | A0-6 | on cost (C5): Scala guarantees no order either, so there is nothing to match; `SortedMap`/`ListMap` are a different type | (perm) |
 | D59 | `Vector.hashCode` equals `List.hashCode` for the same elements, and a `Range`'s equals both — required for `Map(List(1) -> 1)(Vector(1))` to work. All three differ from the JVM's (D39, unchanged) | A0-7 | on cost (C6) | (perm) |
 | D60 | **Unused.** It was reserved for `(0 until 3) == List(0, 1, 2)` being `false`. Decided on cost and reversed: an allocation-free `SeqView` — which *replaces* the helper the `Vector` work needed anyway — makes it `true`, as scalac answers, in about 58 lines with an O(1) length short-circuit. The id is left unused rather than reassigned | A0-8 | on cost (C1) | — |
 | D61 | `to`, `until` and `by` require bounds that fit a `SmallInteger` and raise `IllegalArgumentException: a Range bound must fit a 54-bit integer` otherwise | A0-9 | on cost (C7): matching means boxing both bounds, an allocation on every `Range` method, to serve ranges of more than 2^53 elements | (perm) |
 | D62 | `sorted` orders with the runtime's own comparison: numbers by exact value across `Int`/`BigInt`/`Double`, `Char` by code point, strings by content, booleans `false < true`. Any other pair raises `IllegalArgumentException: sorted needs comparable elements; use sortWith`. `sortBy(f)` orders by `f`'s results and `sortWith(lt)` takes the comparator; all three are **stable** (merge sort), as Scala's are | A0-10 | on cost (C8): matching needs `Ordering`, i.e. implicits (D3) — a whole subsystem, for an answer that is identical on numbers and strings | later |
-| D63 | `collect` is not provided: `xs.collect(…)` fails with `NoSuchMethodError`. A `PartialFunction` needs the compiler to emit a second entry point per `{ case … }` literal, which belongs with Phase 4's pattern-matched `catch`. Write `xs.filter(p).map(f)` | A0-11 | ruled (R5) | Phase 4 |
+| D63 | `collect` is not provided: `xs.collect(…)` fails with `NoSuchMethodError`. A `PartialFunction` needs the compiler to emit a second entry point per `{ case … }` literal. Phase 4 delivered the pattern-matched `catch` by REUSING `compileMatch`'s cascade rather than introducing a `PartialFunction`, so this is still open | A0-11 | ruled (R5) | later |
 | D64 | **Unused.** It was reserved for `Try.apply` taking a function, `Try(() => expr)`. By-name parameters landed on `main` on 2026-09-23 (`bca0352`), so `Try { risky() }` works as in Scala and there is no divergence. The id is left unused rather than reassigned. Note that `Try(() => expr)` is still accepted and means what Scala means by it — a `Try` of a function value, `Success(<function0>)` | A0-12 | on cost (C9) | — |
 | D65 | `Seq` and `Iterable` are **not** provided and are not scheduled: `case xs: Seq[_]` and `x.isInstanceOf[Seq[_]]` are rejected at compile time (`Not found: type Seq`), and `List`, `Vector`, `Range`, `Map` and `Set` share no common ancestor below `AnyRef`. LANGUAGE §4 used to promise them; the promise was removed rather than left to contradict the code | A0-14 | ruled (R6): ROADMAP's done-when governs | later |
 | D66 | `%e`, `%f` and `%g` convert their argument to a `Double` first, so an integer above 2^53 prints rounded. `%d` is exact for a promoted `LargeInteger` (D1) and is what an integer wants | Task 4 | on cost (C16): matching means a bignum decimal formatter | later |
-| D67 | Neither `Either` nor `Try` has `filter`/`withFilter`, so `for (x <- e if p)` over one fails with `NoSuchMethodError`. Scala's `Either.withFilter` needs a `Left` to fall back to, and `Try`'s a failed filter's exception value; both need the static type | Task 5 | on cost (C15) | Phase 4 |
+| D67 | Neither `Either` nor `Try` has `filter`/`withFilter`, so `for (x <- e if p)` over one fails with `NoSuchMethodError`. Scala's `Either.withFilter` needs a `Left` to fall back to; `Try`'s needs only an exception value, which Phase 4 now has, so the `Try` half is merely unimplemented rather than blocked | Task 5 | on cost (C15) | later |
 | D68 | `Range.map`, `flatMap` and `filter` answer a `List`, where Scala answers an `IndexedSeq` (rendered `Vector(…)`). The elements and their order are Scala's. `Range.reverse` *does* answer a `Range`, as Scala's does, because that was cheap | Task 6 | on cost (C14): `IndexedSeq` is a `Seq` trait, which R6 keeps out of this phase | later |
 | D69 | `String.split` answers a `List[String]`, not an `Array[String]`. There is no `Array` type (D12 already routes varargs to `List`) | Task 11 | on cost (C13) | (perm) |
 | D70 | `String.split` splits on a **literal** separator, not a regular expression: `"a.b".split(".")` yields `List(a, b)` where Scala, reading the argument as a regex, yields `List()`. `split(",")` — the common case — is identical | Task 11 | on cost (C12): matching means a regex engine, a dependency this dialect does not have | later |
@@ -452,9 +549,90 @@ equality and hashing are cross-kind, so `List(1,2) == Vector(1,2) == (1 to 2)`
 and a `Map` keyed by one is found by another; and `Try { … }` takes its body by
 name. All three were verified against `tools/scala3-3.9.0`.
 
+### Phase 4 deviations — recorded 2026-09-24, pending review
+
+Decided by the implementing agent under the maintainer's standing authorisation
+([DECISIONS-LOG.md](DECISIONS-LOG.md), "Phase 4"). The plan
+([plans/2026-09-23-phase-4-exceptions-enums.md](plans/2026-09-23-phase-4-exceptions-enums.md))
+escalated four items (E1–E4) to the maintainer; the maintainer was unavailable, so
+each was decided here, implemented, and recorded in the decisions log with the
+argument, how it was proved and what reversing it would cost. Everything else was
+decided on cost under the standing rule *follow Scala where matching is cheap;
+document the divergence where matching would cost real machinery and only unusual
+code could notice*.
+
+The plan reserved D71–D89 on the assumption that Phase 3 had taken D54–D70. Phase
+3 in fact reached **D71**, so the whole block is shifted one place: Phase 4 uses
+**D72 onwards**. **D78 is deliberately unused** — the plan proposed accepting an
+`enum` case without its qualifier, and matching Scala costs nothing, so no
+deviation was taken.
+
+| Id | Deviation | Plan item | Track |
+|---|---|---|---|
+| D72 | A `finally` body that itself throws **replaces** the in-flight exception. Scala does the same and warns about it; protoScala has no warnings (D4) | A0-4 | (perm) |
+| D73 | Exception class names are unqualified (`ArithmeticException`, never `java.lang.ArithmeticException`) and the hierarchy is the twenty-class one of §3.1 of LANGUAGE.md, not the JVM's. `catch { case e: java.io.IOException => }` does not compile: there is no `java` namespace (D8) | A0-6 | (perm) |
+| D74 | A `std::logic_error` from a compiler or VM defect is deliberately **not** translated and **not** catchable: it reaches `main.cpp` as `protoscala: internal error: …`, so a bug in protoScala can never be masked by `catch { case e: Throwable => }`. `std::invalid_argument` and `std::out_of_range` are caught by their exact types, and no `std::logic_error` clause exists anywhere in the engine | A0-6 | (perm) |
+| D75 | An actor suspended on a future that never completes never runs the `finally` of the `try` it suspended inside; the shutdown diagnostic reports how many actors are parked, and that is the only notice. Scala has no equivalent situation, and making it otherwise would mean running arbitrary user code during shutdown | A0-7 | (perm) |
+| D76 | `super[T].m` accepts **any ancestor** in the receiver's linearization, where scalac 3.9 requires `T` to be a **direct** parent and rejects `super[A].m` for a grandparent ("A does not name a parent of class C", verified). `ClassInfo` stores the flattened linearization and no direct-parent list. Permissiveness, not a semantic mismatch: no program scalac accepts behaves differently here | A0-8 | (perm) |
+| D77 | `enum` `values` answers a `List`, where Scala answers an `Array`. The elements and their order are identical; matching Scala needs an `Array` type this dialect does not have (D69) | A0-9 | later |
+| D78 | **Unused.** It was reserved for "an `enum` case resolves unqualified as well as qualified". Scala requires `Colour.Red` unless the case is imported, and matching that costs nothing, so the divergence was not taken: `Red` on its own is `Not found: Red`, exactly as in Scala, and resolves unqualified only inside the enum's own body and its companion. The id is left unused rather than reassigned | A0-9 | — |
+| D79 | A `derives` clause on an `enum` is parsed and **ignored**, as on every other template (D3): there are no type classes to derive. `enum` type parameters are parsed and erased like every other type, and an `enum` case that overrides a member of the enum class is not supported | A0-9 | later |
+| D80 | A `class`, `trait` or `object` nested in a **`class`** or **`trait`**, a local class inside a block, and the anonymous-class form `new T { … }` are rejected with "classes, traits and objects must be defined at the top level of a file or in an object". Each captures the enclosing instance, which needs a per-instance class. Nesting in an **`object`** is implemented. This is the one item here a reasonably common Scala idiom touches, so ROADMAP records it for a later phase rather than leaving it only as a deviation | A0-10 | later |
+| D81 | Because a named argument is bound in the **callee**, a typo in a parameter name is a **run-time** `IllegalArgumentException` (`f has no parameter named 'z'`) where scalac rejects it at compile time; likewise an argument given twice (`f received parameter 'a' twice`) and one left unfilled (`f is missing argument 'b'`). The platform is late-binding even where Scala is not, and that is what makes a named argument work at a call site the compiler cannot resolve. Late **detection** is accepted; every message names the method and the parameter, so silent failure is not | A0-11 | (perm) |
+| D82 | An extension is **global and session-wide**: it is visible to every piece of code that runs after its definition, with no import scoping, where Scala's extensions are scoped like any other member. Scoping needs an import mechanism, which arrives with UMD in Phase 6 (escalation E4) | A0-13 | Phase 6 |
+| D83 | An extension on a builtin type mutates that prototype for the whole session, so two units cannot define conflicting extensions of the same name on the same type. A collision with a member the type **already** has is refused (`extension: String already has a member named 'length'`), where scalac allows the shadowing and simply never reaches the extension: silently shadowing a builtin method would be unrecoverable within a session. Re-running the same definition replaces it | A0-13 | (perm) |
+| D84 | `class C(a: Int)(b: Int)` has **one flat parameter list**, so `new C(1)(2)` and `new C(1, 2)` are the same call and `C.curried`-style partial application of a constructor does not exist. scalac accepts only the curried spelling | A0-14 | (perm) |
+| D85 | `catch someFunction` is accepted and rewritten to `case e => someFunction(e)`, which is what Scala's `catch` of a **total** function means. A genuine `PartialFunction` that is not defined for the exception rethrows in Scala and raises `MatchError` here, so prefer `case` clauses | Task 2 | (perm) |
+| D86 | `Throwable.getClass` answers the class's simple name as a `String`. Matching Scala needs `Class[_]` values — a new type with no other use in this dialect — and `.getClass` on an exception is almost always fed to string concatenation | Task 4 | (perm) |
+| D87 | The cleanup a `return` inlines before its `RETURN` is **excluded** from its own `try`'s handler ranges: the `try` has already been left, so re-entering its own handler would re-raise a value it never saved. That fixes the reachable case (`finally-throws-on-return.scala`, verified against scalac). The **multi-level** variant is not implemented: with two or more nested `try` constructs, an inner handler may see an exception raised by an outer cleanup during a `return`. Matching exactly needs a per-construct hole stack keyed by nesting depth, for an interaction no reasonable program reaches | Task 3 | later |
+| D88 | A default value may read a parameter of the **same** parameter list (`def f(a: Int, b: Int = a + 1)`), which scalac rejects — it requires the referenced parameter to come from a **previous** list, and that curried spelling works here too. Matching the restriction means tracking parameter-list boundaries Desugar has already folded into lambdas, to reject a program a reader finds perfectly clear | Task 9 | (perm) |
+| D89 | A named argument on a **function value** binds against the names written in the function literal, where scalac rejects it because `Function2.apply`'s parameters are called `v1` and `v2`. Binding in the callee makes the literal itself the callee, so its own names are what a reader expects. Permissiveness only | Task 9 | (perm) |
+
+**What did *not* diverge, and is worth stating because a reader will look for
+it:** `throw` accepts only a `Throwable`, as in Scala, with no deviation id; the
+`catch` cascade propagates an unmatched exception outward rather than replacing it;
+`finally` runs on the normal, exceptional and `return` paths in Scala's order,
+innermost first, with the returned expression evaluated before the cleanups;
+`enum` ordinals count every case in declaration order and `values` covers only the
+singletons, both as in Scala; arguments are evaluated at the call site in source
+order however the names reorder them; a `case` of an `enum` requires its
+qualifier; and the generated `valueOf` and `fromOrdinal` messages are scalac's own
+sentences. All of it was verified against `tools/scala3-3.9.0`.
+
 ## Known issues / platform dependencies
 
 See DESIGN §11 for the full table. Unchanged this phase: R2, R4, R5, R8.
+
+- **Phase 4 / the foreign half of named arguments is unexercised.** protoScala
+  compiles `f(x = 1)` into protoCore's `keywordParameters` for every callable,
+  foreign ones included, and `docs/INTEROP.md` §7 records the convention. **UMD is
+  not implemented (Phase 6), so no real `import py.…` call can be made**: the
+  protoScala side is exercised end to end against `__kwprobe`, a runtime-provided
+  stand-in reached through exactly the same `SEND_KW` path, and
+  `tests/conformance/23-named-arguments/foreign-python-keyword.scala` and
+  `foreign-python-open-encoding.scala` are `XFAIL` with their expected output
+  recorded for Phase 6 to convert rather than invent. Nothing in Phase 4 claims
+  the foreign half works.
+- **Phase 4 / class prototypes are mutable.** An extension method is installed on
+  the receiver type's prototype after the class exists, and every instance already
+  created must see it, so `MAKE_CLASS` now builds a **mutable** shape. Measured
+  with `perf stat -r 3` on this host: `object_tree` (131071 case-class objects)
+  costs 1.393 vs 1.355 Gcycles, **+2.8 %**, with instructions +1.4 %;
+  `attr_lookup` is 140.4 vs 138.1 Mcycles, inside its own ±6 % error bars. Both
+  are within the phase's 3 % gate, and class *creation* is cheaper because the
+  members now mutate one object instead of copying per member. Recorded rather
+  than hidden: it is the one read-path cost this phase adds.
+- **Phase 4 / the per-frame retry loop is free.** Measured the same way, by
+  bypassing `runFrame` and comparing: `fib30` 1.2505 vs 1.3016 Gcycles (the retry
+  loop is **3.9 % faster**), `attr_lookup` 122.1 vs 128.8 Mcycles (**5.2 %
+  faster**), `tak` 91.4 vs 88.7 Mcycles (3.1 % slower). All three inside the
+  noise of a busy host, and none of them a regression: one C++ `try` region per
+  frame is free on the non-throwing path of a zero-cost-exceptions ABI, as
+  expected.
+- **Phase 4 / `finally` does not nest perfectly with `return`.** See D87: with two
+  or more nested `try` constructs, an inner handler may see an exception raised by
+  an outer cleanup during a `return`. The single-level case, which is the one a
+  program reaches, is correct and verified against scalac.
 
 - **Phase 3 / one entry cell per value-equality key.** DESIGN §6.1's scheme
   stores an identity key as the `ProtoMap` slot key itself, but a value key as a
@@ -484,17 +662,17 @@ See DESIGN §11 for the full table. Unchanged this phase: R2, R4, R5, R8.
   calls `ProtoContext::safepoint()` at every back-edge (Q21). The scheduler
   unit test's polling loop learned this the hard way under
   `PROTOCORE_HEAP_LIMIT_CELLS=20000`.
-- **Phase 5 / cold start — at or just above target, not confirmed.** The
-  < 25 ms budget (DESIGN §1) measured 24.20 ms (script) and 23.58 ms (REPL) at
-  load average ~4, and 25.11 ms / 26.57 ms at load average ~8.7 on the same
-  build. **The host was shared with three other builds all night, so this is
-  not a clean measurement and the target is not claimed as met.** The cause is
-  not eager worker creation — a script with no actor makes 2 `clone3` calls and
-  one with an actor makes 12, so the pool really does start only at the first
-  `Actor.spawn` — but the prelude did grow by the `Try`/`Success`/`Failure`,
-  `RuntimeError` and `ActorStats` definitions plus six constructor `def`s
-  (D44), and the prelude is compiled at every start-up. Re-measure on a quiet
-  host before the release is called done.
+- **Cold start — above target, and Phase 4 made it worse. Not claimed as met.**
+  The < 25 ms budget (DESIGN §1) measured 24.96 ms (script) / 24.80 ms (REPL) on
+  the 0.4.0 build at load average ~3.6, and **26.31 ms / 26.98 ms on the 0.5.0
+  build at load average ~5.0**, with the Release build at 25.87 / 27.56 ms. The
+  host was busy in both cases, so neither figure is clean — but the direction is
+  real and the cause is known: the prelude grew by **twenty exception classes,
+  `StringContext` and the `Priority` enum**, and the prelude is parsed, desugared,
+  compiled and run at every start-up. Nothing is cached between runs. Re-measure
+  on a quiet host; if the budget is to be met, the prelude needs either a
+  precompiled form or fewer classes, and that is a Phase 6 decision rather than a
+  bug in this phase.
 - **Phase 5 / mailbox size.** With the CAS-list fallback, a backlog of N
   messages on one actor is an N-element `ProtoList` plus N envelopes, and every
   push rebuilds an O(log N) path. `tests/cli/actors-stress.sh` queues 200000
@@ -588,18 +766,18 @@ Smaller notes:
 ## Open bugs
 
 **One, pre-existing.** `Mailbox.EightProducersLoseNothingAndDuplicateNothing`
-aborts under `PROTOCORE_HEAP_LIMIT_CELLS=20000`: 910 of 911 pass in that
-configuration. It is **not** a Phase 3 regression — it fails the same way on
-`main` at `bca0352` with the Phase 3 work stashed, which was checked before the
-first Phase 3 commit. It is Phase 5 code and was left undiagnosed rather than
-fixed outside this phase's scope, but it is recorded here rather than left to be
-rediscovered. Every other configuration is fully green: 911/911 plain, 911/911 at
-`PROTOSCALA_ACTOR_WORKERS=1` and at `=16`.
+aborts under `PROTOCORE_HEAP_LIMIT_CELLS=20000`: 1101 of 1102 pass in that
+configuration. It is **not** a Phase 3 or Phase 4 regression — it fails the same
+way on `main` at `bca0352`, which was checked before the first Phase 3 commit and
+again before the first Phase 4 one. It is Phase 5 code and was left undiagnosed
+rather than fixed outside either phase's scope, but it is recorded here rather
+than left to be rediscovered. Every other configuration is fully green: 1102/1102
+plain, 1102/1102 at `PROTOSCALA_ACTOR_WORKERS=1` and at `=16`.
 
 Not run in this phase either, and therefore still not claimed: the
-ThreadSanitizer build of the Phase 5 plan's Task 8 Step 4. Phase 3 adds no
-concurrency, so it neither needs nor supplies that evidence; it remains the first
-thing to run on a quiet host.
+ThreadSanitizer build of the Phase 5 plan's Task 8 Step 4. Phase 4 adds no new
+concurrency mechanism — it extends the existing one — so it neither needs nor
+supplies that evidence; it remains the first thing to run on a quiet host.
 
 ## History
 

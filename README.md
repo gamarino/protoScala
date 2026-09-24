@@ -15,7 +15,7 @@ protoScala is also a **platform validation project**: protoCore aims to be a sol
 
 ## A flavour of the language
 
-Every line below runs on 0.4.0 today.
+Every line below runs on 0.5.0 today.
 
 ```scala
 case class Increment(by: Int)
@@ -44,15 +44,33 @@ println(f"pi is ${3.14159}%.2f")              // pi is 3.14
 
 def factorial(n: Int): Int = if n == 0 then 1 else n * factorial(n - 1)
 println(factorial(100).toString.length)       // 158 — integers never overflow
+
+enum Shape:
+  case Circle(r: Double)
+  case Square(side: Double)
+
+def area(s: Shape): Double = s match
+  case Shape.Circle(r)    => 3.14 * r * r
+  case Shape.Square(side) => side * side
+println(area(Shape.Square(2.0)))              // 4.0
+
+def volume(width: Int, height: Int = 1, depth: Int = 1): Int = width * height * depth
+println(volume(depth = 3, width = 2))         // 6 — named and default arguments
+
+extension (n: Int) def squared: Int = n * n
+println(3.squared)                            // 9
+
+println(try "x".toInt catch case e: NumberFormatException => -1)   // -1
 ```
 
 ## Project status
 
-**Phase 3 complete (version 0.4.0) — not production ready, open for community
-review.** Phase 5 was implemented before Phases 3 and 4, so the minor version
-went 0.2.0 → 0.3.0 (actors) → 0.4.0 (collections); Phase 4, exceptions and
-`enum`, is what remains. The binary runs Scala 3 scripts and offers a REPL, in
-both brace and significant-indentation syntax:
+**Phase 4 complete (version 0.5.0) — not production ready, open for community
+review.** Phase 5 was implemented before Phases 3 and 4, so the minor version went
+0.2.0 → 0.3.0 (actors) → 0.4.0 (collections) → 0.5.0 (exceptions, enums,
+arguments and extensions); modules and polyglot imports (UMD, Phase 6) are what
+remain. The binary runs Scala 3 scripts and offers a REPL, in both brace and
+significant-indentation syntax:
 
 - `val`/`var`/`lazy val`/`def`, `if`/`while`, lambdas and closures, placeholder
   syntax (`_ + 1`), recursion (with `StackOverflowError` instead of a crash),
@@ -97,7 +115,22 @@ both brace and significant-indentation syntax:
   that **suspends cooperatively** — the worker is released, so an actor that
   asks another actor completes even with a single worker;
 - `Try`/`Success`/`Failure`, `Thread.start`/`join` and
-  `System.nanoTime`/`currentTimeMillis`/`getenv`.
+  `System.nanoTime`/`currentTimeMillis`/`getenv`;
+- **exceptions**: `try`/`catch`/`finally` and `throw`, with a `catch` body that is
+  a full pattern match, a twenty-class `Throwable` hierarchy in the prelude, and
+  every failure the runtime raises translated into a real exception value of the
+  class its name means — including across an actor turn and a suspended `await`,
+  so `try { f.await } catch { … }` works;
+- **`enum` and sealed hierarchies**: simple and parameterised cases, `ordinal`,
+  `values`, `valueOf`, `fromOrdinal`, and enums as algebraic data types;
+- **named and default arguments** for methods, constructors, case-class `apply`
+  and `copy`, function values and local functions — bound in the callee through
+  protoCore's own keyword convention, which is the same one a foreign callee will
+  receive them by (`docs/INTEROP.md` §7);
+- **extension methods**, dispatched on the receiver's runtime prototype, and the
+  **custom string interpolators** they bring;
+- **`super[T].m`**, templates nested in an `object`, and multiple constructor
+  parameter lists.
 
 ```scala
 val counter = Actor.spawn(0) { (state, msg) => (state + msg, state + msg) }
@@ -352,10 +385,15 @@ first two workloads that matter for the positioning, `attr_lookup` and
 the suite as the phases that enable them land. Phase 5 added the actor
 benchmarks above.
 
-**Pending workloads** (need later phases; not approximated): `list_append`
-and protoClojure's `sum-squares` (Phase 3 collections), `exception_latency`
-(Phase 4 exceptions). See [benchmarks/README.md](benchmarks/README.md) to run
-the suite.
+**Pending workloads** (not approximated): `list_append` and protoClojure's
+`sum-squares`, and `exception_latency` — Phase 4 shipped exceptions, and the
+measurement it owed was a targeted A/B rather than a new workload, because a
+throw-per-iteration benchmark measures the handler search and not the thing
+`exception_latency` was meant to compare. The per-frame retry loop was measured by
+bypassing it: `fib30` 1.2505 vs 1.3016 Gcycles, `attr_lookup` 122.1 vs 128.8
+Mcycles, `tak` 91.4 vs 88.7 Mcycles (`perf stat -r 3`) — free on the non-throwing
+path, as a zero-cost-exceptions ABI should be. See
+[benchmarks/README.md](benchmarks/README.md) to run the suite.
 
 ## Building
 

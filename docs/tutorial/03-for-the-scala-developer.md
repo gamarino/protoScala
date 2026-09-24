@@ -180,7 +180,9 @@ object that happens to expose a member of the same name resolves to it instead
 of failing.
 
 **D6 — Extension methods dispatch on the runtime prototype**, not the static
-type. Applies from Phase 4.
+type, so a value reached through `Any` answers an extension too. In force since
+Phase 4; chapter 6 §6.8 has the example, and D82 and D83 record what being
+installed on a prototype costs.
 
 **D7 — `Map` and `Set` iteration order is unspecified** and may differ from
 Scala's. In force since Phase 3; D58 below states what the order actually is
@@ -476,17 +478,19 @@ Scala prints `3`. Write `(a: Int, b: Int) => a + b`, or pass one tuple.
 [STATUS.md](../STATUS.md#provisional-deviations-phase-2--pending-maintainer-decision)
 without a plan question of their own:
 
-- `class`, `trait` and `object` must be defined at the **top level of a
-  file**; local, nested and anonymous classes (`new T { … }`), multiple
-  constructor parameter lists and `super[T].m` are rejected with
-  "not implemented yet" and arrive in Phase 4.
+- `class`, `trait` and `object` must be defined at the **top level of a file or
+  in an `object`** (Phase 4). A template nested in a `class` or a `trait`, a local
+  class inside a block and an anonymous class (`new T { … }`) are rejected (D80).
+  Multiple constructor parameter lists (D84) and `super[T].m` (D76) arrived in
+  Phase 4.
 - **D41** — Scala 3's **universal apply** (a creator application, `C(args)`
   standing for `new C(args)`) is not synthesised for a plain class:
   `class C(val a: Int); C(1)` fails with `Not found: C`, where scalac prints
   `1`. Write `new C(1)`, or give `C` a companion with an `apply`. Case classes
   and case objects are unaffected — their companion `apply` is synthesised.
-- **Named arguments** work only in a case class's `copy`; elsewhere they are
-  rejected with `named arguments are not implemented yet` until Phase 4.
+- **Named and default arguments** work everywhere since Phase 4 — on a `def`, a
+  method, a constructor, a case class's `apply` and `copy`, a function value and a
+  local function — and are bound in the callee (D81, D88, D89; chapter 5 §5.10).
 - **D35** — a refutable pattern in a `for` generator is accepted **without**
   Scala 3.9's `case` keyword and filters, as in Scala 2 (scalac rejects it and
   asks for `case`).

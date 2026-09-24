@@ -4,10 +4,10 @@
 > classes and case objects with their synthesised `apply`, `unapply`, `copy`,
 > `equals`, `hashCode`, `toString` and `Product` members; tuples `Tuple2` to
 > `Tuple22`; `Option`/`Some`/`None`; `match` with every pattern form listed in
-> §7.5; and user-written extractors. What is not implemented yet: `enum` and
-> exhaustiveness checking of a `sealed` hierarchy (Phase 4 — with types erased
-> there is nothing to check, D4), and named arguments anywhere except `copy`
-> (Phase 4).
+> §7.5; and user-written extractors. `enum` is chapter 12 and named arguments are
+> chapter 5 §5.10, both since Phase 4. What is not implemented: exhaustiveness
+> checking of a `sealed` hierarchy or an `enum` — with types erased there is
+> nothing to check (D4).
 
 Case classes and `match` are the pair that makes Scala feel unlike Python or
 JavaScript. A case class is a data shape with structural equality and a
@@ -48,9 +48,9 @@ One word, `case`, adds all of this to a class:
 | `p.canEqual(q)` | the equality-cooperation hook |
 
 `copy` is the way to "modify" an immutable value: it takes the fields you name
-and keeps the rest. It is also the one place where **named arguments** work
-before Phase 4 — `f(b = 1)` on an ordinary method is still rejected with
-`named arguments are not implemented yet`.
+and keeps the rest. **Named arguments** work on any callable since Phase 4
+(chapter 5 §5.10), so `copy` is no longer a special case — it was the first place
+they worked, because it is a native method and natives always received them.
 
 `==` deserves a sentence of its own. On a plain class it is identity (chapter
 6, §6.7); on a case class it is structural, and it follows Scala's rule
@@ -199,8 +199,9 @@ keyword synthesised.
 file, so it can warn you when a `match` forgets one. protoScala parses
 `sealed` and accepts it as documentation, but it erases types (D4), so there
 is **no exhaustiveness check**: a forgotten case surfaces as a `MatchError`
-when a value reaches it (§7.7). Until Phase 4, a `case _` that raises a clear
-error is a cheap substitute.
+when a value reaches it (§7.7). That is permanent, not provisional — the same is
+true of an `enum` (chapter 12 §12.3) — so write a `case _` where a default is
+meaningful, and a test for every branch where it is not.
 
 ## 7.5 A tour of patterns
 
@@ -390,9 +391,10 @@ sniffing becomes one `match`.
   arguments for <lambda>: expected 1, got 2`. Write
   `{ (a: Int, b: Int) => a + b }`, or pass the pair as a tuple. Chapter 3 has
   the fixture.
-- **No exhaustiveness check** on a `sealed` hierarchy (D4), and no `enum`
-  until Phase 4.
-- **Named arguments only in `copy`** until Phase 4.
+- **No exhaustiveness check** on a `sealed` hierarchy (D4). `enum` arrived in
+  Phase 4 and is chapter 12; it is not checked either, for the same reason.
+- **Named arguments** work everywhere since Phase 4, not only in `copy`
+  (chapter 5 §5.10).
 
 Everything else — structural `equals` with `canEqual`, JVM-identical
 `hashCode`, `copy`, the `Product` members, the pattern forms of §7.5, the
