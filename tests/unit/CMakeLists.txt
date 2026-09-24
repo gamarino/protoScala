@@ -18,6 +18,7 @@ add_executable(protoscala_unit_tests
     test_hashing.cpp
     test_stackguard.cpp
     test_engine.cpp
+    test_exceptions.cpp
     test_primitives.cpp
     test_readystack.cpp
     test_mailbox.cpp

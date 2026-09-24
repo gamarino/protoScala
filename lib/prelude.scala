@@ -1,8 +1,45 @@
 // The protoScala prelude: definitions every program sees, compiled when a
 // session starts (DESIGN §6: the prelude is written in protoScala). Phase 2
-// defines Option; Phase 3 extends it (Either, Try, more collection methods).
-// `__raise` is an internal primitive that stands in for `throw` until
-// exceptions exist.
+// defines Option; Phase 3 extends it (Either, Try, more collection methods);
+// Phase 4 adds the Throwable hierarchy and re-points Failure at it.
+
+// Phase 4: the exception hierarchy (DESIGN §7). These are ordinary protoScala
+// classes, so `case e: ArithmeticException` is the same per-class marker test as
+// `case p: Point` (DESIGN §5.3), and the runtime materialises a native failure
+// into one of them by unqualified name. The names are the JVM's without the
+// `java.lang.` prefix; there is no `java` namespace (D8).
+class Throwable(message: String):
+  def getMessage: String = message
+  def getCause: Throwable = null
+  // getClass returns the class's simple name as a String: protoScala has no
+  // Class[_] values, and `.getClass` on an exception is almost always fed to
+  // string concatenation anyway.
+  def getClass: String = __classNameOf(this)
+  override def toString: String =
+    if message == null then getClass else getClass + ": " + message
+
+class Exception(message: String) extends Throwable(message)
+class Error(message: String) extends Throwable(message)
+
+class RuntimeException(message: String) extends Exception(message)
+class ArithmeticException(message: String) extends RuntimeException(message)
+class ClassCastException(message: String) extends RuntimeException(message)
+class IllegalArgumentException(message: String) extends RuntimeException(message)
+class IllegalStateException(message: String) extends RuntimeException(message)
+class IndexOutOfBoundsException(message: String) extends RuntimeException(message)
+class StringIndexOutOfBoundsException(message: String) extends IndexOutOfBoundsException(message)
+class NoSuchElementException(message: String) extends RuntimeException(message)
+class NullPointerException(message: String) extends RuntimeException(message)
+class NumberFormatException(message: String) extends IllegalArgumentException(message)
+class UnsupportedOperationException(message: String) extends RuntimeException(message)
+class MatchError(message: String) extends RuntimeException(message)
+// scala.UninitializedFieldError extends RuntimeException despite its name, and
+// matching that is free.
+class UninitializedFieldError(message: String) extends RuntimeException(message)
+class InterruptedException(message: String) extends Exception(message)
+class NoSuchMethodError(message: String) extends Error(message)
+class StackOverflowError(message: String) extends Error(message)
+class OutOfMemoryError(message: String) extends Error(message)
 
 sealed abstract class Option[+A]:
   def isEmpty: Boolean
@@ -38,7 +75,7 @@ final case class Some[+A](value: A) extends Option[A]:
 
 case object None extends Option[Nothing]:
   def isEmpty: Boolean = true
-  def get: Nothing = __raise("NoSuchElementException", "None.get")
+  def get: Nothing = throw new NoSuchElementException("None.get")
 
 // Phase 3: the disjoint union. `map`/`flatMap`/`foreach` are right-biased, as
 // they are in Scala 2.13 and Scala 3. There is no `withFilter`: Scala's needs a
@@ -86,28 +123,24 @@ final case class Right[+A, +B](value: B) extends Either[A, B]:
   def forall(p: B => Boolean): Boolean = p(value)
   def contains[C >: B](elem: C): Boolean = value == elem
 
-// Phase 5 shipped Try/Success/Failure early (D44) because there were no
-// exception values yet. Phase 3 only ADDS combinators; it must not re-point
-// Failure's payload. Phase 4 replaces RuntimeError with a real Throwable in one
-// edit here plus the `await` raise path, and closes D44 then (plan A0-13).
-final case class RuntimeError(className: String, message: String):
-  override def toString: String = className + ": " + message
-
+// Phase 5 shipped Try/Success/Failure early with a RuntimeError payload (D44),
+// because there were no exception values yet. Phase 4 re-points Failure at a
+// real Throwable and retires D44; RuntimeError is gone.
 sealed abstract class Try[+A]:
   def isSuccess: Boolean
   def isFailure: Boolean = !isSuccess
   def get: A
   def getOrElse[B >: A](default: B): B = if isSuccess then get else default
   def toOption: Option[A] = if isSuccess then Some(get) else None
-  // Phase 3. There is no `filter`/`withFilter`: a failed filter needs an
-  // exception value, which Phase 4 brings (D67).
+  // Phase 3. There is no `filter`/`withFilter`: Scala's needs the static type
+  // to build the failure's message (D67).
   def map[B](f: A => B): Try[B]
   def flatMap[B](f: A => Try[B]): Try[B]
   def foreach[U](f: A => U): Unit
-  def recover[B >: A](f: RuntimeError => B): Try[B]
-  def recoverWith[B >: A](f: RuntimeError => Try[B]): Try[B]
+  def recover[B >: A](f: Throwable => B): Try[B]
+  def recoverWith[B >: A](f: Throwable => Try[B]): Try[B]
   def orElse[B >: A](alternative: Try[B]): Try[B] = if isSuccess then this else alternative
-  def toEither: Either[RuntimeError, A]
+  def toEither: Either[Throwable, A]
 
 final case class Success[+A](value: A) extends Try[A]:
   def isSuccess: Boolean = true
@@ -115,19 +148,19 @@ final case class Success[+A](value: A) extends Try[A]:
   def map[B](f: A => B): Try[B] = __tryOf(() => f(value))
   def flatMap[B](f: A => Try[B]): Try[B] = f(value)
   def foreach[U](f: A => U): Unit = f(value)
-  def recover[B >: A](f: RuntimeError => B): Try[B] = this
-  def recoverWith[B >: A](f: RuntimeError => Try[B]): Try[B] = this
-  def toEither: Either[RuntimeError, A] = Right(value)
+  def recover[B >: A](f: Throwable => B): Try[B] = this
+  def recoverWith[B >: A](f: Throwable => Try[B]): Try[B] = this
+  def toEither: Either[Throwable, A] = Right(value)
 
-final case class Failure[+A](error: RuntimeError) extends Try[A]:
+final case class Failure[+A](exception: Throwable) extends Try[A]:
   def isSuccess: Boolean = false
-  def get: A = __raise(error.className, error.message)
-  def map[B](f: A => B): Try[B] = Failure(error)
-  def flatMap[B](f: A => Try[B]): Try[B] = Failure(error)
+  def get: A = throw exception
+  def map[B](f: A => B): Try[B] = Failure(exception)
+  def flatMap[B](f: A => Try[B]): Try[B] = Failure(exception)
   def foreach[U](f: A => U): Unit = ()
-  def recover[B >: A](f: RuntimeError => B): Try[B] = __tryOf(() => f(error))
-  def recoverWith[B >: A](f: RuntimeError => Try[B]): Try[B] = f(error)
-  def toEither: Either[RuntimeError, A] = Left(error)
+  def recover[B >: A](f: Throwable => B): Try[B] = __tryOf(() => f(exception))
+  def recoverWith[B >: A](f: Throwable => Try[B]): Try[B] = f(exception)
+  def toEither: Either[Throwable, A] = Left(exception)
 
 // Try { risky() }: the argument is by-name, so the block is re-evaluated inside
 // the primitive's catch. The function form Try(() => expr) also works, because a
@@ -149,8 +182,7 @@ final case class ActorStats(workers: Int, messagesProcessed: Int)
 def __mkSome[A](v: A): Option[A] = Some(v)
 def __mkNone: Option[Nothing] = None
 def __mkSuccess[A](v: A): Try[A] = Success(v)
-def __mkFailure[A](e: RuntimeError): Try[A] = Failure(e)
-def __mkRuntimeError(c: String, m: String): RuntimeError = RuntimeError(c, m)
+def __mkFailure[A](e: Throwable): Try[A] = Failure(e)
 def __mkActorStats(w: Int, m: Int): ActorStats = ActorStats(w, m)
 def __mkLeft[A, B](v: A): Either[A, B] = Left(v)
 def __mkRight[A, B](v: B): Either[A, B] = Right(v)

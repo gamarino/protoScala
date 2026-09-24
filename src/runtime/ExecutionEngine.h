@@ -11,6 +11,7 @@
 #pragma once
 #include "compiler/BytecodeModule.h"
 #include "compiler/Opcodes.h"
+#include "runtime/Errors.h"
 #include "runtime/Runtime.h"
 #include "protoCore.h"
 
@@ -101,19 +102,60 @@ public:
     // await that suspended the chain must return. Frame `idx` is rebuilt, the
     // inner frames run first, and their result is written where the in-flight
     // call would have left it (DESIGN §8.3).
+    // `injected` is the value the suspending await must return; when
+    // `injectedThrow` is non-null the await must instead raise it (a failed
+    // future, plan A0-7 invariant 5). Exactly one of the two is non-null.
     const proto::ProtoObject* resumeFrames(proto::ProtoContext* parent,
                                            const proto::ProtoList* frames, unsigned idx,
-                                           const proto::ProtoObject* injected);
+                                           const proto::ProtoObject* injected,
+                                           const proto::ProtoObject* injectedThrow = nullptr);
+
+    // A native ScalaError as a prelude Throwable instance (plan A0-6). Public
+    // so the actor scheduler can complete a failed ask with a real exception
+    // value (plan A0-7 invariant 6).
+    const proto::ProtoObject* materialise(proto::ProtoContext* ctx, const ScalaError& e);
 
 private:
     static constexpr unsigned kNoPendingCall = 0xFFFFFFFFu;
     const RuntimeLayout& layout_;
 
-    // The dispatch loop of one frame, entered fresh by execute() and again by
-    // resumeFrames() with a restored frame.
+    // The dispatch loop of one frame. On an exception it writes the word index
+    // of the faulting instruction to *faultPc and rethrows; runFrame uses it to
+    // search the module's handler table (plan A0-3).
     const proto::ProtoObject* runLoop(proto::ProtoContext& frame, const BytecodeModule& mod,
                                       const proto::ProtoObject** slots,
-                                      const proto::ProtoObject** sp, const Instr* ip);
+                                      const proto::ProtoObject** sp, const Instr* ip,
+                                      std::size_t* faultPc);
+
+    // One frame, with its handler table active. `execute` and `resumeFrames`
+    // call this, never runLoop directly (plan A0-3, escalation E2): the handler
+    // body is entered by `continue`, OUTSIDE the C++ catch block, so it runs
+    // with no live C++ handler, an ordinary ip and an ordinary operand stack —
+    // and therefore suspends cooperatively like any other bytecode. Searching
+    // and jumping inside the catch instead would break `await` inside a `catch`
+    // or a `finally` silently.
+    const proto::ProtoObject* runFrame(proto::ProtoContext& frame, const BytecodeModule& mod,
+                                       const proto::ProtoObject** slots,
+                                       const proto::ProtoObject** sp, const Instr* ip);
+    // Re-enters a resumed frame as if its in-flight call had thrown `payload`:
+    // the handler search runs at the pc of that call instruction (ipOffset - 1,
+    // the same index runLoop's own catch reports), and then the ordinary retry
+    // loop takes over. This is what makes `try { f.await } catch { ... }` work
+    // across a cooperative suspension (plan A0-7 invariant 5, retiring D50).
+    const proto::ProtoObject* runFrameRaising(proto::ProtoContext& frame, const BytecodeModule& mod,
+                                              const proto::ProtoObject** slots,
+                                              std::size_t ipOffset,
+                                              const proto::ProtoObject* payload);
+    // Enters `h`: resets the operand stack, writes `value` into the handler's
+    // slot and sets `*ip`. Returns the new stack pointer.
+    const proto::ProtoObject** enterHandler(const BytecodeModule& mod,
+                                            const proto::ProtoObject** slots,
+                                            const BytecodeModule::Handler& h,
+                                            const proto::ProtoObject* value, const Instr** ip);
+    // A native ScalaError as a prelude Throwable instance. Allocates, so it is
+    // called only once a handler is known to exist: the uncaught path must not
+    // allocate, because it may be dying of OutOfMemoryError.
+    const proto::ProtoObject* materialiseError(proto::ProtoContext* ctx, const ScalaError& e);
 
     // base[0] is the receiver, base[1..argc] the arguments; all rooted.
     // `applied`: the call site wrote an argument list (SEND_APPLY), so a member
@@ -145,13 +187,26 @@ private:
                                         const BytecodeModule::Const& site);
     const proto::ProtoObject* sendKeywords(proto::ProtoContext* ctx, const proto::ProtoObject** base,
                                            const BytecodeModule::Const& site);
+    // CALL_KW: `f(x = 1)` where `f` is a function value or a global def, which
+    // SEND_KW cannot express (it has no receiver). base[0] is the callee.
+    const proto::ProtoObject* callKeywords(proto::ProtoContext* ctx, const proto::ProtoObject** base,
+                                           const BytecodeModule::Const& site);
+    // Binds a keyword ProtoSparseList into a callee frame's parameter slots and
+    // fills the rest from the callee's default blocks. `positional` is the
+    // number of slots the positional arguments already wrote. Raises
+    // IllegalArgumentException for an unknown name, a duplicate and a missing
+    // argument — each naming what was expected and what arrived (plan A0-11).
+    void bindKeywordsAndDefaults(proto::ProtoContext& frame, const BytecodeModule& mod,
+                                 const proto::ProtoSparseList* keywords,
+                                 const proto::ProtoObject** slots, unsigned positional);
     bool testType(proto::ProtoContext* ctx, TypeCode code, const proto::ProtoObject* v) const;
     [[noreturn]] void throwMissingMember(proto::ProtoContext* ctx, const proto::ProtoObject* receiver,
                                          const proto::ProtoString* name) const;
 
     const proto::ProtoObject* execute(proto::ProtoContext* parent, const BytecodeModule& mod,
                                       const proto::ProtoObject* const* args, unsigned argc,
-                                      const proto::ProtoObject* captures);
+                                      const proto::ProtoObject* captures,
+                                      const proto::ProtoSparseList* keywords = nullptr);
     const proto::ProtoObject* callNative(proto::ProtoContext* ctx, proto::ProtoMethod fn,
                                          const proto::ProtoObject* self,
                                          const proto::ProtoObject* const* args, unsigned argc);

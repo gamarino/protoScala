@@ -17,6 +17,10 @@
 
 namespace protoScala {
 
+namespace {
+int line(SourcePos p) { return p.line; }
+}  // namespace
+
 void Compiler::compileMatch(const Match& m) {
     compileExpr(*m.scrutinee);
     const int scrutinee = newSlot();
@@ -40,6 +44,142 @@ void Compiler::compileMatch(const Match& m) {
     emit(Op::PUSH_LOCAL, static_cast<std::uint64_t>(scrutinee), m.pos, +1);
     emit(Op::MATCH_ERROR, 0, m.pos, 0);  // throws; the pushed value stands for the result at the join
     for (std::size_t j : toEnd) fn_->mod->patchJumpTo(j, fn_->mod->pos());
+}
+
+// ---------------------------------------------------------------------------
+// Exceptions (Phase 4, DESIGN §7). A `catch` body is the SAME cascade a `match`
+// compiles, at a different entry point, so nothing here is a second
+// implementation of pattern matching.
+// ---------------------------------------------------------------------------
+
+// throw e: evaluate e, then THROW. The expression's static type is Nothing in
+// Scala; here it simply never produces a value, so the PUSH_UNIT below is
+// unreachable code that keeps the depth bookkeeping of the following code
+// balanced (`val x = throw e` never reaches the store).
+void Compiler::compileThrow(const Throw& n) {
+    compileExpr(*n.value);
+    emit(Op::THROW, 0, n.pos, -1);
+    emit(Op::PUSH_UNIT, 0, n.pos, +1);
+}
+
+// The catch cascade. It is compileMatch's machinery with two differences: the
+// scrutinee is already in `slot` (the handler entry wrote it there), and no
+// match RETHROWs instead of raising MatchError.
+void Compiler::compileCatchCases(const std::vector<CaseDef>& cases, int slot, SourcePos pos) {
+    std::vector<std::size_t> exits;
+    for (const CaseDef& c : cases) {
+        checkDistinctVariables(*c.pattern);
+        fn_->scopes.emplace_back();
+        std::vector<std::size_t> fail;
+        compilePattern(*c.pattern, slot, fail);
+        if (c.guard) {
+            compileExpr(*c.guard);
+            fail.push_back(emitJump(Op::JUMP_IF_FALSE, c.pos, -1));
+        }
+        compileExpr(*c.body);
+        exits.push_back(emitJump(Op::JUMP, c.pos, 0));
+        adjust(-1);  // the next case starts without this case's value
+        for (std::size_t f : fail) fn_->mod->patchJumpTo(f, fn_->mod->pos());
+        fn_->scopes.pop_back();
+    }
+    // Nothing matched: re-raise, which a Finally entry of the same try still
+    // covers, so the cleanup runs (plan A0-4).
+    emit(Op::RETHROW, static_cast<std::uint64_t>(slot), pos, 0);
+    adjust(+1);  // unreachable, but the join below expects the try's value
+    for (std::size_t e : exits) fn_->mod->patchJumpTo(e, fn_->mod->pos());
+}
+
+std::vector<std::size_t> Compiler::addHandlerRanges(
+    std::size_t start, std::size_t end, int entryDepth, int slot,
+    BytecodeModule::HandlerKind kind,
+    const std::vector<std::pair<std::size_t, std::size_t>>& holes) {
+    std::vector<std::size_t> out;
+    std::size_t at = start;
+    for (const auto& [from, to] : holes) {
+        if (from >= end || to <= start) continue;
+        if (from > at) out.push_back(fn_->mod->addHandler({at, from, 0, entryDepth, slot, kind}));
+        if (to > at) at = to;
+    }
+    if (end > at) out.push_back(fn_->mod->addHandler({at, end, 0, entryDepth, slot, kind}));
+    return out;
+}
+
+void Compiler::emitEnclosingFinallys(SourcePos pos) {
+    // Scala runs every enclosing finally body before a `return` leaves the
+    // method, innermost first, and AFTER the returned expression has been
+    // evaluated. Reversing either order is the classic bug;
+    // 20-exceptions/finally-runs-on-return.scala and finally-nested-order.scala
+    // are what catch it.
+    for (auto it = fn_->finallys.rbegin(); it != fn_->finallys.rend(); ++it) {
+        const std::size_t from = fn_->mod->pos();
+        compileExpr(*it->body);
+        emit(Op::POP, 0, pos, -1);
+        it->holes.emplace_back(from, fn_->mod->pos());
+    }
+}
+
+// try B [catch { case ... }] [finally F]
+//
+// Layout of the emitted code:
+//
+//     <B>                     the try body
+//     JUMP after
+//   catchBody:                <cascade over slot>; RETHROW slot when nothing matches
+//   after:                    (the Catch entry covers only B)
+//     JUMP normal             only when there is a finally
+//   cleanup:                  <F>; POP; RETHROW slot   (the Finally entry's target)
+//   normal:                   <F>; POP                 (the straight-line path)
+//
+// The Catch entry covers B only, so an exception raised inside a handler body is
+// not caught by the same try. The Finally entry covers B AND the cascade, so a
+// throw from either one — including the RETHROW a non-matching cascade emits —
+// runs the cleanup (plan A0-4).
+void Compiler::compileTry(const Try& n) {
+    const int entryDepth = fn_->depth;
+    const int slot = newSlot();          // holds the caught value; the user cannot name it
+    const std::size_t tryStart = fn_->mod->pos();
+    if (n.finallyBody) fn_->finallys.push_back({n.finallyBody.get(), slot, {}});
+    compileExpr(*n.body);
+    const std::size_t tryEnd = fn_->mod->pos();
+    const std::size_t skip = fn_->mod->emitJump(Op::JUMP, line(n.pos));
+    std::size_t catchBody = 0;
+    if (!n.cases.empty()) {
+        catchBody = fn_->mod->pos();
+        fn_->depth = entryDepth;         // the handler starts at the try's depth
+        compileCatchCases(n.cases, slot, n.pos);
+    }
+    fn_->mod->patchJumpTo(skip, fn_->mod->pos());
+    const std::size_t protectedEnd = fn_->mod->pos();
+
+    // The handler entries are added HERE, after the whole construct has been
+    // emitted, for two reasons: the inlined-cleanup holes are only known now,
+    // and entries added by a nested `try` inside B are already in the table, so
+    // table order stays innermost-first (plan A0-4).
+    std::vector<std::pair<std::size_t, std::size_t>> holes;
+    if (n.finallyBody) holes = fn_->finallys.back().holes;
+    if (!n.cases.empty())
+        for (std::size_t i : addHandlerRanges(tryStart, tryEnd, entryDepth, slot,
+                                              BytecodeModule::HandlerKind::Catch, holes))
+            fn_->mod->patchHandlerBody(i, catchBody);
+    if (!n.finallyBody) return;
+
+    const std::size_t skipCleanup = fn_->mod->emitJump(Op::JUMP, line(n.pos));
+    const std::size_t cleanup = fn_->mod->pos();
+    for (std::size_t i : addHandlerRanges(tryStart, protectedEnd, entryDepth, slot,
+                                          BytecodeModule::HandlerKind::Finally, holes))
+        fn_->mod->patchHandlerBody(i, cleanup);
+    // The cleanup itself is not protected by its own entry: a throw from a
+    // `finally` body replaces the in-flight exception and propagates outward
+    // rather than looping (Scala does the same).
+    fn_->finallys.pop_back();
+    fn_->depth = entryDepth;
+    compileExpr(*n.finallyBody);
+    emit(Op::POP, 0, n.pos, -1);         // a finally body's value is discarded
+    emit(Op::RETHROW, static_cast<std::uint64_t>(slot), n.pos, 0);
+    fn_->mod->patchJumpTo(skipCleanup, fn_->mod->pos());
+    fn_->depth = entryDepth + 1;         // the normal path still carries the try's value
+    compileExpr(*n.finallyBody);
+    emit(Op::POP, 0, n.pos, -1);
 }
 
 void Compiler::bindPattern(const std::string& name, int slot, SourcePos pos) {

@@ -289,9 +289,18 @@ void ActorScheduler::deliver(proto::ProtoContext* ctx, ActorState* a,
         setCurrentActor(nullptr);
         *suspended = true;
         return;
+    } catch (ScalaThrow& t) {
+        // DESIGN §8.4: the ask's future fails WITH THE EXCEPTION VALUE, the error
+        // is reported, the actor keeps its previous state and stays alive
+        // (plan A0-7 invariant 6). Rooted before completeWith allocates.
+        call.returnValue = t.value;
+        std::fflush(stdout);
+        std::fprintf(stderr, "protoscala: actor handler failed: %s\n",
+                     engine_->showTopLevel(&call, t.value).c_str());
+        if (slot[3] != PROTO_NONE) futures::completeWith(&call, L, slot[3], t.value);
     } catch (ScalaError& e) {
-        // DESIGN §8.4: the ask's future fails, the error is reported, the actor
-        // keeps its previous state and stays alive. Supervision is out of scope.
+        // A native failure: materialised into a Throwable by completeError, so
+        // the ask's Failure always carries a real exception value.
         std::fflush(stdout);
         std::fprintf(stderr, "protoscala: actor handler failed: %s\n", e.what());
         if (slot[3] != PROTO_NONE)
@@ -328,24 +337,40 @@ void ActorScheduler::resumeSuspendedTurn(proto::ProtoContext* ctx, ActorState* a
     actor->removeAttribute(&turn, L.snapshotKey);
     actor->removeAttribute(&turn, L.waitingOnKey);
     actor->removeAttribute(&turn, L.turnFutureKey);
+    // A failed future is RAISED at the pc of the in-flight `await`, so an
+    // enclosing `try` in the suspended handler catches it and the rest of the
+    // handler still runs (plan A0-7 invariant 5). That is what retires D50: the
+    // suspended chain is resumed, never abandoned.
+    const proto::ProtoObject* injected = nullptr;
+    const proto::ProtoObject* injectedThrow = nullptr;
     if (st == futures::kFailure) {
-        // The awaited future failed. Without exceptions (Phase 4) the handler
-        // cannot catch it, so the suspended chain is abandoned and the ask
-        // inherits the failure (D50).
         const proto::ProtoObject* err = futures::errorOf(&turn, L, slot[1]);
-        if (slot[2] != PROTO_NONE) futures::complete(&turn, L, slot[2], err, /*failed=*/true);
-        return;
+        // A kFailure future always carries its Throwable; a missing one could
+        // only come from a VM defect, and it must not read as `raise null`.
+        injectedThrow = (err && err != PROTO_NONE)
+                            ? err
+                            : engine_->materialise(&turn, ScalaError("RuntimeException",
+                                                                    "a future failed without an "
+                                                                    "exception value"));
+    } else {
+        injected = futures::valueOf(&turn, L, slot[1]);
     }
     setCurrentActor(actor);
     bool yielded = false;
     try {
         const proto::ProtoObject* r = engine_->resumeFrames(&turn, slot[0]->asList(&turn), 0,
-                                                            futures::valueOf(&turn, L, slot[1]));
+                                                            injected, injectedThrow);
         turn.returnValue = r;
         applyHandlerResult(&turn, a, r, slot[2]);
     } catch (FutureYield&) {
         if (slot[2] != PROTO_NONE) actor->setAttribute(&turn, L.turnFutureKey, slot[2]);
         yielded = true;
+    } catch (ScalaThrow& t) {
+        turn.returnValue = t.value;
+        std::fflush(stdout);
+        std::fprintf(stderr, "protoscala: actor handler failed: %s\n",
+                     engine_->showTopLevel(&turn, t.value).c_str());
+        if (slot[2] != PROTO_NONE) futures::completeWith(&turn, L, slot[2], t.value);
     } catch (ScalaError& e) {
         std::fflush(stdout);
         std::fprintf(stderr, "protoscala: actor handler failed: %s\n", e.what());

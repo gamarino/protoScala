@@ -120,6 +120,14 @@ PRIM(prim_raise) {
     throw ScalaError(cls, msg);
 }
 
+// __classNameOf(x): the simple name of x's class, which the prelude's
+// Throwable.getClass returns. protoScala has no Class[_] values, so a String is
+// what `getClass` can honestly give (see docs/STATUS.md).
+PRIM(prim_class_name_of) {
+    const ProtoObject* v = arg(ctx, args, 0, "__classNameOf", 1);
+    return str(ctx, typeName(ctx, layoutOf(), v));
+}
+
 // __fmt(lit0, v0, spec0, lit1, v1, spec1, ..., litN): the compiled form of an
 // f-interpolator (Compiler::compileFormat). Arity is always 3k + 1. The
 // specifiers were already validated at compile time, so a parse failure here is
@@ -141,13 +149,12 @@ PRIM(prim_fmt) {
     return str(ctx, out);
 }
 
-// __tryOf(f): runs f() and wraps the result. Until Phase 4 there is no `catch`
-// in the language, so the catch lives here: a ScalaError becomes
-// Failure(RuntimeError(class, message)) (D44). `Try { e }` reaches this with a
+// __tryOf(f): runs f() and wraps the result. `Try { e }` reaches this with a
 // thunk, because Try.apply declares its argument by-name and the compiler's
 // by-name lowering wraps the block in a zero-argument function; `Try(() => e)`
-// reaches it with the same shape. Phase 4 replaces this with a Scala-level
-// try/catch in the prelude and deletes the primitive.
+// reaches it with the same shape. It stays a primitive rather than becoming a
+// prelude `try`/`catch`: the catch would have to name Throwable, and Try is
+// compiled before the class exists in a REPL that redefines it (D25).
 PRIM(prim_try_of) {
     const RuntimeLayout& L = layoutOf();
     const ProtoObject* f = arg(ctx, args, 0, "Try.apply", 1);
@@ -161,11 +168,14 @@ PRIM(prim_try_of) {
     try {
         slot[0] = engine->invoke(&scope, f, nullptr, 0);
         slot[1] = engine->invoke(&scope, L.hooks.success, &slot[0], 1);
+    } catch (const ScalaThrow& t) {
+        // A Scala `throw` from the block: the exception value travels straight
+        // into Failure, with no translation (D44 retired).
+        slot[0] = t.value;
+        slot[1] = engine->invoke(&scope, L.hooks.failure, slot, 1);
     } catch (const ScalaError& e) {
-        slot[0] = str(&scope, e.className());
-        slot[1] = str(&scope, e.message());
-        const ProtoObject* err = engine->invoke(&scope, L.hooks.runtimeError, slot, 2);
-        slot[0] = err;
+        // A native failure: materialised into the prelude class its name means.
+        slot[0] = engine->materialise(&scope, e);
         slot[1] = engine->invoke(&scope, L.hooks.failure, slot, 1);
     }
     scope.returnValue = slot[1];
@@ -1045,7 +1055,7 @@ const std::vector<std::string>& builtinGlobalNames() {
     static const std::vector<std::string> names = [] {
         std::vector<std::string> v = {"println", "print", "List", "Nil", "__raise",
                                       "Actor", "Priority", "Future", "Thread", "System",
-                                      "__fmt", "__tryOf",
+                                      "__fmt", "__tryOf", "__classNameOf",
                                       "Vector", "Map", "Set"};
         for (unsigned n = 2; n <= kMaxTupleArity; ++n) v.push_back("Tuple" + std::to_string(n));
         return v;
@@ -1056,7 +1066,8 @@ const std::vector<std::string>& builtinGlobalNames() {
 void installPrimitives(ProtoContext* ctx, const RuntimeLayout& L) {
     static constexpr MethodEntry globals[] = {
         {"println", &prim_println}, {"print", &prim_print}, {"__raise", &prim_raise},
-        {"__fmt", &prim_fmt}, {"__tryOf", &prim_try_of}};
+        {"__fmt", &prim_fmt}, {"__tryOf", &prim_try_of},
+        {"__classNameOf", &prim_class_name_of}};
     static constexpr MethodEntry any[] = {
         {"toString", &any_toString}, {"equals", &any_equals}, {"==", &any_eqeq},
         {"!=", &any_noteq}, {"eq", &any_eq}, {"ne", &any_ne},

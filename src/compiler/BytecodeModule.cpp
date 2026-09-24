@@ -67,6 +67,9 @@ const char* opName(Op op) {
         case Op::SEND_KW:        return "SEND_KW";
         case Op::NEW_SPREAD:     return "NEW_SPREAD";
         case Op::SEND_APPLY:     return "SEND_APPLY";
+        case Op::CALL_KW:        return "CALL_KW";
+        case Op::THROW:          return "THROW";
+        case Op::RETHROW:        return "RETHROW";
     }
     return "?";
 }
@@ -87,6 +90,24 @@ const char* typeCodeName(TypeCode code) {
 std::size_t BytecodeModule::addBlock(std::unique_ptr<BytecodeModule> sub) {
     blocks_.push_back(std::move(sub));
     return blocks_.size() - 1;
+}
+
+std::size_t BytecodeModule::addHandler(const Handler& h) {
+    handlers_.push_back(h);
+    return handlers_.size() - 1;
+}
+
+void BytecodeModule::patchHandlerBody(std::size_t index, std::size_t handlerPc) {
+    handlers_[index].handlerPc = handlerPc;
+}
+
+const BytecodeModule::Handler* BytecodeModule::handlerFor(std::size_t pc) const {
+    // Table order is search order: the compiler appends nested try blocks before
+    // enclosing ones, and each try's Catch entry before its Finally entry
+    // (plan A0-4), so the first containing entry is the innermost applicable one.
+    for (const Handler& h : handlers_)
+        if (pc >= h.startPc && pc < h.endPc) return &h;
+    return nullptr;
 }
 
 namespace {
@@ -225,6 +246,21 @@ std::size_t BytecodeModule::emitJumpBack(std::size_t target, int line) {
     return emit(Op::JUMP_BACK, offset, line);
 }
 
+void BytecodeModule::setParamNames(std::vector<std::string> names) {
+    paramNames_ = std::move(names);
+    defaultBlocks_.assign(paramNames_.size(), kNoDefault);
+    minArity_ = arity_;
+}
+
+void BytecodeModule::setDefaultBlock(std::size_t param, std::size_t blockIndex) {
+    if (defaultBlocks_.size() <= param) defaultBlocks_.resize(param + 1, kNoDefault);
+    defaultBlocks_[param] = blockIndex;
+    hasDefaults_ = true;
+    // The lowest positional count still acceptable: every parameter from the
+    // first one carrying a default onwards may be filled by the prologue.
+    if (static_cast<int>(param) < minArity_) minArity_ = static_cast<int>(param);
+}
+
 void BytecodeModule::linkSymbols(proto::ProtoContext* ctx) {
     // createSymbol takes a C string: a name with an embedded NUL cannot occur —
     // identifiers never contain one.
@@ -244,6 +280,13 @@ void BytecodeModule::linkSymbols(proto::ProtoContext* ctx) {
         for (const auto& f : c.fields) c.fieldSymbols.push_back(intern(f));
         if (!c.key.empty()) c.keySymbol = intern(c.key);
     }
+    // Every keyword-argument key in this phase is derived from createSymbol,
+    // which INTERNS. ProtoString::fromUTF8String, fromUTF8 and fromStdString
+    // return a different pointer for the same text, so a key built from one of
+    // them matches nothing — and the failure is SILENT: the argument simply
+    // never binds. protoJS hit this class of bug more than once.
+    paramSymbols_.clear();
+    for (const auto& p : paramNames_) paramSymbols_.push_back(intern(p));
     for (auto& b : blocks_) b->linkSymbols(ctx);
 }
 
@@ -411,6 +454,15 @@ std::string BytecodeModule::disassemble() const {
                        commentFor(m, word0p, operand, pc) + "\n";
                 ++pc;
             }
+
+            // The handler table, in search order (plan A0-4): this listing is
+            // how the exception tasks read the table back out of a module.
+            for (const Handler& h : m.handlers_)
+                out += pad + "  handler [" + std::to_string(h.startPc) + ", " +
+                       std::to_string(h.endPc) + ") -> " + std::to_string(h.handlerPc) +
+                       "  depth=" + std::to_string(h.stackDepth) +
+                       " slot=" + std::to_string(h.slot) + " " +
+                       (h.kind == HandlerKind::Catch ? "catch" : "finally") + "\n";
 
             for (const auto& block : m.blocks_) {
                 out += "\n";

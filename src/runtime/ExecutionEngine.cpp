@@ -8,8 +8,10 @@
 #include "protoCore.h"
 
 #include <cmath>
+#include <new>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace protoScala {
 
@@ -373,9 +375,109 @@ const proto::ProtoObject* ExecutionEngine::superSend(proto::ProtoContext* ctx,
                      "super." + site.sval + " has no implementation after " + ownerName);
 }
 
-// Named arguments reach native methods (Product.copy) through protoCore's
-// keyword ProtoSparseList, keyed by the interned name (DESIGN §5.2); Scala
-// methods take them in a later phase (Open question Q9).
+namespace {
+
+// The keyword ProtoSparseList of a SEND_KW / CALL_KW site.
+//
+// The key is the ADDRESS of the interned parameter-name symbol — protoCore's
+// own calling convention, the same one every runtime in the family speaks
+// (DESIGN §5.2). It is sound because interning guarantees exactly one address
+// per name in a ProtoSpace, so the address IS the name's identity, and an
+// interned string is PERENNIAL: never collected, never moved, so there is
+// nothing for the collector to trace and an integer-keyed ProtoSparseList is
+// exactly the right structure rather than a compromise. ProtoMap exists for
+// arbitrary COLLECTABLE object keys, which is a different problem — the same
+// principle that makes ProtoTuple interned and perennial.
+const proto::ProtoSparseList* keywordsOfSite(proto::ProtoContext* ctx,
+                                             const proto::ProtoObject** base,
+                                             const BytecodeModule::Const& site) {
+    const proto::ProtoSparseList* keywords = ctx->newSparseList();
+    for (std::size_t k = 0; k < site.nameSymbols.size(); ++k)
+        keywords = keywords->setAt(ctx, reinterpret_cast<unsigned long>(site.nameSymbols[k]),
+                                   base[1 + site.argc + k]);
+    return keywords;
+}
+
+// The name of the first keyword key that is not one of the callee's parameter
+// names. Recovering the name from the key is a cast, and that is only sound
+// because the key IS an interned symbol's address (see keywordsOfSite).
+std::string unmatchedKeywordName(proto::ProtoContext* ctx, const BytecodeModule& mod,
+                                 const proto::ProtoSparseList* keywords) {
+    const auto& symbols = mod.paramNameSymbols();
+    const proto::ProtoSparseListIterator* it = keywords->getIterator(ctx);
+    while (it && it->hasNext(ctx)) {
+        const unsigned long key = it->nextKey(ctx);
+        bool known = false;
+        for (const proto::ProtoString* s : symbols)
+            if (reinterpret_cast<unsigned long>(s) == key) { known = true; break; }
+        if (!known) return reinterpret_cast<const proto::ProtoString*>(key)->toStdString(ctx);
+        // `advance` is a non-const member of ProtoSparseListIterator, and
+        // getIterator hands back a const pointer: the cast is protoCore's own
+        // iteration idiom, not a mutation of a shared structure.
+        it = const_cast<proto::ProtoSparseListIterator*>(it)->advance(ctx);
+    }
+    return "?";
+}
+
+}  // namespace
+
+void ExecutionEngine::bindKeywordsAndDefaults(proto::ProtoContext& frame, const BytecodeModule& mod,
+                                              const proto::ProtoSparseList* keywords,
+                                              const proto::ProtoObject** slots,
+                                              unsigned positional) {
+    const auto& symbols = mod.paramNameSymbols();
+    const auto& names = mod.paramNames();
+    const std::size_t n = symbols.size();
+    if (n != names.size())
+        throw std::logic_error("bindKeywordsAndDefaults: unlinked module " + mod.name());
+    // A callable with no recorded parameter names cannot bind by name at all;
+    // that is a loud error rather than a silent drop.
+    if (n == 0 && keywords && keywords->getSize(&frame) > 0)
+        throw ScalaError("IllegalArgumentException",
+                         mod.name() + " does not take named arguments");
+    // Small and bounded: a Scala parameter list never reaches a size where a
+    // heap allocation would be cheaper than this stack vector.
+    std::vector<bool> filled(n, false);
+    for (unsigned k = 0; k < positional && k < n; ++k) filled[k] = true;
+    if (keywords) {
+        unsigned long matched = 0;
+        for (std::size_t i = 0; i < n; ++i) {
+            const auto key = reinterpret_cast<unsigned long>(symbols[i]);
+            if (!keywords->has(&frame, key)) continue;
+            ++matched;
+            if (filled[i])
+                throw ScalaError("IllegalArgumentException",
+                                 mod.name() + " received parameter '" + names[i] + "' twice");
+            slots[i] = keywords->getAt(&frame, key);
+            filled[i] = true;
+        }
+        // A key that matched no parameter is a caller mistake and must be LOUD:
+        // silently dropping it is exactly the failure mode a non-interning key
+        // would produce, and it must not be reachable from this side either.
+        if (matched != keywords->getSize(&frame))
+            throw ScalaError("IllegalArgumentException",
+                             mod.name() + " has no parameter named '" +
+                                 unmatchedKeywordName(&frame, mod, keywords) + "'");
+    }
+    for (std::size_t i = 0; i < n; ++i) {
+        if (filled[i]) continue;
+        const std::size_t block = mod.defaultBlock(i);
+        if (block == BytecodeModule::kNoDefault)
+            throw ScalaError("IllegalArgumentException",
+                             mod.name() + " is missing argument '" + names[i] + "'");
+        // Defaults run in the callee prologue, in PARAMETER order, and a default
+        // may read the parameters declared before it: the default block takes
+        // exactly those slots as its own arguments, which is why they must
+        // already be bound and live in the frame's traced slots (plan A0-11).
+        slots[i] = execute(&frame, mod.block(block), slots, static_cast<unsigned>(i), nullptr);
+        filled[i] = true;
+    }
+}
+
+// Named arguments reach every callable through protoCore's keyword
+// ProtoSparseList, keyed by the address of the interned parameter-name symbol
+// (DESIGN §5.2, plan A0-12) — native methods, Scala-defined methods and, once
+// UMD lands, foreign callables alike, with no special case for any of them.
 const proto::ProtoObject* ExecutionEngine::sendKeywords(proto::ProtoContext* ctx,
                                                         const proto::ProtoObject** base,
                                                         const BytecodeModule::Const& site) {
@@ -386,20 +488,86 @@ const proto::ProtoObject* ExecutionEngine::sendKeywords(proto::ProtoContext* ctx
     const proto::ProtoString* name = siteName(ctx, receiver, site);
     const proto::ProtoObject* m = receiver->getAttribute(ctx, name);
     if (!m || m == PROTO_NONE) throwMissingMember(ctx, receiver, name);
-    if (!m->isMethod(ctx))
-        throw ScalaError("UnsupportedOperationException",
-                         "named arguments are not supported yet for methods written in Scala (" +
-                             site.sval + ")");
     proto::ProtoContext scope(ctx->space, ctx);
+    if (const BytecodeModule* mod = compiledModuleOf(&scope, layout_, m)) {
+        if (mod->isMethod() && !m->getOwnAttributeDirect(&scope, layout_.selfKey)) {
+            // A method of the receiver: `this` travels in slot 0, so the
+            // positional arguments start at base[0] (the receiver itself).
+            const proto::ProtoSparseList* keywords = keywordsOfSite(&scope, base, site);
+            const proto::ProtoObject* r = execute(&scope, *mod, base, site.argc + 1, nullptr, keywords);
+            scope.returnValue = r;
+            return r;
+        }
+        // A function-valued member (or a bound method): call it as a value.
+        const proto::ProtoSparseList* keywords = keywordsOfSite(&scope, base, site);
+        const proto::ProtoObject* caps =
+            mod->captureCount() ? m->getOwnAttributeDirect(&scope, layout_.capturesKey) : nullptr;
+        const proto::ProtoObject* r =
+            mod->isMethod()
+                ? execute(&scope, *mod, base, site.argc + 1, caps, keywords)
+                : execute(&scope, *mod, base + 1, site.argc, caps, keywords);
+        scope.returnValue = r;
+        return r;
+    }
+    if (!m->isMethod(ctx))
+        throw ScalaError("IllegalArgumentException",
+                         plainName(site.sval) + " is not a method of " +
+                             typeName(ctx, layout_, receiver) + ", so it takes no named arguments");
     const proto::ProtoList* positional = scope.newList(site.argc, base + 1);
-    const proto::ProtoSparseList* keywords = scope.newSparseList();
-    for (std::size_t k = 0; k < site.nameSymbols.size(); ++k)
-        keywords = keywords->setAt(&scope, reinterpret_cast<unsigned long>(site.nameSymbols[k]),
-                                   base[1 + site.argc + k]);
+    const proto::ProtoSparseList* keywords = keywordsOfSite(&scope, base, site);
     const proto::ProtoObject* r = m->asMethod(ctx)(&scope, receiver, nullptr, positional, keywords);
     if (!r) r = PROTO_NONE;
     scope.returnValue = r;
     return r;
+}
+
+// CALL_KW: `f(x = 1)` where `f` is a function value, a global `def` or a local
+// function. base[0] is the callee, base[1..argc] the positional arguments and
+// the keyword values follow them.
+const proto::ProtoObject* ExecutionEngine::callKeywords(proto::ProtoContext* ctx,
+                                                        const proto::ProtoObject** base,
+                                                        const BytecodeModule::Const& site) {
+    const proto::ProtoObject* callee = base[0];
+    if (callee == PROTO_NONE) throw ScalaError("NullPointerException", "cannot call null");
+    proto::ProtoContext scope(ctx->space, ctx);
+    const proto::ProtoSparseList* keywords = keywordsOfSite(&scope, base, site);
+    if (const BytecodeModule* mod = compiledModuleOf(&scope, layout_, callee)) {
+        const proto::ProtoObject* caps =
+            mod->captureCount() ? callee->getOwnAttributeDirect(&scope, layout_.capturesKey) : nullptr;
+        const proto::ProtoObject* r;
+        if (mod->isMethod()) {
+            // A bound method: its receiver travels in slot 0.
+            const proto::ProtoObject* self =
+                callee->getOwnAttributeDirect(&scope, layout_.selfKey);
+            if (!self) throw std::logic_error("callKeywords: unbound method");
+            proto::ProtoContext argScope(scope.space, &scope);
+            argScope.resizeAutomaticLocals(site.argc + 1);
+            const proto::ProtoObject** a = argScope.getAutomaticLocals();
+            a[0] = self;
+            for (unsigned k = 0; k < site.argc; ++k) a[k + 1] = base[1 + k];
+            r = execute(&argScope, *mod, a, site.argc + 1, caps, keywords);
+            argScope.returnValue = r;
+        } else {
+            r = execute(&scope, *mod, base + 1, site.argc, caps, keywords);
+        }
+        scope.returnValue = r;
+        return r;
+    }
+    if (callee->isMethod(ctx)) {
+        const proto::ProtoList* positional = scope.newList(site.argc, base + 1);
+        const proto::ProtoObject* r = callee->asMethod(ctx)(
+            &scope, callee->asMethodSelf(ctx), nullptr, positional, keywords);
+        if (!r) r = PROTO_NONE;
+        scope.returnValue = r;
+        return r;
+    }
+    // Any other value: `f(x = 1)` is `f.apply(x = 1)` (DESIGN §5.1).
+    BytecodeModule::Const applySite = site;
+    applySite.sval = "apply";
+    applySite.symbol = layout_.applyName;
+    applySite.key.clear();
+    applySite.keySymbol = nullptr;
+    return sendKeywords(ctx, base, applySite);
 }
 
 bool ExecutionEngine::testType(proto::ProtoContext* ctx, TypeCode code,
@@ -459,11 +627,20 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                                                    const BytecodeModule& mod,
                                                    const proto::ProtoObject* const* args,
                                                    unsigned argc,
-                                                   const proto::ProtoObject* captures) {
+                                                   const proto::ProtoObject* captures,
+                                                   const proto::ProtoSparseList* keywords) {
     checkNativeStack();
     const unsigned arity = static_cast<unsigned>(mod.arity());
     const unsigned fixed = mod.isVariadic() ? arity - 1 : arity;
-    if (mod.isVariadic() ? argc < fixed : argc != arity) {
+    // A call that passes fewer positional arguments than the callee declares is
+    // acceptable when keyword arguments or defaults can fill the rest; the
+    // prologue then raises a message that names the missing parameter, which is
+    // strictly more informative than the count below (plan A0-11).
+    const bool mayBind = !mod.isVariadic() && (keywords != nullptr || mod.hasDefaults());
+    const bool ok = mod.isVariadic() ? argc >= fixed
+                    : mayBind        ? argc <= arity
+                                     : argc == arity;
+    if (!ok) {
         const unsigned self = mod.isMethod() ? 1 : 0;
         throw ScalaError("IllegalArgumentException",
                          "wrong number of arguments for " + mod.name() + ": expected " +
@@ -475,9 +652,16 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
     proto::ProtoContext frame(parent->space, parent);
     frame.resizeAutomaticLocals(stackBase + static_cast<unsigned>(mod.maxStack()));
     const proto::ProtoObject** slots = frame.getAutomaticLocals();  // never resized again
-    for (unsigned k = 0; k < fixed; ++k) slots[k] = args[k];
+    const unsigned positional = argc < fixed ? argc : fixed;
+    for (unsigned k = 0; k < positional; ++k) slots[k] = args[k];
     if (mod.isVariadic())
         slots[fixed] = frame.newList(argc - fixed, args + fixed)->asObject(&frame);
+    // Named arguments and defaults are bound HERE, in the callee: a caller that
+    // does not know its callee statically therefore still works. The platform
+    // is late-binding even where Scala is not; late detection is accepted,
+    // silent failure is not (plan A0-11).
+    if (keywords || (mod.hasDefaults() && positional < fixed))
+        bindKeywordsAndDefaults(frame, mod, keywords, slots, positional);
     if (mod.captureCount() > 0) {
         // A module with captures is never run without them: filling its
         // capture slots with nulls would corrupt the frame silently. Scala
@@ -493,7 +677,9 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
             slots[specs[k].localSlot] = caps->getAt(&frame, static_cast<int>(k));
     }
 
-    const proto::ProtoObject* out = runLoop(frame, mod, slots, slots + stackBase, mod.code().data());
+    // runFrame, never runLoop: the module's handler table must be active for
+    // this frame, and the handler body must run outside the C++ catch (A0-3).
+    const proto::ProtoObject* out = runFrame(frame, mod, slots, slots + stackBase, mod.code().data());
     frame.returnValue = out;
     return out;
 }
@@ -526,7 +712,8 @@ static void appendSuspendedFrame(proto::ProtoContext* ctx, const RuntimeLayout& 
 const proto::ProtoObject* ExecutionEngine::resumeFrames(proto::ProtoContext* parent,
                                                         const proto::ProtoList* frames,
                                                         unsigned idx,
-                                                        const proto::ProtoObject* injected) {
+                                                        const proto::ProtoObject* injected,
+                                                        const proto::ProtoObject* injectedThrow) {
     checkNativeStack();
     const RuntimeLayout& L = layout_;
     const proto::ProtoObject* rec = frames->getAt(parent, static_cast<int>(idx));
@@ -546,24 +733,133 @@ const proto::ProtoObject* ExecutionEngine::resumeFrames(proto::ProtoContext* par
     const proto::ProtoObject** slots = frame.getAutomaticLocals();
     for (unsigned k = 0; k < base; ++k) slots[k] = saved->getAt(&frame, static_cast<int>(k));
 
-    // The inner frames finish first; their result is what this frame's
-    // in-flight call would have returned. The innermost frame receives the
-    // awaited value itself.
-    const proto::ProtoObject* r = (idx + 1 < frames->getSize(&frame))
-                                      ? resumeFrames(&frame, frames, idx + 1, injected)
-                                      : injected;
-    slots[base] = r;
+    // The inner frames finish first; their result is what this frame's in-flight
+    // call would have returned. The innermost frame receives the awaited value
+    // itself — or, when the future failed, raises it AT the await's call site so
+    // an enclosing try in the suspended handler can catch it (plan A0-7, 5).
+    //
+    // runFrame, not runLoop: without this a resumed frame would have no handler
+    // table active and `try { f.await } catch { ... }` would silently catch
+    // nothing (plan A0-7 invariant 3). That is the single line whose omission
+    // breaks Phase 5 invisibly.
+    if (idx + 1 < frames->getSize(&frame)) {
+        const proto::ProtoObject* r =
+            resumeFrames(&frame, frames, idx + 1, injected, injectedThrow);
+        slots[base] = r;
+        const proto::ProtoObject* out =
+            runFrame(frame, mod, slots, slots + base + 1, mod.code().data() + ipOffset);
+        frame.returnValue = out;
+        return out;
+    }
+    if (injectedThrow) {
+        const proto::ProtoObject* out =
+            runFrameRaising(frame, mod, slots, ipOffset, injectedThrow);
+        frame.returnValue = out;
+        return out;
+    }
+    slots[base] = injected;
     const proto::ProtoObject* out =
-        runLoop(frame, mod, slots, slots + base + 1, mod.code().data() + ipOffset);
+        runFrame(frame, mod, slots, slots + base + 1, mod.code().data() + ipOffset);
     frame.returnValue = out;
     return out;
+}
+
+// --- Exceptions: the per-frame retry loop (DESIGN §7, plan A0-2 .. A0-4) ----
+
+const proto::ProtoObject** ExecutionEngine::enterHandler(const BytecodeModule& mod,
+                                                         const proto::ProtoObject** slots,
+                                                         const BytecodeModule::Handler& h,
+                                                         const proto::ProtoObject* value,
+                                                         const Instr** ip) {
+    const unsigned stackBase =
+        static_cast<unsigned>(mod.arity()) + static_cast<unsigned>(mod.localCount());
+    slots[h.slot] = value;                       // the caught value, in a traced slot
+    *ip = mod.code().data() + h.handlerPc;
+    return slots + stackBase + h.stackDepth;     // back to the try's entry depth
+}
+
+const proto::ProtoObject* ExecutionEngine::materialiseError(proto::ProtoContext* ctx,
+                                                            const ScalaError& e) {
+    const RuntimeLayout& L = layout_;
+    proto::ProtoContext scope(ctx->space, ctx);
+    scope.resizeAutomaticLocals(1);
+    const proto::ProtoObject** slot = scope.getAutomaticLocals();
+    // A named prelude class if there is one, else RuntimeException carrying the
+    // original class name in its message, so nothing is ever lost (plan A0-6).
+    auto it = L.hooks.throwableClasses.find(e.className());
+    const bool known = it != L.hooks.throwableClasses.end();
+    const proto::ProtoObject* cls = known ? it->second : L.hooks.runtimeException;
+    if (!cls)
+        throw std::logic_error("materialiseError: the prelude exception classes are not bound");
+    // The message string is written into a traced slot before the constructor
+    // runs: `construct` allocates, and an accumulator held only in a C++ local
+    // is the Phase 5 Mailbox::push bug.
+    slot[0] = makeString(&scope, known ? e.message() : e.className() + ": " + e.message());
+    const proto::ProtoObject* r = construct(&scope, cls, slot, 1);
+    scope.returnValue = r;
+    return r;
+}
+
+const proto::ProtoObject* ExecutionEngine::materialise(proto::ProtoContext* ctx,
+                                                       const ScalaError& e) {
+    return materialiseError(ctx, e);
+}
+
+const proto::ProtoObject* ExecutionEngine::runFrame(proto::ProtoContext& frame,
+                                                    const BytecodeModule& mod,
+                                                    const proto::ProtoObject** slots,
+                                                    const proto::ProtoObject** sp,
+                                                    const Instr* ip) {
+    // Fast path: a module with no protected region can never enter a handler, so
+    // it pays nothing beyond the one C++ try region a zero-cost-exceptions ABI
+    // makes free on the non-throwing path.
+    for (;;) {
+        std::size_t faultPc = 0;
+        try {
+            return runLoop(frame, mod, slots, sp, ip, &faultPc);
+        } catch (ScalaThrow& t) {
+            // Re-root before anything allocates: the frames below this one have
+            // already been destroyed, so this context's returnValue is the only
+            // thing the collector can see the payload through (plan A0-2, E1).
+            frame.returnValue = t.value;
+            const BytecodeModule::Handler* h = mod.handlerFor(faultPc);
+            if (!h) throw;
+            sp = enterHandler(mod, slots, *h, t.value, &ip);
+            continue;   // leaves the catch block: the handler body then runs with
+                        // NO live C++ handler, so it suspends like any other code
+        } catch (ScalaError& e) {
+            const BytecodeModule::Handler* h = mod.handlerFor(faultPc);
+            if (!h) throw;                       // the uncaught path allocates nothing
+            const proto::ProtoObject* v = materialiseError(&frame, e);
+            frame.returnValue = v;
+            sp = enterHandler(mod, slots, *h, v, &ip);
+            continue;
+        }
+    }
+}
+
+const proto::ProtoObject* ExecutionEngine::runFrameRaising(proto::ProtoContext& frame,
+                                                           const BytecodeModule& mod,
+                                                           const proto::ProtoObject** slots,
+                                                           std::size_t ipOffset,
+                                                           const proto::ProtoObject* payload) {
+    // ipOffset is where the snapshot said to continue, i.e. just past the call
+    // instruction that was in flight; that instruction's word index is
+    // ipOffset - 1, which is the index runLoop's own catch reports (plan A0-3).
+    frame.returnValue = payload;
+    const BytecodeModule::Handler* h = mod.handlerFor(ipOffset - 1);
+    if (!h) throw ScalaThrow(payload);
+    const Instr* ip = nullptr;
+    const proto::ProtoObject** newSp = enterHandler(mod, slots, *h, payload, &ip);
+    return runFrame(frame, mod, slots, newSp, ip);
 }
 
 const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                                                    const BytecodeModule& mod,
                                                    const proto::ProtoObject** slots,
                                                    const proto::ProtoObject** sp,
-                                                   const Instr* ip) {
+                                                   const Instr* ip,
+                                                   std::size_t* faultPc) {
     const Instr* const code = mod.code().data();
     const RuntimeLayout& L = layout_;
     // The operand-stack index where the in-flight call will write its result,
@@ -961,6 +1257,38 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                     sp = base + 1;
                     continue;
                 }
+                case Op::CALL_KW: {
+                    const auto& site = mod.constAt(operand);
+                    const proto::ProtoObject** base =
+                        sp - site.argc - static_cast<unsigned>(site.nameSymbols.size()) - 1;
+                    pendingBase = static_cast<unsigned>(base - slots);
+                    base[0] = callKeywords(&frame, base, site);
+                    pendingBase = kNoPendingCall;
+                    sp = base + 1;
+                    continue;
+                }
+                case Op::THROW: {
+                    const proto::ProtoObject* v = *--sp;
+                    if (v == PROTO_NONE)
+                        throw ScalaError("NullPointerException", "throw null");
+                    // Only a Throwable may be thrown (plan A0-5, Scala's rule),
+                    // tested with the Phase 2 per-class marker attribute and not
+                    // with protoCore's isInstanceOf (R3).
+                    if (v->getAttribute(&frame, L.throwableKey) != PROTO_TRUE)
+                        throw ScalaError("IllegalArgumentException",
+                                         "throw expects a Throwable, got " +
+                                             typeName(&frame, L, v));
+                    throw ScalaThrow(v);
+                }
+                case Op::RETHROW: {
+                    // A Catch cascade that matched nothing, or a Finally body
+                    // that has finished: re-raise the value the handler saved in
+                    // slot `operand` (plan A0-4).
+                    const proto::ProtoObject* v = slots[operand];
+                    if (!v || v == PROTO_NONE)
+                        throw std::logic_error("RETHROW with no saved exception in " + mod.name());
+                    throw ScalaThrow(v);
+                }
             }
             // Every handled opcode continues the loop or returns; reaching this
             // point means the module holds an opcode value the VM does not know
@@ -969,9 +1297,16 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                                    std::to_string(static_cast<unsigned>(op)) + " in " + mod.name());
         }
     } catch (FutureYield&) {
-        // This frame is part of a suspended chain. Record it and rethrow; the
-        // frames prepend themselves, so the actor's list reads outermost-first
-        // (the innermost frame is the first to catch).
+        // A cooperative suspension, not an error: this frame is part of a
+        // suspended chain. It never reaches runFrame's handler search, and no
+        // `finally` runs, because the frame will be resumed rather than
+        // abandoned (plan A0-7 invariants 1 and 2). This clause must stay
+        // FIRST: FutureYield is not a std::exception, but the order is what a
+        // reader checks, and a Scala `catch` must never see it.
+        //
+        // Record this frame and rethrow; the frames prepend themselves, so the
+        // actor's list reads outermost-first (the innermost frame catches first).
+        *faultPc = static_cast<std::size_t>(ip - code) - 1;
         if (pendingBase == kNoPendingCall)
             throw ScalaError("UnsupportedOperationException",
                              "await is not supported here: " + mod.name() +
@@ -979,14 +1314,49 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
         appendSuspendedFrame(&frame, layout_, mod, static_cast<unsigned>(ip - code), pendingBase,
                              slots);
         throw;
-    } catch (ScalaError& e) {
-        if (e.line == 0) e.line = mod.lineAt(static_cast<std::size_t>(ip - code) - 1);
+    } catch (ScalaThrow& t) {
+        // A Scala exception value: runFrame searches this module's handler table.
+        *faultPc = static_cast<std::size_t>(ip - code) - 1;
+        if (t.line == 0) t.line = mod.lineAt(*faultPc);
         throw;
+    } catch (ScalaError& e) {
+        *faultPc = static_cast<std::size_t>(ip - code) - 1;
+        if (e.line == 0) e.line = mod.lineAt(*faultPc);
+        throw;
+    } catch (const std::invalid_argument& e) {
+        // protoCore argument errors (e.g. asIntegerString with a bad base).
+        // Caught by its EXACT type: std::invalid_argument derives from
+        // std::logic_error, and a std::logic_error is a VM or compiler defect
+        // that must stay uncatchable, so this file never carries a
+        // `catch (const std::logic_error&)` clause (plan A0-6, D74).
+        *faultPc = static_cast<std::size_t>(ip - code) - 1;
+        ScalaError se("IllegalArgumentException", e.what());
+        se.line = mod.lineAt(*faultPc);
+        throw se;
+    } catch (const std::out_of_range& e) {
+        // Also a std::logic_error subclass: caught by its exact type, as above.
+        *faultPc = static_cast<std::size_t>(ip - code) - 1;
+        ScalaError se("IndexOutOfBoundsException", e.what());
+        se.line = mod.lineAt(*faultPc);
+        throw se;
+    } catch (const std::overflow_error& e) {
+        // Derives from std::runtime_error, so it must precede that clause.
+        *faultPc = static_cast<std::size_t>(ip - code) - 1;
+        ScalaError se("ArithmeticException", e.what());
+        se.line = mod.lineAt(*faultPc);
+        throw se;
+    } catch (const std::bad_alloc& e) {
+        // An Error, not an Exception: `case e: Exception` must not catch it.
+        *faultPc = static_cast<std::size_t>(ip - code) - 1;
+        ScalaError se("OutOfMemoryError", e.what());
+        se.line = mod.lineAt(*faultPc);
+        throw se;
     } catch (const std::runtime_error& e) {
         // A protoCore error (e.g. "Objects are not integer types for division.")
         // becomes a Scala RuntimeException; it is never swallowed (DESIGN §7).
+        *faultPc = static_cast<std::size_t>(ip - code) - 1;
         ScalaError se("RuntimeException", e.what());
-        se.line = mod.lineAt(static_cast<std::size_t>(ip - code) - 1);
+        se.line = mod.lineAt(*faultPc);
         throw se;
     }
 }

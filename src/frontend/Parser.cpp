@@ -249,8 +249,8 @@ NodePtr Parser::parseExprNoPlaceholders() {
         case TokenKind::KwReturn: return parseReturn();
         case TokenKind::KwDo:
             fail("do-while loops are not part of Scala 3; use while ... do", t);
-        case TokenKind::KwThrow:  unsupported("throw", t);
-        case TokenKind::KwTry:    unsupported("try", t);
+        case TokenKind::KwThrow:  return parseThrow();
+        case TokenKind::KwTry:    return parseTry();
         case TokenKind::KwFor:    return parseFor();
         default: break;
     }
@@ -340,6 +340,115 @@ NodePtr Parser::parseReturn() {
                           k != TokenKind::EndOfFile;
     if (hasValue) node->value = parseExprOrIndented();
     return node;
+}
+
+// throw Expr
+NodePtr Parser::parseThrow() {
+    auto n = std::make_unique<Throw>(advance().pos);   // `throw`
+    n->value = parseExprOrIndented();
+    return n;
+}
+
+// try Expr [catch CaseClauses] [finally Expr]
+//
+// Layout already opens a region after `try`, `catch` and `finally`, and pairs
+// `catch` with a pending `try` and `finally` with a pending `try` or `catch`
+// (Layout.cpp), so this reads them as ordinary tokens and Phase 4 adds no
+// layout work.
+NodePtr Parser::parseTry() {
+    const Token& t = advance();                       // `try`
+    auto n = std::make_unique<Try>(t.pos);
+    n->body = parseExprOrIndented();
+    while (at(TokenKind::Newline) || at(TokenKind::Semicolon)) {
+        // Only step over a separator that a `catch` or `finally` follows: the
+        // `try` expression must not swallow the statement after it.
+        const TokenKind next = peek(1).kind;
+        if (next != TokenKind::KwCatch && next != TokenKind::KwFinally) break;
+        advance();
+    }
+    if (at(TokenKind::KwCatch)) {
+        advance();
+        n->cases = parseCatchCases();
+        while (at(TokenKind::Newline) || at(TokenKind::Semicolon)) {
+            if (peek(1).kind != TokenKind::KwFinally) break;
+            advance();
+        }
+    }
+    if (at(TokenKind::KwFinally)) {
+        advance();
+        n->finallyBody = parseExprOrIndented();
+    }
+    if (n->cases.empty() && !n->finallyBody) fail("a try needs a catch or a finally", t);
+    return n;
+}
+
+// The handler of a `catch`: a braced or indented list of `case` clauses, or
+// Scala's single-expression form `catch handler`, where `handler` is a function
+// value. The second is rewritten to one synthetic case `case __ex => h(__ex)`,
+// so the compiler has exactly one shape to compile.
+std::vector<CaseDef> Parser::parseCatchCases() {
+    const std::size_t save = i_;
+    if (at(TokenKind::LBrace) || at(TokenKind::Indent)) {
+        const TokenKind terminator =
+            at(TokenKind::LBrace) ? TokenKind::RBrace : TokenKind::Outdent;
+        advance();
+        while (skipOneNewline()) {}
+        if (at(TokenKind::KwCase)) {
+            Match m(peek().pos);
+            parseCases(m, terminator);
+            expect(terminator, terminator == TokenKind::RBrace ? "'}'" : "end of the cases");
+            return std::move(m.cases);
+        }
+        i_ = save;   // not a list of cases: the handler is an ordinary expression
+    }
+    if (at(TokenKind::KwCase)) {
+        // `catch case e: T => ...` with the first `case` on the `catch` line and
+        // no bracket of its own. The clause parser of a `match` needs a
+        // terminator token to stop at, and here there is none: the body ends at
+        // the newline (or at the Outdent of the enclosing region). One
+        // expression per body is therefore parsed directly; a multi-statement
+        // body is written with braces or on an indented block after `=>`, both
+        // of which parseExprOrIndented handles.
+        std::vector<CaseDef> cases;
+        while (at(TokenKind::KwCase)) {
+            CaseDef c;
+            c.pos = expect(TokenKind::KwCase, "'case'").pos;
+            c.pattern = parsePattern();
+            if (at(TokenKind::KwIf)) {
+                advance();
+                c.guard = parseInfix(0);
+            }
+            expect(TokenKind::Arrow, "'=>'");
+            c.body = parseExprOrIndented();
+            cases.push_back(std::move(c));
+            if (at(TokenKind::Semicolon)) advance();   // `case a => x; case b => y`
+        }
+        return cases;
+    }
+    // An initializer_list would COPY, and CaseDef holds unique_ptrs.
+    std::vector<CaseDef> single;
+    single.push_back(catchHandlerCase(parseExprOrIndented()));
+    return single;
+}
+
+// `catch handler` where `handler` is a function value, rewritten to the single
+// synthetic case `case e => handler(e)` so the compiler has one shape. This is
+// what Scala's `catch` of a *total* function means. A genuine PartialFunction
+// that is not defined for the exception rethrows in Scala and, here, raises
+// MatchError from inside the function — prefer `case` clauses.
+CaseDef Parser::catchHandlerCase(NodePtr handler) {
+    const SourcePos pos = handler->pos;
+    const std::string binder = "e$" + std::to_string(++caseLambdaCounter_);
+    CaseDef c;
+    c.pos = pos;
+    c.pattern = std::make_unique<Pattern>();
+    c.pattern->kind = Pattern::Kind::Var;
+    c.pattern->name = binder;
+    c.pattern->pos = pos;
+    auto call = std::make_unique<Apply>(pos, std::move(handler));
+    call->args.push_back(std::make_unique<Ident>(pos, binder));
+    c.body = std::move(call);
+    return c;
 }
 
 // `x =>`, `_ =>`, or `( ... ) =>` with the matching parenthesis followed by `=>`.

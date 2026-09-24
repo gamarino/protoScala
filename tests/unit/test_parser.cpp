@@ -132,8 +132,18 @@ TEST(Parser, TypesAreParsedIntoTypeTrees) {
     EXPECT_EQ(e("x: scala.collection.Seq[?]"), "(typed x scala.collection.Seq[?])");
 }
 
+// Phase 4 implements `throw`, `try`/`catch`/`finally` and `super[T].m`; what
+// stays out is the anonymous-class form `new T { ... }`, which needs a
+// per-instance class (a deliberate deviation, see docs/STATUS.md).
+TEST(Parser, ThrowAndTryParse) {
+    EXPECT_EQ(dump(*parseExpressionSource("throw e")), "(throw e)");
+    EXPECT_EQ(dump(*parseExpressionSource("try a finally b")), "(try a (finally b))");
+    EXPECT_NE(dump(*parseExpressionSource("try a catch case e: T => b")).find("(case"),
+              std::string::npos);
+}
+
 TEST(Parser, LaterPhaseConstructsAreReportedClearly) {
-    for (const char* src : {"throw e", "try a finally b", "new A { }", "super[T].f"}) {
+    for (const char* src : {"new A { }"}) {
         try {
             parseExpressionSource(src);
             FAIL() << "expected ParseError for " << src;

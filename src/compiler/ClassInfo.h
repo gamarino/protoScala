@@ -43,6 +43,8 @@ inline constexpr const char* kRangeKey = "@Range";        // Phase 3 (DESIGN §6
 inline constexpr const char* kVectorKey = "@Vector";
 inline constexpr const char* kMapKey = "@Map";            // DESIGN §6.1
 inline constexpr const char* kSetKey = "@Set";
+inline constexpr const char* kThrowableKey = "@Throwable"; // Phase 4 (DESIGN §7)
+inline constexpr const char* kEnumKey = "@Enum";           // Phase 4 (DESIGN §4.5)
 inline constexpr const char* kPrimaryCtorKey = "<init>";
 inline constexpr unsigned kMaxTupleArity = 22;
 

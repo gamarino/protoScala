@@ -108,6 +108,14 @@ EvalStatus Session::evaluate(const std::string& source, const std::string& sourc
         engine_.run(&ctx, mod);
         if (!cu.mainName.empty() && mainArgs)
             callMain(&ctx, cu.mainKey, cu.mainTakesArgs, *mainArgs);
+    } catch (const ScalaThrow& t) {
+        // An uncaught Scala exception, reported through the VALUE's own
+        // toString, so a user-defined class says what its class says. The engine
+        // must be active for that, and it is: this is the thread that ran it.
+        std::fflush(stdout);
+        std::fprintf(stderr, "%s:%d: error: %s\n", sourceName.c_str(), t.line,
+                     showThrown(&ctx, t.value).c_str());
+        return EvalStatus::Error;
     } catch (const ScalaError& e) {
         std::fflush(stdout);
         std::fprintf(stderr, "%s:%d: error: %s\n", sourceName.c_str(), e.line, e.what());
@@ -140,6 +148,11 @@ EvalStatus Session::evaluate(const std::string& source, const std::string& sourc
                 outcome->echo.push_back("val " + cu.resultName + " = " +
                                         showResult(&ctx, global(cu.resultKey)));
         }
+    } catch (const ScalaThrow& t) {  // a toString that throws
+        std::fflush(stdout);
+        std::fprintf(stderr, "%s: error: %s\n", sourceName.c_str(),
+                     showThrown(&ctx, t.value).c_str());
+        return EvalStatus::Error;
     } catch (const ScalaError& e) {  // a toString that throws
         std::fflush(stdout);
         std::fprintf(stderr, "%s: error: %s\n", sourceName.c_str(), e.what());
@@ -165,6 +178,14 @@ void Session::callMain(proto::ProtoContext* ctx, const std::string& mainKey, boo
     for (unsigned k = 0; k < n; ++k)
         scope.setAutomaticLocal(k, makeString(&scope, args[k]));
     engine_.callTopLevel(&scope, scope.getAutomaticLocal(n), scope.getAutomaticLocals(), n);
+}
+
+std::string Session::showThrown(proto::ProtoContext* ctx, const proto::ProtoObject* v) {
+    try {
+        return engine_.showTopLevel(ctx, v);
+    } catch (...) {
+        return "<exception whose toString failed>";
+    }
 }
 
 int Session::runScript(const std::string& path, const std::vector<std::string>& args) {

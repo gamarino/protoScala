@@ -7,6 +7,7 @@
  */
 #include "protoScala/Version.h"
 #include "repl/Repl.h"
+#include "runtime/Errors.h"
 #include "runtime/Mailbox.h"
 #include "repl/Session.h"
 #include "runtime/StackGuard.h"
@@ -84,6 +85,13 @@ int main(int argc, char** argv) {
         // No arguments: start the interactive REPL.
         return protoScala::runOnEvaluatorThread([](void*) { return protoScala::runRepl(); },
                                                 nullptr);
+    } catch (const protoScala::ScalaThrow&) {
+        // An uncaught Scala exception that escaped the session's own report (a
+        // throw from a thread body, say): the session prints the class and
+        // message, so this arm only has to distinguish it from a VM defect.
+        std::fflush(stdout);
+        std::fprintf(stderr, "protoscala: uncaught exception\n");
+        return 1;
     } catch (const std::exception& e) {
         std::fflush(stdout);
         std::fprintf(stderr, "protoscala: internal error: %s\n", e.what());

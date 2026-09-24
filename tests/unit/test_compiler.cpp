@@ -572,3 +572,56 @@ TEST(CompilerInterpolation, AnUnknownInterpolatorIsRejectedWhileDesugaring) {
     // The desugarer raises a ParseError, not a CompileError (D56).
     EXPECT_THROW(listing(R"(val s = json"$x")"), ParseError);
 }
+
+// --- Exceptions (Phase 4, DESIGN §7) ---------------------------------------
+
+// These listings use `case e =>` and a bare `throw e` rather than a named
+// exception class: this fixture compiles against the builtin type table only,
+// without the prelude, so `RuntimeException` does not exist here.
+TEST(Bytecode, TryEmitsAHandlerEntryCoveringOnlyTheTryBody) {
+    const std::string asm_ = listing("def f(): Int = try 1 catch case e => 2");
+    EXPECT_TRUE(has(asm_, "handler [")) << asm_;
+    EXPECT_TRUE(has(asm_, "catch")) << asm_;
+    EXPECT_TRUE(has(asm_, "RETHROW")) << asm_;
+}
+
+TEST(Bytecode, ThrowEmitsTheThrowOpcode) {
+    const std::string asm_ = listing("def f(e: Any): Int = throw e");
+    EXPECT_TRUE(has(asm_, "THROW")) << asm_;
+}
+
+TEST(Bytecode, FinallyEmitsTwoCopiesAndAFinallyEntry) {
+    const std::string asm_ = listing("def f(): Int = try 1 finally 2");
+    EXPECT_TRUE(has(asm_, "finally")) << asm_;   // the handler-table line
+    EXPECT_TRUE(has(asm_, "RETHROW")) << asm_;
+    // The cleanup appears twice: once as the handler body, once inline on the
+    // normal path, so `try 1 finally 2` pushes three constants in all.
+    std::size_t count = 0, at = 0;
+    while ((at = asm_.find("PUSH_CONST", at)) != std::string::npos) { ++count; ++at; }
+    EXPECT_GE(count, 3u) << asm_;
+}
+
+TEST(Bytecode, ReturnInsideTryFinallyEmitsTheCleanupBeforeTheReturn) {
+    const std::string whole = listing("def f(): Int = try { return 7 } finally { 9 }");
+    // Search inside f's own listing: the enclosing <top> module has a RETURN of
+    // its own, which would come first.
+    const std::size_t body = whole.find("function f ");
+    ASSERT_NE(body, std::string::npos) << whole;
+    const std::string asm_ = whole.substr(body);
+    const std::size_t nine = asm_.find("; 9");
+    const std::size_t ret = asm_.find("RETURN");
+    ASSERT_NE(nine, std::string::npos) << asm_;
+    ASSERT_NE(ret, std::string::npos) << asm_;
+    EXPECT_LT(nine, ret) << asm_;
+}
+
+// The inlined cleanup a `return` emits must be EXCLUDED from the try's own
+// Finally range: the try has already been left, so re-entering the handler
+// would re-raise a value it never saved. The table therefore holds two
+// non-overlapping Finally pieces rather than one.
+TEST(Bytecode, AReturnPunchesAHoleInItsOwnFinallyRange) {
+    const std::string asm_ = listing("def f(): Int = try { return 7 } finally { 9 }");
+    std::size_t entries = 0, at = 0;
+    while ((at = asm_.find("finally", at)) != std::string::npos) { ++entries; ++at; }
+    EXPECT_GE(entries, 2u) << asm_;
+}

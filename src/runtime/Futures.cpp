@@ -94,17 +94,15 @@ const proto::ProtoObject* errorOf(proto::ProtoContext* ctx, const RuntimeLayout&
     return v ? v : PROTO_NONE;
 }
 
+// Phase 4: a failed future carries the Throwable itself, so raising it is a
+// ScalaThrow of that value and nothing is translated or reconstructed (D44
+// retired). A future failed with no value at all can only come from a VM defect.
 void raiseError(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* err) {
-    std::string cls = "RuntimeException", msg;
-    if (err && err != PROTO_NONE) {
-        const proto::ProtoObject* c = err->getOwnAttributeDirect(ctx, L.classNameField);
-        const proto::ProtoObject* m = err->getOwnAttributeDirect(ctx, L.messageField);
-        if (c && proto::ProtoObject::isStringTagFast(c))
-            cls = reinterpret_cast<const proto::ProtoString*>(c)->toStdString(ctx);
-        if (m && proto::ProtoObject::isStringTagFast(m))
-            msg = reinterpret_cast<const proto::ProtoString*>(m)->toStdString(ctx);
-    }
-    throw ScalaError(cls, msg);
+    (void)ctx;
+    (void)L;
+    if (!err || err == PROTO_NONE)
+        throw ScalaError("RuntimeException", "a future failed without an exception value");
+    throw ScalaThrow(err);
 }
 
 const proto::ProtoObject* result(proto::ProtoContext* ctx, const RuntimeLayout& L,
@@ -150,10 +148,20 @@ bool complete(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::Pro
 bool completeError(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* f,
                    const char* className, const std::string& message) {
     proto::ProtoContext scope(ctx->space, ctx);
-    const proto::ProtoObject* a[2] = {makeString(&scope, className), makeString(&scope, message)};
-    const proto::ProtoObject* err = callHook(&scope, L.hooks.runtimeError, a, 2);
+    // The native error is materialised into the prelude class its name means, so
+    // the future carries a real Throwable a Scala `catch` can match (plan A0-6).
+    const ActiveCallContext* active = activeCallContext();
+    if (!active || !active->engine)
+        throw std::logic_error("futures::completeError without an active engine");
+    const proto::ProtoObject* err =
+        active->engine->materialise(&scope, ScalaError(className, message));
     scope.returnValue = err;
     return complete(&scope, L, f, err, /*failed=*/true);
+}
+
+bool completeWith(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* f,
+                  const proto::ProtoObject* throwable) {
+    return complete(ctx, L, f, throwable, /*failed=*/true);
 }
 
 bool addWaiter(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* f,

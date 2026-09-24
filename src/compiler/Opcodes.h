@@ -82,8 +82,17 @@ enum class Op : uint8_t {
     SEND_APPLY     = 79,  // [recv a1..an] -> [r]         operand: SendSite (name, n)
                           // `recv.m(args)` written with an argument list: calls the
                           // member when it is a method, else applies its value.
-    // 80..95   reserved (object model)
-    // 96..127  exceptions, Phase 4: THROW (+ per-module handler table)
+    // Phase 4: a keyword-argument call of a function value (plan A0-11, A0-12).
+    // The keyword ProtoSparseList is keyed by the address of the interned
+    // parameter-name symbol, protoCore's own convention (A0-12).
+    CALL_KW        = 80,  // [f a1..an v1..vm] -> [r]     operand: KwSendSite constant
+    // 81..95   reserved (object model)
+    // Phase 4: exceptions (DESIGN §7). The protected regions live in the
+    // module's handler table, not in the instruction stream.
+    THROW          = 96,  // [v] -> throws                v must be a Throwable (A0-5)
+    RETHROW        = 97,  // [] -> throws                 operand: the local slot a
+                          // Finally handler saved the in-flight value in (A0-4)
+    // 98..127  reserved (exceptions)
     // 128..159 actors, Phase 5: SEND_ASYNC, ASK, AWAIT
 };
 

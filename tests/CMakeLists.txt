@@ -88,8 +88,12 @@ endforeach()
 # Every fixture that waits for an actor spins on the main thread, which has no
 # deadline of its own: a scheduling bug must fail the suite instead of stalling
 # it (Phase 5 plan, Global Constraints).
+# Phase 4 adds exception fixtures that start actors or threads; they belong to
+# the same block, and the `await` ones must complete with a SINGLE worker, which
+# is what proves the suspension is cooperative rather than blocking.
 foreach(conf_file ${PROTOSCALA_CONFORMANCE_FILES})
-    if("${conf_file}" MATCHES "^(13-actors|14-futures)/" OR "${conf_file}" MATCHES "tutorial/13-")
+    if("${conf_file}" MATCHES "^(13-actors|14-futures)/" OR "${conf_file}" MATCHES "tutorial/13-"
+       OR "${conf_file}" MATCHES "^20-exceptions/(await-|finally-does-not-run-|thread-body-|actor-survives-|catch-payload-survives-a-concurrent-)")
         if("${conf_file}" MATCHES "await")
             # The cooperative-await fixtures must complete with a single worker,
             # which a blocking await never could (DESIGN §8.3, D43).
@@ -126,5 +130,19 @@ foreach(pinned_bench map_build.scala list_ops.scala)
     if(EXISTS "${CMAKE_SOURCE_DIR}/benchmarks/comparable/${pinned_bench}")
         set_tests_properties("benchmarks/${pinned_bench}" PROPERTIES
             ENVIRONMENT "PROTOCORE_HEAP_LIMIT_CELLS=2000000" TIMEOUT 300)
+    endif()
+endforeach()
+
+# Phase 4: two exception fixtures are deliberately long. `finally-in-a-loop`
+# runs 100000 try/finally cycles to prove the operand stack returns to the try's
+# entry depth every time and the retry loop never grows the native stack; the two
+# `catch-payload-survives-*` fixtures throw hundreds of times through deep chains
+# under collector pressure. None of them holds a large live set, so they keep the
+# ambient PROTOCORE_HEAP_LIMIT_CELLS of the low-heap sweep.
+foreach(slow_fixture 20-exceptions/finally-in-a-loop.scala
+                     20-exceptions/catch-payload-survives-unwinding.scala
+                     20-exceptions/catch-payload-survives-a-concurrent-collector.scala)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/conformance/${slow_fixture}")
+        set_tests_properties("conformance/${slow_fixture}" PROPERTIES TIMEOUT 600)
     endif()
 endforeach()

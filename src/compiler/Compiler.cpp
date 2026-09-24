@@ -308,8 +308,31 @@ private:
                 }
                 return;
             }
+            // Phase 4: a catch clause binds its exception variable exactly as a
+            // match case does, and the bound name may be captured by a closure
+            // inside the handler body.
+            case NodeKind::Try: {
+                const auto& t = as<Try>(n);
+                walk(t.body.get(), depth);
+                for (const CaseDef& c : t.cases) {
+                    walkPatternPaths(*c.pattern, depth);
+                    scopes_.emplace_back();
+                    std::vector<std::string> vars;
+                    patternVariables(*c.pattern, vars);
+                    for (const auto& v : vars)
+                        scopes_.back().names[v] = Decl{nullptr, depth, DeclKind::Param, -1};
+                    walk(c.guard.get(), depth);
+                    walk(c.body.get(), depth);
+                    scopes_.pop_back();
+                }
+                walk(t.finallyBody.get(), depth);
+                return;
+            }
+            case NodeKind::Throw: walk(as<Throw>(n).value.get(), depth); return;
             case NodeKind::TemplateDef:
             case NodeKind::For:
+            case NodeKind::Super:
+            case NodeKind::ExtensionDef:
                 return;  // templates are compiled on their own; For never survives Desugar
         }
     }
@@ -563,6 +586,12 @@ void Compiler::compileExpr(const Node& n) {
                                "of a file", n.pos);
         case NodeKind::New: compileNew(as<New>(n)); return;
         case NodeKind::Match: compileMatch(as<Match>(n)); return;
+        case NodeKind::Try: compileTry(as<Try>(n)); return;
+        case NodeKind::Throw: compileThrow(as<Throw>(n)); return;
+        case NodeKind::Super:
+            throw CompileError("'super' must be followed by '.' and a member name", n.pos);
+        case NodeKind::ExtensionDef:
+            throw CompileError("an extension must be defined at the top level of a file", n.pos);
         case NodeKind::For: throw std::logic_error("compiler: for-comprehension not desugared");
         case NodeKind::Infix:
         case NodeKind::Prefix:
@@ -867,6 +896,9 @@ void Compiler::compileReturn(const Return& r) {
                            r.pos);
     if (r.value) compileExpr(*r.value);
     else emit(Op::PUSH_UNIT, 0, r.pos, +1);
+    // Scala evaluates the returned expression FIRST, then runs every enclosing
+    // finally body, innermost first (plan A0-4).
+    emitEnclosingFinallys(r.pos);
     emit(Op::RETURN, 0, r.pos, -1);
     adjust(+1);  // the expression `return e` has type Nothing; keep the stack shape
 }

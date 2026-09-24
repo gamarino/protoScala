@@ -38,9 +38,14 @@ bool isFuture(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::Pro
 bool complete(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* f,
               const proto::ProtoObject* value, bool failed);
 
-// Completes `f` with Failure(RuntimeError(className, message)).
+// Completes `f` with Failure(e), materialising the native error into the
+// prelude exception class `className` names (plan A0-6). Needs an active engine.
 bool completeError(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* f,
                    const char* className, const std::string& message);
+// Completes `f` with Failure(throwable): the exception value travels as it is,
+// with no translation (plan A0-7 invariant 6).
+bool completeWith(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* f,
+                  const proto::ProtoObject* throwable);
 
 // Appends `actor` to __waiters__. Returns false when the future had already
 // completed, in which case the caller must not suspend.
@@ -62,7 +67,7 @@ const proto::ProtoObject* errorOf(proto::ProtoContext* ctx, const RuntimeLayout&
 // Success(v) / Failure(e) of a completed future, through the prelude hooks.
 const proto::ProtoObject* tryOf(proto::ProtoContext* ctx, const RuntimeLayout& L,
                                 const proto::ProtoObject* f);
-// Raises the ScalaError a failed future's RuntimeError describes.
+// Raises a failed future's Throwable at the caller, as a ScalaThrow.
 [[noreturn]] void raiseError(proto::ProtoContext* ctx, const RuntimeLayout& L,
                              const proto::ProtoObject* err);
 

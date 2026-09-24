@@ -79,6 +79,32 @@ public:
         int localSlot;   // slot written in this frame on entry
     };
 
+    // --- Exceptions: the per-module handler table (Phase 4, plan A0-4) ------
+    // A handler table entry, not an instruction: a `try` costs nothing at run
+    // time until something throws. The table holds no ProtoObject*, so it is
+    // plain C++ PODs in a std::vector and never a ProtoTuple (DESIGN §4.6).
+    enum class HandlerKind : std::uint8_t { Catch, Finally };
+    // One protected region of this module. `[startPc, endPc)` are instruction
+    // word indices; `handlerPc` is where the handler body starts; `stackDepth`
+    // is the operand-stack depth at the `try`'s entry, which the handler resets
+    // to; `slot` is the local slot the caught value is written into.
+    struct Handler {
+        std::size_t startPc = 0;
+        std::size_t endPc = 0;
+        std::size_t handlerPc = 0;
+        int stackDepth = 0;
+        int slot = 0;
+        HandlerKind kind = HandlerKind::Catch;
+    };
+    // Appends an entry. The compiler appends nested `try`s before enclosing
+    // ones, and a `try`'s Catch entry before its Finally entry, so table order
+    // is search order (plan A0-4).
+    std::size_t addHandler(const Handler& h);
+    void patchHandlerBody(std::size_t index, std::size_t handlerPc);
+    // The first entry whose range contains `pc`, or nullptr.
+    const Handler* handlerFor(std::size_t pc) const;
+    const std::vector<Handler>& handlers() const { return handlers_; }
+
     std::size_t addInt(long long v);
     std::size_t addBigInt(const std::string& digits, int base);
     std::size_t addDouble(double v);
@@ -132,6 +158,28 @@ public:
     bool isParamless() const { return paramless_; }
     void setParamless(bool p) { paramless_ = p; }
 
+    // --- Named and default arguments (Phase 4, plan A0-11, A0-12) ----------
+    // The callee's parameter names, in declaration order (index 0 is `this` for
+    // a method), interned by linkSymbols. The keyword ProtoSparseList a caller
+    // builds is keyed by the ADDRESS of paramNameSymbols()[i] — protoCore's own
+    // calling convention. Binding happens in the CALLEE, so a caller that
+    // cannot resolve its callee statically still works: the platform is
+    // late-binding even where Scala is not.
+    static constexpr std::size_t kNoDefault = static_cast<std::size_t>(-1);
+    void setParamNames(std::vector<std::string> names);
+    const std::vector<std::string>& paramNames() const { return paramNames_; }
+    const std::vector<const proto::ProtoString*>& paramNameSymbols() const { return paramSymbols_; }
+    // `blockIndex` is a block of this module whose captures are the parameter
+    // slots declared before `param`, so a default may read them.
+    void setDefaultBlock(std::size_t param, std::size_t blockIndex);
+    std::size_t defaultBlock(std::size_t param) const {
+        return param < defaultBlocks_.size() ? defaultBlocks_[param] : kNoDefault;
+    }
+    bool hasDefaults() const { return hasDefaults_; }
+    // The lowest positional argument count this module accepts: `arity()` minus
+    // the trailing parameters that carry a default.
+    int minArity() const { return minArity_; }
+
     void addCapture(int parentSlot, int localSlot) { captures_.push_back({parentSlot, localSlot}); }
     const std::vector<CaptureSpec>& captureSpecs() const { return captures_; }
     int captureCount() const { return static_cast<int>(captures_.size()); }
@@ -163,6 +211,7 @@ private:
     std::unordered_map<std::string, std::size_t> kwIndex_;        // name + "/" + n + "/" + keywords
     std::vector<std::unique_ptr<BytecodeModule>> blocks_;
     std::vector<CaptureSpec> captures_;
+    std::vector<Handler> handlers_;
     std::string name_ = "<top>";
     int arity_ = 0;
     bool variadic_ = false;
@@ -170,6 +219,11 @@ private:
     int maxStack_ = 0;
     bool method_ = false;
     bool paramless_ = false;
+    std::vector<std::string> paramNames_;
+    std::vector<const proto::ProtoString*> paramSymbols_;   // after linkSymbols
+    std::vector<std::size_t> defaultBlocks_;
+    bool hasDefaults_ = false;
+    int minArity_ = 0;
 };
 
 } // namespace protoScala

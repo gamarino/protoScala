@@ -9,6 +9,6 @@ val caller = Actor.spawn(0) { (s, m) =>
 val f = caller ? 0
 while !f.isCompleted do ()
 val failed = f.value match
-  case Some(Failure(e)) => e.className == "UnsupportedOperationException"
+  case Some(Failure(e)) => e.isInstanceOf[UnsupportedOperationException]
   case other            => false
 println(failed.toString)

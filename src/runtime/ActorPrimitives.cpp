@@ -233,6 +233,8 @@ PRIM(cont_map) {
             const ProtoObject* v = futures::valueOf(ctx, L, source);
             const ProtoObject* r = activeCallContext()->engine->invoke(ctx, body, &v, 1);
             futures::complete(ctx, L, derived, r, false);
+        } catch (ScalaThrow& t) {
+            futures::completeWith(ctx, L, derived, t.value);
         } catch (ScalaError& e) {
             futures::completeError(ctx, L, derived, e.className().c_str(), e.message());
         }
@@ -274,6 +276,8 @@ PRIM(cont_flatMap) {
         else
             futures::onComplete(&scope, L, inner,
                                 makeCont(&scope, L, &cont_forward, derived, nullptr, inner));
+    } catch (ScalaThrow& t) {
+        futures::completeWith(ctx, L, derived, t.value);
     } catch (ScalaError& e) {
         futures::completeError(ctx, L, derived, e.className().c_str(), e.message());
     }
@@ -294,6 +298,8 @@ PRIM(cont_recover) {
         const ProtoObject* e = futures::errorOf(ctx, L, source);
         const ProtoObject* r = activeCallContext()->engine->invoke(ctx, body, &e, 1);
         futures::complete(ctx, L, derived, r, false);
+    } catch (ScalaThrow& t) {
+        futures::completeWith(ctx, L, derived, t.value);
     } catch (ScalaError& e) {
         futures::completeError(ctx, L, derived, e.className().c_str(), e.message());
     }
@@ -396,6 +402,12 @@ const ProtoObject* threadEntry(ProtoContext* ctx, const ProtoObject*, const prot
     try {
         const ProtoObject* body = handle->getOwnAttributeDirect(ctx, L.bodyKey);
         g_threadBlueprint.engine->invoke(ctx, body, nullptr, 0);
+    } catch (ScalaThrow& t) {
+        // A throwing thread body reports and joins; it never terminates the
+        // process (plan A0-7 invariant 6).
+        std::fflush(stdout);
+        std::fprintf(stderr, "protoscala: thread failed: %s\n",
+                     g_threadBlueprint.engine->showTopLevel(ctx, t.value).c_str());
     } catch (ScalaError& e) {
         std::fflush(stdout);
         std::fprintf(stderr, "protoscala: thread failed: %s\n", e.what());
@@ -555,10 +567,37 @@ void bindPreludeHooks(proto::ProtoContext* ctx, RuntimeLayout& layout, const Glo
     layout.hooks.noneValue = resolve("__mkNone");
     layout.hooks.success = resolve("__mkSuccess");
     layout.hooks.failure = resolve("__mkFailure");
-    layout.hooks.runtimeError = resolve("__mkRuntimeError");
     layout.hooks.actorStats = resolve("__mkActorStats");
     layout.hooks.left = resolve("__mkLeft");
     layout.hooks.right = resolve("__mkRight");
+    // Phase 4: the exception classes materialiseError builds, resolved by their
+    // TYPE key rather than by a factory function, because a class prototype is
+    // exactly what `construct` needs and the type namespace already carries the
+    // REPL-shadowing rule (`@Some#1`, D25). Every name below must exist: a
+    // missing one is a build defect in lib/prelude.scala, not user input.
+    {
+        static const char* const kThrowables[] = {
+            "Throwable", "Exception", "Error", "RuntimeException",
+            "ArithmeticException", "ClassCastException", "IllegalArgumentException",
+            "IllegalStateException", "IndexOutOfBoundsException",
+            "StringIndexOutOfBoundsException", "NoSuchElementException",
+            "NullPointerException", "NumberFormatException",
+            "UnsupportedOperationException", "MatchError", "UninitializedFieldError",
+            "InterruptedException", "NoSuchMethodError", "StackOverflowError",
+            "OutOfMemoryError"};
+        layout.hooks.throwableClasses.clear();
+        for (const char* name : kThrowables) {
+            const ClassInfo* info = globals.findType(name);
+            if (!info)
+                throw std::logic_error(std::string("prelude: class ") + name + " is missing");
+            const auto* key = proto::ProtoString::createSymbol(ctx, info->key.c_str());
+            const proto::ProtoObject* cls = layout.globals->getOwnAttributeDirect(ctx, key);
+            if (!cls || cls == PROTO_NONE)
+                throw std::logic_error(std::string("prelude: class ") + name + " has no prototype");
+            layout.hooks.throwableClasses[name] = cls;
+        }
+        layout.hooks.runtimeException = layout.hooks.throwableClasses.at("RuntimeException");
+    }
     layout.hooks.bound = true;
 }
 

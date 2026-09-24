@@ -55,6 +55,14 @@ private:
     NodePtr parseIf();
     NodePtr parseWhile();
     NodePtr parseReturn();
+    // Phase 4 (DESIGN §7). Layout already opens a region after `try`, `catch`
+    // and `finally` and pairs them, so these read them as ordinary tokens.
+    NodePtr parseThrow();
+    NodePtr parseTry();
+    // The `case` clauses of a `catch`, in either syntax, plus Scala's
+    // single-expression form `catch handler`.
+    std::vector<CaseDef> parseCatchCases();
+    CaseDef catchHandlerCase(NodePtr handler);
     bool lambdaAhead() const;
     std::vector<Param> parseLambdaParams();  // up to and including `=>`
     NodePtr parseLambda();

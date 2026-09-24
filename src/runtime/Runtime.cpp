@@ -16,6 +16,7 @@ enum RootSlot : unsigned {
     kSystemCompanion,
     kRangeProto, kVectorProto, kMapProto, kSetProto, kFoldPartialProto,
     kVectorCompanion, kMapCompanion, kSetCompanion,
+    kEnumProto,
     kRootSlotCount
 };
 } // namespace
@@ -182,8 +183,6 @@ Runtime::Runtime(proto::ProtoSpace& space) : space_(space) {
     L.threadRefKey  = key("__thread__");
     L.bodyKey       = key("__body__");
     L.tuple2Key     = key(tupleTypeKey(2).c_str());
-    L.classNameField = key("className");
-    L.messageField   = key("message");
     // Phase 3: the collection prototypes and their companions (DESIGN §6,
     // plan A0-4). Each payload lives in one attribute of an ordinary object.
     L.rangeProto       = pin(kRangeProto, L.anyRefProto->newChild(ctx, true));
@@ -205,6 +204,14 @@ Runtime::Runtime(proto::ProtoSpace& space) : space_(space) {
     L.foldSeedKey = key("__fold_seed__");
     L.foldLeftKey = key("__fold_left__");
 
+    // Phase 4: exceptions and enums (DESIGN §7, §4.5). `@Throwable` is the
+    // per-class marker the THROW opcode tests, exactly as `case p: Point` tests
+    // `@Point` — a Phase 2 marker attribute, never protoCore's isInstanceOf (R3).
+    L.throwableKey = key(kThrowableKey);
+    L.ordinalKey   = key("__ordinal__");
+    L.enumNameKey  = key("__enumname__");
+    L.enumProto    = pin(kEnumProto, L.anyRefProto->newChild(ctx, true));
+
     L.actorRegistry->setAttribute(ctx, L.actorsKey, ctx->newList()->asObject(ctx));
     L.actorRegistry->setAttribute(ctx, L.threadsKey, ctx->newList()->asObject(ctx));
     bindType(L.actorProto, kActorKey, "Actor");
@@ -222,6 +229,7 @@ Runtime::Runtime(proto::ProtoSpace& space) : space_(space) {
     L.vectorCompanion->setAttribute(ctx, L.nameKey, makeString(ctx, "Vector"));
     L.mapCompanion->setAttribute(ctx, L.nameKey, makeString(ctx, "Map"));
     L.setCompanion->setAttribute(ctx, L.nameKey, makeString(ctx, "Set"));
+    bindType(L.enumProto, kEnumKey, "Enum");
 
     // Rebind the primitive prototypes (see the header comment).
     space.smallIntegerPrototype = L.intProto;

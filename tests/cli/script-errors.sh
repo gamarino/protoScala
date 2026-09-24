@@ -29,4 +29,24 @@ out=$("$P" "$work/runtime.scala" 2>"$work/err"); rc=$?
 [[ "$out" == "before" ]] || fail "stdout before the error was lost: '$out'"
 grep -q 'runtime\.scala:4: error: ArithmeticException: / by zero' "$work/err" \
     || fail "runtime error format: $(cat "$work/err")"
+
+# Phase 4: an uncaught user exception is reported through the VALUE's own
+# toString, so a user-defined class says what its class says.
+printf 'class MyError(msg: String) extends Exception(msg)\n@main def run(): Unit =\n  println("before")\n  throw new MyError("bad")\n' \
+    >"$work/uncaught.scala"
+out=$("$P" "$work/uncaught.scala" 2>"$work/err"); rc=$?
+[[ $rc -eq 1 ]] || fail "uncaught exception exited $rc"
+[[ "$out" == "before" ]] || fail "stdout before the uncaught exception was lost: '$out'"
+grep -qE 'uncaught\.scala:[0-9]+: error: MyError: bad' "$work/err" \
+    || fail "uncaught exception format: $(cat "$work/err")"
+
+# An uncaught NATIVE failure raised from inside a `finally`: the cleanup's own
+# output is kept and the replacing exception is what is reported (D72).
+printf '@main def run(): Unit =\n  try\n    throw new RuntimeException("original")\n  finally\n    println("cleanup")\n    println(1 / 0)\n' \
+    >"$work/finally.scala"
+out=$("$P" "$work/finally.scala" 2>"$work/err"); rc=$?
+[[ $rc -eq 1 ]] || fail "uncaught error in a finally exited $rc"
+[[ "$out" == "cleanup" ]] || fail "the cleanup output was lost: '$out'"
+grep -q 'ArithmeticException: / by zero' "$work/err" \
+    || fail "the finally exception was not reported: $(cat "$work/err")"
 echo OK

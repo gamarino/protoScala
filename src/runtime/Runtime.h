@@ -15,6 +15,9 @@
 #pragma once
 #include "compiler/ClassInfo.h"  // the type-key constants and kMaxTupleArity
 
+#include <string>
+#include <unordered_map>
+
 namespace proto {
 class ProtoContext;
 class ProtoObject;
@@ -110,7 +113,7 @@ struct RuntimeLayout {
     const proto::ProtoString* turnFutureKey = nullptr; // "__turn_future__": the suspended ask
     const proto::ProtoString* fstateKey = nullptr;     // "__fstate__": 0 pending, 1 ok, 2 failed
     const proto::ProtoString* fvalueKey = nullptr;     // "__fvalue__"
-    const proto::ProtoString* ferrorKey = nullptr;     // "__ferror__": a RuntimeError instance
+    const proto::ProtoString* ferrorKey = nullptr;     // "__ferror__": the Throwable (Phase 4)
     const proto::ProtoString* waitersKey = nullptr;    // "__waiters__": suspended actors
     const proto::ProtoString* contsKey = nullptr;      // "__conts__": continuations (D48)
     const proto::ProtoString* modKey = nullptr;        // "__mod__" on a frame record
@@ -120,8 +123,6 @@ struct RuntimeLayout {
     const proto::ProtoString* threadRefKey = nullptr;  // "__thread__": ProtoThread address
     const proto::ProtoString* bodyKey = nullptr;       // "__body__": a Thread's function
     const proto::ProtoString* tuple2Key = nullptr;     // "@Tuple2": the D45 handler-result test
-    const proto::ProtoString* classNameField = nullptr;  // RuntimeError.className
-    const proto::ProtoString* messageField = nullptr;    // RuntimeError.message
 
     // Phase 3: the collection prototypes (DESIGN §6, plan A0-4). Each is an
     // ordinary protoCore object whose payload is one attribute, and each is
@@ -150,6 +151,12 @@ struct RuntimeLayout {
     // Runtime::Runtime, because the method object does not exist until then.
     const proto::ProtoObject* defaultEqualsMethod = nullptr;
 
+    // Phase 4: exceptions and enums (DESIGN §7, §4.5).
+    proto::ProtoObject* enumProto = nullptr;               // the Enum builtin trait
+    const proto::ProtoString* throwableKey = nullptr;      // "@Throwable": the THROW marker
+    const proto::ProtoString* ordinalKey = nullptr;        // "__ordinal__" on an enum case
+    const proto::ProtoString* enumNameKey = nullptr;       // "__enumname__" on an enum case
+
     // Prelude values the natives construct, resolved after the prelude is
     // compiled (a REPL redefinition gives `Some#1`, so a name cannot be
     // hard-coded). Filled by bindPreludeHooks.
@@ -159,9 +166,13 @@ struct RuntimeLayout {
         const proto::ProtoObject* noneValue = nullptr;
         const proto::ProtoObject* success = nullptr;
         const proto::ProtoObject* failure = nullptr;
-        const proto::ProtoObject* runtimeError = nullptr;
         const proto::ProtoObject* left = nullptr;     // Phase 3: __mkLeft
         const proto::ProtoObject* right = nullptr;    // Phase 3: __mkRight
+        // Phase 4: the exception classes materialiseError builds, by
+        // unqualified name (plan A0-6). Each value is a one-argument factory
+        // function, so no constructor key is needed.
+        std::unordered_map<std::string, const proto::ProtoObject*> throwableClasses;
+        const proto::ProtoObject* runtimeException = nullptr;   // the fallback factory
         bool bound = false;
     } hooks;
 

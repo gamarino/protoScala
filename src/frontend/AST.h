@@ -30,6 +30,7 @@ enum class NodeKind : uint8_t {
     Block, Lambda, Typed, Parens, Tuple, Splice, NamedArg,
     ValDef, DefDef, Import,
     TemplateDef, New, Match, For,   // Phase 2
+    Try, Throw, Super, ExtensionDef,  // Phase 4
 };
 
 struct Node {
@@ -278,6 +279,38 @@ struct Match : Node {
     Match(SourcePos p) : Node(NodeKind::Match, p) {}
     NodePtr scrutinee;
     std::vector<CaseDef> cases;
+};
+
+// Phase 4 (DESIGN §7): try B [catch { case ... }] [finally F].
+// `cases` empty: no catch clause. `finallyBody` null: no finally clause. A
+// `catch` body and a `finally` body are ordinary bytecode in the SAME frame and
+// the same ProtoContext as the `try` body (P2), at a different ip.
+struct Try : Node {
+    explicit Try(SourcePos p) : Node(NodeKind::Try, p) {}
+    NodePtr body;
+    std::vector<CaseDef> cases;
+    NodePtr finallyBody;
+};
+struct Throw : Node {
+    explicit Throw(SourcePos p) : Node(NodeKind::Throw, p) {}
+    NodePtr value;
+};
+// super.m or super[T].m. `qualifier` empty: plain super (the next entry in the
+// linearization after the defining class). Non-empty: the named ancestor, whose
+// own definition is probed first (plan A0-8).
+struct Super : Node {
+    explicit Super(SourcePos p) : Node(NodeKind::Super, p) {}
+    std::string qualifier;
+};
+// extension (x: T) def m(...) = ..., or a collective extension with a body.
+// The compiler installs each member as an attribute of T's prototype, so
+// dispatch is the ordinary prototype walk (D6) and the installation is global
+// and session-wide.
+struct ExtensionDef : Node {
+    explicit ExtensionDef(SourcePos p) : Node(NodeKind::ExtensionDef, p) {}
+    std::string receiverName;      // `x`
+    TypePtr receiverType;          // `T`
+    std::vector<NodePtr> members;  // DefDef nodes
 };
 
 struct Enumerator {

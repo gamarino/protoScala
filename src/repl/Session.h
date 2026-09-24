@@ -72,6 +72,10 @@ private:
     // a user-defined toString runs), with a String in quotes (the Scala 3
     // REPL shows `val res0: String = "hi"`).
     std::string showResult(proto::ProtoContext* ctx, const proto::ProtoObject* v);
+    // An uncaught exception value as its own toString renders it, so a
+    // user-defined class reports what its class says (DESIGN §7). A toString
+    // that itself fails is reported rather than allowed to mask the original.
+    std::string showThrown(proto::ProtoContext* ctx, const proto::ProtoObject* v);
 };
 
 } // namespace protoScala

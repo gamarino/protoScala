@@ -81,6 +81,19 @@ private:
         int maxDepth = 0;
         bool allowsReturn = false;  // def bodies
         bool isTopLevel = false;
+        // The enclosing `finally` bodies of the code being compiled, innermost
+        // last. A `return` emits them innermost-first before its RETURN, and a
+        // `try`'s normal exit emits its own inline (plan A0-4). `holes` records
+        // the [from, to) spans of those inlined copies, which must be EXCLUDED
+        // from this try's own handler ranges: a cleanup emitted at a `return`
+        // has already left the try, so an exception from it must not re-enter
+        // the same handler (which would RETHROW an unset slot).
+        struct ActiveFinally {
+            const Node* body;
+            int slot;
+            std::vector<std::pair<std::size_t, std::size_t>> holes;
+        };
+        std::vector<ActiveFinally> finallys;
     };
     // Method: `this` in slot 0 and no enclosing function (Design note 9).
     enum class FnShape { Lambda, Def, Method };
@@ -154,6 +167,25 @@ private:
     const std::vector<std::uint32_t>* byNameMasksOfMember(const std::string& name) const;
     const std::vector<std::uint32_t>* byNameMasksOfObjectMember(const std::string& objectName,
                                                                 const std::string& member) const;
+    // --- Exceptions (Phase 4, DESIGN §7) ---------------------------------
+    void compileThrow(const Throw& n);
+    void compileTry(const Try& n);
+    // The `catch` cascade: compileMatch's machinery with RETHROW instead of
+    // MATCH_ERROR when no case matches, because Scala propagates an exception
+    // the handler does not match rather than replacing it. `slot` holds the
+    // caught value, which the handler entry has already written there.
+    void compileCatchCases(const std::vector<CaseDef>& cases, int slot, SourcePos pos);
+    // Emits every enclosing finally body, innermost first, recording each span
+    // so the owning try can exclude it from its handler range. Called by
+    // compileReturn AFTER the returned value has been evaluated.
+    void emitEnclosingFinallys(SourcePos pos);
+    // Appends one handler entry per piece of [start, end) that no hole covers.
+    // Returns the indices, for patchHandlerBody.
+    std::vector<std::size_t> addHandlerRanges(
+        std::size_t start, std::size_t end, int entryDepth, int slot,
+        BytecodeModule::HandlerKind kind,
+        const std::vector<std::pair<std::size_t, std::size_t>>& holes);
+
     void compileLazyThunk(const Node& rhs, SourcePos pos);  // thunk + MAKE_LAZY
     void compileStats(const std::vector<NodePtr>& stats, std::size_t from, SourcePos pos);
     void storeLocal(const LocalInfo& info, SourcePos pos);

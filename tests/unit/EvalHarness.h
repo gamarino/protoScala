@@ -52,6 +52,15 @@ public:
             const auto* key = proto::ProtoString::createSymbol(&ctx, cu.resultKey.c_str());
             const proto::ProtoObject* v = runtime_.layout().globals->getOwnAttributeDirect(&ctx, key);
             return engine_.showTopLevel(&ctx, v ? v : PROTO_NONE);  // a Scala toString may throw
+        } catch (const ScalaThrow& t) {
+            // An uncaught Scala exception reads like a ScalaError report, so a
+            // test can assert on "error: RuntimeException: boom" either way.
+            try {
+                proto::ProtoContext ctx2(&space_, runtime_.rootContext());
+                return std::string("error: ") + engine_.showTopLevel(&ctx2, t.value);
+            } catch (...) {
+                return "error: <exception whose toString failed>";
+            }
         } catch (const ScalaError& e) {
             return std::string("error: ") + e.what();
         }

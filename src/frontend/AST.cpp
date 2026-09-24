@@ -567,6 +567,51 @@ void render(std::string& out, const Node& n) {
             out += ')';
             break;
         }
+        // Phase 4.
+        case NodeKind::Try: {
+            const auto& x = as<Try>(n);
+            out += "(try ";
+            render(out, *x.body);
+            for (const CaseDef& c : x.cases) {
+                out += " (case ";
+                renderPattern(out, *c.pattern);
+                if (c.guard) {
+                    out += " (if ";
+                    render(out, *c.guard);
+                    out += ')';
+                }
+                out += ' ';
+                render(out, *c.body);
+                out += ')';
+            }
+            if (x.finallyBody) {
+                out += " (finally ";
+                render(out, *x.finallyBody);
+                out += ')';
+            }
+            out += ')';
+            break;
+        }
+        case NodeKind::Throw: {
+            out += "(throw ";
+            render(out, *as<Throw>(n).value);
+            out += ')';
+            break;
+        }
+        case NodeKind::Super: {
+            const auto& x = as<Super>(n);
+            out += x.qualifier.empty() ? "super" : "(super " + x.qualifier + ")";
+            break;
+        }
+        case NodeKind::ExtensionDef: {
+            const auto& x = as<ExtensionDef>(n);
+            out += "(extension (" + x.receiverName + " ";
+            renderType(out, *x.receiverType);
+            out += ')';
+            renderChildren(out, x.members);
+            out += ')';
+            break;
+        }
     }
 }
 
@@ -675,6 +720,18 @@ void eachChildSlot(Node& n, F f) {
             f(fo.body);
             return;
         }
+        // Phase 4.
+        case NodeKind::Try: {
+            auto& t = as<Try>(n);
+            f(t.body);
+            for (auto& c : t.cases) { f(c.guard); f(c.body); }
+            f(t.finallyBody);
+            return;
+        }
+        case NodeKind::Throw: f(as<Throw>(n).value); return;
+        case NodeKind::ExtensionDef:
+            for (auto& m : as<ExtensionDef>(n).members) f(m);
+            return;
         // Phase 3: an interpolation's holes are parsed sub-expressions.
         case NodeKind::InterpString: for (auto& a : as<InterpString>(n).args) f(a); return;
         default: return;  // leaves

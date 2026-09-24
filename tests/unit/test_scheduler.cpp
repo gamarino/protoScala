@@ -181,7 +181,8 @@ TEST(Futures, AddWaiterOnACompletedFutureIsRefused) {
 TEST(Futures, AFailedFutureRaisesItsError) {
     ProtoContext ctx(&world().harness.space(), world().root());
     const RuntimeLayout& L = world().L();
-    // completeError builds a prelude RuntimeError, which needs an engine.
+    // completeError materialises the native error into a prelude Throwable,
+    // which needs an engine.
     ExecutionEngine::ActiveCallGuard active(world().engine(), &L);
     ctx.resizeAutomaticLocals(1);
     const ProtoObject* f = futures::create(&ctx, L);
@@ -191,9 +192,10 @@ TEST(Futures, AFailedFutureRaisesItsError) {
     try {
         futures::result(&ctx, L, f);
         FAIL() << "a failed future must raise";
-    } catch (const ScalaError& e) {
-        EXPECT_EQ(e.className(), "ArithmeticException");
-        EXPECT_EQ(e.message(), "/ by zero");
+    } catch (const ScalaThrow& t) {
+        // Phase 4: the payload IS the exception value, raised as it is, so the
+        // report goes through the instance's own toString (D44 retired).
+        EXPECT_EQ(world().engine()->showTopLevel(&ctx, t.value), "ArithmeticException: / by zero");
     }
 }
 
@@ -217,7 +219,7 @@ TEST(Yield, CooperativeAwaitCompletesAndRefusalIsReported) {
                   "val f = bad ? 0\n"
                   "while !f.isCompleted do ()\n"
                   "f.value match\n"
-                  "  case Some(Failure(e)) => e.className\n"
+                  "  case Some(Failure(e)) => e.getClass\n"
                   "  case other            => \"unexpected\""),
               "UnsupportedOperationException");
 }
@@ -228,4 +230,30 @@ int main(int argc, char** argv) {
     ProtoContext ctx(&world().harness.space(), world().root());
     ActorScheduler::instance().shutdown(&ctx);  // join before the space dies
     return rc;
+}
+
+// --- Exceptions across an actor turn (Phase 4, DESIGN §8.4) -----------------
+
+TEST(Scheduler, AHandlerExceptionCompletesTheAskWithTheExceptionValue) {
+    EXPECT_EQ(world().harness.eval(
+                  "val a = Actor.spawn(0) { (s, m) => throw new IllegalStateException(\"boom\") }\n"
+                  "val f = a ? 1\n"
+                  "while !f.isCompleted do ()\n"
+                  "f.value.get match { case Failure(e) => e.getMessage; case Success(v) => \"?\" }"),
+              "boom");
+}
+
+TEST(Scheduler, AFailedAwaitRaisesAtItsCallSite) {
+    // Plan A0-7 invariant 5, which retires D50: the suspended handler catches
+    // the failure and the rest of the handler still runs.
+    EXPECT_EQ(world().harness.eval(
+                  "val failer = Actor.spawn(0) { (s, m) => throw new IllegalStateException(\"b\") }\n"
+                  "val caller = Actor.spawn(0) { (s, m) =>\n"
+                  "  var out = \"none\"\n"
+                  "  try out = (failer ? 1).await.toString\n"
+                  "  catch case e: IllegalStateException => out = \"recovered \" + e.getMessage\n"
+                  "  (s, out)\n"
+                  "}\n"
+                  "(caller ? 1).await"),
+              "recovered b");
 }

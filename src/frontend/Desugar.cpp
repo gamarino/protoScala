@@ -142,6 +142,24 @@ public:
                 }
                 return n;
             }
+            // Phase 4: a try's body, its catch bodies and its finally body are
+            // ordinary expressions in the same frame, so they are desugared like
+            // any other (P2).
+            case NodeKind::Throw: {
+                auto& t = as<Throw>(*n);
+                t.value = expr(std::move(t.value));
+                return n;
+            }
+            case NodeKind::Try: {
+                auto& t = as<Try>(*n);
+                t.body = expr(std::move(t.body));
+                for (CaseDef& c : t.cases) {
+                    if (c.guard) c.guard = expr(std::move(c.guard));
+                    c.body = expr(std::move(c.body));
+                }
+                if (t.finallyBody) t.finallyBody = expr(std::move(t.finallyBody));
+                return n;
+            }
             case NodeKind::For: return expr(forExpr(as<For>(*n)));  // rewrite, then desugar it
             case NodeKind::InterpString: {
                 auto& s = as<InterpString>(*n);
@@ -284,6 +302,17 @@ private:
                 }
                 return;
             }
+            case NodeKind::Try: {
+                auto& t = as<Try>(n);
+                visit(t.body);
+                for (CaseDef& c : t.cases) {
+                    visit(c.guard);
+                    visit(c.body);
+                }
+                visit(t.finallyBody);
+                return;
+            }
+            case NodeKind::Throw: visit(as<Throw>(n).value); return;
             default: return;  // literals, identifiers, imports
         }
     }

@@ -105,6 +105,19 @@ std::vector<ClassInfo> builtinTypes() {
     set.key = kSetKey;
     set.isFinal = true;
     set.linearization = {kSetKey, kAnyRefKey, kAnyKey};
+    // Phase 4: the marker trait every `enum` class extends (DESIGN §4.5). Its
+    // `ordinal` and `toString` are natives on enumProto; the cases themselves
+    // are ordinary case classes and case objects, so pattern matching,
+    // `equals`, `hashCode` and `unapply` come from Phase 2 for free.
+    ClassInfo enumTrait = anyRef;
+    enumTrait.name = "Enum";
+    enumTrait.key = kEnumKey;
+    enumTrait.kind = ClassKind::Trait;
+    enumTrait.isAbstract = true;
+    enumTrait.hasInit = false;
+    enumTrait.linearization = {kEnumKey, kAnyRefKey, kAnyKey};
+    member(enumTrait, "ordinal", MemberKind::ParamlessDef);
+    out.push_back(std::move(enumTrait));
     out.push_back(std::move(range));
     out.push_back(std::move(vector));
     out.push_back(std::move(map));
