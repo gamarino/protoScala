@@ -140,7 +140,14 @@ which the installer phase recorded as its own deliberate gap.
 - **A wildcard import of a foreign module is refused** (D92), and **imports are
   hoisted to their unit rather than scoped lexically** (D96), which is the same
   question as scoping extension methods (D82) and is decided with it.
-- See "Cold start" below for DESIGN §1's budget.
+- Nothing outstanding on DESIGN §1's cold-start budget: it is **met** at 0.6.0
+  (script 23.73 ms, REPL 23.89 ms, against a target of 25 ms), which 0.5.0 missed
+  by about 1 ms. Three rounds interleaved in one window, 21 verified runs per
+  case; `PROTOSCALA_PRELUDE_NO_IMAGE=1` still measures 25.65 / 26.01 ms, which is
+  what proves the image and not the release moved the number. What no protoScala
+  change can remove is `linkSymbols` and *running* the compiled prelude
+  (342 µs + 177 µs); that would need a protoCore space image, which does not
+  exist. See `benchmarks/RESULTS.md`.
 
 ## [0.5.0] - 2026-09-24
 

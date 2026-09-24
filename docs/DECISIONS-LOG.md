@@ -281,10 +281,32 @@ Recorded in full in `benchmarks/RESULTS.md`. The short form:
   **2,456 us**, with link and run unchanged as predicted.
 - **The budget itself** is DESIGN §1's `< 25 ms`, and it is a done-when rather
   than an aspiration: `benchmarks/cold-start.sh <binary> 21` must exit 0 with
-  `verified=21`. The figure that decides it is recorded in `RESULTS.md` with the
-  load average beside it; **it is never claimed on an unverified run**, and if it
-  is missed the README and the CHANGELOG say so and by how much, exactly as 0.5.0
-  honestly did.
+  `verified=21`. **It is met.** Three rounds interleaved in one window, image and
+  source path alternating, load average 2.97 at the start and 2.67 at the end,
+  and **all twelve cases reported `verified=21`**:
+
+  | binary | script | REPL |
+  |---|---:|---:|
+  | 0.5.0 (quoted, not re-measured) | 25.22 ms | 25.58 ms |
+  | **0.6.0, precompiled image** | **23.73 ms** | **23.89 ms** |
+  | 0.6.0, `PROTOSCALA_PRELUDE_NO_IMAGE=1` | 25.65 ms | 26.01 ms |
+
+  `cold-start.sh` exited **0 in all three image rounds** and **1 in all three
+  source rounds**, on both cases. The third row is the decisive one: both paths
+  live in one binary, so it is the **image** that moved the number and not
+  anything else in the release, and the source path still misses by 0.65 ms.
+
+  The saving, 1.92 ms on the script case, agrees with the 2.46 ms the in-process
+  stage measurement predicted, to within the run-to-run spread. **Nothing was
+  claimed on an unverified run, and the budget would have been reported as missed
+  if it were** — the wording for that outcome was written before the measurement
+  existed, exactly as 0.5.0 honestly reported its own miss.
+
+  **E5 therefore no longer needs a ruling to ship**, and the question it raised
+  stays open on its merits rather than as a blocker: a protoCore space image is
+  still the only way to remove the remaining 519 µs (`linkSymbols` 342 µs plus
+  running the prelude 177 µs), and the budget is met with about 1.3 ms of
+  headroom — which is what the next twenty prelude classes would spend.
 
 ## Decisions the implementation took, beyond the plan
 

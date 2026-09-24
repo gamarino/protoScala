@@ -548,30 +548,47 @@ Python twin's O(n) `insert(0, i)` against an O(log n) `::` — the row says the
 prepend-and-fold surface is cheap, not that protoScala is four times CPython.
 
 Cold start (`benchmarks/cold-start.sh`, 21 runs, target < 25 ms). **Verdict for
-0.5.0: NOT MET, by about 1 ms, and the reason is measured rather than guessed.**
-0.4.0 and 0.5.0 measured interleaved in the same window, three rounds of 21
-verified runs each, medians of the round medians:
+0.6.0: MET.** The prelude is now compiled at build time rather than at every
+start-up, and the third row is what proves it was the *image* and not anything
+else in the release: both paths live in one binary, and
+`PROTOSCALA_PRELUDE_NO_IMAGE=1` takes the source path. Three rounds interleaved in
+one window, 21 runs per case, **every case reported `verified=21`**, load average
+2.97 at the start and 2.67 at the end:
 
 | binary | script | REPL |
 |---|---:|---:|
 | 0.4.0 | 23.91 ms | 24.46 ms |
 | 0.5.0 | 25.22 ms | 25.58 ms |
-| 0.5.0 + 20 more prelude exception classes (probe, not shipped) | 26.41 ms | — |
+| **0.6.0, precompiled prelude image** | **23.73 ms** | **23.89 ms** |
+| 0.6.0, `PROTOSCALA_PRELUDE_NO_IMAGE=1` (the 0.5.0 path) | 25.65 ms | 26.01 ms |
+
+`cold-start.sh` exited 0 in all three image rounds and 1 in all three source
+rounds, on both cases; that exit code *is* the check, because it fails when any
+run printed the wrong line or when a median is not below the target.
+
+The image removes parse, desugar and compile — measured before it was built at
+59.6 %, 2.6 % and 22.5 % of the prelude's 4.4 ms. What it cannot remove is
+`linkSymbols` (342 µs) and *running* the compiled prelude (177 µs): the tables
+hold strings and PODs, so the symbols must still be interned into a `ProtoSpace`
+and `MAKE_CLASS`/`MAKE_FN`/`STORE_GLOBAL` must still execute. Removing those would
+need a protoCore space image, which does not exist. The budget is met with about
+1.3 ms of headroom on the script case, and that headroom is what the next twenty
+prelude classes would spend.
 
 The REPL column comes from a two-binary interleave and the script column from a
 three-binary one, so compare down a column and never across; the 0.4.0 script
 median was 23.84 ms in the two-binary run and 23.91 ms in the three-binary one,
 which is the size of the run-to-run error here.
 
-Phase 4 cost **+1.31 ms** and grew the prelude from 156 to 200 lines — twenty
-exception classes, `StringContext` and the `Priority` enum — which is parsed,
-desugared, compiled and run at every start-up with nothing cached between runs.
-Adding twenty *more* classes of the same shape to a probe build costs a further
-**+1.19 ms**, so roughly 60 µs per prelude class accounts for the whole
-regression: it is the prelude's size, not the exception machinery in the engine
-(the per-frame retry loop was measured free by `perf stat -r 3`). Meeting the
-budget again needs a precompiled prelude or a smaller one, which is a Phase 6
-decision.
+How 0.5.0 came to miss it, since the table keeps the row: Phase 4 cost
+**+1.31 ms** and grew the prelude from 156 to 200 lines — twenty exception
+classes, `StringContext` and the `Priority` enum — which was parsed, desugared,
+compiled and run at every start-up with nothing cached between runs. Adding twenty
+*more* classes of the same shape to a probe build cost a further **+1.19 ms**, so
+roughly 60 µs per prelude class accounted for the whole regression: it was the
+prelude's size, not the exception machinery in the engine. That is what 0.6.0's
+image removes, and the fourth row above is the same code path 0.5.0 shipped,
+still missing by 0.65 ms.
 
 Earlier phases met the target: the 0.3.0 run measured script 21.02
 [19.44-22.68] ms and REPL 21.77 [20.37-23.28] ms with every individual sample,

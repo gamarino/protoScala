@@ -433,3 +433,53 @@ fixed set-up work produces. The two measurements agree.
 parse + desugar + compile removes 3,752 µs — **84.8 %** of the prelude's cost —
 and leaves link (342 µs) and run (177 µs), which no protoScala-side change can
 remove.
+
+### Cold start at 0.6.0 — the budget is met (2026-09-24)
+
+`benchmarks/cold-start.sh <binary> 21`, **three rounds interleaved in one
+window**, image and source path alternating, on this host (AMD Ryzen 5 5500U).
+Load average **2.97 at the start and 2.67 at the end**; 22.7 GiB available. Both
+paths live in the same binary, so the third row is what proves the **image** moved
+the number rather than anything else in the phase — `PROTOSCALA_PRELUDE_NO_IMAGE=1`
+takes the source path and changes nothing else.
+
+**Every one of the twelve cases reported `verified=21`.** A median without that is
+not a figure.
+
+| binary | script, per round | script median | REPL, per round | REPL median |
+|---|---|---:|---|---:|
+| 0.5.0 (shipped, quoted from the table above, not re-measured) | — | 25.22 ms | — | 25.58 ms |
+| **0.6.0, precompiled image** | 23.58 / 23.73 / 23.85 | **23.73 ms** | 23.89 / 23.83 / 24.84 | **23.89 ms** |
+| 0.6.0, `PROTOSCALA_PRELUDE_NO_IMAGE=1` | 25.71 / 25.31 / 25.65 | 25.65 ms | 26.04 / 27.07 / 26.01 | 26.01 ms |
+
+`benchmarks/cold-start.sh` **exited 0 in all three image rounds** and **1 in all
+three source rounds**, on both the script and the REPL case. That exit code *is*
+the done-when: it fails when any run printed the wrong last line or when a median
+is not below `TARGET_MS=25`.
+
+**Verdict: DESIGN §1's `< 25 ms` is met at 0.6.0, and it is met by the image.**
+The image is worth 1.92 ms on the script case and 2.12 ms on the REPL case,
+against the 2.46 ms the in-process stage measurement predicted
+(`4,116 µs → 1,660 µs` of prelude time) — agreement to within the run-to-run
+spread, which is what the `min_ms`/`max_ms` columns show. The source path still
+misses by 0.65 ms, which is 0.5.0's regression very nearly unchanged: nothing
+about the prelude got smaller, and `ImportError` made it one class larger.
+
+**What was not removed, and cannot be from here.** `linkSymbols` (342 µs) and
+*running* the compiled prelude (177 µs) survive the image by construction: the
+tables hold strings and PODs, so the symbols must still be interned into a
+`ProtoSpace`, and `MAKE_CLASS`/`MAKE_FN`/`STORE_GLOBAL` must still execute.
+Removing those needs a **protoCore space image**, which does not exist — there is
+no object-graph serialisation, no image and no snapshot API in
+`headers/protoCore.h` or `proto_internal.h`, and the only caching facility is the
+in-process `SharedModuleCache`, which holds live objects and cannot cross a
+process. That is P3 territory and a maintainer decision (escalation **E5**); it is
+no longer urgent, because the budget is met with 1.27 ms of headroom on the script
+case, but the headroom is what the next twenty prelude classes would spend.
+
+**Reading the jitter honestly.** Round 2's source-path case shows `max_ms` of
+34.54 (script) and 43.38 (REPL) against an image-path worst case of 26.50 across
+all three rounds. A shared host produces outliers; the medians are what the target
+is compared against, and the three rounds are monotone in the direction that
+matters — every image round is below 25 ms and every source round is above it, on
+both cases, which a 2 ms effect on a noisy host does not usually manage.

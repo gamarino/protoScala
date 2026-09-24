@@ -241,8 +241,18 @@ Four things Phase 4 left for this phase to finish:
 - **Decide whether extension methods gain import scoping** (D82). The import
   mechanism arrives here, and scoping an extension is a public-surface change that
   needs it.
-- **Precompile or cache the prelude, and reclaim the cold-start budget.** 0.5.0
-  misses DESIGN §1's < 25 ms by about 1 ms, and the cause is measured: roughly
+- ✅ **Precompile or cache the prelude, and reclaim the cold-start budget.**
+  **Done, and the budget is met**: 0.6.0 measures script 23.73 ms and REPL
+  23.89 ms against the 25 ms target, three rounds interleaved, all twelve cases
+  `verified=21`. The same binary with `PROTOSCALA_PRELUDE_NO_IMAGE=1` still
+  measures 25.65 / 26.01 ms, which is what proves the image moved the number. The
+  prelude became a **build product**, not a cache, so it cannot go stale. What no
+  protoScala change can remove is `linkSymbols` and running the compiled prelude
+  (342 µs + 177 µs); that needs a protoCore space image, which does not exist, and
+  stays open on its merits rather than as a blocker (escalation E5). The original
+  statement of the problem follows.
+
+  0.5.0 missed DESIGN §1's < 25 ms by about 1 ms, and the cause was measured: roughly
   60 µs per prelude class, so the growth from 156 to 200 lines costs +1.31 ms
   (a probe build with twenty more classes of the same shape costs a further
   +1.19 ms — benchmarks/RESULTS.md). The prelude is parsed, desugared, compiled
@@ -273,6 +283,20 @@ full protoClojure suite passes; no ordering guarantee beyond Clojure's is
 introduced; actor mailboxes use three `ProtoMPSCQueue`s per actor, with
 `actor-bench.sh` tables recorded before and after. Requires P1, P2 and a
 maintainer decision on R2.
+
+## Track F — file I/O *(language)*
+
+**Goal:** a program can read its own input.
+**Done when:** a script can open, read and write a text file, and the worked
+example (`examples/log-report/`) parses `sample.log` itself instead of carrying
+the same text a second time in `report/Sample.scala`.
+
+Found while writing Phase 6's worked example. There is no `scala.io.Source`, no
+`java.io` (D8) and no primitive that touches the filesystem, so the first thing a
+script-oriented runtime is asked for is missing. It is a missing capability rather
+than a divergence, so it has no `D<n>` id; the shape it should take — a `Source`
+object, or the `os-lib`-style surface a dynamic dialect might prefer — is a
+language decision and therefore the maintainer's.
 
 ## Track Y — a `py` provider, and two runtimes in one process *(platform)*
 

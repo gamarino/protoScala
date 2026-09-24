@@ -378,6 +378,15 @@ file-level modules in Scala) are recorded as D90-D96.
   records them for a later phase. Nesting in an **`object`** is implemented
   (Phase 4).
 - Exhaustiveness checking for `match` (D4: types are erased).
+- **File I/O of any kind.** There is no `scala.io.Source`, no `java.io`, and no
+  primitive that opens a file, so a program cannot read its own input. Found
+  while writing the Phase 6 worked example, which therefore carries its sample
+  log twice — once as a real file for a reader and once as a `"""` block for the
+  program — with `tests/cli/examples.sh` diffing the two so they cannot drift.
+  Not scheduled, and not a deviation with an id: it is a missing capability
+  rather than a divergence from Scala. It is the first thing a script-oriented
+  runtime is asked for, so it is recorded here rather than left to be
+  rediscovered.
 - A **`py`, `js` or `clj` provider**. protoScala routes all four family prefixes
   and reports `no provider registered for '<alias>'`; no runtime in the family
   registers those three aliases, and installing protoPython's means a second
@@ -824,8 +833,33 @@ exercised for the first time in Phase 6** — see the three entries below it.
   calls `ProtoContext::safepoint()` at every back-edge (Q21). The scheduler
   unit test's polling loop learned this the hard way under
   `PROTOCORE_HEAP_LIMIT_CELLS=20000`.
-- **Cold start — about 1 ms above target, and the cause is measured. Not claimed
-  as met.** The < 25 ms budget (DESIGN §1) was re-measured with the 0.4.0 and
+- **Cold start — MET at 0.6.0, and met by the precompiled prelude image.** Three
+  rounds interleaved in one window, image and source path alternating, all twelve
+  cases `verified=21`, load average 2.97 at the start and 2.67 at the end:
+  **0.6.0 with the image, script 23.73 ms and REPL 23.89 ms**, against 25.65 and
+  26.01 ms for the same binary with `PROTOSCALA_PRELUDE_NO_IMAGE=1`.
+  `benchmarks/cold-start.sh` exited 0 in all three image rounds and 1 in all three
+  source rounds, on both cases, which *is* the check. Both paths live in one
+  binary, so the source row is what proves the image — and not anything else in
+  the release — moved the number; the source path is 0.5.0's, still missing by
+  0.65 ms.
+
+  What the image cannot remove is `linkSymbols` (342 µs) and *running* the
+  compiled prelude (177 µs), by construction: the tables hold strings and PODs, so
+  the symbols must be interned into a `ProtoSpace` and
+  `MAKE_CLASS`/`MAKE_FN`/`STORE_GLOBAL` must execute. Removing those needs a
+  **protoCore space image**, which does not exist — no object-graph serialisation,
+  no image and no snapshot API in `headers/protoCore.h` or `proto_internal.h`,
+  and the only caching facility is the in-process `SharedModuleCache`, which holds
+  live objects and cannot cross a process. That stays a P3, maintainer-owned
+  question (escalation **E5**), no longer as a blocker: the budget is met with
+  about 1.3 ms of headroom on the script case, which is what the next twenty
+  prelude classes would spend. Full tables in `benchmarks/RESULTS.md`.
+
+  The 0.5.0 history is kept below, because the row it explains is still in the
+  table and because the attribution is what told this phase what to build.
+
+  The < 25 ms budget (DESIGN §1) was re-measured at 0.5.0 with the 0.4.0 and
   0.5.0 binaries **interleaved in one window** — 0.4.0 built from `941f577` in a
   scratch worktree against the same protoCore — three rounds of 21 verified runs
   each, plus a third binary that is **not shipped**: 0.5.0 with twenty more
@@ -845,9 +879,8 @@ exercised for the first time in Phase 6** — see the three entries below it.
   whole regression. That **rules out the engine's exception machinery**: the
   per-frame retry loop measured free with `perf stat -r 3`, and mutable class
   prototypes make class creation cheaper. The prelude is parsed, desugared,
-  compiled and run at every start-up with nothing cached between runs. Meeting the
-  budget again needs a precompiled prelude, which is listed in Phase 6 and is not
-  a bug in this phase. The earlier uninterleaved figures (26.31 / 26.98 ms against
+  compiled and run at every start-up with nothing cached between runs, which is
+  exactly what Phase 6's image removed. The earlier uninterleaved figures (26.31 / 26.98 ms against
   24.96 / 24.80, measured hours apart) had the direction right and the magnitude
   about twice too large.
 - **Phase 5 / mailbox size.** With the CAS-list fallback, a backlog of N
