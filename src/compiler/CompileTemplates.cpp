@@ -745,9 +745,28 @@ void Compiler::compileTuple(const Tuple& t) {
     emit(Op::MAKE_TUPLE, n, t.pos, 1 - static_cast<int>(n));
 }
 
+// super.m resolves relative to the method's defining class; super[T].m names T
+// explicitly and the runtime probes T's OWN definition first, so `super[A].m`
+// finds A's m when A defines it and the m A inherits when it does not — which is
+// what "the member m as seen from A" means in Scala (DESIGN §4.4).
 void Compiler::compileSuperSend(const std::string& name, const std::vector<NodePtr>& args,
-                                SourcePos pos) {
+                                const std::string& qualifier, SourcePos pos) {
     if (!tmpl_) throw CompileError("super can be used only inside a class, trait or object", pos);
+    std::string ownerKey = tmpl_->info->key;
+    bool exact = false;
+    if (!qualifier.empty()) {
+        const ClassInfo* t = globals_.findType(qualifier);
+        if (!t)
+            throw CompileError("super[" + qualifier + "]: " + qualifier +
+                                   " is not a protoScala type",
+                               pos);
+        if (t->key == tmpl_->info->key)
+            throw CompileError("super[" + qualifier + "]." + name + " inside " + qualifier +
+                                   " itself would call itself",
+                               pos);
+        ownerKey = t->key;
+        exact = true;
+    }
     loadThis(pos);
     for (const auto& arg : args) {
         if (arg->kind == NodeKind::Splice || arg->kind == NodeKind::NamedArg)
@@ -755,7 +774,7 @@ void Compiler::compileSuperSend(const std::string& name, const std::vector<NodeP
         compileExpr(*arg);
     }
     const auto n = static_cast<std::uint32_t>(args.size());
-    emit(Op::SEND_SUPER, fn_->mod->addSuperSite(name, n, tmpl_->info->key), pos,
+    emit(Op::SEND_SUPER, fn_->mod->addSuperSite(name, n, ownerKey, exact), pos,
          -static_cast<int>(n));
 }
 

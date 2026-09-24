@@ -679,7 +679,7 @@ const std::vector<std::uint32_t>* Compiler::byNameMasksOfCalleeHead(const Node& 
     if (sel.qualifier->kind != NodeKind::Ident) return nullptr;
     const std::string& qual = as<Ident>(*sel.qualifier).name;
     if (qual == "this") return byNameMasksOfMember(sel.name);
-    if (qual == "super") return nullptr;
+    if (qual == "super") return nullptr;   // a Super node never reaches here
     bool found = false;
     captureInto(fn_, qual, fn->pos, &found);
     if (found || memberOf(qual)) return nullptr;  // a local or a field: dynamic
@@ -721,9 +721,8 @@ void Compiler::compileApply(const Apply& a) {
     }
     if (fn->kind == NodeKind::Select) {
         const auto& sel = as<Select>(*fn);
-        if (sel.qualifier->kind == NodeKind::Ident &&
-            as<Ident>(*sel.qualifier).name == "super") {
-            compileSuperSend(sel.name, a.args, a.pos);
+        if (sel.qualifier->kind == NodeKind::Super) {
+            compileSuperSend(sel.name, a.args, as<Super>(*sel.qualifier).qualifier, a.pos);
             return;
         }
         if (a.args.size() == 1 && (sel.name == "&&" || sel.name == "||")) {
@@ -811,8 +810,8 @@ void Compiler::compileArgsAndCall(const std::vector<NodePtr>& args, SourcePos po
 }
 
 void Compiler::compileSelect(const Select& s) {
-    if (s.qualifier->kind == NodeKind::Ident && as<Ident>(*s.qualifier).name == "super") {
-        compileSuperSend(s.name, {}, s.pos);
+    if (s.qualifier->kind == NodeKind::Super) {
+        compileSuperSend(s.name, {}, as<Super>(*s.qualifier).qualifier, s.pos);
         return;
     }
     compileExpr(*s.qualifier);

@@ -739,12 +739,18 @@ NodePtr Parser::parseSimple() {
             base = std::make_unique<Ident>(t.pos, "this");
             advance();
             break;
-        case TokenKind::KwSuper:
+        case TokenKind::KwSuper: {
             advance();
-            if (at(TokenKind::LBracket)) unsupported("super[T] (a qualified super call)", peek());
+            auto sup = std::make_unique<Super>(t.pos);
+            if (at(TokenKind::LBracket)) {   // super[T].m names the ancestor
+                advance();
+                sup->qualifier = expect(TokenKind::Identifier, "an ancestor type name").text;
+                expect(TokenKind::RBracket, "']'");
+            }
             if (!at(TokenKind::Dot)) fail("'.' expected after 'super'", peek());
-            base = std::make_unique<Ident>(t.pos, "super");  // the compiler checks the context
+            base = std::move(sup);           // the compiler checks the context
             break;
+        }
         case TokenKind::Underscore:
             base = placeholder(t.pos);
             advance();

@@ -359,20 +359,25 @@ const proto::ProtoObject* ExecutionEngine::superSend(proto::ProtoContext* ctx,
     const proto::ProtoList* chain = base[0]->getParents(ctx);  // young in ctx
     const unsigned long n = chain->getSize(ctx);
     const std::string ownerName = GlobalTable::nameOfKey(site.key.substr(1));
+    const std::string spelling =
+        "super" + (site.exact ? "[" + ownerName + "]" : "") + "." + site.sval;
     unsigned long k = 0;
     while (k < n && chain->getAt(ctx, static_cast<int>(k)) != owner) ++k;
     if (k == n)
         throw ScalaError("NoSuchMethodError",
                          ownerName + " is not in the linearization of " +
-                             typeName(ctx, L, base[0]) + ", so super." + site.sval +
+                             typeName(ctx, L, base[0]) + ", so " + spelling +
                              " has no meaning here");
-    for (++k; k < n; ++k) {
+    // super[T].m starts AT T, so T's own definition is the one the programmer
+    // named; plain super.m starts after the defining class (DESIGN §4.4).
+    if (!site.exact) ++k;
+    for (; k < n; ++k) {
         const proto::ProtoObject* m =
             chain->getAt(ctx, static_cast<int>(k))->getOwnAttributeDirect(ctx, site.symbol);
         if (m) return callMember(ctx, m, base, site.argc);
     }
     throw ScalaError("NoSuchMethodError",
-                     "super." + site.sval + " has no implementation after " + ownerName);
+                     spelling + " has no implementation after " + ownerName);
 }
 
 namespace {

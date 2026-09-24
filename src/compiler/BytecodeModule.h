@@ -63,6 +63,9 @@ public:
                                                      // SendSite: the fallback name (D5)
         const proto::ProtoString* keySymbol = nullptr;        // after linkSymbols
         std::uint32_t flags = 0;                     // ClassSpec: ClassFlag bits
+        // SuperSite: the site wrote `super[T].m`, so the search starts AT the
+        // named ancestor rather than after the defining class (Phase 4).
+        bool exact = false;
     };
 
     struct ClassSpecData {
@@ -117,7 +120,10 @@ public:
                             const std::string& fallback = {});
     std::size_t addNames(const std::vector<std::string>& names);      // de-duplicated by content
     std::size_t addClassSpec(const ClassSpecData& spec);              // never de-duplicated
-    std::size_t addSuperSite(const std::string& name, std::uint32_t argc, const std::string& ownerKey);
+    // `exact`: the site wrote super[T].m, so the search starts AT the named
+    // ancestor rather than after the defining class.
+    std::size_t addSuperSite(const std::string& name, std::uint32_t argc,
+                             const std::string& ownerKey, bool exact = false);
     std::size_t addKwSendSite(const std::string& name, std::uint32_t positional,
                               const std::vector<std::string>& keywords,
                               const std::string& fallback = {});

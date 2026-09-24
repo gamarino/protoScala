@@ -193,12 +193,16 @@ std::size_t BytecodeModule::addClassSpec(const ClassSpecData& spec) {
 }
 
 std::size_t BytecodeModule::addSuperSite(const std::string& name, std::uint32_t argc,
-                                         const std::string& ownerKey) {
+                                         const std::string& ownerKey, bool exact) {
     Const c{ConstKind::SuperSite, 0, 0.0, name};
     c.argc = argc;
     c.key = ownerKey;
-    return findOrAdd(superIndex_, ownerKey + "/" + name + "/" + std::to_string(argc), consts_,
-                     std::move(c));
+    c.exact = exact;
+    // The key carries `exact` so a plain and a qualified site on the same owner
+    // never de-duplicate onto each other.
+    return findOrAdd(superIndex_,
+                     ownerKey + "/" + name + "/" + std::to_string(argc) + (exact ? "/x" : ""),
+                     consts_, std::move(c));
 }
 
 std::size_t BytecodeModule::addKwSendSite(const std::string& name, std::uint32_t positional,
@@ -355,7 +359,8 @@ std::string formatConst(const BytecodeModule::Const& c) {
             return out;
         }
         case BytecodeModule::ConstKind::SuperSite:
-            return "super." + c.sval + "/" + std::to_string(c.argc) + " in " + c.key;
+            return "super" + (c.exact ? "[" + c.key.substr(1) + "]" : "") + "." + c.sval + "/" +
+                   std::to_string(c.argc) + " in " + c.key;
         case BytecodeModule::ConstKind::KwSendSite: {
             std::string out = c.sval + "/" + std::to_string(c.argc) + "(";
             for (std::size_t i = 0; i < c.names.size(); ++i) {

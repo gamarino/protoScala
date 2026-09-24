@@ -3,6 +3,7 @@
 // only; the last one checks the built-in types the Runtime binds on top of it.
 // If one of them fails after a protoCore change, revisit the class model
 // (MAKE_CLASS in ExecutionEngine.cpp) before anything else.
+#include "EvalHarness.h"
 #include "runtime/Runtime.h"
 #include "runtime/Values.h"
 #include "protoCore.h"
@@ -10,6 +11,8 @@
 #include <gtest/gtest.h>
 
 #include <string>
+
+using protoScala::test::EvalHarness;
 
 namespace {
 const proto::ProtoString* sym(proto::ProtoContext* c, const char* s) {
@@ -154,4 +157,33 @@ TEST(ObjectModel, RuntimeBindsTheBuiltInTypes) {
     EXPECT_EQ(protoScala::show(c, L, L.anyRefProto->getAttribute(c, L.nameKey)), "AnyRef");
     EXPECT_EQ(protoScala::show(c, L, L.withFilterProto->getAttribute(c, L.nameKey)), "WithFilter");
     EXPECT_EQ(protoScala::show(c, L, L.listCompanion->getAttribute(c, L.nameKey)), "List");
+}
+
+// --- super[T].m (Phase 4, DESIGN §4.4) --------------------------------------
+
+TEST(ObjectModel, QualifiedSuperProbesTheNamedAncestorFirst) {
+    EvalHarness h;
+    h.eval("trait A { def m: Int = 1 }");
+    h.eval("trait B extends A { override def m: Int = 2 }");
+    h.eval("class C extends B { override def m: Int = 3; "
+           "def a: Int = super[A].m; def b: Int = super[B].m }");
+    EXPECT_EQ(h.eval("new C().a"), "1");
+    EXPECT_EQ(h.eval("new C().b"), "2");
+    EXPECT_EQ(h.eval("new C().m"), "3");
+}
+
+TEST(ObjectModel, QualifiedSuperFindsAMemberTheAncestorInherits) {
+    EvalHarness h;
+    h.eval("trait A2 { def m: Int = 1 }");
+    h.eval("trait B2 extends A2");
+    h.eval("class C2 extends B2 { override def m: Int = 9; def viaB: Int = super[B2].m }");
+    EXPECT_EQ(h.eval("new C2().viaB"), "1");
+}
+
+TEST(ObjectModel, QualifiedSuperOnAnUnrelatedTypeFails) {
+    EvalHarness h;
+    h.eval("trait A3 { def m: Int = 1 }");
+    h.eval("trait U3 { def m: Int = 0 }");
+    h.eval("class C3 extends A3 { def bad: Int = super[U3].m }");
+    EXPECT_NE(h.eval("new C3().bad").find("is not in the linearization of"), std::string::npos);
 }

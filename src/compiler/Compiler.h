@@ -219,7 +219,9 @@ private:
     void compileNew(const New& n);
     void compileNewOf(const ClassInfo& info, const std::vector<NodePtr>& args, SourcePos pos);
     void compileTuple(const Tuple& t);
-    void compileSuperSend(const std::string& name, const std::vector<NodePtr>& args, SourcePos pos);
+    // `qualifier` empty: plain `super.m`. Non-empty: `super[T].m`.
+    void compileSuperSend(const std::string& name, const std::vector<NodePtr>& args,
+                          const std::string& qualifier, SourcePos pos);
     void compileNamedSend(const Select& sel, const std::vector<NodePtr>& args, SourcePos pos);
 
     // --- Pattern matching (CompilePatterns.cpp) ---------------------------

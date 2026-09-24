@@ -503,7 +503,9 @@ TEST(ParserTemplates, Errors) {
                   .find("multiple constructor parameter lists are not implemented yet"),
               std::string::npos);
     EXPECT_NE(parseErrorOf("def f: Int").find("'=' expected"), std::string::npos);  // outside a template
-    EXPECT_NE(parseErrorOf("super.f[Int]; super[T].f").find("super[T]"), std::string::npos);
+    // `super[T].f` is implemented (Phase 4); what is still an error is `super`
+    // with no member selection at all.
+    EXPECT_NE(parseErrorOf("super + 1").find("'.' expected after 'super'"), std::string::npos);
     EXPECT_NE(parseErrorOf("case 1 => 2").find("'case'"), std::string::npos);
 }
 
