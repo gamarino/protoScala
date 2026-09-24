@@ -494,6 +494,76 @@ NodePtr Parser::parsePrefix() {
     return parseSimple();
 }
 
+namespace {
+// The f-interpolator's specifier is the leading %… of the literal text that
+// follows a hole. Returns its length in `text`, or 0 when the text does not
+// start with a specifier. `%%` is an escaped percent, not a specifier.
+std::size_t formatSpecLength(const std::string& text) {
+    if (text.size() < 2 || text[0] != '%' || text[1] == '%') return 0;
+    std::size_t k = 1;
+    while (k < text.size() && (text[k] == '-' || text[k] == '+' || text[k] == ' ' ||
+                               text[k] == '0' || text[k] == ',' || text[k] == '#')) ++k;
+    while (k < text.size() && text[k] >= '0' && text[k] <= '9') ++k;
+    if (k < text.size() && text[k] == '.') {
+        ++k;
+        while (k < text.size() && text[k] >= '0' && text[k] <= '9') ++k;
+    }
+    if (k >= text.size()) return 0;
+    const char c = text[k];
+    const bool isConversion = c == 's' || c == 'b' || c == 'c' || c == 'd' || c == 'o' ||
+                              c == 'x' || c == 'X' || c == 'e' || c == 'E' || c == 'f' ||
+                              c == 'g' || c == 'G';
+    return isConversion ? k + 1 : 0;
+}
+} // namespace
+
+NodePtr Parser::parseInterpolation(const Token& t) {
+    auto n = std::make_unique<InterpString>(t.pos);
+    n->interpolator = t.text;
+    const bool isF = t.text == "f";
+    std::string pending;                       // literal text accumulated so far
+    bool afterHole = false;
+    for (const InterpolationPart& part : t.parts) {
+        if (!part.isHole) {
+            std::string text = part.text;
+            if (isF && afterHole) {
+                const std::size_t len = formatSpecLength(text);
+                if (len > 0) {
+                    n->specs.back() = text.substr(0, len);
+                    text = text.substr(len);
+                }
+            }
+            pending += text;
+            afterHole = false;
+            continue;
+        }
+        n->literals.push_back(pending);
+        pending.clear();
+        // `$name` and `${expr}` are both parsed as one expression. The nested
+        // Lexer/Layout/Parser is the same pipeline the file went through, so a
+        // hole may hold any expression, including another interpolation.
+        Parser sub(tokenize(part.text));
+        n->args.push_back(sub.parseHoleExpression(part.pos));
+        n->specs.emplace_back();
+        afterHole = true;
+    }
+    n->literals.push_back(pending);
+    return n;
+}
+
+// Every position in the result is rebased onto `holePos`, the hole's position in
+// the enclosing file, so a diagnostic points at the string, not at column 1 of a
+// source text the reader never wrote.
+NodePtr Parser::parseHoleExpression(SourcePos holePos) {
+    while (at(TokenKind::Newline) || at(TokenKind::Indent)) advance();
+    NodePtr e = parseExpr();
+    while (at(TokenKind::Newline) || at(TokenKind::Outdent)) advance();
+    if (!at(TokenKind::EndOfFile))
+        throw ParseError("a string interpolation hole holds one expression", holePos, false);
+    rebase(*e, holePos);
+    return e;
+}
+
 NodePtr Parser::parseSimple() {
     checkNativeStack(StackUse::Source);
     const Token& t = peek();
@@ -531,14 +601,10 @@ NodePtr Parser::parseSimple() {
             advance();
             break;
         }
-        case TokenKind::InterpolatedString: {
-            auto n = std::make_unique<InterpString>(t.pos);
-            n->interpolator = t.text;
-            n->parts = t.parts;
-            base = std::move(n);
+        case TokenKind::InterpolatedString:
+            base = parseInterpolation(t);
             advance();
             break;
-        }
         case TokenKind::Identifier:
             base = std::make_unique<Ident>(t.pos, t.text);
             advance();
@@ -817,6 +883,7 @@ bool isExtensionStart(const Token& t, const Token& next) {
 [[noreturn]] void notImplemented(const std::string& what, const Token& at) {
     throw ParseError(what + " are not implemented yet", at.pos, false);
 }
+
 
 const char* const kImplicitsUnsupported = "implicits and givens are not supported (D3)";
 

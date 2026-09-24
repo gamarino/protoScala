@@ -7,7 +7,7 @@
  *   StringLit         (str "<escaped>")     — \n \t \" \\ escaped
  *   CharLit           (char '<c>')
  *   BoolLit/Null/Unit true false / null / ()
- *   InterpString      (interp <interpolator>)
+ *   InterpString      (interp <interpolator> "lit" <arg> ["%spec"] ... "lit")
  *   Ident / Select    name / (. <qualifier> name)
  *   Apply / TypeApply (apply <fn> <arg>...) / (tapply <fn> <type>...)
  *   Infix / Prefix    (infix <op> <lhs> <rhs>) / (prefix <op> <e>)
@@ -270,9 +270,23 @@ void render(std::string& out, const Node& n) {
         case NodeKind::UnitLit:
             out += "()";
             break;
-        case NodeKind::InterpString:
-            out += "(interp " + as<InterpString>(n).interpolator + ")";
+        case NodeKind::InterpString: {
+            // (interp s "lit0" <arg0> ["%spec0"] "lit1" ...): the parsed form,
+            // so a test can see the split without reaching into the node.
+            const auto& x = as<InterpString>(n);
+            out += "(interp " + x.interpolator;
+            for (std::size_t k = 0; k < x.args.size(); ++k) {
+                out += " \"";
+                appendEscaped(out, x.literals[k]);
+                out += "\" ";
+                render(out, *x.args[k]);
+                if (!x.specs[k].empty()) out += " \"" + x.specs[k] + '"';
+            }
+            out += " \"";
+            appendEscaped(out, x.literals.back());
+            out += "\")";
             break;
+        }
         case NodeKind::Ident:
             out += as<Ident>(n).name;
             break;
@@ -601,64 +615,74 @@ std::string dump(const CompilationUnit& u) {
 namespace {
 
 // Moves every child subtree of `n` to `out`, leaving `n` childless.
-void releaseChildren(Node& n, std::vector<NodePtr>& out) {
-    auto take = [&out](NodePtr& c) { if (c) out.push_back(std::move(c)); };
-    auto takeParams = [&](std::vector<Param>& ps) { for (auto& p : ps) take(p.defaultValue); };
+// Visits every child *slot* of `n` (a NodePtr lvalue, possibly null) exactly
+// once, without copying or moving anything. Both the tree teardown below and
+// `rebase` walk the tree through this one table, so a node kind that grows a
+// child cannot be forgotten by one of them and remembered by the other.
+template <typename F>
+void eachChildSlot(Node& n, F f) {
+    auto takeParams = [&](std::vector<Param>& ps) { for (auto& p : ps) f(p.defaultValue); };
     switch (n.kind) {
-        case NodeKind::Select: take(as<Select>(n).qualifier); return;
+        case NodeKind::Select: f(as<Select>(n).qualifier); return;
         case NodeKind::Apply: {
             auto& a = as<Apply>(n);
-            take(a.fn);
-            for (auto& arg : a.args) take(arg);
+            f(a.fn);
+            for (auto& arg : a.args) f(arg);
             return;
         }
-        case NodeKind::TypeApply: take(as<TypeApply>(n).fn); return;
-        case NodeKind::Infix: take(as<Infix>(n).lhs); take(as<Infix>(n).rhs); return;
-        case NodeKind::Prefix: take(as<Prefix>(n).operand); return;
-        case NodeKind::Assign: take(as<Assign>(n).target); take(as<Assign>(n).value); return;
+        case NodeKind::TypeApply: f(as<TypeApply>(n).fn); return;
+        case NodeKind::Infix: f(as<Infix>(n).lhs); f(as<Infix>(n).rhs); return;
+        case NodeKind::Prefix: f(as<Prefix>(n).operand); return;
+        case NodeKind::Assign: f(as<Assign>(n).target); f(as<Assign>(n).value); return;
         case NodeKind::If: {
             auto& i = as<If>(n);
-            take(i.cond); take(i.thenp); take(i.elsep);
+            f(i.cond); f(i.thenp); f(i.elsep);
             return;
         }
-        case NodeKind::While: take(as<While>(n).cond); take(as<While>(n).body); return;
-        case NodeKind::Return: take(as<Return>(n).value); return;
-        case NodeKind::Block: for (auto& st : as<Block>(n).stats) take(st); return;
-        case NodeKind::Lambda: takeParams(as<Lambda>(n).params); take(as<Lambda>(n).body); return;
-        case NodeKind::Typed: take(as<Typed>(n).expr); return;
-        case NodeKind::Parens: take(as<Parens>(n).expr); return;
-        case NodeKind::Tuple: for (auto& e : as<Tuple>(n).elems) take(e); return;
-        case NodeKind::Splice: take(as<Splice>(n).expr); return;
-        case NodeKind::NamedArg: take(as<NamedArg>(n).value); return;
-        case NodeKind::ValDef: take(as<ValDef>(n).rhs); return;
+        case NodeKind::While: f(as<While>(n).cond); f(as<While>(n).body); return;
+        case NodeKind::Return: f(as<Return>(n).value); return;
+        case NodeKind::Block: for (auto& st : as<Block>(n).stats) f(st); return;
+        case NodeKind::Lambda: takeParams(as<Lambda>(n).params); f(as<Lambda>(n).body); return;
+        case NodeKind::Typed: f(as<Typed>(n).expr); return;
+        case NodeKind::Parens: f(as<Parens>(n).expr); return;
+        case NodeKind::Tuple: for (auto& e : as<Tuple>(n).elems) f(e); return;
+        case NodeKind::Splice: f(as<Splice>(n).expr); return;
+        case NodeKind::NamedArg: f(as<NamedArg>(n).value); return;
+        case NodeKind::ValDef: f(as<ValDef>(n).rhs); return;
         case NodeKind::DefDef: {
             auto& d = as<DefDef>(n);
             for (auto& list : d.paramLists) takeParams(list);
-            take(d.body);
+            f(d.body);
             return;
         }
         case NodeKind::TemplateDef: {
             auto& t = as<TemplateDef>(n);
             takeParams(t.ctorParams);
-            for (auto& p : t.parents) for (auto& a : p.args) take(a);
-            for (auto& s : t.body) take(s);
+            for (auto& p : t.parents) for (auto& a : p.args) f(a);
+            for (auto& s : t.body) f(s);
             return;
         }
-        case NodeKind::New: for (auto& a : as<New>(n).args) take(a); return;
+        case NodeKind::New: for (auto& a : as<New>(n).args) f(a); return;
         case NodeKind::Match: {  // patterns hold only literals and paths: freed normally
             auto& m = as<Match>(n);
-            take(m.scrutinee);
-            for (auto& c : m.cases) { take(c.guard); take(c.body); }
+            f(m.scrutinee);
+            for (auto& c : m.cases) { f(c.guard); f(c.body); }
             return;
         }
         case NodeKind::For: {
-            auto& f = as<For>(n);
-            for (auto& en : f.enums) take(en.expr);
-            take(f.body);
+            auto& fo = as<For>(n);
+            for (auto& en : fo.enums) f(en.expr);
+            f(fo.body);
             return;
         }
+        // Phase 3: an interpolation's holes are parsed sub-expressions.
+        case NodeKind::InterpString: for (auto& a : as<InterpString>(n).args) f(a); return;
         default: return;  // leaves
     }
+}
+
+void releaseChildren(Node& n, std::vector<NodePtr>& out) {
+    eachChildSlot(n, [&out](NodePtr& c) { if (c) out.push_back(std::move(c)); });
 }
 
 } // namespace
@@ -721,6 +745,15 @@ PatternPtr clonePattern(const Pattern& p) {
     if (p.type) c->type = cloneType(*p.type);
     for (const PatternPtr& a : p.args) c->args.push_back(clonePattern(*a));
     return c;
+}
+
+void rebase(Node& n, SourcePos at) {
+    // A hole's sub-expression was parsed from its own little source text, so its
+    // line and column mean nothing in the enclosing file. Collapsing the whole
+    // subtree onto the hole's position makes every diagnostic point at the
+    // interpolated string instead of at column 1 of a text the reader never saw.
+    n.pos = at;
+    eachChildSlot(n, [at](NodePtr& c) { if (c) rebase(*c, at); });
 }
 
 void destroyTree(NodePtr root) {

@@ -66,6 +66,14 @@ private:
                            bool assocRight = false);
     NodePtr parseInfixLoop(NodePtr& lhs, int minPrec, int assocPrec, bool assocRight);
     NodePtr parsePrefix();
+    // Turns an InterpolatedString token into a parsed InterpString node: each
+    // hole's source text is lexed, laid out and parsed as one expression by a
+    // nested Parser whose positions are rebased onto the hole's position.
+    NodePtr parseInterpolation(const Token& t);
+    // Parses the whole token stream as one expression and rejects a trailing
+    // remainder, so `${ 1 2 }` fails at the hole instead of dropping `2`.
+    NodePtr parseHoleExpression(SourcePos holePos);
+
     NodePtr parseSimple();
     NodePtr parseSimpleRest(NodePtr base);
     NodePtr parseSimpleLoop(NodePtr& base);

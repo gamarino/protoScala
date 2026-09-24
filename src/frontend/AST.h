@@ -55,10 +55,16 @@ struct CharLit : Node { CharLit(SourcePos p) : Node(NodeKind::CharLit, p) {} cha
 struct BoolLit : Node { BoolLit(SourcePos p, bool v) : Node(NodeKind::BoolLit, p), value(v) {} bool value; };
 struct NullLit : Node { NullLit(SourcePos p) : Node(NodeKind::NullLit, p) {} };
 struct UnitLit : Node { UnitLit(SourcePos p) : Node(NodeKind::UnitLit, p) {} };
+// s"a ${x + 1} b": literals = {"a ", " b"}, args = {x + 1}.
+// Invariant: literals.size() == args.size() + 1 (empty strings fill the ends).
+// `specs[i]` is the f-interpolator format specifier that followed args[i]
+// ("%05.2f"), or empty for `%s`; it is always empty for `s` and `raw`.
 struct InterpString : Node {
-    InterpString(SourcePos p) : Node(NodeKind::InterpString, p) {}
+    explicit InterpString(SourcePos p) : Node(NodeKind::InterpString, p) {}
     std::string interpolator;
-    std::vector<InterpolationPart> parts;
+    std::vector<std::string> literals;
+    std::vector<NodePtr> args;
+    std::vector<std::string> specs;
 };
 struct Ident : Node {
     Ident(SourcePos p, std::string n) : Node(NodeKind::Ident, p), name(std::move(n)) {}
@@ -300,6 +306,10 @@ void patternVariables(const Pattern& p, std::vector<std::string>& out);
 // withFilter lambda and in the map lambda). cloneSimpleExpr copies literal,
 // Ident and Select trees only (what a pattern contains) and throws
 // std::logic_error for anything else.
+// Sets every position in the subtree to `at`. Used for expressions parsed out
+// of an interpolation hole, whose own coordinates do not exist in the file.
+void rebase(Node& n, SourcePos at);
+
 NodePtr cloneSimpleExpr(const Node& n);
 PatternPtr clonePattern(const Pattern& p);
 TypePtr cloneType(const TypeTree& t);

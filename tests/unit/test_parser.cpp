@@ -30,7 +30,7 @@ TEST(Parser, Literals) {
     EXPECT_EQ(e("true"), "true");
     EXPECT_EQ(e("null"), "null");
     EXPECT_EQ(e("()"), "()");
-    EXPECT_EQ(e("s\"x $y\""), "(interp s)");
+    EXPECT_EQ(e("s\"x $y\""), "(interp s \"x \" y \"\")");
 }
 
 TEST(Parser, PrecedenceByFirstCharacter) {
@@ -684,4 +684,32 @@ TEST(ParserPatterns, BraceCasesAtTheBodyIndentation) {
     EXPECT_EQ(e("xs.map { case 1 =>\n    val y = 2\n    y\n  case n =>\n    n }"),
               "(apply (. xs map) (lambda (x$1) (match x$1 (case (int 1) (block (val y (int 2)) y)) "
               "(case n (block n)))))");
+}
+
+// --- Phase 3: string interpolation is parsed, not carried as raw text ----------
+
+TEST(ParserInterpolation, SplitsLiteralsAndHoles) {
+    EXPECT_EQ(e(R"(s"x=${1 + 2}!")"), R"((interp s "x=" (infix + (int 1) (int 2)) "!"))");
+    EXPECT_EQ(e(R"(s"$name is $age")"), R"((interp s "" name " is " age ""))");
+}
+
+TEST(ParserInterpolation, FInterpolatorTakesTheSpecifierOffTheFollowingLiteral) {
+    EXPECT_EQ(e(R"(f"pi=$pi%.2f!")"), R"((interp f "pi=" pi "%.2f" "!"))");
+    EXPECT_EQ(e(R"(f"$n%05d")"), R"((interp f "" n "%05d" ""))");
+}
+
+TEST(ParserInterpolation, SInterpolatorLeavesAPercentAlone) {
+    EXPECT_EQ(e(R"(s"$n%done")"), R"((interp s "" n "%done"))");
+}
+
+TEST(ParserInterpolation, AnEscapedPercentIsNotASpecifier) {
+    EXPECT_EQ(e(R"(f"$n%%")"), R"((interp f "" n "%%"))");
+}
+
+TEST(ParserInterpolation, AHoleMayHoldAnotherInterpolation) {
+    EXPECT_EQ(e(R"(s"a${s"b$c"}d")"), R"((interp s "a" (interp s "b" c "") "d"))");
+}
+
+TEST(ParserInterpolation, AHoleHoldingTwoExpressionsIsRejected) {
+    EXPECT_THROW(e(R"(s"${1 2}")"), ParseError);
 }
