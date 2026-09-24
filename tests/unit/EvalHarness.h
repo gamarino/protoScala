@@ -57,6 +57,25 @@ public:
         }
     }
 
+    // The VALUE of the last expression, for a white-box test that has to look
+    // at the representation and not only at what toString prints.
+    const proto::ProtoObject* evalValue(const std::string& src) {
+        auto unit = parseSource(src);
+        desugar(*unit);
+        Compiler compiler(globals_);
+        CompiledUnit cu = compiler.compileUnit(*unit, UnitMode::Repl, counter_++);
+        proto::ProtoContext ctx(&space_, runtime_.rootContext());
+        cu.module->linkSymbols(&ctx);
+        const BytecodeModule& mod = *cu.module;
+        const std::string key = cu.resultKey;
+        modules_.push_back(std::move(cu.module));
+        engine_.run(&ctx, mod);
+        if (key.empty()) return PROTO_NONE;
+        const auto* k = proto::ProtoString::createSymbol(&ctx, key.c_str());
+        const proto::ProtoObject* v = runtime_.layout().globals->getOwnAttributeDirect(&ctx, k);
+        return v ? v : PROTO_NONE;
+    }
+
     // Runs a hand-assembled top-level module (engine tests of opcodes the
     // compiler does not emit yet). The value of its RETURN is shown.
     std::string runModule(std::unique_ptr<BytecodeModule> mod) {

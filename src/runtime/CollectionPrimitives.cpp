@@ -15,7 +15,10 @@
 #include "runtime/PrimitiveSupport.h"
 #include "runtime/Primitives.h"
 
+#include "compiler/BytecodeModule.h"
+
 #include <algorithm>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -1268,6 +1271,935 @@ PRIM(prim_vectorCompanion_empty) {
     return newVector(ctx, L, ctx->newList());
 }
 
+
+// ---------------------------------------------------------------------------
+// Map and Set (DESIGN §6.1, PROTOMAP-SPEC §4)
+// ---------------------------------------------------------------------------
+//
+// Every read and write goes through protoCore's hashed-collection helper with
+// the single KeySemantics below. protoCore's header is explicit that a map used
+// with those functions must never be touched with raw setAt/removeAt, because a
+// raw SmallInteger key would collide with a hash slot.
+
+// DESIGN §6.1 bullet 1: "objects whose == is eq (instances of classes with the
+// default equals, objects, case objects, SINGLETON enum cases, symbols,
+// booleans)". Bullet 2: "numbers, chars, strings, case classes (including
+// tuples and parameterised enum cases, which are case classes), collections,
+// and classes that override equals".
+//
+// The one judgement call — "does this class override equals?" — is decided by an
+// EXACT POINTER COMPARISON against the single method object installed on
+// anyProto, pinned in the layout as defaultEqualsMethod. A case class resolves
+// to product_equals and a user override to their own compiled method, so both
+// fall out of the same comparison with no special case and no heuristic; a
+// parameterised enum case needs no rule of its own, which is ruling C2's point.
+// Getting this wrong is SILENTLY wrong, which is why the fixtures of
+// 18-maps-and-sets are built to fail loudly on a misclassification (plan A0-5).
+bool scalaIsIdentityKey(ProtoContext* ctx, const ProtoObject* key) {
+    const RuntimeLayout& L = *activeCallContext()->layout;
+
+    // --- bullet 2 first: every value-equality kind, so the fallthrough at the
+    //     bottom can default to identity without swallowing one of them.
+    if (isNumberFast(key)) return false;                          // numbers
+    if (proto::ProtoObject::isStringTagFast(key)) return false;   // strings
+    if (isListFast(key)) return false;                            // collections
+    if (isVectorFast(ctx, L, key) || isMapFast(ctx, L, key) ||
+        isSetFast(ctx, L, key) || isRangeFast(ctx, L, key))
+        return false;                                             // collections
+
+    // --- Char is the one special case (maintainer ruling C1, 2026-09-23: "si
+    //     Char es un caso especial, debería procesarse especial en el código de
+    //     la función. Tratar en lo posible seguir Scala"). A Char is a unique
+    //     embedded word, so identity LOOKS right -- but a Char's == is not eq:
+    //     Scala's cooperative equality makes 'a' == 97 true and 'a'.## == 97, so
+    //     Map('a' -> 1) must be found by a lookup of 97. Sending it down the
+    //     value path does that for free, because scalaHash already hashes a Char
+    //     to its code point and valuesEqual already widens a Char to it.
+    if (isCharFast(key)) return false;
+
+    // --- bullet 1: unique-word immediates. `==` on each of these IS word
+    //     identity, which is bullet 1's own criterion.
+    if (key == PROTO_TRUE || key == PROTO_FALSE) return true;     // booleans
+    if (key == PROTO_NONE || key == L.unit) return true;          // null, ()
+
+    // --- an instance: identity exactly when its equals is the default one.
+    if (isScalaInstance(ctx, L, key)) {
+        const ProtoObject* eq = key->getAttribute(ctx, L.equalsName);
+        return eq == nullptr || eq == PROTO_NONE || eq == L.defaultEqualsMethod;
+    }
+
+    // Function values, lazy holders, actors, futures, WithFilter: valuesEqual
+    // falls back to identity for all of them, so bullet 1's criterion applies.
+    return true;
+}
+
+unsigned long scalaKeyHash(ProtoContext* ctx, const ProtoObject* key) {
+    // Called only for value-equality keys. scalaHash is Scala's ##: cooperative
+    // across Int/Long/Double, Char by code point, String by content, case
+    // classes structurally, every Seq kind through the one SeqView.
+    return static_cast<unsigned long>(
+        static_cast<long long>(scalaHash(ctx, *activeCallContext()->layout, key)));
+}
+
+bool scalaKeyEquals(ProtoContext* ctx, const ProtoObject* a, const ProtoObject* b) {
+    // Called only inside a collision bucket, on value-equality keys.
+    return valuesEqual(ctx, *activeCallContext()->layout, a, b);
+}
+
+// A static POD of three function pointers holds no ProtoObject*, so it is not
+// the forbidden per-space symbol cache.
+const proto::KeySemantics& scalaKeySemantics() {
+    static const proto::KeySemantics semantics{&scalaIsIdentityKey, &scalaKeyHash, &scalaKeyEquals};
+    return semantics;
+}
+
+const proto::ProtoMap* mapDataOf(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* m,
+                                 const char* method) {
+    if (!isMapFast(ctx, L, m) && !isSetFast(ctx, L, m))
+        wrongType(ctx, method, "a Map or a Set", m);
+    return m->getAttribute(ctx, L.mapDataKey)->asMap(ctx);
+}
+
+const ProtoObject* wrapMap(ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoMap* data,
+                           bool isSet) {
+    proto::ProtoContext scope(ctx->space, ctx);
+    const ProtoObject* payload = data->asObject(&scope);
+    scope.returnValue = payload;
+    const ProtoObject* o = (isSet ? L.setProto : L.mapProto)->newChild(&scope, /*isMutable=*/false);
+    scope.returnValue = o;
+    o = o->setAttribute(&scope, L.mapDataKey, payload);
+    scope.returnValue = o;
+    return o;
+}
+
+bool selfIsSet(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* self) {
+    return isSetFast(ctx, L, self);
+}
+
+// The (key, value) of a Tuple2 case-class instance (§4.6), or a loud error.
+void pairOf(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* pair, const char* method,
+            const ProtoObject** k, const ProtoObject** v) {
+    const ProtoObject* a = pair->getAttribute(ctx, L.tupleFieldKey[1]);
+    const ProtoObject* b = pair->getAttribute(ctx, L.tupleFieldKey[2]);
+    if (!a || a == PROTO_NONE || !b || b == PROTO_NONE) {
+        if (!isScalaInstance(ctx, L, pair) ||
+            pair->getAttribute(ctx, L.tupleKey) != PROTO_TRUE)
+            throw ScalaError("IllegalArgumentException",
+                             std::string(method) + " expects a (key, value) pair, got " +
+                                 typeName(ctx, L, pair));
+    }
+    *k = a;
+    *v = b;
+}
+
+// --- collecting entries ----------------------------------------------------
+
+// Iteration keeps its accumulator in a slot of one context and re-roots it after
+// every append: never a std::vector<const ProtoObject*>, which a re-entrant
+// hashCode could invalidate (P1).
+struct Collector {
+    ProtoContext* scope = nullptr;
+    const ProtoObject** acc = nullptr;   // one slot, re-rooted after every append
+    const RuntimeLayout* L = nullptr;
+    int what = 0;                        // 0: pairs, 1: keys, 2: values
+};
+
+void collectEntry(ProtoContext* ctx, void* self, const ProtoObject* k, const ProtoObject* v) {
+    auto* c = static_cast<Collector*>(self);
+    const ProtoObject* item = c->what == 1 ? k : (c->what == 2 ? v : makePair(ctx, *c->L, k, v));
+    c->acc[0] = c->acc[0]->asList(ctx)->appendLast(ctx, item)->asObject(ctx);
+}
+
+// Every entry of `data` as a List of `what` (pairs, keys or values).
+const ProtoObject* entriesOf(ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoMap* data,
+                             int what) {
+    proto::ProtoContext scope(ctx->space, ctx);
+    scope.resizeAutomaticLocals(1);
+    const ProtoObject** slot = scope.getAutomaticLocals();
+    slot[0] = scope.newList()->asObject(&scope);
+    Collector c{&scope, slot, &L, what};
+    proto::hashedForEach(&scope, data, &c, &collectEntry);
+    scope.returnValue = slot[0];
+    return slot[0];
+}
+
+// --- reads -----------------------------------------------------------------
+
+PRIM(prim_map_apply) {
+    const RuntimeLayout& L = layoutOf();
+    const ProtoObject* k = arg(ctx, args, 0, "apply", 1);
+    if (selfIsSet(ctx, L, self))   // Set(x) is contains(x) (DESIGN §5.1)
+        return boolean(proto::hashedGet(ctx, mapDataOf(ctx, L, self, "apply"),
+                                        scalaKeySemantics(), k) != nullptr);
+    const ProtoObject* v = proto::hashedGet(ctx, mapDataOf(ctx, L, self, "apply"),
+                                            scalaKeySemantics(), k);
+    if (!v)   // nullptr, never PROTO_NONE: a stored null stays distinguishable
+        throw ScalaError("NoSuchElementException", "key not found: " + show(ctx, L, k));
+    return v;
+}
+
+PRIM(prim_map_get) {
+    const RuntimeLayout& L = layoutOf();
+    const ProtoObject* k = arg(ctx, args, 0, "get", 1);
+    const ProtoObject* v = proto::hashedGet(ctx, mapDataOf(ctx, L, self, "get"),
+                                            scalaKeySemantics(), k);
+    return optionOf(ctx, L, v);       // nullptr -> None, a stored null -> Some(null)
+}
+
+PRIM(prim_map_getOrElse) {
+    const RuntimeLayout& L = layoutOf();
+    const ProtoObject* k = arg(ctx, args, 0, "getOrElse", 2);
+    const ProtoObject* v = proto::hashedGet(ctx, mapDataOf(ctx, L, self, "getOrElse"),
+                                            scalaKeySemantics(), k);
+    return v ? v : args->getAt(ctx, 1);
+}
+
+const ProtoObject* mapContains(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+                               const char* method) {
+    const RuntimeLayout& L = layoutOf();
+    const ProtoObject* k = arg(ctx, args, 0, method, 1);
+    return boolean(proto::hashedGet(ctx, mapDataOf(ctx, L, self, method), scalaKeySemantics(), k) !=
+                   nullptr);
+}
+SEQ_NAMED(prim_map_contains, mapContains, "contains")
+SEQ_NAMED(prim_map_isDefinedAt, mapContains, "isDefinedAt")
+
+// The number of ENTRIES, not of slots: a genuine hash collision puts several
+// entries in one slot, so ProtoMap::getSize would undercount. Only emptiness can
+// be read off the slot count, because a slot always holds at least one entry.
+void countEntry(ProtoContext*, void* raw, const ProtoObject*, const ProtoObject*) {
+    ++*static_cast<long long*>(raw);
+}
+
+long long entryCount(ProtoContext* ctx, const proto::ProtoMap* data) {
+    long long n = 0;
+    proto::hashedForEach(ctx, data, &n, &countEntry);
+    return n;
+}
+
+const ProtoObject* mapSize(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+                           const char* method) {
+    const RuntimeLayout& L = layoutOf();
+    expectArgs(ctx, args, method, 0);
+    proto::ProtoContext scope(ctx->space, ctx);
+    return proto::makeSmallInt(entryCount(&scope, mapDataOf(&scope, L, self, method)));
+}
+SEQ_NAMED(prim_map_size, mapSize, "size")
+SEQ_NAMED(prim_map_length, mapSize, "length")
+
+PRIM(prim_map_isEmpty) {
+    const RuntimeLayout& L = layoutOf();
+    expectArgs(ctx, args, "isEmpty", 0);
+    return boolean(mapDataOf(ctx, L, self, "isEmpty")->getSize(ctx) == 0);
+}
+
+PRIM(prim_map_nonEmpty) {
+    const RuntimeLayout& L = layoutOf();
+    expectArgs(ctx, args, "nonEmpty", 0);
+    return boolean(mapDataOf(ctx, L, self, "nonEmpty")->getSize(ctx) != 0);
+}
+
+// D58: the order is ascending hash, deterministic for a given key set but
+// unrelated to insertion order or to Scala's, so every fixture sorts.
+const ProtoObject* mapEntries(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+                              const char* method, int what) {
+    const RuntimeLayout& L = layoutOf();
+    expectArgs(ctx, args, method, 0);
+    const bool set = selfIsSet(ctx, L, self);
+    return entriesOf(ctx, L, mapDataOf(ctx, L, self, method), set ? 1 : what);
+}
+
+PRIM(prim_map_toList) { return mapEntries(ctx, self, args, "toList", 0); }
+PRIM(prim_map_toSeq) { return mapEntries(ctx, self, args, "toSeq", 0); }
+PRIM(prim_map_iterator) { return mapEntries(ctx, self, args, "iterator", 0); }
+PRIM(prim_map_keys) { return mapEntries(ctx, self, args, "keys", 1); }
+PRIM(prim_map_values) { return mapEntries(ctx, self, args, "values", 2); }
+
+PRIM(prim_map_head) {
+    const RuntimeLayout& L = layoutOf();
+    expectArgs(ctx, args, "head", 0);
+    const ProtoObject* xs = mapEntries(ctx, self, args, "head", 0);
+    const proto::ProtoList* l = xs->asList(ctx);
+    if (l->getSize(ctx) == 0)
+        throw ScalaError("NoSuchElementException", "head of empty collection");
+    (void)L;
+    return l->getAt(ctx, 0);
+}
+
+// --- writes ----------------------------------------------------------------
+
+const ProtoObject* mapPut(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* self,
+                          const ProtoObject* k, const ProtoObject* v, const char* method) {
+    proto::ProtoContext scope(ctx->space, ctx);
+    scope.returnValue = self;
+    const proto::ProtoMap* out = proto::hashedPut(&scope, mapDataOf(&scope, L, self, method),
+                                                  scalaKeySemantics(), k, v);
+    scope.returnValue = out->asObject(&scope);
+    return wrapMap(&scope, L, out, selfIsSet(&scope, L, self));
+}
+
+PRIM(prim_map_plus) {
+    const RuntimeLayout& L = layoutOf();
+    const ProtoObject* x = arg(ctx, args, 0, "+", 1);
+    if (selfIsSet(ctx, L, self)) return mapPut(ctx, L, self, x, x, "+");   // Set: element is entry
+    const ProtoObject* k = nullptr;
+    const ProtoObject* v = nullptr;
+    pairOf(ctx, L, x, "Map.+", &k, &v);
+    return mapPut(ctx, L, self, k, v, "+");
+}
+
+PRIM(prim_map_updated) {
+    const RuntimeLayout& L = layoutOf();
+    const ProtoObject* k = arg(ctx, args, 0, "updated", 2);
+    return mapPut(ctx, L, self, k, args->getAt(ctx, 1), "updated");
+}
+
+const ProtoObject* mapMinus(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+                            const char* method) {
+    const RuntimeLayout& L = layoutOf();
+    const ProtoObject* k = arg(ctx, args, 0, method, 1);
+    proto::ProtoContext scope(ctx->space, ctx);
+    scope.returnValue = self;
+    const proto::ProtoMap* out = proto::hashedRemove(&scope, mapDataOf(&scope, L, self, method),
+                                                     scalaKeySemantics(), k);
+    scope.returnValue = out->asObject(&scope);
+    return wrapMap(&scope, L, out, selfIsSet(&scope, L, self));
+}
+SEQ_NAMED(prim_map_minus, mapMinus, "-")
+SEQ_NAMED(prim_map_removed, mapMinus, "removed")
+
+// Every entry of the argument, added to (or removed from) the receiver.
+enum class BulkOp { Add, Remove, KeepCommon, KeepMissing };
+
+struct BulkState {
+    const RuntimeLayout* L = nullptr;
+    const proto::ProtoMap* out = nullptr;
+    const proto::ProtoMap* other = nullptr;
+    ProtoContext* scope = nullptr;
+    const ProtoObject** slot = nullptr;
+    BulkOp op = BulkOp::Add;
+};
+
+void bulkVisit(ProtoContext* ctx, void* raw, const ProtoObject* k, const ProtoObject* v) {
+    auto* s = static_cast<BulkState*>(raw);
+    switch (s->op) {
+        case BulkOp::Add:
+            s->out = proto::hashedPut(ctx, s->out, scalaKeySemantics(), k, v);
+            break;
+        case BulkOp::Remove:
+            s->out = proto::hashedRemove(ctx, s->out, scalaKeySemantics(), k);
+            break;
+        case BulkOp::KeepCommon:
+            if (proto::hashedGet(ctx, s->other, scalaKeySemantics(), k) != nullptr)
+                s->out = proto::hashedPut(ctx, s->out, scalaKeySemantics(), k, v);
+            break;
+        case BulkOp::KeepMissing:
+            if (proto::hashedGet(ctx, s->other, scalaKeySemantics(), k) == nullptr)
+                s->out = proto::hashedPut(ctx, s->out, scalaKeySemantics(), k, v);
+            break;
+    }
+    s->slot[0] = s->out->asObject(ctx);   // rooted across the next allocation
+}
+
+// `other` as a ProtoMap: a Map/Set argument directly, a List/Vector/Range of
+// elements (for a Set) or of pairs (for a Map) otherwise.
+const proto::ProtoMap* asKeyedData(ProtoContext* ctx, const RuntimeLayout& L,
+                                   const ProtoObject* other, bool pairs, const char* method) {
+    if (isMapFast(ctx, L, other) || isSetFast(ctx, L, other))
+        return other->getAttribute(ctx, L.mapDataKey)->asMap(ctx);
+    const SeqView sv = seqViewOf(ctx, L, other);
+    if (!sv.valid) wrongType(ctx, method, "a collection", other);
+    const proto::ProtoMap* data = ctx->newMap();
+    ctx->returnValue = data->asObject(ctx);
+    for (long long i = 0; i < sv.size; ++i) {
+        const ProtoObject* e = seqElemAt(ctx, sv, i);
+        const ProtoObject* k = e;
+        const ProtoObject* v = e;
+        if (pairs) pairOf(ctx, L, e, method, &k, &v);
+        data = proto::hashedPut(ctx, data, scalaKeySemantics(), k, v);
+        ctx->returnValue = data->asObject(ctx);
+    }
+    return data;
+}
+
+const ProtoObject* bulk(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+                        BulkOp op, const char* method) {
+    const RuntimeLayout& L = layoutOf();
+    const bool set = selfIsSet(ctx, L, self);
+    const ProtoObject* other = arg(ctx, args, 0, method, 1);
+    proto::ProtoContext scope(ctx->space, ctx);
+    scope.resizeAutomaticLocals(1);
+    const ProtoObject** slot = scope.getAutomaticLocals();
+    const proto::ProtoMap* mine = mapDataOf(&scope, L, self, method);
+    const proto::ProtoMap* theirs = asKeyedData(&scope, L, other, !set, method);
+    BulkState st;
+    st.L = &L;
+    st.scope = &scope;
+    st.slot = slot;
+    st.op = op;
+    if (op == BulkOp::KeepCommon || op == BulkOp::KeepMissing) {
+        st.out = scope.newMap();
+        st.other = theirs;
+        slot[0] = st.out->asObject(&scope);
+        proto::hashedForEach(&scope, mine, &st, &bulkVisit);
+    } else {
+        st.out = mine;
+        slot[0] = st.out->asObject(&scope);
+        proto::hashedForEach(&scope, theirs, &st, &bulkVisit);
+    }
+    return wrapMap(&scope, L, st.out, set);
+}
+
+PRIM(prim_map_concat) { return bulk(ctx, self, args, BulkOp::Add, "++"); }
+PRIM(prim_map_removeAll) { return bulk(ctx, self, args, BulkOp::Remove, "--"); }
+
+const ProtoObject* setUnion(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+                            const char* method) {
+    return bulk(ctx, self, args, BulkOp::Add, method);
+}
+SEQ_NAMED(prim_set_union, setUnion, "union")
+SEQ_NAMED(prim_set_or, setUnion, "|")
+
+const ProtoObject* setIntersect(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+                                const char* method) {
+    return bulk(ctx, self, args, BulkOp::KeepCommon, method);
+}
+SEQ_NAMED(prim_set_intersect, setIntersect, "intersect")
+SEQ_NAMED(prim_set_and, setIntersect, "&")
+
+const ProtoObject* setDiff(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+                           const char* method) {
+    return bulk(ctx, self, args, BulkOp::KeepMissing, method);
+}
+SEQ_NAMED(prim_set_diff, setDiff, "diff")
+SEQ_NAMED(prim_set_andNot, setDiff, "&~")
+
+struct SubsetState {
+    const proto::ProtoMap* other = nullptr;
+    bool all = true;
+};
+
+void subsetVisit(ProtoContext* ctx, void* raw, const ProtoObject* k, const ProtoObject* v) {
+    (void)v;
+    auto* s = static_cast<SubsetState*>(raw);
+    if (s->all && proto::hashedGet(ctx, s->other, scalaKeySemantics(), k) == nullptr) s->all = false;
+}
+
+PRIM(prim_set_subsetOf) {
+    const RuntimeLayout& L = layoutOf();
+    const ProtoObject* other = arg(ctx, args, 0, "subsetOf", 1);
+    proto::ProtoContext scope(ctx->space, ctx);
+    SubsetState st{asKeyedData(&scope, L, other, /*pairs=*/false, "subsetOf"), true};
+    proto::hashedForEach(&scope, mapDataOf(&scope, L, self, "subsetOf"), &st, &subsetVisit);
+    return boolean(st.all);
+}
+
+// --- higher-order ----------------------------------------------------------
+
+// A Map's function may be written `(k, v) => ...` (arity 2) or `p => p._1`
+// (arity 1). protoScala has no static types, so the arity of the value decides,
+// which is what makes both spellings work.
+const ProtoObject* callOnEntry(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* f,
+                               const ProtoObject* k, const ProtoObject* v, bool isSet) {
+    ExecutionEngine* engine = activeCallContext()->engine;
+    proto::ProtoContext step(ctx->space, ctx);
+    step.resizeAutomaticLocals(2);
+    const ProtoObject** slot = step.getAutomaticLocals();
+    const BytecodeModule* m = compiledModuleOf(&step, L, f);
+    const unsigned arity = m ? (m->isMethod() ? m->arity() - 1 : m->arity()) : 1;
+    const ProtoObject* r = nullptr;
+    if (isSet || arity == 1) {
+        slot[0] = isSet ? k : makePair(&step, L, k, v);
+        r = engine->invoke(&step, f, slot, 1);
+    } else {
+        slot[0] = k;
+        slot[1] = v;
+        r = engine->invoke(&step, f, slot, 2);
+    }
+    step.returnValue = r;
+    return r;
+}
+
+struct EntryFnState {
+    const RuntimeLayout* L = nullptr;
+    const ProtoObject* f = nullptr;
+    bool isSet = false;
+    ProtoContext* scope = nullptr;
+    const ProtoObject** slot = nullptr;    // slot[0]: the accumulator
+    const proto::ProtoMap* out = nullptr;
+    long long count = 0;
+    bool flag = false;                     // exists/forall/find outcome
+    const ProtoObject* found = nullptr;
+    bool done = false;
+};
+
+void foreachVisit(ProtoContext* ctx, void* raw, const ProtoObject* k, const ProtoObject* v) {
+    auto* s = static_cast<EntryFnState*>(raw);
+    (void)callOnEntry(ctx, *s->L, s->f, k, v, s->isSet);
+}
+
+// map: the result is a Map when the function answered pairs, and a List
+// otherwise, which is what Scala's Map.map does with a non-pair result.
+void mapVisit(ProtoContext* ctx, void* raw, const ProtoObject* k, const ProtoObject* v) {
+    auto* s = static_cast<EntryFnState*>(raw);
+    const ProtoObject* r = callOnEntry(ctx, *s->L, s->f, k, v, s->isSet);
+    s->slot[1] = r;
+    s->slot[0] = s->slot[0]->asList(ctx)->appendLast(ctx, r)->asObject(ctx);
+}
+
+void filterVisit(ProtoContext* ctx, void* raw, const ProtoObject* k, const ProtoObject* v) {
+    auto* s = static_cast<EntryFnState*>(raw);
+    if (!truth(ctx, callOnEntry(ctx, *s->L, s->f, k, v, s->isSet), "filter")) return;
+    s->out = proto::hashedPut(ctx, s->out, scalaKeySemantics(), k, v);
+    s->slot[0] = s->out->asObject(ctx);
+}
+
+void filterNotVisit(ProtoContext* ctx, void* raw, const ProtoObject* k, const ProtoObject* v) {
+    auto* s = static_cast<EntryFnState*>(raw);
+    if (truth(ctx, callOnEntry(ctx, *s->L, s->f, k, v, s->isSet), "filterNot")) return;
+    s->out = proto::hashedPut(ctx, s->out, scalaKeySemantics(), k, v);
+    s->slot[0] = s->out->asObject(ctx);
+}
+
+void countVisit(ProtoContext* ctx, void* raw, const ProtoObject* k, const ProtoObject* v) {
+    auto* s = static_cast<EntryFnState*>(raw);
+    if (truth(ctx, callOnEntry(ctx, *s->L, s->f, k, v, s->isSet), "count")) ++s->count;
+}
+
+void existsVisit(ProtoContext* ctx, void* raw, const ProtoObject* k, const ProtoObject* v) {
+    auto* s = static_cast<EntryFnState*>(raw);
+    if (s->done) return;
+    if (truth(ctx, callOnEntry(ctx, *s->L, s->f, k, v, s->isSet), "exists")) {
+        s->flag = true;
+        s->done = true;
+        s->found = s->isSet ? k : makePair(ctx, *s->L, k, v);
+        s->slot[0] = s->found;
+    }
+}
+
+void forallVisit(ProtoContext* ctx, void* raw, const ProtoObject* k, const ProtoObject* v) {
+    auto* s = static_cast<EntryFnState*>(raw);
+    if (s->done) return;
+    if (!truth(ctx, callOnEntry(ctx, *s->L, s->f, k, v, s->isSet), "forall")) {
+        s->flag = false;
+        s->done = true;
+    }
+}
+
+EntryFnState entryState(const RuntimeLayout& L, ProtoContext* scope, const ProtoObject** slot,
+                        const ProtoObject* f, bool isSet) {
+    EntryFnState s;
+    s.L = &L;
+    s.f = f;
+    s.isSet = isSet;
+    s.scope = scope;
+    s.slot = slot;
+    return s;
+}
+
+PRIM(prim_map_foreach) {
+    const RuntimeLayout& L = layoutOf();
+    const ProtoObject* f = arg(ctx, args, 0, "foreach", 1);
+    proto::ProtoContext scope(ctx->space, ctx);
+    EntryFnState st = entryState(L, &scope, nullptr, f, selfIsSet(&scope, L, self));
+    proto::hashedForEach(&scope, mapDataOf(&scope, L, self, "foreach"), &st, &foreachVisit);
+    return L.unit;
+}
+
+// Map.map: a pair result rebuilds a Map, anything else gives a List, as Scala's
+// does. Set.map always gives a Set.
+PRIM(prim_map_map) {
+    const RuntimeLayout& L = layoutOf();
+    const ProtoObject* f = arg(ctx, args, 0, "map", 1);
+    const bool set = selfIsSet(ctx, L, self);
+    proto::ProtoContext scope(ctx->space, ctx);
+    scope.resizeAutomaticLocals(2);
+    const ProtoObject** slot = scope.getAutomaticLocals();
+    slot[0] = scope.newList()->asObject(&scope);
+    EntryFnState st = entryState(L, &scope, slot, f, set);
+    proto::hashedForEach(&scope, mapDataOf(&scope, L, self, "map"), &st, &mapVisit);
+    const proto::ProtoList* results = slot[0]->asList(&scope);
+    const unsigned long n = results->getSize(&scope);
+    // A Set rebuilds a Set; a Map rebuilds a Map when every result is a pair.
+    bool allPairs = !set;
+    for (unsigned long i = 0; i < n && allPairs; ++i) {
+        const ProtoObject* e = results->getAt(&scope, static_cast<int>(i));
+        allPairs = isScalaInstance(&scope, L, e) &&
+                   e->getAttribute(&scope, L.tupleKey) == PROTO_TRUE;
+    }
+    if (!set && !allPairs) return slot[0];
+    const proto::ProtoMap* out = scope.newMap();
+    slot[1] = out->asObject(&scope);
+    for (unsigned long i = 0; i < n; ++i) {
+        const ProtoObject* e = results->getAt(&scope, static_cast<int>(i));
+        const ProtoObject* k = e;
+        const ProtoObject* v = e;
+        if (!set) pairOf(&scope, L, e, "map", &k, &v);
+        out = proto::hashedPut(&scope, out, scalaKeySemantics(), k, v);
+        slot[1] = out->asObject(&scope);
+    }
+    return wrapMap(&scope, L, out, set);
+}
+
+PRIM(prim_map_flatMap) {
+    const RuntimeLayout& L = layoutOf();
+    const ProtoObject* f = arg(ctx, args, 0, "flatMap", 1);
+    const bool set = selfIsSet(ctx, L, self);
+    proto::ProtoContext scope(ctx->space, ctx);
+    scope.resizeAutomaticLocals(2);
+    const ProtoObject** slot = scope.getAutomaticLocals();
+    slot[0] = scope.newList()->asObject(&scope);
+    EntryFnState st = entryState(L, &scope, slot, f, set);
+    proto::hashedForEach(&scope, mapDataOf(&scope, L, self, "flatMap"), &st, &mapVisit);
+    // Flatten what the function returned, then rebuild the receiver's kind.
+    const proto::ProtoList* results = slot[0]->asList(&scope);
+    ListBuilder b(&scope);
+    for (unsigned long i = 0, n = results->getSize(&scope); i < n; ++i)
+        addFlat(b, results->getAt(b.context(), static_cast<int>(i)), "flatMap");
+    slot[0] = b.finish();
+    const proto::ProtoList* flat = slot[0]->asList(&scope);
+    const unsigned long n = flat->getSize(&scope);
+    bool allPairs = !set;
+    for (unsigned long i = 0; i < n && allPairs; ++i) {
+        const ProtoObject* e = flat->getAt(&scope, static_cast<int>(i));
+        allPairs = isScalaInstance(&scope, L, e) &&
+                   e->getAttribute(&scope, L.tupleKey) == PROTO_TRUE;
+    }
+    if (!set && !allPairs) return slot[0];
+    const proto::ProtoMap* out = scope.newMap();
+    slot[1] = out->asObject(&scope);
+    for (unsigned long i = 0; i < n; ++i) {
+        const ProtoObject* e = flat->getAt(&scope, static_cast<int>(i));
+        const ProtoObject* k = e;
+        const ProtoObject* v = e;
+        if (!set) pairOf(&scope, L, e, "flatMap", &k, &v);
+        out = proto::hashedPut(&scope, out, scalaKeySemantics(), k, v);
+        slot[1] = out->asObject(&scope);
+    }
+    return wrapMap(&scope, L, out, set);
+}
+
+const ProtoObject* mapFilter(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+                             bool keep, const char* method) {
+    const RuntimeLayout& L = layoutOf();
+    const ProtoObject* f = arg(ctx, args, 0, method, 1);
+    const bool set = selfIsSet(ctx, L, self);
+    proto::ProtoContext scope(ctx->space, ctx);
+    scope.resizeAutomaticLocals(1);
+    const ProtoObject** slot = scope.getAutomaticLocals();
+    EntryFnState st = entryState(L, &scope, slot, f, set);
+    st.out = scope.newMap();
+    slot[0] = st.out->asObject(&scope);
+    proto::hashedForEach(&scope, mapDataOf(&scope, L, self, method), &st,
+                         keep ? &filterVisit : &filterNotVisit);
+    return wrapMap(&scope, L, st.out, set);
+}
+
+PRIM(prim_map_filter) { return mapFilter(ctx, self, args, /*keep=*/true, "filter"); }
+PRIM(prim_map_filterNot) { return mapFilter(ctx, self, args, /*keep=*/false, "filterNot"); }
+
+// A Map's withFilter is over the entry List, so a for-comprehension's guard and
+// body interleave exactly as the Phase 2 WithFilter does for a List.
+PRIM(prim_map_withFilter) {
+    const ProtoObject* p = arg(ctx, args, 0, "withFilter", 1);
+    proto::ProtoContext scope(ctx->space, ctx);
+    const ProtoObject* entries = mapEntries(&scope, self, nullptr, "withFilter", 0);
+    scope.returnValue = entries;
+    const ProtoObject* preds[1] = {p};
+    const ProtoObject* r = makeWithFilter(&scope, entries, scope.newList(1, preds));
+    scope.returnValue = r;
+    return r;
+}
+
+PRIM(prim_map_count) {
+    const RuntimeLayout& L = layoutOf();
+    const ProtoObject* f = arg(ctx, args, 0, "count", 1);
+    proto::ProtoContext scope(ctx->space, ctx);
+    EntryFnState st = entryState(L, &scope, nullptr, f, selfIsSet(&scope, L, self));
+    proto::hashedForEach(&scope, mapDataOf(&scope, L, self, "count"), &st, &countVisit);
+    return proto::makeSmallInt(st.count);
+}
+
+PRIM(prim_map_exists) {
+    const RuntimeLayout& L = layoutOf();
+    const ProtoObject* f = arg(ctx, args, 0, "exists", 1);
+    proto::ProtoContext scope(ctx->space, ctx);
+    scope.resizeAutomaticLocals(1);
+    EntryFnState st = entryState(L, &scope, scope.getAutomaticLocals(), f,
+                                 selfIsSet(&scope, L, self));
+    st.flag = false;
+    proto::hashedForEach(&scope, mapDataOf(&scope, L, self, "exists"), &st, &existsVisit);
+    return boolean(st.flag);
+}
+
+PRIM(prim_map_forall) {
+    const RuntimeLayout& L = layoutOf();
+    const ProtoObject* f = arg(ctx, args, 0, "forall", 1);
+    proto::ProtoContext scope(ctx->space, ctx);
+    EntryFnState st = entryState(L, &scope, nullptr, f, selfIsSet(&scope, L, self));
+    st.flag = true;
+    proto::hashedForEach(&scope, mapDataOf(&scope, L, self, "forall"), &st, &forallVisit);
+    return boolean(st.flag);
+}
+
+PRIM(prim_map_find) {
+    const RuntimeLayout& L = layoutOf();
+    const ProtoObject* f = arg(ctx, args, 0, "find", 1);
+    proto::ProtoContext scope(ctx->space, ctx);
+    scope.resizeAutomaticLocals(1);
+    EntryFnState st = entryState(L, &scope, scope.getAutomaticLocals(), f,
+                                 selfIsSet(&scope, L, self));
+    st.flag = false;
+    proto::hashedForEach(&scope, mapDataOf(&scope, L, self, "find"), &st, &existsVisit);
+    return optionOf(&scope, L, st.flag ? st.found : nullptr);
+}
+
+PRIM(prim_map_foldLeft) {
+    const RuntimeLayout& L = layoutOf();
+    proto::ProtoContext scope(ctx->space, ctx);
+    const ProtoObject* entries = mapEntries(&scope, self, nullptr, "foldLeft", 0);
+    scope.returnValue = entries;
+    const unsigned long n = argCount(&scope, args);
+    if (n == 1) return makeFoldPartial(&scope, L, entries, args->getAt(&scope, 0), /*left=*/true);
+    if (n != 2) wrongArgCount("foldLeft", "1 or 2", n);
+    return foldImpl(&scope, entries->asList(&scope), args->getAt(&scope, 0),
+                    args->getAt(&scope, 1), /*left=*/true);
+}
+
+// --- conversions, rendering, equality --------------------------------------
+
+PRIM(prim_map_toMap) {
+    const RuntimeLayout& L = layoutOf();
+    expectArgs(ctx, args, "toMap", 0);
+    if (isMapFast(ctx, L, self)) return self;
+    proto::ProtoContext scope(ctx->space, ctx);
+    const proto::ProtoMap* data = asKeyedData(&scope, L, self, /*pairs=*/true, "toMap");
+    scope.returnValue = data->asObject(&scope);
+    return wrapMap(&scope, L, data, /*isSet=*/false);
+}
+
+const ProtoObject* toSetImpl(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* self) {
+    proto::ProtoContext scope(ctx->space, ctx);
+    const proto::ProtoMap* data = asKeyedData(&scope, L, self, /*pairs=*/false, "toSet");
+    scope.returnValue = data->asObject(&scope);
+    return wrapMap(&scope, L, data, /*isSet=*/true);
+}
+
+PRIM(prim_seq_toSet) {
+    const RuntimeLayout& L = layoutOf();
+    expectArgs(ctx, args, "toSet", 0);
+    if (isSetFast(ctx, L, self)) return self;
+    return toSetImpl(ctx, L, self);
+}
+
+PRIM(prim_map_keySet) {
+    const RuntimeLayout& L = layoutOf();
+    expectArgs(ctx, args, "keySet", 0);
+    proto::ProtoContext scope(ctx->space, ctx);
+    const ProtoObject* keys = mapEntries(&scope, self, nullptr, "keySet", 1);
+    scope.returnValue = keys;
+    return toSetImpl(&scope, L, keys);
+}
+
+// D58: ascending-hash order, deterministic for a given key set and unrelated to
+// Scala's, so the rendering is pinned only by fixtures that sort first.
+const ProtoObject* mapShow(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+                           const char* method) {
+    const RuntimeLayout& L = layoutOf();
+    expectArgs(ctx, args, method, 0);
+    const bool set = selfIsSet(ctx, L, self);
+    proto::ProtoContext scope(ctx->space, ctx);
+    const ProtoObject* entries = mapEntries(&scope, self, nullptr, method, 0);
+    scope.returnValue = entries;
+    const proto::ProtoList* l = entries->asList(&scope);
+    std::string out = set ? "Set(" : "Map(";
+    for (unsigned long i = 0, n = l->getSize(&scope); i < n; ++i) {
+        if (i) out += ", ";
+        const ProtoObject* e = l->getAt(&scope, static_cast<int>(i));
+        if (set) {
+            out += show(&scope, L, e);
+        } else {
+            out += show(&scope, L, e->getAttribute(&scope, L.tupleFieldKey[1])) + " -> " +
+                   show(&scope, L, e->getAttribute(&scope, L.tupleFieldKey[2]));
+        }
+    }
+    return str(ctx, out + ")");
+}
+SEQ_NAMED(prim_map_toString, mapShow, "toString")
+
+PRIM(prim_map_mkString) {
+    const RuntimeLayout& L = layoutOf();
+    const unsigned long argn = argCount(ctx, args);
+    std::string start, sep, end;
+    if (argn == 1) {
+        sep = stringArg(ctx, args->getAt(ctx, 0), "mkString");
+    } else if (argn == 3) {
+        start = stringArg(ctx, args->getAt(ctx, 0), "mkString");
+        sep = stringArg(ctx, args->getAt(ctx, 1), "mkString");
+        end = stringArg(ctx, args->getAt(ctx, 2), "mkString");
+    } else if (argn != 0) {
+        wrongArgCount("mkString", "0, 1 or 3", argn);
+    }
+    proto::ProtoContext scope(ctx->space, ctx);
+    const ProtoObject* entries = mapEntries(&scope, self, nullptr, "mkString", 0);
+    scope.returnValue = entries;
+    const proto::ProtoList* l = entries->asList(&scope);
+    std::string out = start;
+    for (unsigned long i = 0, n = l->getSize(&scope); i < n; ++i) {
+        if (i) out += sep;
+        out += show(&scope, L, l->getAt(&scope, static_cast<int>(i)));
+    }
+    return str(ctx, out + end);
+}
+
+// Two Maps are equal when they have the same size and every key of one is
+// present in the other with an == value; a Map and a Set are never equal.
+struct EqState {
+    const RuntimeLayout* L = nullptr;
+    const proto::ProtoMap* other = nullptr;
+    bool same = true;
+    bool valuesToo = true;
+};
+
+void eqVisit(ProtoContext* ctx, void* raw, const ProtoObject* k, const ProtoObject* v) {
+    auto* s = static_cast<EqState*>(raw);
+    if (!s->same) return;
+    const ProtoObject* w = proto::hashedGet(ctx, s->other, scalaKeySemantics(), k);
+    if (!w) { s->same = false; return; }
+    if (s->valuesToo && !valuesEqual(ctx, *s->L, v, w)) s->same = false;
+}
+
+bool keyedEqual(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* a,
+                const ProtoObject* b) {
+    const bool aSet = isSetFast(ctx, L, a);
+    const bool bSet = isSetFast(ctx, L, b);
+    if (aSet != bSet) return false;                      // a Map is never a Set
+    const proto::ProtoMap* da = a->getAttribute(ctx, L.mapDataKey)->asMap(ctx);
+    const proto::ProtoMap* db = b->getAttribute(ctx, L.mapDataKey)->asMap(ctx);
+    if (entryCount(ctx, da) != entryCount(ctx, db)) return false;
+    EqState st{&L, db, true, !aSet};
+    proto::hashedForEach(ctx, da, &st, &eqVisit);
+    return st.same;
+}
+
+PRIM(prim_map_equals) {
+    const RuntimeLayout& L = layoutOf();
+    const ProtoObject* other = arg(ctx, args, 0, "equals", 1);
+    if (!isMapFast(ctx, L, other) && !isSetFast(ctx, L, other)) return PROTO_FALSE;
+    return boolean(keyedEqual(ctx, L, self, other));
+}
+
+// Order-independent: a commutative XOR fold, so the ascending-hash iteration
+// order cannot leak into the hash (D58).
+struct HashState {
+    const RuntimeLayout* L = nullptr;
+    std::int32_t acc = 0;
+    bool keysOnly = false;
+};
+
+void hashVisit(ProtoContext* ctx, void* raw, const ProtoObject* k, const ProtoObject* v) {
+    auto* s = static_cast<HashState*>(raw);
+    const std::int32_t h = s->keysOnly
+                               ? scalaHash(ctx, *s->L, k)
+                               : scalaHash(ctx, *s->L, k) * 41 + scalaHash(ctx, *s->L, v);
+    s->acc ^= h;
+}
+
+const ProtoObject* keyedHash(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+                             const char* method) {
+    const RuntimeLayout& L = layoutOf();
+    expectArgs(ctx, args, method, 0);
+    proto::ProtoContext scope(ctx->space, ctx);
+    HashState st{&L, 0, selfIsSet(&scope, L, self)};
+    proto::hashedForEach(&scope, mapDataOf(&scope, L, self, method), &st, &hashVisit);
+    return proto::makeSmallInt(st.acc);
+}
+SEQ_NAMED(prim_map_hashCode, keyedHash, "hashCode")
+SEQ_NAMED(prim_map_hashHash, keyedHash, "##")
+
+// --- the companions --------------------------------------------------------
+
+PRIM(prim_mapCompanion_apply) {
+    const RuntimeLayout& L = layoutOf();
+    proto::ProtoContext scope(ctx->space, ctx);
+    scope.resizeAutomaticLocals(1);
+    const ProtoObject** slot = scope.getAutomaticLocals();
+    const proto::ProtoMap* data = scope.newMap();
+    slot[0] = data->asObject(&scope);
+    const unsigned long n = argCount(&scope, args);
+    for (unsigned long i = 0; i < n; ++i) {
+        const ProtoObject* pair = args->getAt(&scope, static_cast<int>(i));
+        const ProtoObject* k = nullptr;
+        const ProtoObject* v = nullptr;
+        pairOf(&scope, L, pair, "Map(...)", &k, &v);
+        data = proto::hashedPut(&scope, data, scalaKeySemantics(), k, v);
+        slot[0] = data->asObject(&scope);   // rooted across the next hashedPut
+    }
+    return wrapMap(&scope, L, data, /*isSet=*/false);
+}
+
+PRIM(prim_mapCompanion_empty) {
+    const RuntimeLayout& L = layoutOf();
+    expectArgs(ctx, args, "empty", 0);
+    return wrapMap(ctx, L, ctx->newMap(), /*isSet=*/false);
+}
+
+PRIM(prim_setCompanion_apply) {
+    const RuntimeLayout& L = layoutOf();
+    proto::ProtoContext scope(ctx->space, ctx);
+    scope.resizeAutomaticLocals(1);
+    const ProtoObject** slot = scope.getAutomaticLocals();
+    const proto::ProtoMap* data = scope.newMap();
+    slot[0] = data->asObject(&scope);
+    const unsigned long n = argCount(&scope, args);
+    for (unsigned long i = 0; i < n; ++i) {
+        const ProtoObject* e = args->getAt(&scope, static_cast<int>(i));
+        data = proto::hashedPut(&scope, data, scalaKeySemantics(), e, e);
+        slot[0] = data->asObject(&scope);
+    }
+    return wrapMap(&scope, L, data, /*isSet=*/true);
+}
+
+PRIM(prim_setCompanion_empty) {
+    const RuntimeLayout& L = layoutOf();
+    expectArgs(ctx, args, "empty", 0);
+    return wrapMap(ctx, L, ctx->newMap(), /*isSet=*/true);
+}
+
+// --- `->` on Any, and the List operations that build a Map -----------------
+
+// Scala's ArrowAssoc: `k -> v` is the Tuple2 (k, v). A case-class instance,
+// never a ProtoTuple (§4.6).
+PRIM(prim_any_arrow) {
+    const RuntimeLayout& L = layoutOf();
+    return makePair(ctx, L, self, arg(ctx, args, 0, "->", 1));
+}
+
+// xs.groupBy(f): a Map from each key f produced to the List of elements that
+// produced it, in the elements' own order.
+PRIM(prim_seq_groupBy) {
+    const RuntimeLayout& L = layoutOf();
+    const ProtoList* xs = seqData(ctx, L, self, "groupBy");
+    const ProtoObject* f = arg(ctx, args, 0, "groupBy", 1);
+    proto::ProtoContext scope(ctx->space, ctx);
+    scope.resizeAutomaticLocals(3);
+    const ProtoObject** slot = scope.getAutomaticLocals();
+    const proto::ProtoMap* data = scope.newMap();
+    slot[0] = data->asObject(&scope);
+    for (unsigned long i = 0, n = xs->getSize(&scope); i < n; ++i) {
+        slot[1] = xs->getAt(&scope, static_cast<int>(i));
+        slot[2] = callOne(&scope, f, slot[1]);
+        const ProtoObject* bucket = proto::hashedGet(&scope, data, scalaKeySemantics(), slot[2]);
+        const proto::ProtoList* group =
+            bucket ? bucket->asList(&scope) : scope.newList();
+        const ProtoObject* extended = group->appendLast(&scope, slot[1])->asObject(&scope);
+        slot[1] = extended;
+        data = proto::hashedPut(&scope, data, scalaKeySemantics(), slot[2], extended);
+        slot[0] = data->asObject(&scope);
+    }
+    return wrapMap(&scope, L, data, /*isSet=*/false);
+}
+
 } // namespace
 
 void installCollectionPrimitives(ProtoContext* ctx, const RuntimeLayout& L) {
@@ -1340,8 +2272,59 @@ void installCollectionPrimitives(ProtoContext* ctx, const RuntimeLayout& L) {
     installAll(ctx, L.vectorCompanion, vectorCompanion);
     static constexpr MethodEntry foldPartial[] = {{"apply", &prim_foldPartial_apply}};
     installAll(ctx, L.foldPartialProto, foldPartial);
+
+    // Map and Set share every native: a Set stores its element as both key and
+    // value, so one implementation covers both and `selfIsSet` decides which
+    // kind a result is wrapped as.
+    static constexpr MethodEntry keyed[] = {
+        {"apply", &prim_map_apply}, {"get", &prim_map_get}, {"getOrElse", &prim_map_getOrElse},
+        {"contains", &prim_map_contains}, {"isDefinedAt", &prim_map_isDefinedAt},
+        {"size", &prim_map_size}, {"length", &prim_map_length},
+        {"isEmpty", &prim_map_isEmpty}, {"nonEmpty", &prim_map_nonEmpty},
+        {"keys", &prim_map_keys}, {"keySet", &prim_map_keySet}, {"values", &prim_map_values},
+        {"toList", &prim_map_toList}, {"toSeq", &prim_map_toSeq},
+        {"iterator", &prim_map_iterator}, {"head", &prim_map_head},
+        {"+", &prim_map_plus}, {"updated", &prim_map_updated},
+        {"-", &prim_map_minus}, {"removed", &prim_map_removed},
+        {"++", &prim_map_concat}, {"--", &prim_map_removeAll},
+        {"union", &prim_set_union}, {"|", &prim_set_or},
+        {"intersect", &prim_set_intersect}, {"&", &prim_set_and},
+        {"diff", &prim_set_diff}, {"&~", &prim_set_andNot},
+        {"subsetOf", &prim_set_subsetOf},
+        {"foreach", &prim_map_foreach}, {"map", &prim_map_map}, {"flatMap", &prim_map_flatMap},
+        {"filter", &prim_map_filter}, {"filterNot", &prim_map_filterNot},
+        {"withFilter", &prim_map_withFilter},
+        {"count", &prim_map_count}, {"exists", &prim_map_exists},
+        {"forall", &prim_map_forall}, {"find", &prim_map_find},
+        {"foldLeft", &prim_map_foldLeft},
+        {"toMap", &prim_map_toMap}, {"toSet", &prim_seq_toSet},
+        {"mkString", &prim_map_mkString}, {"toString", &prim_map_toString},
+        {"equals", &prim_map_equals}, {"hashCode", &prim_map_hashCode},
+        {"##", &prim_map_hashHash},
+    };
+    installAll(ctx, L.mapProto, keyed);
+    installAll(ctx, L.setProto, keyed);
+    static constexpr MethodEntry mapCompanion[] = {
+        {"apply", &prim_mapCompanion_apply}, {"empty", &prim_mapCompanion_empty}};
+    installAll(ctx, L.mapCompanion, mapCompanion);
+    static constexpr MethodEntry setCompanion[] = {
+        {"apply", &prim_setCompanion_apply}, {"empty", &prim_setCompanion_empty}};
+    installAll(ctx, L.setCompanion, setCompanion);
+    // `Map(1 -> "a")` needs `->` on every value (Scala's ArrowAssoc).
+    static constexpr MethodEntry anyArrow[] = {{"->", &prim_any_arrow}};
+    installAll(ctx, L.anyProto, anyArrow);
+    // The two Seq operations that build a Map.
+    static constexpr MethodEntry seqToMap[] = {
+        {"toMap", &prim_map_toMap}, {"toSet", &prim_seq_toSet}, {"groupBy", &prim_seq_groupBy}};
+    installAll(ctx, L.listProto, seqToMap);
+    installAll(ctx, L.vectorProto, seqToMap);
+    static constexpr MethodEntry rangeToSet[] = {{"toSet", &prim_seq_toSet}};
+    installAll(ctx, L.rangeProto, rangeToSet);
+
     L.globals->setAttribute(ctx, proto::ProtoString::createSymbol(ctx, "Vector"),
                             L.vectorCompanion);
+    L.globals->setAttribute(ctx, proto::ProtoString::createSymbol(ctx, "Map"), L.mapCompanion);
+    L.globals->setAttribute(ctx, proto::ProtoString::createSymbol(ctx, "Set"), L.setCompanion);
 }
 
 } // namespace protoScala

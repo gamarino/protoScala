@@ -110,4 +110,57 @@ println(total)
 SCALA
 out=$(PROTOCORE_HEAP_LIMIT_CELLS=2000000 timeout 180s "$P" "$work/actors.scala" 2>&1); rc=$?
 [[ $rc -eq 0 && "$out" == "40000" ]] || { echo "FAIL (actors): exit $rc, '$out'"; exit 1; }
+
+# --- Phase 3: Map under a low heap, value keys ---------------------------------
+# 20000 entries whose only reference is the Map, then every key is read back. A
+# key the collector reclaimed shows up as a miss, which is the whole point of
+# ProtoMap's traced keys. The keys are built by concatenation, so the only
+# reference to each is the slot (PROTOMAP-SPEC §5, now exercised from the
+# language).
+cat >"$work/map-pressure.scala" <<'SCALA'
+@main def run(): Unit =
+  var m = Map[String, Int]()
+  var i = 0
+  while i < 20000 do
+    m = m + (("k" + i) -> i)
+    i += 1
+  var seen = 0
+  var j = 0
+  while j < 20000 do
+    if m.getOrElse("k" + j, -1) == j then seen += 1
+    j += 1
+  println(seen.toString + " " + (if seen == 20000 then "ok" else "BAD"))
+SCALA
+out=$(PROTOCORE_HEAP_LIMIT_CELLS=2000000 timeout 300s "$P" "$work/map-pressure.scala" 2>&1); rc=$?
+[[ $rc -eq 0 ]] || { echo "FAIL (map pressure): exit $rc: $out"; exit 1; }
+[[ "$out" == "20000 ok" ]] || { echo "FAIL (map pressure): printed '$out'"; exit 1; }
+
+# --- Phase 3: Map under a low heap, IDENTITY keys ------------------------------
+# The half ProtoMap's traced-key guarantee exists for: a value key lives inside
+# the entry list, an identity key IS the slot key. 20000 instances of a class
+# with the default equals, reachable only through the Map and the list that keeps
+# them findable. If ProtoMap did not trace its keys the read-back count would
+# fall below 20000 and print BAD.
+cat >"$work/map-identity-pressure.scala" <<'SCALA'
+class Key(val n: Int)
+@main def run(): Unit =
+  var m = Map[Key, Int]()
+  var keep = List[Key]()
+  var i = 0
+  while i < 20000 do
+    val k = new Key(i)
+    m = m + (k -> i)
+    keep = k :: keep
+    i += 1
+  var seen = 0
+  var rest = keep
+  while rest.nonEmpty do
+    if m.getOrElse(rest.head, -1) == rest.head.n then seen += 1
+    rest = rest.tail
+  println(seen.toString + " " + (if seen == 20000 then "ok" else "BAD"))
+SCALA
+out=$(PROTOCORE_HEAP_LIMIT_CELLS=2000000 timeout 300s "$P" "$work/map-identity-pressure.scala" 2>&1); rc=$?
+[[ $rc -eq 0 ]] || { echo "FAIL (identity-key pressure): exit $rc: $out"; exit 1; }
+[[ "$out" == "20000 ok" ]] || { echo "FAIL (identity-key pressure): printed '$out'"; exit 1; }
+
 echo OK
