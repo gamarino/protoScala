@@ -10,8 +10,9 @@
 > arguments for Scala-defined methods (and for every other callable protoCore can
 > reach), extension methods, templates nested in an `object`, and multiple
 > constructor parameter lists**. Phase 5 was implemented out of order, so the
-> minor version went 0.2.0 → 0.3.0 (Phase 5) → 0.4.0 (Phase 3) → 0.5.0 (Phase 4);
-> UMD and packaging (Phase 6) are what remain.
+> minor version went 0.2.0 → 0.3.0 (Phase 5) → 0.4.0 (Phase 3) → 0.5.0 (Phase 4)
+> → 0.6.0 (Phase 6: modules, UMD and packaging). Packaging in fact landed in the
+> installer phase; Phase 6 closed the `.tar.gz` half and the version.
 > **Tests:** 1102 total (`ctest --test-dir build_release -N`) — 353 unit
 > (GoogleTest, including the separate `unit/actors` binary), 715 conformance
 > fixtures, 22 CLI checks, 12 benchmark smoke checks. All green, and green at
@@ -299,6 +300,76 @@ keyword-argument convention is documented in `docs/INTEROP.md` with a
 stand-in-callee fixture suite, and a default value may read an enclosing local as
 well as an earlier parameter.
 
+### Phase 6 — modules, UMD and packaging
+
+Per [LANGUAGE.md](LANGUAGE.md) §1 and §3 and [INTEROP.md](INTEROP.md). Every item
+is covered by conformance fixtures; the module forms that have a Scala meaning
+were checked against that meaning, and the ones that do not (there are no
+file-level modules in Scala) are recorded as D90-D96.
+
+- [x] **`import` is a binding form.** It resolves at **compile time**, through a
+      `ModuleLoader` seam the `Compiler` holds a pointer to, and that is the one
+      place in the dialect that binds early rather than late. It is deliberate: a
+      name bound at run time carries no `ClassInfo`, so an imported class could
+      not be used as a **type**, and importing types is what a Scala programmer
+      does with `import`. DESIGN §3.3 still holds — the loader returns plain C++
+      descriptors and no `ProtoObject*` reaches the compiler or the AST.
+- [x] **A module is an `object`** (D91). `desugarModule` wraps a module file's
+      top-level statements in a synthetic `object <LastSegment>` and runs the
+      ordinary desugarer, so Phase 4's nested-template lifting does all the work:
+      the classes get their qualified names and their companions, the `def`s
+      become members, and no second object model is introduced.
+- [x] **The five import forms**: the module itself, `as` rename, a selector list
+      with per-name renames (`as` and `=>`), a wildcard (`*` and `_`), and a
+      selector that names a **type** — which makes `new Point(1, 2)`,
+      `case p: Point` and `case Point(x, y)` compile. 27 fixtures in
+      `tests/conformance/24-modules/` and a REPL check in `tests/cli/modules.sh`.
+- [x] **`ScalaModuleProvider`** — alias `scala`, GUID `protoScala-source-v1`,
+      registered once per process with `std::call_once`, resolving its session
+      through a **`ProtoSpace`-keyed** registry rather than a thread-local (a
+      thread-local answers "module not found" on every actor worker, which is the
+      bug protoST's header records). `provider:scala` is **prepended** to the
+      space's resolution chain, never substituted for it. A miss is `PROTO_NONE`
+      and never an exception, so the chain continues to the next provider.
+- [x] **Exactly-once loading per canonical absolute path**, with cycle detection
+      (`cyclic module import: <path>`), a failed load deliberately **not** cached
+      so a fixed file can be imported again, and a waiting importer parked inside
+      `UnmanagedScope` so the collector never waits for it.
+- [x] **Prefix routing** for `py.`, `js.`, `st.` and `clj.`, from a **closed**
+      four-name list — "any registered alias is a prefix" would make
+      `import util.Strings` hijackable by a plug-in aliased `util`, and a
+      program's meaning must not depend on which plug-ins are installed. A
+      prefixed import calls the named provider's `tryLoad` **directly** and does
+      not go through `getImportModule`, because protoCore's `SharedModuleCache`
+      is keyed by logical path with no `ProtoSpace` component.
+- [x] **Provider plug-ins**, `dlopen`'d from `PROTOSCALA_PROVIDERS` and from
+      `<prefix>/lib/protoscala/providers`, exporting `protoScalaProviderABI` and
+      `protoScalaRegisterProviders`. protoScala ships **none**; the only one built
+      is the test double of `tests/unit/probe_provider.cpp`, which answers
+      `probe` and never a real library's data. `--version` reports what it found.
+- [x] **The mandatory boundary catch shape** (`src/umd/ForeignBoundary.h`): six
+      clauses in ROADMAP's order plus `catch (const std::logic_error&) { throw; }`
+      before the `std::exception` arm, which ROADMAP's list omits and D74
+      requires. One unit test per clause; removing any one turns exactly one red.
+      `ExecutionEngine::callNative` gained the last-resort clause it lacked, so a
+      native from a plug-in that throws a non-`std::exception` is a catchable
+      Scala `RuntimeException` instead of a terminated process.
+- [x] **A named argument across a real UMD boundary**, in
+      `tests/conformance/25-interop/`, with a sibling whose parameter name is too
+      long to embed in a pointer word — the case where a key built with anything
+      but `createSymbol` fails silently.
+- [x] **The prelude is compiled at build time.** `protoscala-precompile` emits
+      static tables that `src/runtime/PreludeImage.cpp` walks, with no lexer,
+      parser, desugarer or compiler in the start-up path. It is a build product
+      with a CMake `DEPENDS` on `lib/prelude.scala`, not a cache, so it cannot go
+      stale; a format version and an FNV-1a-64 of the source guard a hand-copied
+      file and **fall back** to the source rather than failing.
+- [x] **Packaging**: both a `.deb` and a `.tar.gz` at 0.6.0, each extracted and
+      run under `env -u LD_LIBRARY_PATH`, with `ldd` confirming libprotoCore
+      resolved from inside the package.
+- [x] Tutorial chapter 15 and the worked example, with a conformance fixture per
+      runnable snippet, and two "protoScala in 10 minutes" sections in the README.
+
 ## Not yet implemented
 
 - A `class`, `trait` or `object` nested in a **`class`** or **`trait`**, a local
@@ -307,12 +378,15 @@ well as an earlier parameter.
   records them for a later phase. Nesting in an **`object`** is implemented
   (Phase 4).
 - Exhaustiveness checking for `match` (D4: types are erased).
-- UMD and packaging — Phase 6. **Named arguments already travel in protoCore's
-  `keywordParameters` for every callable, foreign ones included, but UMD itself
-  is not implemented, so the foreign half is unexercised: `docs/INTEROP.md` §7
-  records the convention and
-  `tests/conformance/23-named-arguments/foreign-python-*.scala` are `XFAIL` with
-  their expected output recorded for Phase 6 to convert.**
+- A **`py`, `js` or `clj` provider**. protoScala routes all four family prefixes
+  and reports `no provider registered for '<alias>'`; no runtime in the family
+  registers those three aliases, and installing protoPython's means a second
+  runtime in the process (R5). ROADMAP **Track Y**.
+- A **wildcard import of a foreign module** (D92) and **lexical import scoping**
+  (D96), which is the same question as scoping extensions (D82).
+- **A cross-runtime import between two co-resident runtimes.** Co-residency
+  itself works and was measured; a provider serves only callers that share its
+  `ProtoSpace`, which is the UMD contract. See R5 under "Known issues".
 - Supervision trees, `ExecutionContext`, actor timeouts and
   `Await.result(f, duration)` — not scheduled. An `await` waits forever; the
   shutdown reports any actor still parked on a future that never completed.
@@ -396,6 +470,14 @@ their reserved ranges.
 | 97 | `RETHROW` | `[] -> throws` | operand: the local slot a `Finally` handler saved the in-flight value in. Also what a `catch` cascade emits when no case matches, so the exception continues outward rather than being replaced |
 | 98..127 | reserved | | exceptions |
 | 128..159 | reserved | | still reserved; Phase 5 shipped the actor surface as ordinary sends to native methods (plan Task 0 A0-11), so `SEND_ASYNC`, `ASK` and `AWAIT` were not needed. A dedicated opcode is a later optimisation to be justified by `perf stat -r 3` |
+
+**Phase 6 added no opcode.** An import is resolved at compile time and binds a
+name to a global that already exists, so the import site emits no instruction at
+all: `import util.Strings` produces nothing, and a later use of `Strings` is the
+`PUSH_GLOBAL` + `FORCE` an `object` read already compiles to. A member alias
+compiles to the `SEND_APPLY` its qualified spelling compiles to. The lowest free
+opcode is still **40**. A reader who has just read a UMD changelog will look for a
+module opcode; there is none, and that is the design rather than an omission.
 
 ## Intentional deviations
 
@@ -599,20 +681,100 @@ order however the names reorder them; a `case` of an `enum` requires its
 qualifier; and the generated `valueOf` and `fromOrdinal` messages are scalac's own
 sentences. All of it was verified against `tools/scala3-3.9.0`.
 
+### Phase 6 deviations — recorded 2026-09-24, pending review
+
+Decided by the implementing agent under the maintainer's standing authorisation
+([DECISIONS-LOG.md](DECISIONS-LOG.md), "Phase 6"). The plan
+([plans/2026-09-24-phase-6-umd-packaging.md](plans/2026-09-24-phase-6-umd-packaging.md))
+escalated three items (E5–E7) to the maintainer; the maintainer was unavailable,
+so each was decided here, implemented, and recorded in the decisions log with the
+argument and what reversing it would cost.
+
+The highest id in use before this phase was **D89**, so Phase 6 uses **D90
+onwards**. **D57, D60, D64 and D78 remain deliberately unused** and were not
+recycled.
+
+| Id | Deviation | Plan item | Track |
+|---|---|---|---|
+| D90 | A module's top level runs **when it is imported**, during the importing unit's compilation, not lazily on first member access. Scala has no file-level modules, so there is nothing to diverge from; Python and JavaScript both run a module at import, and a module that exists for its effects (`import mylib.Setup`) would otherwise never run. A module stays loaded even when the importing unit then fails to compile or throws: its values live under keys that are never reused, so the leftover is unreachable, and Python behaves the same way | A0-1, A0-3 | (perm) |
+| D91 | A module **is an `object`**: `util/Shapes.scala` becomes `object Shapes`, its classes are `Shapes.Point` with their companions, and its name comes from the **file** rather than from anything written inside it. A module may not define an `@main`, which is refused (`a module may not define an @main method`) rather than ignored, because a silently ignored `@main` would be a trap. An `import` and an `extension` written in a module stay outside that synthetic object — neither is a member of anything — so an extension in a module sees the module's globals and not its members | A0-2 | (perm) |
+| D92 | A **wildcard import of a foreign module** (`import py.numpy.*`) is refused: a foreign object's attribute names cannot be enumerated through the API this runtime uses, and guessing a name set would fail silently later. The message names the working spelling (`import numpy.{a, b}`). Named selectors work | A0-4 | later |
+| D93 | `given` selectors (`import M.given`, `import M.{given T}`, `import M.{a => _}`) are parsed and **ignored**, as every other given is (D3): there are no type classes to resolve, so nothing is bound and nothing is an error | A0-6 | later |
+| D94 | A **foreign module binds no types**: `new`, a type pattern and `isInstanceOf` on a class reached through `py.`, `js.`, `st.` or `clj.` are unavailable, because a foreign value carries no `ClassInfo`. Its members resolve by name at run time, which is what DESIGN §5's type-mapping table already says ("other objects → dynamic objects") | A0-4 | (perm) |
+| D95 | `--disassemble` **resolves imports**, and therefore runs the top level of every module the file imports: a file cannot be compiled without its imports, and an import is resolved by loading (D90) | A0-1 | (perm) |
+| D96 | An `import` is **hoisted to its compilation unit**. A top-level import is processed before every other declaration and is visible for the whole unit; an import written inside a block or a template body is compiled where it is found and its binding **outlives that block**, so it is visible from there to the end of the unit. Scala scopes an import lexically. Lexical scoping needs a scope-aware name resolver the compiler does not have, and D82's extensions have exactly the same shape, so the two are scoped together or not at all | A0-6, A0-11 | later |
+
+Two rules that are *not* deviations but decide what a program means, so they are
+recorded here rather than left to be discovered:
+
+- **An imported member is consulted after locals and members and before
+  globals.** An inner scope wins over an import, as in Scala; an import shadows an
+  outer binding, also as in Scala.
+- **A name this unit declares and an import also binds is an error**, not a silent
+  shadow: `'area' is both imported from Shapes and defined here; rename one of
+  them`. Which of the two would otherwise win depends on the compiler's lookup
+  order, and that is not a thing a program's meaning may rest on.
+
+**What did *not* diverge, and is worth stating because a reader will look for
+it:** the five import forms have Scala's meaning; `as` and `=>` are both accepted
+as renames; `*` and `_` are both accepted as wildcards; a selector that names
+nothing is an error rather than a silent no-op (`Strings has no member named
+'nope'`); and the longest-dotted-prefix rule — `import a.b.C` tries module `a.b.C`,
+then module `a.b` with member `C` — is what Scala's package-or-object resolution
+means, with the miss message naming every path that was tried.
+
 ## Known issues / platform dependencies
 
-See DESIGN §11 for the full table. Unchanged this phase: R2, R4, R5, R8.
+See DESIGN §11 for the full table. Unchanged this phase: R2, R4, R8. **R5 was
+exercised for the first time in Phase 6** — see the three entries below it.
 
-- **Phase 4 / the foreign half of named arguments is unexercised.** protoScala
-  compiles `f(x = 1)` into protoCore's `keywordParameters` for every callable,
-  foreign ones included, and `docs/INTEROP.md` §7 records the convention. **UMD is
-  not implemented (Phase 6), so no real `import py.…` call can be made**: the
-  protoScala side is exercised end to end against `__kwprobe`, a runtime-provided
-  stand-in reached through exactly the same `SEND_KW` path, and
+- **R5 / two runtimes in one process: co-residency works, a cross-runtime import
+  does not.** Measured on 2026-09-24 against protoST `3fd0438`, by
+  `tests/unit/protost_interop.cpp` (`umd/protost-interop`, built with
+  `-DPROTOSCALA_PROTOST_INTEROP=ON`). An `STRuntime` and a protoScala `Session`
+  were constructed in one process, in that order, and **both `provider:st` and
+  `provider:scala` stayed reachable afterwards** — the first real evidence for R5
+  since Phase 0. The order matters: protoST *replaces* the space's resolution
+  chain and protoScala *prepends* to it, so building protoST first leaves both
+  entries alive; the other way round protoST's replace deletes protoScala's, and
+  the failure reads as "module not found". What does **not** work is
+  `import st.counter_lib` from protoScala: it reports `provider 'st' has no
+  module 'counter_lib'`, and the cause is isolated by its own test —
+  protoST's provider loads that module when the context is in protoST's space and
+  misses when the identical call carries a context in protoScala's. This is
+  neither runtime's defect but the **UMD contract**:
+  `ModuleProvider::tryLoad(path, ctx)` receives the *caller's* context, and every
+  provider in the family resolves its runtime from `ctx->space` (protoST's
+  `stRuntimeForSpace`, protoScala's `moduleHostForSpace`), because a thread-local
+  answered "module not found" on every worker thread. A provider therefore serves
+  only callers that share its object space, and two co-resident runtimes do not.
+  The end-to-end case is kept `DISABLED` in its failing shape, so it is the test
+  that turns green the day the contract grows a way for a provider to serve a
+  caller in another space. The target is off by default so this suite does not
+  depend on a sibling repository's build state.
+- **R5 / protoCore's `SharedModuleCache` is keyed by logical path with no
+  `ProtoSpace` component** (`core/ModuleCache.cpp`) and is never invalidated, so
+  in a process with two runtimes an unprefixed `import util.Strings` could be
+  answered from a module another runtime loaded under the same name. Phase 6
+  applies two mitigations and fixes neither the cache nor its key, because it is
+  protoCore's and P3 makes a protoCore change a maintainer decision: a **prefixed**
+  import bypasses `getImportModule` entirely and calls the named provider's
+  `tryLoad` directly, and `provider:scala` is *prepended* to the chain so
+  protoScala's own provider is asked first for an unprefixed path. The residual
+  hazard is the unprefixed path in a two-runtime process.
+- **Phase 6 / no runtime in the family registers `py`, `js` or `clj`.** protoScala
+  routes all four family prefixes and reports
+  `ImportError: no provider registered for '<alias>'` when the alias is absent,
+  which is what a user sees for `import py.numpy as np` today. protoPython
+  registers `native`, `python_stdlib`, `compiled` and `hpy`; protoJS and
+  protoClojure register none; protoST registers `st` and is subject to the
+  space-keyed limit above. The cross-repository work is ROADMAP's **Track Y**, and
   `tests/conformance/23-named-arguments/foreign-python-keyword.scala` and
-  `foreign-python-open-encoding.scala` are `XFAIL` with their expected output
-  recorded for Phase 6 to convert rather than invent. Nothing in Phase 4 claims
-  the foreign half works.
+  `foreign-python-open-encoding.scala` stay `XFAIL` with their expected output
+  recorded and their directive naming the real blocker. The keyword convention
+  itself **is** now exercised across a real provider boundary, by
+  `tests/conformance/25-interop/stand-in-provider-keyword.scala` and its
+  `-long-keyword` sibling.
 - **Phase 4 / class prototypes are mutable.** An extension method is installed on
   the receiver type's prototype after the class exists, and every instance already
   created must see it, so `MAKE_CLASS` now builds a **mutable** shape. Measured

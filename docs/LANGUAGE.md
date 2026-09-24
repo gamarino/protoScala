@@ -38,9 +38,9 @@
 | `for` comprehensions (generators, guards, value definitions, patterns, `yield` and `do`) | 2 ✅ |
 | `match` with the patterns of DESIGN §5.3, pattern `val`s, `{ case ... }` literals | 2 ✅ |
 | `try`/`catch`/`finally`, `throw`, with pattern-matched handlers | 4 ✅ (§3.1; D72–D75, D85–D87) |
-| `import` (selectors, renames `as`, wildcard `*`, `given` imports parsed only) | 1 (UMD prefixes: 6) |
+| `import` (selectors, renames `as` and `=>`, wildcard `*` and `_`, `given` selectors parsed and ignored), and the family prefixes `py.`/`js.`/`st.`/`clj.` | 6 ✅ (§3.2; D90–D96) |
 | top-level definitions (no wrapping `object` needed), `@main` methods | 1 |
-| `package` clauses (one namespace per file) | 6 |
+| `package` clauses (one namespace per file) | — **not implemented and not scheduled**: a module is a file reached by its path, not a package (D91). `package p` is refused with "not implemented yet" |
 
 ### 2.1 By-name parameters
 
@@ -154,6 +154,53 @@ simple name as a `String` — D86) and a `toString` of `<class>: <message>`.
 `UninitializedFieldError` extends `RuntimeException` despite its name, as
 `scala.UninitializedFieldError` does. A defect in protoScala itself is **not** in
 this tree and is not catchable (D74).
+
+### 3.2 Modules and imports (Phase 6)
+
+A **module** is a `.scala` file reached by its path. `util/Shapes.scala` is the
+module `util.Shapes`; the file is desugared into a synthetic `object Shapes`, so
+its classes become `Shapes.Point` with their companions and its `def`s become
+members (**D91**). The module's name comes from the *file*, not from anything
+written inside it, and a module may not define an `@main` — it is imported, not
+run, and a silently ignored `@main` would be a trap.
+
+A module's top level runs **when it is imported** (**D90**), once per canonical
+absolute path. Scala has no file-level modules, so there is nothing to diverge
+from; Python and JavaScript both run a module at import, and a module that exists
+for its effects would otherwise never run. A cycle is refused
+(`cyclic module import: <path>`), and a failed load is not cached, so a fixed file
+can be imported again in the same session.
+
+| Form | Binds |
+|---|---|
+| `import util.Strings` | `Strings` → the module object |
+| `import util.Strings as S` | `S` → the same |
+| `import util.Strings.{trim, pad as p}` | `trim` and `p`, each rewriting to the member access the qualified spelling compiles to |
+| `import util.Shapes.{Point}` | the **type** `Point` and its companion term, so `new Point(1, 2)`, `case p: Point` and `case Point(x, y)` all compile |
+| `import util.Strings.*` / `._` | every exported member and every nested type under its simple name |
+| `import util.Strings.given` / `.{given T}` | parsed and **ignored** (D3, D93) |
+| `import py.numpy as np` | the `py` provider's module, as a `Val` with no types (D94) |
+| `import py.numpy.*` | **refused** (D92): a foreign object's names cannot be enumerated |
+
+An import is **resolved when the file is compiled**, which is why an imported
+class is usable as a type. `import a.b.C` tries the longest dotted prefix first —
+module `a.b.C`, then module `a.b` with member `C` — and a miss names every path
+it tried. Modules are searched in the importing file's directory, then each
+colon-separated entry of `PROTOSCALA_PATH`, then the working directory.
+
+An import is **hoisted to its compilation unit** (**D96**): a top-level import is
+visible for the whole unit, and one written inside a block or a template body
+takes effect where it appears and outlives that block. Scala scopes an import
+lexically; matching that needs a scope-aware resolver this compiler does not have,
+and D82's extensions have the same shape, so the two are scoped together or not at
+all.
+
+An imported member is consulted **after** locals and members and **before**
+globals: an inner scope wins over an import, and an import shadows an outer
+binding, both as in Scala. A name this unit declares *and* an import binds is a
+compile error rather than a silent shadow.
+
+See [INTEROP.md](INTEROP.md) for the polyglot half and what it can reach today.
 
 ## 4. Standard library (Phases 3–5)
 
@@ -343,7 +390,7 @@ that value at its own call site and an enclosing `try` catches it.
 | D79 | A `derives` clause on an `enum` is parsed and ignored, as on every other template (D3); `enum` type parameters are erased, and a case may not override a member of the enum class | there are no type classes to derive |
 | D80 | A `class`, `trait` or `object` nested in a **`class`** or **`trait`**, a local class in a block, and `new T { … }` are rejected; nesting in an **`object`** is supported | each captures the enclosing instance, which needs a per-instance class |
 | D81 | A named argument is bound in the **callee**, so a typo in a parameter name, an argument given twice and one left unfilled are all run-time `IllegalArgumentException`s naming the method and the parameter, where scalac rejects them at compile time | the platform is late-binding even where Scala is not; that is what makes a named argument work at an unresolvable call site |
-| D82 | An extension is global and session-wide, with no import scoping | scoping needs an import mechanism, which arrives with UMD in Phase 6 |
+| D82 | An extension is global and session-wide, with no import scoping | the import mechanism arrived in Phase 6 and scoping was **considered and declined**: protoScala hoists an import to its unit (D96), so "scoped" would mean per-*unit* — a third behaviour that is neither Scala's per-block scoping nor today's session-wide visibility. The two are scoped together when a scope-aware resolver exists, or not at all |
 | D83 | An extension on a builtin type mutates that prototype for the session, and a collision with an existing member of the type is refused where scalac allows the shadowing | silently shadowing a builtin method would be unrecoverable within a session |
 | D84 | `class C(a: Int)(b: Int)` has one flat parameter list, so `new C(1)(2)` and `new C(1, 2)` are the same call and a constructor cannot be partially applied | one positional parameter list per callable |
 | D85 | `catch someFunction` is accepted and rewritten to `case e => someFunction(e)`; a genuine `PartialFunction` rethrows in Scala and raises `MatchError` here | permissive and cheap; rejecting it later would break programs |
@@ -364,6 +411,14 @@ brought D53 with them. The Phase 3 and Phase 4 groups are **pending review**.
 that Phase 4 retired: a failed `Future` carried a `RuntimeError` case class rather
 than a `Throwable`, awaiting a failed future abandoned the rest of the handler,
 and `Priority` was three integers on an object. Their ids are not reused.
+
+| D90 | A module's top level runs **when it is imported**, during the importing unit's compilation, not lazily on first member access | Scala has no file-level modules; Python and JavaScript both run a module at import, and a module imported for its effects would otherwise never run |
+| D91 | A module **is an `object`** named after its **file**; its classes are `M.C` with their companions; it may not define an `@main`. An `import` and an `extension` written in a module stay outside that object | Phase 4's nested-template lifting already gives qualified names, companions and sibling resolution, so a bespoke module object model would be a second object model for what the first expresses |
+| D92 | A **wildcard import of a foreign module** (`import py.numpy.*`) is refused; named selectors work | a foreign object's attribute names cannot be enumerated, and a guessed name set would fail silently later. The message names the working spelling |
+| D93 | `given` selectors are parsed and **ignored**, as every other given is (D3) | there are no type classes to resolve |
+| D94 | A **foreign module binds no types**: `new`, a type pattern and `isInstanceOf` are unavailable on a class reached through a family prefix; its members resolve by name at run time | a foreign value carries no `ClassInfo`, which is what DESIGN §5's type-mapping table already says |
+| D95 | `--disassemble` **resolves imports**, and therefore runs the top level of every module the file imports | a file cannot be compiled without its imports, and an import is resolved by loading (D90) |
+| D96 | An `import` is **hoisted to its compilation unit** rather than scoped lexically: a top-level import is visible for the whole unit, and one inside a block outlives that block | lexical scoping needs a scope-aware name resolver the compiler does not have, and D82's extensions have the same shape, so the two are scoped together or not at all |
 
 **D57, D60, D64 and D78 do not exist**, and are not reused. They were reserved for
 a `Char`-key divergence, a `Range == List` divergence, a `Try.apply` divergence

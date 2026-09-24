@@ -184,7 +184,7 @@ of this phase a reasonably common Scala idiom touches, so it is recorded under
   numbers on the same machine and date;
 - tutorial chapter 13 (actors and futures) is written — 13, not 12: TUTORIAL.md's chapter table is the live list and numbers it 13.
 
-## Phase 6 — UMD and packaging
+## Phase 6 — UMD and packaging ✅ (2026-09-24, 0.6.0)
 
 **Goal:** a polyglot, installable runtime.
 **Done when:** `ScalaModuleProvider` loads `.scala` modules; `py.`, `js.`,
@@ -193,13 +193,45 @@ provider, and with protoST's provider when both are built); CPack produces a
 `.deb` and a `.tar.gz` that install and run `protoscala` without
 `LD_LIBRARY_PATH`. Release `0.6.0`.
 
-Four things Phase 4 leaves for this phase to finish:
+**What it delivered**, against that done-when: `ScalaModuleProvider` (alias
+`scala`, GUID `protoScala-source-v1`) loads `.scala` modules for protoScala's own
+`import` and for protoCore's resolution chain; all four prefixes route; a
+`dlopen`'d stand-in provider exercises the routing, a member import, a named
+argument across the boundary (including a parameter name too long to embed in a
+pointer word) and a provider failure caught as a Scala exception; and both a
+`.deb` and a `.tar.gz` at 0.6.0 were built, extracted and run under
+`env -u LD_LIBRARY_PATH`, with `ldd` confirming libprotoCore resolved from inside
+the package. **Beyond the done-when**, the prelude became a build-time image, the
+boundary catch shape gained the clause D74 needs and `callNative` gained the
+last-resort clause it lacked.
 
-- **Convert `tests/conformance/23-named-arguments/foreign-python-keyword.scala`
-  and `foreign-python-open-encoding.scala` from `XFAIL` to `EXPECT`.** Their
-  expected output is already recorded, so it is not invented then. The protoScala
-  half of the keyword-argument convention ships in 0.5.0 and is documented in
-  [INTEROP.md](INTEROP.md) §7; what is missing is only `import py.…` routing.
+**What it deliberately did not do**, each with its reason recorded:
+
+- *"tested … with protoST's provider when both are built"* is **partly met and
+  the gap is measured, not hand-waved.** Two runtimes were built in one process
+  and both providers stayed reachable — R5's first real evidence since Phase 0 —
+  but a cross-runtime import misses, because `tryLoad` receives the *caller's*
+  context and every provider in the family resolves its runtime from
+  `ctx->space`. A provider serves only callers that share its object space. The
+  end-to-end test is kept `DISABLED` in its failing shape rather than deleted or
+  weakened. See R5 in [STATUS.md](STATUS.md).
+- The two Python `XFAIL` fixtures were **not converted**; see the first hand-off
+  below and **Track Y**.
+
+Four things Phase 4 left for this phase to finish:
+
+- ~~**Convert `tests/conformance/23-named-arguments/foreign-python-keyword.scala`
+  and `foreign-python-open-encoding.scala` from `XFAIL` to `EXPECT`.**~~
+  **Moved to Track Y, and this clause was wrong.** It said "what is missing is
+  only `import py.…` routing"; the routing shipped in this phase and the
+  fixtures still cannot be converted, because **no runtime in the family
+  registers the alias `py`** (protoPython registers `native`, `python_stdlib`,
+  `compiled` and `hpy`), its providers come with a whole `PythonEnvironment`
+  (R5), and `protoscala` links no sibling runtime. Both fixtures stay `XFAIL`
+  with their recorded output and a directive that names the real blocker.
+  Amending a done-when is the maintainer's, so this edit is
+  **[agent, pending review]** — see [DECISIONS-LOG.md](DECISIONS-LOG.md),
+  Phase 6 E7, and plan A0-12.
 - **Add the boundary catch shape at every UMD and foreign-call site**, in this
   order: `catch (FutureYield&) { throw; }`, `catch (ScalaThrow&) { throw; }`,
   `catch (ScalaError&) { throw; }`, `catch (const std::exception& e) { throw
@@ -241,6 +273,29 @@ full protoClojure suite passes; no ordering guarantee beyond Clojure's is
 introduced; actor mailboxes use three `ProtoMPSCQueue`s per actor, with
 `actor-bench.sh` tables recorded before and after. Requires P1, P2 and a
 maintainer decision on R2.
+
+## Track Y — a `py` provider, and two runtimes in one process *(platform)*
+
+**Goal:** make `import py.numpy as np` work from protoScala.
+**Done when:** protoPython registers the alias `py` (or an agreed alias
+protoScala's prefix table names) and ships a provider plug-in exporting
+protoScala's `protoScala-provider-1` ABI ([INTEROP.md](INTEROP.md) §3.1); a
+`protoscala` process that loads it imports a Python module and calls it with named
+arguments; `tests/conformance/23-named-arguments/foreign-python-keyword.scala` and
+`foreign-python-open-encoding.scala` convert from `XFAIL` to `EXPECT` with the
+output they already record.
+
+**Requires a maintainer ruling on R5**, and the ruling now has evidence rather
+than only a premise. Two runtimes *were* made co-resident in one process and both
+providers stayed reachable; what does not work is a cross-runtime import, because
+`ModuleProvider::tryLoad(path, ctx)` receives the caller's context and every
+provider resolves its runtime from `ctx->space`. Closing that needs a change to
+the UMD contract itself — protoCore's, and therefore a maintainer decision under
+P3 — not a change in protoScala. protoCore's `SharedModuleCache`, keyed by logical
+path with no `ProtoSpace` component, is the second half of the same question.
+
+Changes to protoPython, which is a different repository and follows its own
+conventions.
 
 ## Track S — protoST onto the new protoCore types *(platform)*
 

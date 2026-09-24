@@ -1,6 +1,6 @@
 # protoScala
 
-> **A dynamic Scala 3 dialect on the protoCore object kernel — instant start-up, persistent immutable data by default, GIL-free native actors, and transparent in-memory interop with Python, JavaScript, Smalltalk and Clojure.**
+> **A dynamic Scala 3 dialect on the protoCore object kernel — fast start-up, persistent immutable data by default, GIL-free native actors, and a polyglot module system built on protoCore's Unified Module Discovery.**
 
 protoScala is a language runtime of the [protoCore](https://github.com/numaes/protoCore) family, alongside [protoST](https://github.com/gamarino/protoST) (Smalltalk), [protoClojure](https://github.com/gamarino/protoClojure) (Clojure), [protoJS](https://github.com/gamarino/protoJS) (JavaScript) and [protoPython](https://github.com/gamarino/protoPython) (Python).
 
@@ -9,7 +9,7 @@ It is **not** a JVM replacement: there is no JVM, no sbt/Maven, no Java interop 
 - **start in under 25 ms with ~20 MB RSS**, making Scala viable for scripts and REPL-driven work;
 - map **case classes and functional collections** onto protoCore's persistent, structurally shared data;
 - run **native actors without a GIL**: messages are pointers to immutable data, mailboxes are lock-free with three priority bands, and `await` inside an actor suspends cooperatively instead of blocking a thread;
-- **import modules from sibling runtimes** (`import py.numpy as np`) through protoCore's Unified Module Discovery, with no serialization at the boundary.
+- **load modules through protoCore's Unified Module Discovery.** `import util.Shapes` loads a `.scala` module and its classes are usable as *types* — `new Point(1, 2)`, `case Point(x, y)` — because an import is resolved when the file is compiled. protoScala also *registers itself* as a UMD provider (`provider:scala`), and the four family prefixes `py.`, `js.`, `st.` and `clj.` route to their providers. Across that boundary there is no serialization and no adapter, by construction: a value is a protoCore object on both sides, and a named argument arrives in the callee's `keywordParameters` unchanged. **What no runtime in the family registers yet is a `py`, `js` or `clj` provider**, so `import py.numpy as np` compiles, routes, and reports `ImportError: no provider registered for 'py'` — see [What polyglot interop does and does not do today](#what-polyglot-interop-does-and-does-not-do-today).
 
 protoScala is also a **platform validation project**: protoCore aims to be a solid base for implementing any language, and each new language exposes missing capabilities. Those capabilities are added to protoCore as part of this project — the first two are `ProtoMap`, a persistent map with GC-traced object keys, and `ProtoMPSCQueue`, a lock-free GC-traced actor mailbox; both also serve protoClojure and protoST.
 
@@ -62,6 +62,80 @@ println(3.squared)                            // 9
 
 println(try "x".toInt catch case e: NumberFormatException => -1)   // -1
 ```
+
+## What polyglot interop does and does not do today
+
+The headline is a real mechanism and a partial reach, and it is worth being exact
+about which is which, because the interesting half is the part that is missing
+from *other* repositories rather than from this one.
+
+**What you can run right now.** A protoScala module is a `.scala` file reached by
+its path. Put this in `util/Shapes.scala`:
+
+```scala
+case class Point(x: Int, y: Int)
+def area(p: Point): Int = p.x * p.y
+```
+
+and this beside it:
+
+```scala
+import util.Shapes.{Point, area}
+@main def run(): Unit =
+  Point(3, 4) match
+    case Point(x, y) => println(area(Point(x, y)))   // 12
+```
+
+`Point` is usable as a **type** — in `new`, in a type test, in an extractor
+pattern — because an `import` is resolved when the file is compiled, not when it
+runs. Every form works: `import util.Shapes`, `… as S`, `… .{a, b as c}`,
+`… .*`, `… ._`. Modules are found in the importing file's directory, then on
+`PROTOSCALA_PATH`, then in the working directory, and a miss names every path it
+tried.
+
+**What routes but has nowhere to go.** The four family prefixes are wired to
+protoCore's provider registry:
+
+```
+$ cat try.scala
+import py.numpy as np
+@main def run(): Unit = println(np)
+
+$ protoscala try.scala
+try.scala:1:1: error: ImportError: no provider registered for 'py'. Install the
+runtime that provides it, or point PROTOSCALA_PROVIDERS at its plug-in
+```
+
+That message is the current, honest state of `import py.numpy as np`. protoScala
+routes the prefix; what is missing is the provider. protoPython registers the UMD
+aliases `native`, `python_stdlib`, `compiled` and `hpy` — none of them `py` — and
+its providers are installed by a whole `PythonEnvironment`, so having them in a
+`protoscala` process means a second runtime in that process. protoJS and
+protoClojure register no provider at all. That coordination is tracked as
+**Track Y** in [docs/ROADMAP.md](docs/ROADMAP.md) and it is cross-repository work,
+not a protoScala change.
+
+**What is proved rather than promised.** The boundary itself is built and
+exercised. `protoscala` loads provider plug-ins by `dlopen` from
+`PROTOSCALA_PROVIDERS` and from `<prefix>/lib/protoscala/providers`, and
+`tests/conformance/25-interop/` drives a real one: a module is imported through a
+prefix, a member is selected from it, a **named argument crosses the boundary**
+and arrives in the callee's `keywordParameters` with no adapter — including one
+whose parameter name is too long to embed in a pointer word, which is where a
+naive implementation fails silently — and a C++ exception thrown inside the
+provider is caught at the Scala call site as a `RuntimeException` with its message
+intact. There is no serialization anywhere in that path, because a value is a
+protoCore object on both sides.
+
+protoScala also *is* a provider: it registers `provider:scala` so another runtime
+can import a `.scala` module. One limit was measured rather than assumed, and it
+is the honest ceiling on co-residency today: an `STRuntime` and a protoScala
+`Session` were built in one process and **both providers stayed reachable**, but
+a cross-runtime import still misses, because `ModuleProvider::tryLoad` receives
+the *caller's* context and every provider in the family resolves its runtime from
+`ctx->space`. A provider therefore serves only callers that share its object
+space. That is the UMD contract, not a defect in either runtime, and it is
+recorded under R5 in [docs/STATUS.md](docs/STATUS.md).
 
 ## Project status
 

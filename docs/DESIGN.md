@@ -151,6 +151,21 @@ never contains `ProtoObject*`; constants are materialised by the compiler).
 Type syntax is parsed into a `TypeTree` node that the compiler ignores except
 in patterns and `isInstanceOf`.
 
+**The `ModuleLoader` seam does not breach this.** An `import` is resolved at
+compile time, which needs a `ProtoContext` the compiler must not have. The seam is
+`src/compiler/ModuleLoader.h`: the `Compiler` holds a `ModuleLoader*`, asks for a
+module by name, and receives **plain C++ descriptors** (`ModuleExports`: a term
+key, a type key, member bindings, `ClassInfo`s). No `ProtoObject*` crosses that
+interface, so the rule above holds unchanged; everything that needs a context
+happens on the other side, in `Session`, which is what owns the `ProtoSpace`.
+Compile-time resolution is the one place in the dialect that binds early, and it
+is deliberate: a name bound at run time carries no `ClassInfo`, so an imported
+class could not be used as a *type* — `new Point(1, 2)`, `case p: Point` and
+`case Point(x, y)` would all fail to compile — and importing types is what a
+Scala programmer does with `import`. Late binding is preserved everywhere it is
+observable: a *member* of an imported module is still reached by an ordinary
+`SEND`, and a foreign module's members resolve by name at run time (D94).
+
 ### 3.4 Desugar
 
 Performed on the AST before code generation:
@@ -574,7 +589,38 @@ boundary and terminates the process.
 | `std::length_error` from bytecode limits | a **compile-time** failure reported by `Session` | not catchable |
 | `std::logic_error` (a compiler or VM bug) | **not translated**; reaches `main.cpp` as `protoscala: internal error: …` | **not catchable** (**D74**) |
 | `FutureYield` | **never translated, never catchable** | it is not a `std::exception` and `runLoop` catches it first |
-| a UMD provider's or foreign method's C++ exception | `RuntimeException`, through the boundary shape of ROADMAP Phase 6 | Phase 6 |
+| a UMD provider's or foreign method's C++ exception | `RuntimeException` carrying `what()`, or `ImportError` for a module load that failed | `src/umd/ForeignBoundary.h`, and `ExecutionEngine::callNative`'s last-resort clause |
+
+**The boundary shape, clause by clause.** Every call that leaves protoScala for a
+UMD provider or a foreign callable goes through one template,
+`translateForeignException` in `src/umd/ForeignBoundary.h`, and **the catch order
+is load-bearing**:
+
+1. `catch (FutureYield&) { throw; }` — a cooperative suspension, not an error. It
+   is not a `std::exception` and must be first anyway, because a later
+   `catch (...)` would eat it and the actor would never resume.
+2. `catch (ScalaThrow&) { throw; }` — a Scala exception already in flight.
+   `ScalaThrow` *is* a `std::exception`, so without this clause the
+   `std::exception` arm would rewrite every Scala exception crossing a module
+   boundary into a `RuntimeException`, losing its class and its payload.
+3. `catch (ScalaError&) { throw; }` — already a translation; re-translating it
+   would replace a precise class name with `RuntimeException`.
+4. `catch (const std::logic_error&) { throw; }` — **D74**: a compiler or VM defect
+   must never be maskable by `catch { case e: Throwable => }`. It is re-thrown
+   **before** the `std::exception` arm, which would otherwise catch it, because
+   `std::logic_error` derives from `std::exception`. ROADMAP's prescribed five
+   clauses do not mention it; without it this template would retire D74 silently.
+5. `catch (const std::exception& e)` — carries `what()` across.
+6. `catch (...)` — the last resort, which says "native exception" rather than
+   inventing a message.
+
+`tests/unit/test_exceptions.cpp` has one case per clause, and removing any one of
+the six turns exactly one of them red. The same six apply at
+`ExecutionEngine::callNative`, minus the translating arm: the engine's own chain
+already implements this table with a source line attached, so the only clause
+`callNative` adds is `catch (...)` — without which a native from a `dlopen`'d
+plug-in that throws a non-`std::exception` escapes the VM and terminates the
+process.
 
 `std::invalid_argument` and `std::out_of_range` both derive from
 `std::logic_error`, so they are caught by their exact types and the engine carries
@@ -821,6 +867,40 @@ Reporting rules:
   | `import st.PumpTwin as Twin` | `provider:st` |
   | `import clj.core as clj` | `provider:clj` |
   | `import util.Strings` | the space's resolution chain (protoScala first) |
+
+  The prefix list is **closed**: if any registered provider alias could be a
+  prefix, `import util.Strings` would become hijackable by a plug-in aliased
+  `util`, and a program's meaning must not depend on which plug-ins are
+  installed. Only a leading segment is stripped, and only when the path has at
+  least two segments.
+
+- **The module-path-versus-member rule is longest dotted prefix first.**
+  `import a.b.C` tries module `a.b.C`, then module `a.b` with member `C`, then
+  module `a` with member `b.C`; the first that resolves wins, and when none does
+  the error names **every** path that was tried. That is what Scala's
+  package-or-object resolution means, and the message makes a typo obvious in one
+  read.
+
+- **A prefixed import bypasses `getImportModule`**, and that is a correctness
+  point rather than an optimisation: protoCore's `SharedModuleCache`
+  (`core/ModuleCache.cpp`) is keyed by logical path with **no `ProtoSpace`
+  component** and is never invalidated, so in a two-runtime process a cached
+  `numpy` could be handed to whichever runtime asked second. Calling `tryLoad`
+  directly keeps each prefix bound to exactly the provider its name selects. The
+  unprefixed path does use the chain, and therefore the shared cache; that
+  residual hazard is recorded under R5.
+
+- **Provider plug-ins.** A plug-in is a shared object exporting
+  `protoScalaProviderABI` and `protoScalaRegisterProviders`, `dlopen`'d from
+  `PROTOSCALA_PROVIDERS` and from `<prefix>/lib/protoscala/providers`. protoScala
+  ships none: the mechanism exists so a sibling runtime *can* be present, and
+  whether two runtimes may be co-resident stays R5's question. Statically linking
+  every sibling runtime was rejected because it multiplies the binary and the
+  start-up work, makes every runtime co-resident by construction rather than by
+  decision, and makes protoScala's build depend on five repositories.
+
+- **A provider serves only callers that share its `ProtoSpace`**, measured rather
+  than assumed — see R5 in [STATUS.md](STATUS.md) and INTEROP §6.
 
 - A foreign object is an ordinary `ProtoObject`; calls use the standard
   positional + keyword convention with no FFI layer and no copies.
