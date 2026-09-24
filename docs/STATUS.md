@@ -850,7 +850,16 @@ exercised for the first time in Phase 6** — see the three entries below it.
   source rounds, on both cases, which *is* the check. Both paths live in one
   binary, so the source row is what proves the image — and not anything else in
   the release — moved the number; the source path is 0.5.0's, still missing by
-  0.65 ms.
+  0.65 ms. The packaged `Release` build (what the `.deb` and the `.tar.gz` ship,
+  a different binary from the canonical RelWithDebInfo one) was measured
+  separately and also passes: 23.28 ms script, 23.73 ms REPL.
+
+  **What this does not claim:** the worst sample is still above the target.
+  `run_benchmarks.py` applies a stricter per-sample verdict and records all four
+  0.6.0 cases as **STRADDLES** — median below 25 ms, spread crossing it — on a
+  daily-driver desktop. The budget is met on the measure DESIGN §1 and the
+  done-when use; the tail is not yet quiet, and that is recorded rather than
+  rounded away.
 
   What the image cannot remove is `linkSymbols` (342 µs) and *running* the
   compiled prelude (177 µs), by construction: the tables hold strings and PODs, so

@@ -564,7 +564,16 @@ one window, 21 runs per case, **every case reported `verified=21`**, load averag
 
 `cold-start.sh` exited 0 in all three image rounds and 1 in all three source
 rounds, on both cases; that exit code *is* the check, because it fails when any
-run printed the wrong line or when a median is not below the target.
+run printed the wrong line or when a median is not below the target. The
+artefact the `.deb` and the `.tar.gz` ship is a different binary (`Release`
+rather than `RelWithDebInfo`) and was measured separately: 23.28 ms script and
+23.73 ms REPL, also passing.
+
+One thing that reading does **not** claim: the *worst* sample is still above
+25 ms. `benchmarks/run_benchmarks.py` applies a stricter per-sample verdict and
+records all four 0.6.0 cases as **STRADDLES** — median below the target, spread
+crossing it — on a machine that runs an editor and a browser throughout. The
+budget is met on the measure DESIGN §1 uses; the tail is not yet quiet.
 
 The image removes parse, desugar and compile — measured before it was built at
 59.6 %, 2.6 % and 22.5 % of the prelude's 4.4 ms. What it cannot remove is

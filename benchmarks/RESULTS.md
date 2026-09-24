@@ -483,3 +483,53 @@ all three rounds. A shared host produces outliers; the medians are what the targ
 is compared against, and the three rounds are monotone in the direction that
 matters — every image round is below 25 ms and every source round is above it, on
 both cases, which a 2 ms effect on a noisy host does not usually manage.
+
+#### The artefact a user installs meets it too
+
+`build_release` is RelWithDebInfo; the `.deb` and the `.tar.gz` are built from
+`build_pkg`, which is `-DCMAKE_BUILD_TYPE=Release`. Those are different binaries,
+so the packaged one was measured rather than assumed. Three more rounds,
+interleaved, on a machine with **no sibling harness running** (load 2.40 at the
+start, 2.56 at the end), 21 runs per case, all `verified=21`:
+
+| binary | script, per round | REPL, per round |
+|---|---|---|
+| `build_pkg` (Release — what the package ships) | 23.77 / 22.88 / 23.28 | 23.37 / 23.73 / 23.87 |
+| `build_release` (RelWithDebInfo — canonical) | 23.15 / 22.70 / 22.89 | 22.87 / 23.13 / 23.83 |
+
+`cold-start.sh` exited **0 in all twelve cases**. The two builds are within each
+other's run-to-run spread, so the budget does not depend on which one a reader
+measures.
+
+These medians sit about 0.7 ms below the table above because that window had a
+sibling agent compiling; both windows record their load average, and both are
+comfortably inside the target, which is the point of recording it.
+
+**A superseded reading, kept because it was quoted before it was checked.** A
+single 21-run pass over `build_pkg` taken while protoST was being compiled
+measured REPL 25.08 ms — 0.08 ms *above* target — and script 24.09 ms. It is
+contention, not a property of the Release build: the three quiet rounds above put
+the same binary at 23.37 / 23.73 / 23.87 ms. A one-off reading taken against a
+busy host is not a verdict, and the rule that a figure travels with its load
+average is exactly what caught it.
+
+#### Two readings of "met", and which one this claims
+
+`benchmarks/cold-start.sh` compares the **median** with the target, and its exit
+code is what the plan named as Phase 6's done-when. By that check the budget is
+met, on both builds, in every round above.
+
+`benchmarks/run_benchmarks.py`'s report applies a stricter three-way verdict —
+**MET** only when *every* sample including the worst is below target, **MISSED**
+when the median is at or above it, and **STRADDLES** in between. By that reading
+all four 0.6.0 cases are **STRADDLES**: medians 23.48–24.53 ms, worst samples
+26.2–30.8 ms.
+
+Both are true and they are not in conflict. What they say together is: **the
+budget is met on the measure DESIGN §1 and the done-when use, and on a
+daily-driver desktop the occasional sample still crosses 25 ms.** Nothing here
+claims the worst case is under target, because it is not, and the suite report
+records that verdict in its own table rather than being overridden here. A
+dedicated quiet host would settle the question; this one runs VS Code, Chrome and
+PyCharm throughout, which is stated in the report's method note for exactly this
+reason.
