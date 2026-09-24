@@ -13,15 +13,22 @@
 > minor version went 0.2.0 → 0.3.0 (Phase 5) → 0.4.0 (Phase 3) → 0.5.0 (Phase 4)
 > → 0.6.0 (Phase 6: modules, UMD and packaging). Packaging in fact landed in the
 > installer phase; Phase 6 closed the `.tar.gz` half and the version.
-> **Tests:** 1102 total (`ctest --test-dir build_release -N`) — 353 unit
-> (GoogleTest, including the separate `unit/actors` binary), 715 conformance
-> fixtures, 22 CLI checks, 12 benchmark smoke checks. All green, and green at
-> `PROTOSCALA_ACTOR_WORKERS=1` and `=16`. Under
-> `PROTOCORE_HEAP_LIMIT_CELLS=20000` (the whole suite, unfiltered) 1101 of 1102
+> **Tests:** 1203 total (`ctest --test-dir build_release -N`) — 370 unit
+> (GoogleTest, including the separate `unit/actors` and `unit/modules` binaries),
+> 797 conformance fixtures, 24 CLI checks, 12 benchmark smoke checks. **All
+> green**, from a clean build with no compiler warning, and green at
+> `PROTOSCALA_ACTOR_WORKERS=1` and `=16` (1203/1203 in all three). Under
+> `PROTOCORE_HEAP_LIMIT_CELLS=20000` (the whole suite, unfiltered) 1202 of 1203
 > pass: `Mailbox.EightProducersLoseNothingAndDuplicateNothing` aborts, which was
 > verified to be **pre-existing** — it fails the same way on `main` at `bca0352`
-> — and is recorded under "Open bugs".
-> Last verified 2026-09-24.
+> — and is recorded under "Open bugs". It is the only failure in that
+> configuration, so it masks nothing.
+>
+> `umd/protost-interop` is not in that count: it links protoST into a test
+> executable and is off by default (`-DPROTOSCALA_PROTOST_INTEROP=ON`), so this
+> suite does not depend on a sibling repository's build state. It was built and
+> run; see R5 under "Known issues".
+> Last verified 2026-09-24 (Phase 6, 0.6.0).
 
 ## Implemented
 
@@ -42,7 +49,8 @@ Per [LANGUAGE.md](LANGUAGE.md) §1–§2, the rows delivered in Phase 1:
       (methods only — D11).
 - [x] Lambdas `x => e`, `(x, y) => e`.
 - [x] Infix, prefix (`-x`, `!b`, `~n`) and postfix-free method application.
-- [x] `import` (parsed, ignored until UMD in Phase 6).
+- [x] `import` — a real binding form since Phase 6: it loads a module and binds
+      names, and its classes are usable as types (§3.2 of LANGUAGE.md, D90–D96).
 - [x] Top-level definitions (no wrapping `object`), `@main` methods.
 - [x] Closures with per-activation captures; recursion, including deep and
       mutual recursion, with `StackOverflowError` instead of a crash.
