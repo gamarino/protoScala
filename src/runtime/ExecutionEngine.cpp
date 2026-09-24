@@ -809,6 +809,29 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                     else sp[-1] = send(&frame, a, L.unaryNotName, nullptr, 0);
                     continue;
                 }
+                case Op::CONCAT: {
+                    const unsigned n = static_cast<unsigned>(operand);
+                    if (n < 2)
+                        throw std::logic_error("CONCAT of arity " + std::to_string(n) + " in " +
+                                               mod.name());
+                    const proto::ProtoObject** base = sp - n;
+                    // toScalaString returns a string unchanged and calls a user
+                    // toString through the active engine otherwise, so a rope
+                    // argument is joined, never flattened. Each converted piece
+                    // is written back into its operand-stack slot before the
+                    // next allocation: an accumulator held only in a C++ local
+                    // is the Phase 5 Mailbox::push bug.
+                    base[0] = toScalaString(&frame, L, base[0]);
+                    for (unsigned k = 1; k < n; ++k) {
+                        base[k] = toScalaString(&frame, L, base[k]);
+                        base[0] = reinterpret_cast<const proto::ProtoString*>(base[0])
+                                      ->appendLast(&frame,
+                                                   reinterpret_cast<const proto::ProtoString*>(base[k]))
+                                      ->asObject(&frame);
+                    }
+                    sp = base + 1;
+                    continue;
+                }
                 case Op::MAKE_CLASS: {
                     const auto& spec = mod.constAt(operand);
                     const proto::ProtoObject** base =

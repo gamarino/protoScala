@@ -123,6 +123,9 @@ private:
 
     // Code generation.
     void compileExpr(const Node& n);
+    // s"..." / raw"..." -> CONCAT over the pieces; f"..." -> a call of __fmt.
+    void compileInterp(const InterpString& n);
+    void compileFormat(const InterpString& n);
     void compileIdent(const Ident& id);
     void compileApply(const Apply& a);
     void compileSelect(const Select& s);

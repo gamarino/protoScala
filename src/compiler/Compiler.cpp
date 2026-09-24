@@ -208,8 +208,15 @@ private:
         switch (n.kind) {
             case NodeKind::IntLit: case NodeKind::FloatLit: case NodeKind::StringLit:
             case NodeKind::CharLit: case NodeKind::BoolLit: case NodeKind::NullLit:
-            case NodeKind::UnitLit: case NodeKind::InterpString: case NodeKind::Import:
-                return;  // interpolations are rejected by the compiler
+            case NodeKind::UnitLit: case NodeKind::Import:
+                return;
+            // Phase 3: an interpolation's holes are ordinary expressions, so a
+            // name they read from an enclosing scope must be boxed like any
+            // other capture. Forgetting this would make `() => s"$x"` read a
+            // stale `x`.
+            case NodeKind::InterpString:
+                for (const NodePtr& a : as<InterpString>(n).args) walk(a.get(), depth);
+                return;
             case NodeKind::Ident: reference(as<Ident>(n).name, depth, n.pos); return;
             case NodeKind::Select: walk(as<Select>(n).qualifier.get(), depth); return;
             case NodeKind::Apply: {
@@ -509,8 +516,7 @@ void Compiler::compileExpr(const Node& n) {
             return;
         case NodeKind::NullLit: emit(Op::PUSH_NULL, 0, n.pos, +1); return;
         case NodeKind::UnitLit: emit(Op::PUSH_UNIT, 0, n.pos, +1); return;
-        case NodeKind::InterpString:
-            throw CompileError("string interpolation is not implemented yet", n.pos);
+        case NodeKind::InterpString: compileInterp(as<InterpString>(n)); return;
         case NodeKind::Tuple: compileTuple(as<Tuple>(n)); return;
         case NodeKind::Splice:
             throw CompileError("a splice must be the last argument of a function call", n.pos);
@@ -1146,6 +1152,42 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
         globals_ = snapshot;
         throw;
     }
+}
+
+// s"a${x}b" pushes "a", x, "b" and joins them with one CONCAT. Empty literal
+// pieces are dropped: s"$a$b" emits two pushes, not four. A string with no hole
+// never reaches here (the lexer produces a plain StringLit for "...").
+void Compiler::compileInterp(const InterpString& n) {
+    if (n.interpolator == "f") { compileFormat(n); return; }
+    unsigned pieces = 0;
+    for (std::size_t k = 0; k < n.args.size(); ++k) {
+        if (!n.literals[k].empty()) {
+            emit(Op::PUSH_CONST, fn_->mod->addString(n.literals[k]), n.pos, +1);
+            ++pieces;
+        }
+        compileExpr(*n.args[k]);
+        ++pieces;
+    }
+    if (!n.literals.back().empty()) {
+        emit(Op::PUSH_CONST, fn_->mod->addString(n.literals.back()), n.pos, +1);
+        ++pieces;
+    }
+    if (pieces == 0) {                      // s"" : an empty string, no CONCAT
+        emit(Op::PUSH_CONST, fn_->mod->addString(""), n.pos, +1);
+        return;
+    }
+    if (pieces == 1) {
+        // One piece. A lone literal is already a String, but a lone hole still
+        // needs converting, so push an empty literal and let CONCAT do it --
+        // exactly what `"" + v` means on ADD's string branch.
+        emit(Op::PUSH_CONST, fn_->mod->addString(""), n.pos, +1);
+        ++pieces;
+    }
+    emit(Op::CONCAT, pieces, n.pos, -static_cast<int>(pieces) + 1);
+}
+
+void Compiler::compileFormat(const InterpString& n) {
+    throw CompileError("the f interpolator is not implemented yet", n.pos);
 }
 
 } // namespace protoScala

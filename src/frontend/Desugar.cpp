@@ -143,8 +143,18 @@ public:
                 return n;
             }
             case NodeKind::For: return expr(forExpr(as<For>(*n)));  // rewrite, then desugar it
+            case NodeKind::InterpString: {
+                auto& s = as<InterpString>(*n);
+                if (s.interpolator != "s" && s.interpolator != "raw" && s.interpolator != "f")
+                    throw ParseError("unknown string interpolator '" + s.interpolator +
+                                         "': only s, f and raw are available "
+                                         "(custom interpolators need extension methods)",
+                                     n->pos, false);
+                for (NodePtr& a : s.args) a = expr(std::move(a));
+                return n;   // the compiler lowers it (s/raw -> CONCAT, f -> __fmt)
+            }
             default:
-                return n;  // literals, identifiers, imports, interpolations
+                return n;  // literals, identifiers, imports
         }
     }
 

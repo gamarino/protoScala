@@ -57,7 +57,11 @@ enum class Op : uint8_t {
     // passes through, so a call site that could not be resolved — and so
     // evaluated the argument — still works (D53).
     FORCE_THUNK = 38,                      // [v] -> [v()] for a 0-arg function, else [v]
-    // 39..63   reserved (Phase 1 additions)
+    // Phase 3: string interpolation (DESIGN §3.4, plan A0-1, D54)
+    CONCAT = 39,  // [v1 .. vn] -> [str]  operand: n >= 2; each vi is converted
+                  // with toScalaString and the pieces are joined with
+                  // ProtoString::appendLast (an O(log n) rope join, no copy)
+    // 40..63   reserved (Phase 1 additions)
     // Object model and pattern matching, Phase 2 (64..95); stack effects in
     // the Phase 2 plan's opcode table and in docs/STATUS.md.
     MAKE_CLASS     = 64,  // [p1..pk m1..mn] -> [cls]    operand: ClassSpec constant

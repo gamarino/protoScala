@@ -761,15 +761,21 @@ Token Lexer::lexInterpolated(std::string interpolator, SourcePos start) {
                 literalStart = SourcePos{line_, column_};
                 continue;
             }
-            const std::size_t idLen = identCharLength(pos_);
-            if (idLen == 0) {
+            // `$name` scans an *alpha* identifier, so it stops at the next `$`
+            // even though `$` is a legal identifier character elsewhere: scalac
+            // reads `s"$a$b"` as two holes, not as one named `a$b`.
+            auto holeIdentCharLength = [&](std::size_t at) -> std::size_t {
+                if (at < source_.size() && source_[at] == '$') return 0;
+                return identCharLength(at);
+            };
+            if (holeIdentCharLength(pos_) == 0) {
                 return error("invalid string interpolation: $$, $ident or ${expr} expected", dollarPos);
             }
             flushLiteral();
             const SourcePos idStart{line_, column_};
             std::string name;
             while (true) {
-                const std::size_t len = identCharLength(pos_);
+                const std::size_t len = holeIdentCharLength(pos_);
                 if (len == 0) break;
                 name.append(source_, pos_, len);
                 for (std::size_t i = 0; i < len; ++i) advance();

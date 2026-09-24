@@ -182,7 +182,9 @@ TEST(Compiler, SemanticErrors) {
     EXPECT_TRUE(has(compileError("val f = () => return 1"), "return inside a lambda"));
     EXPECT_TRUE(has(compileError("return 1"), "return outside"));
     EXPECT_TRUE(has(listing("val t = (1, 2)"), "MAKE_TUPLE 2"));
-    EXPECT_TRUE(has(compileError("val s = s\"x\""), "string interpolation is not implemented yet"));
+    // Phase 3 implemented `s` and `raw`; `f` follows in Task 4 and an unknown
+    // interpolator is rejected while desugaring (D56, CompilerInterpolation).
+    EXPECT_TRUE(has(compileError("val s = f\"x\""), "f interpolator is not implemented yet"));
     EXPECT_TRUE(has(compileError("def f(x: Int) = x\nval y = f(x = 1)"), "named arguments"));
     EXPECT_TRUE(has(compileError("def f(x: Int = 1) = x"), "default parameter values"));
     // A by-name parameter is thunked at a call site that names its declaration
@@ -537,4 +539,32 @@ TEST(GlobalTableTypes, KeysShadowAcrossUnitsAndStayFindable) {
     GlobalTable g2 = copy;
     g2.beginUnit();
     EXPECT_EQ(g2.declareType("Point"), "@Point#2");
+}
+
+// --- Phase 3: string interpolation lowers to CONCAT (A0-1, D54) ----------------
+
+TEST(CompilerInterpolation, EmitsOneConcatAndNoStringContextSend) {
+    const std::string asm_ = listing(R"(val a = 1
+val s = s"x${a}y")");
+    EXPECT_TRUE(has(asm_, "CONCAT 3")) << asm_;
+    EXPECT_FALSE(has(asm_, "StringContext")) << asm_;
+}
+
+TEST(CompilerInterpolation, AdjacentHolesEmitNoEmptyLiterals) {
+    const std::string asm_ = listing(R"(val a = 1
+val b = 2
+val s = s"$a$b")");
+    EXPECT_TRUE(has(asm_, "CONCAT 2")) << asm_;
+}
+
+TEST(CompilerInterpolation, ALoneHoleStillGoesThroughConcatToConvert) {
+    // s"$a" must convert, so it pushes an empty literal and joins two pieces.
+    const std::string asm_ = listing(R"(val a = 1
+val s = s"$a")");
+    EXPECT_TRUE(has(asm_, "CONCAT 2")) << asm_;
+}
+
+TEST(CompilerInterpolation, AnUnknownInterpolatorIsRejectedWhileDesugaring) {
+    // The desugarer raises a ParseError, not a CompileError (D56).
+    EXPECT_THROW(listing(R"(val s = json"$x")"), ParseError);
 }

@@ -253,3 +253,16 @@ TEST(Lexer, LeadingUnderscoreDoesNotTakeOperatorCharacters) {
         EXPECT_EQ(t[0].text, id);
     }
 }
+
+TEST(Lexer, ADollarEndsAnInterpolationIdentifier) {
+    // `$` is a legal identifier character in Scala, but `$name` inside an
+    // interpolation scans an *alpha* identifier: scalac reads `s"$a$b"` as two
+    // holes, not as one named `a$b`. `_` stays part of the name.
+    auto t = rawTokens(R"(s"$a$b|$a_b")");
+    ASSERT_EQ(t[0].kind, TokenKind::InterpolatedString);
+    ASSERT_EQ(t[0].parts.size(), 4u);
+    EXPECT_TRUE(t[0].parts[0].isHole);  EXPECT_EQ(t[0].parts[0].text, "a");
+    EXPECT_TRUE(t[0].parts[1].isHole);  EXPECT_EQ(t[0].parts[1].text, "b");
+    EXPECT_FALSE(t[0].parts[2].isHole); EXPECT_EQ(t[0].parts[2].text, "|");
+    EXPECT_TRUE(t[0].parts[3].isHole);  EXPECT_EQ(t[0].parts[3].text, "a_b");
+}
