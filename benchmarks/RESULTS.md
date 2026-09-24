@@ -27,6 +27,7 @@ Actor runs (`benchmarks/actor-bench.sh`) are dated reports in the same folder:
 | 2026-09-23 | [2026-09-23-actors-v3-pmq.md](reports/2026-09-23-actors-v3-pmq.md) | CAS list against `ProtoMPSCQueue` at **w=1 and w=16 only**. Its `MPSC` "−11% with the queue" was noise and does **not** reproduce on the full curve (see v4). `ProtoMPSCQueue` is **not merged**; the shipped binary uses the CAS-list mailbox |
 | 2026-09-23 | [**2026-09-23-actors-v4-curve.md**](reports/2026-09-23-actors-v4-curve.md) | **The worker-count curve, 1-2-3-4-5-6-8-12-16, both mailbox variants, interleaved.** Overturns the cross-runtime `fan-out` reading of v2/v3: given protoScala's rotating shape **protoClojure collapses too, −55% w=1→w=16** against protoScala-with-queue's −32%, so the two scripts were measuring different work. `MPMC` **rises +113%** to w=4 on the same scheduler; `fan-out` is **producer-bound in its send path** (isolated sender 113,600/s vs 87,238 observed; send loop 8.80 s → 18.44 s as w goes 1→16). Records that **no mode in the suite can show a rise to the 6 physical cores** |
 | 2026-09-23 | [**2026-09-23-actors-v5-saturation.md**](reports/2026-09-23-actors-v5-saturation.md) | **Adds the CPU-bound `saturation-8` / `saturation-32` modes**, closing the gap v4 recorded: 8 or 32 actors over identical total work with a 20,000-iteration summation (~1.5 ms) inside every handler, so the send loop is 0.14% of the run and the workers are the constraint. Mirrors protoST's `saturation_8a.st` / `saturation_32a.st`. protoClojure twins of the same shape and the same message count. **protoScala's actors do scale**: `saturation-32` reaches **3.68× at w=6** and peaks at **3.97× at w=12** on the shipped CAS-list binary; `saturation-8` peaks at 3.47× at w=8. The near-linear region ends at w=3, and **protoST's SMT regression did not reproduce** — but 6-7 of the 12 logical CPUs were carrying foreign load throughout, so the peak position and the missing SMT cliff are **not settled**. 288/288 samples verified, n=4 per cell, no kills |
+| 2026-09-24 | [**2026-09-24-phase4-actors.md**](reports/2026-09-24-phase4-actors.md) | **The 0.5.0 release run, and the first on the `Priority` enum.** All nine modes (the seven of DESIGN §8.5 plus `saturation-8` / `saturation-32`) x 6 worker counts, 5 interleaved samples per cell, 450/450 samples verified, no FAILED cell and no kill. The shipped `ProtoMPSCQueue` mailbox throughout. Load average 7.99 / 8.48 / 8.43 — **higher than any earlier run**, so absolute msg/s are indicative and the ratios are the result. `saturation-8` peaks at **3.32x @ w=6** and `saturation-32` at **3.48x @ w=8**, against v5's ProtoMPSCQueue series' 3.16x @ w=4 and 3.43x @ w=8: Phase 4 did not cost actor scaling anything measurable. High-band ask p50 **27.2 µs @ w=1 -> 40.4 µs @ w=16**, against 26.7 -> 41.9 µs when `Priority` was three integers on an object — **the enum costs the band dispatch nothing**. protoScala leads protoClojure on both CPU-bound modes (1.17x-1.42x) and on `MPMC` at w=4-6, and trails it on the send-bound `single` / `fan-out` / `MPSC` modes |
 
 ## Actors (Phase 5)
 
@@ -330,6 +331,33 @@ hidden: it is the one read-path cost this phase adds, and the reason for it is a
 correctness requirement, not an optimisation. Class *creation* is cheaper in
 exchange, because the members now mutate one object instead of building a fresh
 immutable copy per member.
+
+### Actors after Phase 4
+
+`benchmarks/actor-bench.sh --name phase4-actors`, report
+[reports/2026-09-24-phase4-actors.md](reports/2026-09-24-phase4-actors.md). Nine
+modes x six worker counts, 5 interleaved samples per cell, every sample's
+self-report verified before any rate was computed: 450/450 verified, no FAILED
+cell, nothing killed. Load average 7.99 at the start and 8.43 at the end — the
+busiest host any actor run has had — so the absolute rates are a reference only.
+
+Two questions this phase had to answer, and the answers:
+
+| question | before | after Phase 4 | reading |
+|---|---:|---:|---|
+| Does the `Priority` **enum** cost the band dispatch anything? (High-band ask p50, w=1 -> w=16) | 26.7 -> 41.9 µs | 27.2 -> 40.4 µs | **No.** An enum case is a singleton object and the band is read from its `ordinal`; the numbers are indistinguishable |
+| Does the per-frame **retry loop** cost actor scaling anything? (`saturation-8` / `saturation-32` peak speedup) | 3.16x @ w=4 / 3.43x @ w=8 | 3.32x @ w=6 / 3.48x @ w=8 | **No.** Both peaks are at or above the previous ProtoMPSCQueue series, on a busier host |
+
+The "before" column is the `ProtoMPSCQueue` series of
+[v5](reports/2026-09-23-actors-v5-saturation.md) for saturation and
+[v2](reports/2026-09-23-actors-v2.md) for the latency percentiles — the latter on
+the CAS-list mailbox, which is why only the *shape* of the latency curve is
+compared and not its absolute throughput.
+
+`saturation-8`'s peak moving from w=4 to w=6 is **not** claimed as an improvement:
+w=4 and w=6 are 2,439 and 2,507 msg/s with `[2,350-2,747]` and `[2,414-2,561]`
+spreads that overlap. The honest statement is that the near-linear region and the
+plateau are where v5 found them, and that this phase did not move them.
 
 **Cold start** missed the < 25 ms budget of DESIGN §1 and this phase made it worse:
 26.31 ms (script) / 26.98 ms (REPL) for the canonical build and 25.87 / 27.56 ms for

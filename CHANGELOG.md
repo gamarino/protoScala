@@ -115,6 +115,23 @@ from protoCore** (P3). Phase 5 shipped out of order as 0.3.0 and Phase 3 as
   identity key. The two are indistinguishable at run time (a case object has one
   instance), which is why only the white-box test can tell.
 
+### Performance
+
+- No workload regression. The wall-clock suite could not answer the question on a
+  host whose own CPython reference moved by 8-23 % between runs, so the two
+  mechanisms this phase puts in hot paths were measured directly with
+  `perf stat -r 3`: the **per-frame retry loop is free** (`fib30` -3.9 % cycles,
+  `attr_lookup` -5.2 %, `tak` +3.1 %, all inside the noise) and **mutable class
+  prototypes cost `object_tree` +2.8 % cycles / +1.4 % instructions**, inside the
+  phase's 3 % gate and recorded rather than hidden.
+- The **actor suite re-run on 0.5.0** (nine modes x six worker counts, 5
+  interleaved samples, 450/450 verified, nothing killed) shows the two Phase 4
+  mechanisms cost the scheduler nothing: `Priority`-as-`enum` leaves the High-band
+  ask p50 at 27.2 µs (w=1) to 40.4 µs (w=16), against 26.7-41.9 µs when `Priority`
+  was three integers on an object; `saturation-8` / `saturation-32` peak at 3.32x
+  and 3.48x, at or above the previous `ProtoMPSCQueue` series, on a busier host.
+  Report: `benchmarks/reports/2026-09-24-phase4-actors.md`.
+
 ### Known issues
 
 - **Cold start is above the < 25 ms budget** and this phase made it worse: 26.31 ms
