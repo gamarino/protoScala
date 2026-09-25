@@ -795,16 +795,76 @@ exercised for the first time in Phase 6** — see the three entries below it.
   supported — remains the maintainer's call; this is evidence for it, not a ruling.
   `-DPROTOSCALA_PROTOST_INTEROP=OFF` builds the suite with no reference to the
   protoST tree.
-- **R5 / protoCore's `SharedModuleCache` is keyed by logical path with no
-  `ProtoSpace` component** (`core/ModuleCache.cpp`) and is never invalidated, so
-  in a process with two runtimes an unprefixed `import util.Strings` could be
-  answered from a module another runtime loaded under the same name. Phase 6
-  applies two mitigations and fixes neither the cache nor its key, because it is
-  protoCore's and P3 makes a protoCore change a maintainer decision: a **prefixed**
-  import bypasses `getImportModule` entirely and calls the named provider's
-  `tryLoad` directly, and `provider:scala` is *prepended* to the chain so
-  protoScala's own provider is asked first for an unprefixed path. The residual
-  hazard is the unprefixed path in a two-runtime process.
+- **R5 / design note: a module is a process-level entity, and the anchor that
+  makes cross-space sharing safe.** The maintainer ruled on 2026-09-24 that a
+  module is loaded **once per process**, that the module list is **global and
+  therefore perennial**, and that a module anchors its own contents through its
+  variables — so a module's classes and values are reachable from a perennial
+  root wherever their cells happen to live, and a loaded module is not owned by
+  a space. There is no cross-space GC edge to reason about; the anchor *is* the
+  mechanism. Recorded here because the implementation is a **local approximation
+  of that platform rule**, and the difference is what a future host could break.
+  Read from the code on 2026-09-24:
+
+  - **protoST's side is per-runtime, not global.** `STRuntime::importModuleFile`
+    anchors the module with `registryAdd`, which stores it in `liveRegistry` — a
+    mutable object pinned once in the `ProtoRootSet` the runtime creates **on its
+    own `ProtoSpace`** (`space.createRootSet("protoST-async")`) — and the classes
+    it declares also live in the runtime's `globals`. Both are roots for the life
+    of the `STRuntime`, which is why the sharing is safe today.
+    `STRuntime::Impl::moduleCache` is a `std::map` of raw pointers and is **not** a
+    root: it provides identity (one load per canonical path), not retention.
+  - **protoCore's global list is global but is not itself a root.**
+    `SharedModuleCache` (`core/ModuleCache.cpp`) is a process-wide
+    `std::map<std::string, const ProtoObject*>`, and the collector's root
+    collection (`core/ProtoSpace.cpp`, Phase 2) does not scan it — it scans
+    `space->moduleRoots`, the per-space root sets, the prototypes, the threads and
+    the contexts. Perenniality is delivered instead by `getImportModule` pushing
+    the module into the **calling** `space->moduleRoots`, once per importing
+    space. So "global list" holds; "and therefore perennial" is implemented today
+    as a set of per-space anchors rather than one perennial global root.
+  - **A prefixed import reaches neither.** `Session::loadForeign` calls the named
+    provider's `tryLoad` directly, so `sharedModuleCacheInsert` never runs and
+    nothing is added to any `space->moduleRoots`; the module is not in the
+    process-global list at all. Its retention is entirely protoST's two
+    per-runtime roots above, and protoScala's own pinned `globals` hold the
+    namespace object.
+
+  **What a host could break:** a host that destroys the `STRuntime` while a
+  protoScala `Session` still holds imported values drops the only anchor. The
+  tests construct the `STRuntime` first so it is destroyed last; nothing in the
+  code enforces that order. Under the platform rule the anchor would not depend
+  on a runtime's lifetime at all.
+
+- **R5 / whether a prefixed import should go through `SharedModuleCache`** —
+  re-examined under the ruling above, and **reported, not changed**, because the
+  mechanism is protoCore's and P3 makes that a maintainer decision. Phase 6
+  bypassed `getImportModule` for prefixed imports on the ground that the cache
+  "is keyed by logical path with no `ProtoSpace` component", treating that as a
+  hazard. **That ground is void:** a module is process-level, so the path is the
+  correct identity and a second runtime answering from the same entry is the
+  intended behaviour, not a collision. Going through `getImportModule` would also
+  deliver the ruling's model directly — one load per process, plus rooting in
+  every importing space. Three things stand in the way, all of them protoCore's:
+
+  1. **There is no way to ask for a named provider.** `getImportModule` walks the
+     *calling space's* resolution chain. To reach protoST through it, protoScala
+     would have to append `provider:st` to its own chain, and then an unprefixed
+     `import counter_lib` would reach protoST too — which is exactly the implicit
+     shadowing the prefix exists to make explicit.
+  2. **The key drops the prefix, so two languages collide.** protoScala strips
+     `st.` and would ask for `"counter_lib"`. With a `counter_lib.scala` also
+     present, a process-global path key makes the two **the same module**, first
+     load winning for both `import st.counter_lib` and `import counter_lib`. Path
+     alone is the right identity only if the provider is part of it;
+     `Session::loadForeign`'s own cache already keys on
+     `providerSpec + "/" + logicalPath` for this reason. This is the one point
+     worth a ruling.
+  3. **It would not remove the per-space re-keying.** `getImportModule` builds its
+     wrapper in the caller's context, but the module object inside still carries
+     keys interned in the owning space, so the provider must re-key regardless.
+     Making interning **global**, as the maintainer has proposed, is the change
+     that would delete that workaround rather than relocate it.
 - **Phase 6 / no runtime in the family registers `py`, `js` or `clj`.** protoScala
   routes all four family prefixes and reports
   `ImportError: no provider registered for '<alias>'` when the alias is absent,

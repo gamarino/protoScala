@@ -215,13 +215,22 @@ list seen as a Scala `Seq` is wrapped, not copied).
   - **A snapshot of the namespace.** protoST's module object is mutable; the
     namespace the importer receives is taken once, at import. A name the module
     binds later is not visible to an importer that already imported it.
-- **protoCore's `SharedModuleCache` is keyed by logical path with no `ProtoSpace`
-  component** and is never invalidated, so in a two-runtime process an unprefixed
-  import could be answered from a module the other runtime loaded under the same
-  name. A **prefixed** import therefore calls the named provider's `tryLoad`
-  directly and does not go through `getImportModule`, and `provider:scala` is
-  prepended to the chain so protoScala's own provider is asked first for an
-  unprefixed path. The residual hazard is the unprefixed path (DESIGN R5).
+- **A module is a process-level entity** (maintainer ruling, 2026-09-24): loaded
+  once per process, listed in a global and therefore perennial list, anchoring its
+  own contents through its variables. So `SharedModuleCache` being keyed by
+  logical path with **no `ProtoSpace` component** is the correct identity, not the
+  hazard Phase 6 took it for, and there is no cross-space GC edge to reason about
+  — a loaded module is not owned by a space, and the anchor is the mechanism that
+  keeps its values alive.
+
+  A **prefixed** import still calls the named provider's `tryLoad` directly rather
+  than going through `getImportModule`, and the reasons are now different ones:
+  `getImportModule` has no way to address a *named* provider (it walks the calling
+  space's chain), and the cache key drops the prefix, so `st.counter_lib` and a
+  `counter_lib.scala` would be one entry. R5 in [STATUS.md](STATUS.md) states both,
+  with what the implementation actually anchors and where it approximates the
+  platform rule; the mechanism is protoCore's, so it is reported there rather than
+  changed here.
 
 ## 7. Named arguments across the boundary
 

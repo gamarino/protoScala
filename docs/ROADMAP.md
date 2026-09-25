@@ -325,9 +325,18 @@ Still not demonstrated, and stated so nobody infers more: a cross-runtime **call
 (a protoST method is `__bc_ptr__` + protoST's engine, not a `proto::ProtoMethod`),
 imports from more than one thread, more than one protoST runtime per process, and a
 namespace that changes after import. **R5 itself remains a maintainer ruling**;
-this is evidence for it. protoCore's `SharedModuleCache`, keyed by logical path
-with no `ProtoSpace` component, is the other half of that question and is
-unchanged.
+this is evidence for it.
+
+The maintainer has since ruled on the reachability half: a module is a
+**process-level** entity, its list is global and therefore perennial, and it
+anchors its own contents through its variables — so a loaded module is not owned
+by a space and there is no cross-space GC edge to reason about. That makes
+`SharedModuleCache`'s path-only key the correct identity rather than the hazard
+Phase 6 recorded. What is left is reported under R5 in [STATUS.md](STATUS.md) and
+belongs to protoCore: today the retention is per-runtime rather than one perennial
+global root, `getImportModule` cannot address a *named* provider, and the cache key
+drops the family prefix so two languages' modules of the same path would be one
+entry. Nothing here was changed on that account.
 
 ### Remaining — a `py` provider
 
