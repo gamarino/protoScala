@@ -90,32 +90,52 @@ public:
     // path P2's heap-ceiling finding was measured on and the path whose CAS
     // snapshot is now rooted before `appendLast`.
     bool runProducerConsumer(unsigned long units) override {
-        // BOUNDED BACKLOG, in rounds, and that is load-bearing twice over.
+        // ONE actor for the LIFETIME OF THE HOST, and a bounded backlog.
         //
-        // One actor for the whole workload, because a fresh actor per round made
-        // the live set grow with the NUMBER OF ACTORS -- protoScala anchors every
-        // actor in the scheduler registry for the session (DESIGN D46).
+        // Both constraints were learned from failures of this adaptor, not from
+        // the plan.  A fresh actor per call made gc.host_stress abort with a live
+        // set of 322,474 cells under a 400,000-cell ceiling, and a fresh actor per
+        // round made heap.ceiling_progress abort at 237,536: protoScala anchors
+        // every actor in the scheduler registry for the whole session (DESIGN
+        // D46), so the live set grew with the NUMBER OF ACTORS and neither case
+        // was measuring what its name claims.  That is a real protoScala property
+        // and it is recorded as a finding in docs/CONFORMANCE.md -- but a case
+        // about unrooted C++ locals must not fail because of it.
         //
         // And the producer waits for the consumer every 2,000 messages, because
-        // sending all `units` before reading any leaves the whole backlog live at
-        // once: the live set then legitimately exceeds any ceiling and rule 8
-        // "fails" with an abort that says nothing about protoScala.  At most
-        // 2,000 messages are ever in flight here.
+        // sending everything before reading anything leaves the whole backlog
+        // live, which exceeds any ceiling by construction.
+        if (!actorReady_) {
+            harness_.eval(
+                "var conformanceActor = Actor.spawn(0) { (state, msg) => (state + msg, state + msg) }");
+            const std::string got = harness_.eval("conformanceActor.value");
+            if (got != "0") {
+                // No persistent binding available: fall back to one actor per
+                // call and say so by declining the capability, rather than
+                // silently measuring actor accumulation.
+                return false;
+            }
+            actorReady_ = true;
+            delivered_ = 0;
+        }
         const unsigned long perRound = 2000;
         const unsigned long rounds = (units / perRound) + 1;
+        const unsigned long target = delivered_ + rounds * perRound;
         const std::string src =
-            "{ val counter = Actor.spawn(0) { (state, msg) => (state + msg, state + msg) }\n"
-            "  var r = 0\n"
-            "  var sent = 0\n"
+            "{ var r = 0\n"
             "  while r < " + std::to_string(rounds) + " do {\n"
             "    var i = 0\n"
-            "    while i < " + std::to_string(perRound) + " do { counter ! 1; i += 1 }\n"
-            "    sent = sent + " + std::to_string(perRound) + "\n"
+            "    while i < " + std::to_string(perRound) + " do { conformanceActor ! 1; i += 1 }\n"
             "    var spins = 0\n"
-            "    while counter.value < sent && spins < 50000000 do { spins += 1 }\n"
+            "    while conformanceActor.value < " + std::to_string(delivered_)
+                + " + (r + 1) * " + std::to_string(perRound)
+                + " && spins < 50000000 do { spins += 1 }\n"
             "    r += 1 }\n"
-            "  counter.value }";
-        return harness_.eval(src) == std::to_string(rounds * perRound);
+            "  conformanceActor.value }";
+        const std::string got = harness_.eval(src);
+        if (got != std::to_string(target)) return false;
+        delivered_ = target;
+        return true;
     }
 
     // --- rule 2b -----------------------------------------------------------
@@ -186,7 +206,9 @@ private:
         return (long) s.heapSize - (long) s.freeCellsCount;
     }
 
-    EvalHarness harness_;
+    EvalHarness  harness_;
+    bool          actorReady_ = false;
+    unsigned long delivered_  = 0;
 };
 
 }  // namespace protoScala::test

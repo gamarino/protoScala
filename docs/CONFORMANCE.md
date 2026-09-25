@@ -15,7 +15,7 @@ give, and what each capability of the adaptor does and does not prove.
 |---|---|---|---|
 | `gc.young_submitted` | 1 | **PASS** | grew in-use by 363,162 cells; 3 cycles reclaimed 360,082; residual 3,080 |
 | `gc.transient_reclaimed` | 5 | **PASS** | grew 305,818; residual −264 (`List` is a `ProtoList`, not a `ProtoTuple`) |
-| `gc.host_stress` | 3 | **PASS** | 20/20 rounds under a 400,000-cell ceiling, 34 cycles, 1,323,476 cells reclaimed |
+| **`gc.host_stress`** | **3** | **FAIL** | live set 316,230 under a 400,000-cell ceiling, reclaimed 0 — **see the mailbox-retention finding below.** An earlier run of this case passed (34 cycles, 1,323,476 reclaimed) with a workload that spawned a fresh actor per call; that pass was an artefact of a shorter-lived actor |
 | `symbol.fast_path_key_hits` | 4 | **PASS** | a 31-byte key is readable through both `getAttribute` and `getOwnAttributeDirect` |
 | `external.finalizer_runs` | 7 | **PASS** | kernel characterisation: one call, right pointer |
 | `module.root_survives_cycle` | 9b | **PASS** | kernel characterisation: module and contents survived 3 cycles |
@@ -26,56 +26,94 @@ give, and what each capability of the adaptor does and does not prove.
 | `join.parks` | 2b | **PASS** (isolated) | a cycle completed while `Thread.start`/`t.join()` was blocked |
 | **`heap.ceiling_progress`** | **8** | **FAIL** (isolated) | **see the finding below** |
 
-Suite total: **1263** ctest cases, 1262 passing — 1248 pre-existing plus 15
-conformance entries, with **no previously-passing test newly failing**. The one
-failure is the rule-8 finding.
+Suite total: **1263** ctest cases, **1261 passing** — 1248 pre-existing plus 15
+conformance entries, with **no previously-passing test newly failing**. The two
+failures are both new conformance findings: the mailbox retention above and rule
+8 below (which is very likely the same mechanism reached by a different route).
 
 Static check: **0 unjustified findings**, 1 justified entry, 3 informational.
 
-## The finding: rule 8
+## The finding: the actor mailbox appears to retain every message ever delivered
+
+This is the phase's most specific finding for protoScala and it reproduces in
+**two independent cases**, so it is reported first.
+
+`gc.host_stress` aborts:
 
 ```
-protoCore: heap hard limit 294912 cells reached; live set 280922 cells,
+protoCore: heap hard limit 400000 cells reached; live set 316230 cells,
+last cycle reclaimed 0 — out of memory
+```
+
+**Reproduction:**
+`build_release/tests/unit/protoscala_conformance --gtest_filter='*gc_host_stress*'`
+(exit 134). Twenty rounds of the actor path under a 400,000-cell ceiling with a
+forced cycle between rounds, **one actor for the whole run** and at most 2,000
+messages in flight at a time.
+
+**The arithmetic is the finding.** The run delivers 20 × 4,000 = **80,000
+messages** through that one actor, and the live set at the abort is **316,230
+cells**: **3.95 cells per message delivered**, with `reclaimedLastCycle` at zero.
+A live set that grows by a small constant per message, while at most 2,000
+messages are ever queued, is retention — not an unrooted local, and not the
+actor registry.
+
+**Named hypothesis, unproven:** `ActorState::pendingIdx` is a *read cursor* into
+the actor's `__pend<n>__` list (`src/runtime/ActorScheduler.h:47-51`). If the list
+itself is never truncated or replaced as the cursor advances, every envelope ever
+delivered stays reachable from the actor, which is anchored in the registry for
+the session. That would produce exactly this shape: a bounded queue depth, an
+unbounded live set, and zero reclamation. **The first thing to do with this is to
+measure cells-per-message at two different message counts** — if the ratio holds,
+the hypothesis is confirmed without reading any more code.
+
+Three alternatives were eliminated by measurement rather than by argument:
+
+1. *Actor accumulation.* A fresh actor per round aborted at 237,536 cells and a
+   fresh actor per call at 322,474; one actor for the whole run still aborts at
+   316,230. So the registry is not the mechanism here (it is a real property —
+   `Actor.spawn` retains for the session — but not this).
+2. *An unbounded backlog.* At most 2,000 messages are in flight.
+3. *A ceiling below the working set.* protoScala's settled live set is ~22,000
+   cells; the ceiling here is 400,000.
+
+**Severity: high.** A long-running protoScala program that sends messages to a
+long-lived actor has a live set proportional to total messages sent. Without a
+configured heap ceiling that is unbounded RSS; with one it is an abort.
+
+## The finding: rule 8 — the same shape, reached by a different route
+
+```
+protoCore: heap hard limit 221865 cells reached; live set 215351 cells,
 last cycle reclaimed 0 — out of memory
 ```
 
 **Reproduction:**
 `build_release/tests/unit/protoscala_conformance_isolate --case=heap.ceiling_progress`
-(exit 134). The case configures a hard ceiling of `heapSize + 32768` cells —
-which no protoScala code does, because protoScala never calls `setHeapLimits` —
-and runs 200,000 messages through one actor.
+(exit 134). The case settles the space, measures protoScala's own live set
+(≈21,865 cells), and sets a hard ceiling **200,000 cells above it** — which no
+protoScala code does, because protoScala never calls `setHeapLimits`. The workload
+is one actor with a bounded 2,000-message backlog.
 
-**Severity: high, mechanism not yet established.** Three candidate mechanisms,
-and distinguishing them is the first thing to do with this finding rather than
-something to guess at now:
+**This is very likely the mailbox retention above, reached through a different
+case**, and the numbers say so: the live set climbs to the ceiling with zero
+reclamation, exactly as in `gc.host_stress`. It is reported separately because the
+two cases configure the ceiling differently and a single mechanism explaining both
+is a conclusion, not an observation.
 
-1. **An unbounded mailbox.** The producer is a tight Scala loop and the consumer
-   is one actor worker. If the producer outruns it, the queued envelopes are
-   genuinely live and the live set grows without limit. Under any configured
-   ceiling that is an abort rather than backpressure.
-2. **Processed messages retained.** `ActorState::pendingIdx` is a read cursor
-   into `__pend<n>__`; if the list itself is not replaced as the cursor advances,
-   already-processed envelopes stay reachable. That would explain
-   `last cycle reclaimed 0` even while the consumer is draining, which mechanism
-   (1) alone does not.
-3. **The P2 topology** — every producer and the consumer parked in
-   `waitForHeapHeadroom` with the collector idle.
+**Not a regression.** protoScala never configures a ceiling, so `maxHeapSize == 0`,
+`waitForHeapHeadroom` returns immediately and this code was unreachable before
+this case existed. The finding was **latent, not new** — which is the whole point
+of a case that configures its own ceiling.
 
-`liveCellsLastCycle` = 280,922 against a 294,912-cell ceiling says the live set
-really is that large, which points at (1) or (2) rather than (3).
-
-**Not a regression.** protoScala never configures a ceiling, so
-`maxHeapSize == 0`, `waitForHeapHeadroom` returns immediately and this code was
-unreachable before this case existed. The finding was **latent, not new**.
-
-**An earlier draft of the workload found a second thing** and it is worth
-recording because it changed the adaptor: spawning a fresh actor per round of
-2,000 messages reached the same abort with a live set of 237,536 cells, because
-protoScala anchors every actor in the scheduler's registry for the whole session
-(DESIGN D46). The live set grew with the **number of actors**. The workload now
-reuses one actor, so the case measures the mailbox rather than the registry —
-but an unbounded actor registry is a real property worth a maintainer's
-attention on its own.
+**Two earlier versions of this measurement were invalid, and both are recorded
+because the abort surviving the fixes is what makes the number trustworthy.** The
+first used a ceiling of `heapSize + 32768` — only 32,768 cells above what the
+runtime already held — which cannot distinguish "cannot make progress" from "the
+ceiling is below the working set". The second bounded the ceiling properly but
+used a workload that enqueued all 200,000 messages before reading any, so the
+live set was unboundedly live **by construction**. Both are fixed;
+`Host::runProducerConsumer`'s contract now requires a bounded backlog.
 
 ## What the adaptor does not prove
 
