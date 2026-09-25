@@ -140,9 +140,12 @@ list seen as a Scala `Seq` is wrapped, not copied).
 
 ## 6. Rules, and the measured limit on co-residency
 
-- Never cache interned symbols in function-local statics; symbols are per space.
-  Every key protoScala needs lives in `RuntimeLayout` and is read, never
-  re-interned.
+- Interned symbols are **process-global** since protoCore 2.2.0 (P3), so a
+  function-local static cache of a `createSymbol` result is now sound. This rule
+  used to read "never cache interned symbols in function-local statics; symbols
+  are per space", and it is **reversed**. protoScala keeps every key it needs in
+  `RuntimeLayout` anyway — one place to read, nothing re-interned — which is a
+  clarity convention now rather than a correctness requirement.
 - A provider resolves its runtime from **`ctx->space`**, never from a
   thread-local: a thread-local answers "module not found" on every actor worker,
   which is the bug protoST's `STModuleProvider.h` records having had.
@@ -171,14 +174,34 @@ list seen as a Scala `Seq` is wrapped, not copied).
   resolves through the space-keyed `moduleHostForSpace` and therefore still
   answers only protoScala's own callers.
 
-- **A cross-space attribute key is a different pointer.** An attribute key is the
-  address of an interned symbol and protoCore interns **per `ProtoSpace`**
-  (`ctx->space->symbolTable`), so the module NAMESPACE a provider returns has to be
-  built with keys interned in the CALLER's space. Only the mapping is rebuilt; the
-  values are the foreign objects themselves, by address. The trap is that protoCore
-  embeds a short string in the pointer word, so a 5-byte member name matches across
-  spaces by accident and a 7-byte one misses silently — `Counter` is the test case
-  for exactly that reason.
+- **A cross-space attribute key is the SAME pointer since protoCore 2.2.0 (P3).**
+  This entry used to read "a cross-space attribute key is a different pointer",
+  and it is **reversed**. An attribute key is the address of an interned symbol,
+  and protoCore used to intern per `ProtoSpace` (`ctx->space->symbolTable`), so
+  the module NAMESPACE a provider returned had to be rebuilt with keys interned
+  in the CALLER's space. The trap was that protoCore embeds a short string in the
+  pointer word, so a 5-byte member name matched across spaces by accident and a
+  7-byte one missed silently, with `getAttribute` returning `PROTO_NONE` — which
+  is also a legitimate value. `Counter` (7 bytes) was the test case for exactly
+  that reason. P3 made interning process-global: one canonical pointer per
+  spelling per process.
+
+  **The namespace rebuild survives, for a different reason.** `buildCallerFacade`
+  also re-parents the namespace object to `callerCtx->space->objectPrototype`,
+  and **prototypes remain per space**. A foreign object handed straight across
+  still carries parent links into the providing runtime's prototype chain.
+  Deleting the facade would trade a silent attribute miss for a silent prototype
+  mismatch (P3 D9). Global interning fixed names, not prototypes.
+
+- **A module's identity is provider + path + version** (protoCore 2.2.0, P3 D11),
+  rendered as one canonical string with `\x1F` between the components. The
+  provider component is the provider's GUID, never its alias. A module that
+  declares no version has the empty version, which is reserved permanently for
+  exactly that and is not a wildcard. `Session::loadForeign` publishes through
+  `ProtoSpace::registerModule` under that identity, so the module joins the
+  process-global module list and is rooted in the **importing** space — before
+  P3 its only anchor was inside the providing runtime, and destroying that
+  runtime dropped it.
 
 - **No copy at the boundary, verified.** `umd/protost-interop` reads the same
   protoST class out of the namespace protoScala received and out of protoST's own
