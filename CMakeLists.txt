@@ -66,6 +66,9 @@ if(protoCore_FOUND)
     endif()
     set(PROTOCORE_LIBRARY protoCore::protoCore)
     set(PROTOCORE_INCLUDE_DIRS "${protoCore_INCLUDE_DIR}")
+    if(TARGET protoCore::conformance)
+        set(PROTOCORE_CONFORMANCE_LIBRARY protoCore::conformance)
+    endif()
     set(PROTOCORE_EFFECTIVE_VERSION "${protoCore_VERSION}")
     message(STATUS "protoScala: installed protoCore ${protoCore_VERSION} "
                    "(SOVERSION ${protoCore_SOVERSION}) from ${protoCore_DIR}")
@@ -118,6 +121,12 @@ else()
     endif()
     unset(_protoCore_abi_file)
     set(PROTOCORE_INCLUDE_DIRS ${PROTOCORE_DIR} ${PROTOCORE_DIR}/headers)
+    # protoCore's embedder conformance suite (P4): a static archive beside
+    # libprotoCore in the same build tree.  Optional, so a protoCore older than
+    # 2.3 simply does not build the conformance target here.
+    find_library(PROTOCORE_CONFORMANCE_LIBRARY NAMES protoCoreConformance
+        PATHS ${PROTOCORE_LIB_DIR}/conformance ${PROTOCORE_LIB_DIR}
+        NO_DEFAULT_PATH)
     set(CMAKE_BUILD_RPATH "${PROTOCORE_LIB_DIR}")
     set(CMAKE_BUILD_RPATH_USE_LINK_PATH TRUE)
 

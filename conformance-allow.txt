@@ -1,0 +1,12 @@
+# conformance-allow.txt -- the static ratchet for protoScala.
+#
+# Format: <check-id> <path>:<line> <sha1-12-of-the-line-text> :: <justification>
+#
+# The hash is of the LINE TEXT, so an entry goes stale when the line changes and
+# not only when it moves: a justified call that is later turned into something
+# else re-opens the finding.  The raw count is never the gate; the delta is.
+#
+# Run: python3 ../protoCore/scripts/conformance/check_static.py --repo .
+# Exit 0 clean, 1 an unjustified finding, 2 a stale entry.
+
+blocking_join_unbracketed src/runtime/StackGuard.cpp:145 07a115653b2c :: Correct, but only by construction, and the reason must be written down. This pthread_join is main()'s thread waiting for the evaluator thread that runOnEvaluatorThread spawned to get a larger stack. The ProtoSpace is constructed INSIDE the joined thread (src/main.cpp), so at the moment of the join the joining thread is not registered with any ProtoSpace and holds no quorum -- there is nothing for it to hold. It must stay that way: if protoScala ever constructs the space before this join, or joins a registered thread here, the call needs a ProtoContext::UnmanagedScope and this entry must be deleted rather than re-hashed. Reviewed 2026-09-25, agent, pending maintainer review.
