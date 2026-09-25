@@ -6,6 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A cross-runtime import works: `import st.<module>` loads a protoST module,
+  binds its members and shares its values with no copy at the boundary.** Phase 6
+  measured this as a miss and concluded it needed a change to protoCore's UMD
+  contract. It did not, and protoCore is untouched: a `ModuleProvider` is an object
+  with its own state, so a provider takes its runtime from that state instead of
+  from the caller's `ctx->space` — which is a space it does not own when the caller
+  is another runtime — and uses `ctx` only to allocate the result in the caller's
+  context. The provider change is protoST `e82682b`.
+
+  Two per-space facts came out of it. A provider must run a module's top level in
+  its OWN space, or the module's literals intern in the caller's symbol table and
+  the provider's own later lookups miss. And it must rebuild the module namespace
+  with keys interned in the CALLER's space, because an attribute key is an interned
+  symbol's address and protoCore interns per `ProtoSpace`: a short name matched
+  across spaces by accident (protoCore embeds it in the pointer word) and a 7-byte
+  one missed silently. Only the mapping is rebuilt; the values are the protoST
+  objects themselves.
+
+  `umd/protost-interop` prints both addresses of the same class read from both
+  runtimes, with the same `getHash` from either side, and asserts that it survives
+  a forced collection in each space with the cycle counters checked. It also
+  asserts what is refused: an import from another thread, and a process holding
+  two protoST runtimes. `PROTOSCALA_PROTOST_INTEROP` now defaults to ON, so the
+  test runs whenever protoST is found beside this tree.
+
+  Unchanged, and stated in `docs/INTEROP.md` §6: a cross-runtime **call** does not
+  work (a protoST method is `__bc_ptr__` plus protoST's engine, not a
+  `proto::ProtoMethod`); `py`, `js` and `clj` still have no provider, and §6.1
+  records the four measured reasons `py` could not follow `st`, including that
+  protoPython ships no numpy. Both `py` fixtures stay `XFAIL`.
+
 ### Changed
 
 - **`Future` takes its body by name** — `Future(expr)` and `Future { … }`, as in

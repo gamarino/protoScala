@@ -24,10 +24,11 @@
 > — and is recorded under "Open bugs". It is the only failure in that
 > configuration, so it masks nothing.
 >
-> `umd/protost-interop` is not in that count: it links protoST into a test
-> executable and is off by default (`-DPROTOSCALA_PROTOST_INTEROP=ON`), so this
-> suite does not depend on a sibling repository's build state. It was built and
-> run; see R5 under "Known issues".
+> `umd/protost-interop` is the 1204th case: it links protoST into a test
+> executable and, since Track Y, is built by default whenever protoST is found
+> beside this tree (`-DPROTOSCALA_PROTOST_INTEROP=OFF` restores a suite that
+> refers to no other tree). It holds the cross-runtime import tests; see R5 under
+> "Known issues".
 > Last verified 2026-09-24 (Phase 6, 0.6.0).
 
 ## Implemented
@@ -397,13 +398,18 @@ file-level modules in Scala) are recorded as D90-D96.
   rediscovered.
 - A **`py`, `js` or `clj` provider**. protoScala routes all four family prefixes
   and reports `no provider registered for '<alias>'`; no runtime in the family
-  registers those three aliases, and installing protoPython's means a second
-  runtime in the process (R5). ROADMAP **Track Y**.
+  registers those three aliases. `st` is the one prefix with a provider behind it
+  (R5 below). For `py` the blockers are measured in INTEROP §6.1: no `py` alias, an
+  environment resolved from a `thread_local`, a `ProtoSpace` that is a process
+  singleton by design, and no `numpy` in protoPython at all. ROADMAP **Track Y**.
 - A **wildcard import of a foreign module** (D92) and **lexical import scoping**
   (D96), which is the same question as scoping extensions (D82).
-- **A cross-runtime import between two co-resident runtimes.** Co-residency
-  itself works and was measured; a provider serves only callers that share its
-  `ProtoSpace`, which is the UMD contract. See R5 under "Known issues".
+- **A cross-runtime CALL.** `import st.<module>` works and its values cross with
+  no copy (R5 below), but *calling* a protoST method from protoScala does not: a
+  protoST method is an object carrying `__bc_ptr__` that protoST's own engine
+  interprets on SEND, not a `proto::ProtoMethod`. A foreign callable has to be a
+  protoCore method. INTEROP §6 lists the other limits of what does work (one
+  thread, one protoST runtime, a namespace snapshot).
 - Supervision trees, `ExecutionContext`, actor timeouts and
   `Await.result(f, duration)` — not scheduled. An `await` waits forever; the
   shutdown reports any actor still parked on a future that never completed.
@@ -745,30 +751,50 @@ means, with the miss message naming every path that was tried.
 See DESIGN §11 for the full table. Unchanged this phase: R2, R4, R8. **R5 was
 exercised for the first time in Phase 6** — see the three entries below it.
 
-- **R5 / two runtimes in one process: co-residency works, a cross-runtime import
-  does not.** Measured on 2026-09-24 against protoST `3fd0438`, by
-  `tests/unit/protost_interop.cpp` (`umd/protost-interop`, built with
-  `-DPROTOSCALA_PROTOST_INTEROP=ON`). An `STRuntime` and a protoScala `Session`
-  were constructed in one process, in that order, and **both `provider:st` and
-  `provider:scala` stayed reachable afterwards** — the first real evidence for R5
-  since Phase 0. The order matters: protoST *replaces* the space's resolution
-  chain and protoScala *prepends* to it, so building protoST first leaves both
-  entries alive; the other way round protoST's replace deletes protoScala's, and
-  the failure reads as "module not found". What does **not** work is
-  `import st.counter_lib` from protoScala: it reports `provider 'st' has no
-  module 'counter_lib'`, and the cause is isolated by its own test —
-  protoST's provider loads that module when the context is in protoST's space and
-  misses when the identical call carries a context in protoScala's. This is
-  neither runtime's defect but the **UMD contract**:
-  `ModuleProvider::tryLoad(path, ctx)` receives the *caller's* context, and every
-  provider in the family resolves its runtime from `ctx->space` (protoST's
-  `stRuntimeForSpace`, protoScala's `moduleHostForSpace`), because a thread-local
-  answered "module not found" on every worker thread. A provider therefore serves
-  only callers that share its object space, and two co-resident runtimes do not.
-  The end-to-end case is kept `DISABLED` in its failing shape, so it is the test
-  that turns green the day the contract grows a way for a provider to serve a
-  caller in another space. The target is off by default so this suite does not
-  depend on a sibling repository's build state.
+- **R5 / two runtimes in one process: a cross-runtime import now works.**
+  Phase 6 measured co-residency working and `import st.counter_lib` missing, and
+  diagnosed the cause correctly: `ModuleProvider::tryLoad(path, ctx)` receives the
+  *caller's* context, and protoST resolved its own runtime from `ctx->space` — a
+  space it does not own when the caller is another runtime, since each runtime owns
+  its own. Phase 6 then concluded the fix had to change the UMD contract. **That
+  conclusion was wrong, and Track Y closed it with no protoCore change.** A
+  `ModuleProvider` is an object with its own state, so a provider takes its runtime
+  from that state and uses `ctx` only to allocate the result in the caller's
+  context. protoST `e82682b` does exactly that; `provider:scala` still resolves
+  through the space-keyed `moduleHostForSpace` and so still answers only
+  protoScala's own callers — the same shape applies the day a foreign runtime
+  imports a `.scala` module.
+
+  What Track Y verified, in `tests/unit/protost_interop.cpp`
+  (`umd/protost-interop`) and in protoST's own
+  `tests/unit/test_cross_runtime_provider.cpp`:
+
+  - `import st.counter_lib as lib` from a protoScala program resolves and runs;
+  - `import st.counter_lib.Counter` binds the member through protoScala's
+    `bindForeignMember`, and a member the module does not define is refused;
+  - **no copy at the boundary**: the same protoST class read out of the namespace
+    protoScala received and out of protoST's own globals is the same address with
+    the same `getHash` from either side, with both addresses printed;
+  - it survives a forced collection in *each* space, with the cycle counters
+    asserted so a run that collected nothing fails rather than passing vacuously;
+  - an import from a thread other than the one that constructed the protoST
+    runtime is refused with a message (protoST D26), and two `STRuntime`s in one
+    process make the choice ambiguous and are likewise refused.
+
+  A second per-space trap was found and fixed on the way: an attribute key is the
+  address of an interned symbol and protoCore interns **per `ProtoSpace`**, so the
+  module namespace has to be rebuilt with keys interned in the caller's space.
+  Only the mapping is rebuilt — the values are the foreign objects themselves.
+  Because protoCore embeds a short string in the pointer word, a 5-byte member name
+  matched across spaces by accident and a 7-byte one missed silently, which is why
+  the tests use `Counter`.
+
+  What is still *not* demonstrated: a cross-runtime **call**, imports from more
+  than one thread, more than one protoST runtime, and a namespace that changes
+  after import. INTEROP §6 states each. R5 itself — whether co-residency is
+  supported — remains the maintainer's call; this is evidence for it, not a ruling.
+  `-DPROTOSCALA_PROTOST_INTEROP=OFF` builds the suite with no reference to the
+  protoST tree.
 - **R5 / protoCore's `SharedModuleCache` is keyed by logical path with no
   `ProtoSpace` component** (`core/ModuleCache.cpp`) and is never invalidated, so
   in a process with two runtimes an unprefixed `import util.Strings` could be
@@ -785,10 +811,11 @@ exercised for the first time in Phase 6** — see the three entries below it.
   which is what a user sees for `import py.numpy as np` today. protoPython
   registers `native`, `python_stdlib`, `compiled` and `hpy`; protoJS and
   protoClojure register none; protoST registers `st` and is subject to the
-  space-keyed limit above. The cross-repository work is ROADMAP's **Track Y**, and
-  `tests/conformance/23-named-arguments/foreign-python-keyword.scala` and
+  space-keyed limit above — which Track Y removed, so `st` is now reachable from a
+  protoScala importer. The remaining cross-repository work is ROADMAP's **Track Y**,
+  and `tests/conformance/23-named-arguments/foreign-python-keyword.scala` and
   `foreign-python-open-encoding.scala` stay `XFAIL` with their expected output
-  recorded and their directive naming the real blocker. The keyword convention
+  recorded and their directives naming the measured blockers (INTEROP §6.1). The keyword convention
   itself **is** now exercised across a real provider boundary, by
   `tests/conformance/25-interop/stand-in-provider-keyword.scala` and its
   `-long-keyword` sibling.

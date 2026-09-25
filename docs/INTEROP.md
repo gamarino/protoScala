@@ -1,13 +1,15 @@
 # protoScala Interoperability (UMD)
 
-> **Status:** implemented in 0.6.0, with one gap that is not protoScala's to
-> close. The mechanism below is built, installed and tested: protoScala loads
-> `.scala` modules, registers itself as a UMD provider, routes the four family
-> prefixes, and loads provider plug-ins by `dlopen`. **What no runtime in the
-> family registers yet is a `py`, `js` or `clj` provider**, so `import py.numpy`
-> compiles, routes, and reports `no provider registered for 'py'`. §3 says
-> exactly what routes where, and ROADMAP's **Track Y** is the cross-repository
-> work. A second, measured limit is in §6.
+> **Status:** implemented in 0.6.0; `import st.<module>` works as of Track Y. The
+> mechanism below is built, installed and tested: protoScala loads `.scala`
+> modules, registers itself as a UMD provider, routes the four family prefixes,
+> and loads provider plug-ins by `dlopen`. **One family prefix now has a provider
+> behind it — `st`** — and a protoScala program imports a protoST module, reads its
+> members and shares its values with no copy at the boundary (§6). `py`, `js` and
+> `clj` still have no provider, so `import py.numpy` compiles, routes, and reports
+> `no provider registered for 'py'`. §3 says exactly what routes where, §6 says
+> what cross-runtime interop does and does not cover, and ROADMAP's **Track Y** is
+> the remaining cross-repository work.
 
 ## 1. Mechanism
 
@@ -56,15 +58,22 @@ hijackable by a plug-in aliased `util`, and a program's meaning must not depend 
 which plug-ins are installed. A fifth runtime needs one line in
 `src/umd/Prefixes.h`.
 
-Current provider availability in the family, re-verified 2026-09-24:
+Current provider availability in the family, re-verified 2026-09-24 (Track Y):
 
-| Runtime | Aliases it registers | Reachable from `protoscala` today |
+| Runtime | Aliases it registers | Reachable from a protoScala importer today |
 |---|---|---|
-| protoPython | `native`, `python_stdlib`, `compiled`, `hpy` | no — and none of them is `py` |
-| protoST | `st` | only in a process that also constructs an `STRuntime`, and then only for callers in protoST's own object space (§6) |
+| protoPython | `native`, `python_stdlib`, `compiled`, `hpy` | no — and none of them is `py` (§6.1) |
+| protoST | `st` | **yes**, in a process that also constructs an `STRuntime`, from the thread that constructed it (§6) |
 | protoJS | none | no |
 | protoClojure | none | no |
 | protoScala | `scala` | yes |
+
+The shipped `protoscala` binary links libprotoCore and libreadline and nothing
+else of the family, so "in a process that also constructs an `STRuntime`" means an
+embedder that links protoST, or a provider plug-in (§3.1) that brings one. The
+tests that exercise it are `umd/protost-interop`
+(`tests/unit/protost_interop.cpp`), built whenever protoST is found beside this
+tree, and protoST's own `tests/unit/test_cross_runtime_provider.cpp`.
 
 So `import py.numpy as np` reports, verbatim:
 
@@ -74,10 +83,11 @@ it, or point PROTOSCALA_PROVIDERS at its plug-in
 ```
 
 protoScala's half is done and the message is what makes the coordination visible
-to a user rather than silent. The other half is **Track Y** in ROADMAP: it needs
-protoPython to register an agreed alias and ship a plug-in exporting the ABI of
-§3.1, and it needs a maintainer ruling on R5, because protoPython's providers come
-with a whole `PythonEnvironment`.
+to a user rather than silent. The remaining half is **Track Y** in ROADMAP: it
+needs protoPython to register an agreed alias, to make its provider serve a caller
+in another `ProtoSpace` the way protoST's now does, and to ship a plug-in exporting
+the ABI of §3.1 — and it needs a maintainer ruling on R5. §6.1 states what was
+measured about that.
 
 ### 3.1 Provider plug-ins
 
@@ -146,16 +156,65 @@ list seen as a Scala `Seq` is wrapped, not copied).
   *is* a `std::exception`); `std::exception`, carrying `what()` across; and
   `catch (...)`, which says "native exception" rather than inventing a message.
   There is one unit test per clause.
-- **A provider serves only callers that share its `ProtoSpace`**, and this is the
-  measured ceiling on co-residency today. `ModuleProvider::tryLoad(path, ctx)`
-  receives the *caller's* context, and every provider in the family resolves its
-  runtime from `ctx->space`, so in a process holding two runtimes each provider
-  answers only its own. Measured on 2026-09-24 against protoST `3fd0438`: an
-  `STRuntime` and a protoScala `Session` were built in one process and **both**
-  `provider:st` and `provider:scala` stayed reachable, but
-  `import st.counter_lib` from protoScala reported `provider 'st' has no module
-  'counter_lib'`, while the same provider loaded that module from a context in
-  protoST's own space. See R5 in [STATUS.md](STATUS.md).
+- **A provider must not resolve its runtime from `ctx->space`.** This was the
+  measured ceiling on co-residency, and Track Y removed it. `tryLoad(path, ctx)`
+  receives the *caller's* context, and each runtime owns its own `ProtoSpace`, so
+  a provider that looks its runtime up by the caller's space finds nothing when
+  the caller is another runtime — and reports a module that is there as absent.
+  Measured on 2026-09-24 against protoST `3fd0438`: both providers stayed
+  reachable in one process, but `import st.counter_lib` from protoScala reported
+  `provider 'st' has no module 'counter_lib'`. protoST `e82682b` fixes it in the
+  provider, with **no protoCore change**: a `ModuleProvider` is an object with its
+  own state, so it takes its runtime from that state and uses `ctx` only to
+  allocate the result in the caller's context. `provider:scala` should follow the
+  same shape the day a foreign runtime imports a `.scala` module; today it
+  resolves through the space-keyed `moduleHostForSpace` and therefore still
+  answers only protoScala's own callers.
+
+- **A cross-space attribute key is a different pointer.** An attribute key is the
+  address of an interned symbol and protoCore interns **per `ProtoSpace`**
+  (`ctx->space->symbolTable`), so the module NAMESPACE a provider returns has to be
+  built with keys interned in the CALLER's space. Only the mapping is rebuilt; the
+  values are the foreign objects themselves, by address. The trap is that protoCore
+  embeds a short string in the pointer word, so a 5-byte member name matches across
+  spaces by accident and a 7-byte one misses silently — `Counter` is the test case
+  for exactly that reason.
+
+- **No copy at the boundary, verified.** `umd/protost-interop` reads the same
+  protoST class out of the namespace protoScala received and out of protoST's own
+  globals, each through its own context with its own interned symbol, and prints
+  both addresses:
+
+  ```
+  NO-COPY PROOF
+    protoScala space   = 0x7ffec21cb4c0
+    protoST space      = 0x57d25533c440
+    Counter via Scala  = 0x743e4cf7e9c0  getHash(scalaCtx) = 127810928110016
+    Counter via ST     = 0x743e4cf7e9c0  getHash(stCtx)    = 127810928110016
+  ```
+
+  Two spaces, one cell, the same `getHash` from either side. Cloning the value at
+  the boundary turns that test red.
+
+- **What cross-runtime interop does NOT cover today**, stated so nobody infers
+  more than was built:
+  - **Values, not calls.** A protoST class or object crosses as a value and its
+    attributes read back. **Calling a protoST method from protoScala does not
+    work**: a protoST method is an object carrying `__bc_ptr__` that protoST's own
+    `ExecutionEngine` interprets on SEND, not a `proto::ProtoMethod` protoCore can
+    dispatch. A foreign callable needs to be a protoCore method, as the plug-in
+    fixtures in `tests/conformance/25-interop/` are.
+  - **One thread.** A protoST module's top level runs on protoST's root context,
+    which only the thread that constructed the runtime may allocate on (protoST
+    D26), and a foreign caller has no context of its own in that space. An import
+    from any other thread — an actor worker, for instance — is refused with a
+    message rather than raced.
+  - **One protoST runtime per process.** The provider is registered once per
+    process, so two `STRuntime`s make "which one" ambiguous, and the ambiguous
+    case is refused rather than resolved arbitrarily.
+  - **A snapshot of the namespace.** protoST's module object is mutable; the
+    namespace the importer receives is taken once, at import. A name the module
+    binds later is not visible to an importer that already imported it.
 - **protoCore's `SharedModuleCache` is keyed by logical path with no `ProtoSpace`
   component** and is never invalidated, so in a two-runtime process an unprefixed
   import could be answered from a module the other runtime loaded under the same
@@ -237,7 +296,38 @@ test asserting numpy behaviour against a stub.
 
 **What is still not reachable:** a `py` provider. `foreign-python-keyword.scala`
 and `foreign-python-open-encoding.scala` remain `XFAIL`, with their expected
-output recorded and their directive now naming the real blocker — *no runtime in
-the family registers the UMD alias `py`* — rather than the routing, which shipped.
-The runner inverts an `XFAIL` verdict, so the day a `py` provider appears both
-fixtures go red and say so. That work is ROADMAP's **Track Y**.
+output recorded and their directives naming the real blockers (§6.1). The runner
+inverts an `XFAIL` verdict, so the day a `py` provider appears both fixtures go
+red and say so. That work is ROADMAP's **Track Y**.
+
+### 6.1 Why `py` did not follow `st`, measured
+
+Track Y made `st` work by changing protoST's provider alone. The same change
+cannot be made to protoPython's providers, and the reasons were read out of
+protoPython's source on 2026-09-24 rather than assumed:
+
+1. **No `py` alias.** protoPython registers `native`, `python_stdlib`, `compiled`
+   and `hpy` (`src/library/PythonEnvironment.cpp`). Adding an alias is the easy
+   part.
+2. **The environment comes from a thread-local, not from the provider or the
+   caller.** `PythonEnvironment::fromContext(ctx)` ignores `ctx` and returns
+   `s_threadEnv`, a `thread_local` pointer. A provider that has no environment for
+   the calling thread cannot serve the call, and one that does would serve it with
+   whatever environment that thread happens to hold.
+3. **protoPython's `ProtoSpace` is a process singleton by design.**
+   `PythonEnvironment::getProcessSpace()` returns a function-local
+   `static proto::ProtoSpace`, commented "L-Shape: one per process". A co-resident
+   protoScala `Session` owns its own space, so the premise that there is one space
+   per process is false in that process. Every module protoPython builds, and every
+   symbol it interns, belongs to that singleton space.
+4. **The first fixture cannot pass at all.** `foreign-python-keyword.scala`
+   expects `float64` from `np.array(…, dtype = "float64")`, and protoPython ships
+   no `numpy` — `lib/python3.14/` has 213 entries and none of them is numpy. No
+   amount of provider plumbing produces that output, and a stand-in dressed as
+   numpy would be a green test asserting numpy behaviour against a stub, which is
+   the failure mode this family already rejected once.
+
+So (1) and (4) are facts about protoPython's contents and (2)–(3) are its
+ownership model, which is what DESIGN R5 asks the maintainer about. Making a `py`
+provider serve a foreign caller is a change to `PythonEnvironment`, not a
+provider-local change, and it is not protoScala's to make.

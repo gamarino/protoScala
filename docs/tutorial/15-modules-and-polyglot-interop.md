@@ -331,11 +331,22 @@ runtime can import a `.scala` module from it; and it loads provider plug-ins by
 `dlopen` from `PROTOSCALA_PROVIDERS` and from
 `<prefix>/lib/protoscala/providers`.
 
-**What is missing, plainly.** No runtime in the family registers `py`, `js` or
-`clj` today. protoPython registers the aliases `native`, `python_stdlib`,
-`compiled` and `hpy` — none of them `py` — and its providers are installed by a
-whole Python environment, so having them in a `protoscala` process means a
-second runtime in that process. protoJS and protoClojure register no provider
+**What works, and what is missing, plainly.** One of the four prefixes has a
+provider behind it: **`st`**. In a process that also holds a protoST runtime,
+`import st.<module>` loads a Smalltalk module, its members bind by name, and the
+values are literally the same objects protoST holds — the test that proves it
+prints the same cell address and the same identity hash read from each runtime.
+That is the claim in the paragraph above, verified rather than promised. It also
+has limits worth knowing before you rely on it: a foreign **value** crosses, but
+*calling* a protoST method from protoScala does not work (protoST interprets its
+own methods), and the import must happen on the thread that built the protoST
+runtime. `docs/INTEROP.md` §6 lists them all.
+
+The other three — `py`, `js` and `clj` — have no provider. protoPython registers
+the aliases `native`, `python_stdlib`, `compiled` and `hpy` — none of them `py` —
+and, more deeply, resolves its Python environment from a thread-local and treats
+its object space as one-per-process, which a co-resident protoScala session
+contradicts; it also ships no numpy. protoJS and protoClojure register no provider
 at all. So this is the honest state of the headline example:
 
 Fixture: [`tests/conformance/tutorial/15-modules-no-py-provider.scala`](../../tests/conformance/tutorial/15-modules-no-py-provider.scala)
@@ -351,12 +362,13 @@ for 'py'. Install the runtime that provides it, or point PROTOSCALA_PROVIDERS
 at its plug-in
 ```
 
-That is what you get at home, and it is the whole of what is missing:
+That is what you get at home, and it is the whole of what is missing for `py`:
 protoScala routes the prefix, reaches the registry, and finds nothing under
 that alias. The remaining work is in the *other* repositories — registering the
-family aliases and making the providers installable without a second runtime —
-and it is tracked as **Track Y** in [ROADMAP.md](../ROADMAP.md). Nothing in
-this dialect has to change for `import py.numpy as np` to start working.
+family aliases and making each provider serve a caller from another object space,
+which protoST's now does — and it is tracked as **Track Y** in
+[ROADMAP.md](../ROADMAP.md). Nothing in this dialect has to change for
+`import py.numpy as np` to start working.
 
 **Coming from Python.** `import py.numpy as np` is spelled to look like
 `import numpy as np` on purpose. When the provider exists, the only difference

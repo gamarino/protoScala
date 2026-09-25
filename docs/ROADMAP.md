@@ -298,25 +298,57 @@ than a divergence, so it has no `D<n>` id; the shape it should take — a `Sourc
 object, or the `os-lib`-style surface a dynamic dialect might prefer — is a
 language decision and therefore the maintainer's.
 
-## Track Y — a `py` provider, and two runtimes in one process *(platform)*
+## Track Y — a working cross-runtime import *(platform)*
+
+**Half delivered.** `import st.<module>` works; `import py.<module>` does not.
+
+### Delivered — `st`, and the no-copy property
+
+A protoScala program imports a protoST module, binds its members and shares its
+values with **no copy at the boundary**: the same cell, the same `getHash`, read
+from both runtimes, with both addresses printed by
+`umd/protost-interop`. Phase 6's diagnosis was right about the mechanism and wrong
+about the remedy: it concluded that serving a caller in another `ProtoSpace` needed
+a change to the UMD contract, and therefore to protoCore. It did not.
+`ModuleProvider` is an object with its own state, so a provider takes its runtime
+from that state and uses `ctx` only to allocate the result in the caller's context
+— which is what that argument is for. protoST `e82682b` and protoScala `933e75d`,
+**no protoCore change**.
+
+Two further per-space facts came out of it and are recorded in
+[INTEROP.md](INTEROP.md) §6: interned symbols are per `ProtoSpace`, so a provider
+must re-key the module namespace in the caller's space (and a short name matching
+by pointer-word accident is the trap); and a module's top level must run in the
+provider's own space, or its literals intern in the wrong symbol table.
+
+Still not demonstrated, and stated so nobody infers more: a cross-runtime **call**
+(a protoST method is `__bc_ptr__` + protoST's engine, not a `proto::ProtoMethod`),
+imports from more than one thread, more than one protoST runtime per process, and a
+namespace that changes after import. **R5 itself remains a maintainer ruling**;
+this is evidence for it. protoCore's `SharedModuleCache`, keyed by logical path
+with no `ProtoSpace` component, is the other half of that question and is
+unchanged.
+
+### Remaining — a `py` provider
 
 **Goal:** make `import py.numpy as np` work from protoScala.
 **Done when:** protoPython registers the alias `py` (or an agreed alias
-protoScala's prefix table names) and ships a provider plug-in exporting
+protoScala's prefix table names), its provider serves a caller in another
+`ProtoSpace` the way protoST's now does, and it ships a provider plug-in exporting
 protoScala's `protoScala-provider-1` ABI ([INTEROP.md](INTEROP.md) §3.1); a
 `protoscala` process that loads it imports a Python module and calls it with named
 arguments; `tests/conformance/23-named-arguments/foreign-python-keyword.scala` and
 `foreign-python-open-encoding.scala` convert from `XFAIL` to `EXPECT` with the
 output they already record.
 
-**Requires a maintainer ruling on R5**, and the ruling now has evidence rather
-than only a premise. Two runtimes *were* made co-resident in one process and both
-providers stayed reachable; what does not work is a cross-runtime import, because
-`ModuleProvider::tryLoad(path, ctx)` receives the caller's context and every
-provider resolves its runtime from `ctx->space`. Closing that needs a change to
-the UMD contract itself — protoCore's, and therefore a maintainer decision under
-P3 — not a change in protoScala. protoCore's `SharedModuleCache`, keyed by logical
-path with no `ProtoSpace` component, is the second half of the same question.
+Four blockers, measured from protoPython's source on 2026-09-24 and written up in
+[INTEROP.md](INTEROP.md) §6.1: no `py` alias; `PythonEnvironment::fromContext`
+ignores its `ctx` and returns a `thread_local`; `PythonEnvironment::getProcessSpace`
+is a function-local static ProtoSpace, one per process by design, which a
+co-resident protoScala `Session` contradicts; and protoPython ships **no numpy**, so
+`foreign-python-keyword.scala` cannot produce its recorded output however the
+plumbing is arranged. The first three are `PythonEnvironment`'s ownership model,
+which is R5's question; they are not a provider-local change like protoST's was.
 
 Changes to protoPython, which is a different repository and follows its own
 conventions.
