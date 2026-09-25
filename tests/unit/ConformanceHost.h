@@ -90,26 +90,32 @@ public:
     // path P2's heap-ceiling finding was measured on and the path whose CAS
     // snapshot is now rooted before `appendLast`.
     bool runProducerConsumer(unsigned long units) override {
-        // ONE actor, reused for the whole workload.  The first draft spawned a
-        // fresh actor per round of 2,000 messages, and rule 8's case then
-        // reached protoCore's out-of-memory abort with a live set of 237,536
-        // cells under a 294,912-cell ceiling -- because protoScala anchors every
-        // actor in the scheduler's registry for the whole session (DESIGN D46),
-        // so the live set grew with the NUMBER OF ACTORS rather than with the
-        // messages in flight.  That is a real finding about the registry, and it
-        // is recorded in docs/CONFORMANCE.md; but it is not the topology rule 8
-        // is about, and leaving it in the workload would have made every later
-        // run of this case report the wrong mechanism.
+        // BOUNDED BACKLOG, in rounds, and that is load-bearing twice over.
+        //
+        // One actor for the whole workload, because a fresh actor per round made
+        // the live set grow with the NUMBER OF ACTORS -- protoScala anchors every
+        // actor in the scheduler registry for the session (DESIGN D46).
+        //
+        // And the producer waits for the consumer every 2,000 messages, because
+        // sending all `units` before reading any leaves the whole backlog live at
+        // once: the live set then legitimately exceeds any ceiling and rule 8
+        // "fails" with an abort that says nothing about protoScala.  At most
+        // 2,000 messages are ever in flight here.
+        const unsigned long perRound = 2000;
+        const unsigned long rounds = (units / perRound) + 1;
         const std::string src =
             "{ val counter = Actor.spawn(0) { (state, msg) => (state + msg, state + msg) }\n"
-            "  var i = 0\n"
-            "  while i < " + std::to_string(units) + " do { counter ! 1; i += 1 }\n"
-            "  var seen = 0\n"
-            "  var spins = 0\n"
-            "  while seen < " + std::to_string(units) + " && spins < 200000000 do {\n"
-            "    seen = counter.value; spins += 1 }\n"
-            "  seen }";
-        return harness_.eval(src) == std::to_string(units);
+            "  var r = 0\n"
+            "  var sent = 0\n"
+            "  while r < " + std::to_string(rounds) + " do {\n"
+            "    var i = 0\n"
+            "    while i < " + std::to_string(perRound) + " do { counter ! 1; i += 1 }\n"
+            "    sent = sent + " + std::to_string(perRound) + "\n"
+            "    var spins = 0\n"
+            "    while counter.value < sent && spins < 50000000 do { spins += 1 }\n"
+            "    r += 1 }\n"
+            "  counter.value }";
+        return harness_.eval(src) == std::to_string(rounds * perRound);
     }
 
     // --- rule 2b -----------------------------------------------------------
