@@ -904,8 +904,12 @@ Reporting rules:
 
 - A foreign object is an ordinary `ProtoObject`; calls use the standard
   positional + keyword convention with no FFI layer and no copies.
-- Interned symbols are per space: never cache them in function-local statics
-  (protoST INTEROP §2.3).
+- Interned symbols are **process-global** since protoCore 2.2.0 (P3): one
+  canonical pointer per spelling per process. This rule used to read "interned
+  symbols are per space: never cache them in function-local statics", and P3
+  **reversed** it — such a cache is now sound. Keys still live in
+  `RuntimeLayout` as a clarity convention. Prototypes, `PROTO_NONE`, the
+  mutables tree and every per-space callback remain per space.
 - Details and type mapping in [INTEROP.md](INTEROP.md).
 
 ---

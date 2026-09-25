@@ -34,7 +34,7 @@ include(GNUInstallDirs)
 set(PROTOCORE_MIN_VERSION      "2.1")
 set(PROTOCORE_MIN_VERSION_FULL "2.1.0")
 set(PROTOCORE_NEXT_MAJOR       "3.0.0")
-set(PROTOCORE_ABI_SOVERSION    "2")
+set(PROTOCORE_ABI_SOVERSION    "3")
 # The protoCore release that introduced ProtoMPSCQueue. Kept separate from the
 # floor above so the two can be reasoned about independently.
 set(PROTOSCALA_PMQ_MIN_PROTOCORE "2.1.0")
