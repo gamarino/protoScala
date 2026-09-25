@@ -8,6 +8,102 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`import Obj.*` works again (Track X), and that was a regression we made.**
+  Phase 6 turned `import` into a module-loading form and, without recording it
+  anywhere, removed plain Scala's member import with it: `enum Color: case Red,
+  Green` followed by `import Color.*; println(Red)` failed with
+  `ImportError: no module found for 'Color'`. `docs/LANGUAGE.md` §3.2 documented
+  `import` only as file-modules and never said the ordinary form had gone. It is
+  idiomatic Scala, it is what a first user hits in their first file, and it is
+  back — with `import Obj.{a, b}`, `import Obj.a as b` and `import Obj as O`, on
+  an `object`, a companion object or an `enum` as the prefix.
+
+  **The rule that tells the two kinds of `import` apart:** the longest dotted
+  prefix of the path that names something already **in scope** wins, and the
+  import reads its members; if no prefix does, the path is a module to load,
+  exactly as in Phase 6; a family prefix (`py.`, `js.`, `st.`, `clj.`) wins over
+  both. Scala's own resolution has the same shape — a definition in scope shadows
+  a package of that name — so a file that defines `object util` and writes
+  `import util.Shapes` gets its own object in either language, and says
+  `ImportError: util has no member named 'Shapes'` rather than silently reading
+  the file. "In scope" means a term whose class the compiler knows: a wildcard has
+  to enumerate the prefix's members, and a `val` has no static type to enumerate
+  (D4), so `import someVal.*` is not a member import and falls through to the
+  loader and its message. A prefix that is neither still gets Phase 6's
+  `ImportError`, naming every path it tried (**D105**).
+
+  Two things the implementation turns on. An `enum`'s cases and a template nested
+  in an object are lifted to top-level definitions with **dotted** names
+  (`Color.Red`), so they are not members of the companion and a wildcard that only
+  walked the companion's member map would bind nothing — `import Color.*` reads
+  both the members and the lifted names. And with no selector list the **last**
+  path segment is the name being imported, so the prefix search leaves it:
+  `import B1.B2` binds `B2`, not the unspellable `B1.B2`. That second one was a
+  real bug in the first version of this change, found by writing the fixture for
+  it: `import Holder.Even` bound nothing at all, and an `unapply` reached that way
+  could not be used as a pattern.
+
+  Verified against **scalac 3.9.0** by running the same program under both: the
+  wildcard, named, renamed, `enum` and companion cases print byte-identical lines.
+  17 conformance fixtures in `tests/conformance/28-member-imports/` plus one
+  tutorial fixture, with 12 named mutations built and run and every fixture turned
+  red by at least one. In-scope corpus rate **178/601 → 183/601 = 30.4 %**, and
+  zero regressions anywhere in the 1654-file corpus. Two gaps this exposed are
+  recorded rather than fixed, both pre-existing and both in STATUS.md: an imported
+  member cannot be an **assignment target** (the module form has always had this),
+  and `import someVal.*` is refused where Scala accepts it.
+
+  **Cold start.** Track X adds four prelude declarations, ~240 µs at the recorded
+  60 µs/class, and the measurement cannot see them: three interleaved rounds
+  against a binary built from `b7f6afd` put the Track X binary 0.69 ms *faster* on
+  the script median and 0.32 ms faster on the REPL median, against a within-binary
+  spread of 1.2–2.5 ms. What must be said plainly is that the **25 ms budget was
+  not re-certified**: `benchmarks/cold-start.sh` exits 1 for both binaries on this
+  host, including the unmodified tree the recorded 23.73 ms came from, because a
+  second agent was building throughout at load average 5.5–6.5 against 2.97 for
+  the 0.6.0 measurement. Neither confirmed nor refuted, and Track X is not what
+  would have broken it. STATUS.md carries the table.
+
+- **The Predef surface (Track X): `assert`, `assume`, `require`, `???` and
+  `App`.** None of them existed. Every Scala program that checks an invariant or
+  leaves a body unwritten failed at the first line with `Not found: assert`, and
+  nothing in this repository said so — the gap was found by running the Scala 3
+  compiler's own `tests/run` corpus (1654 single-file programs, dotty
+  `a68b419c`), not by our own tests, all 1263 of which were written here and
+  therefore encode the same blind spot.
+
+  Exception types and message texts were verified against **scalac 3.9.0** and
+  match it exactly, including the two details a shim gets wrong: a call with **no**
+  message gets the bare prefix (`assertion failed`, never
+  `assertion failed: assertion failed`), and a message of `null` is still a message
+  and is reported as `null`. `assert`/`assume` raise `AssertionError`, `require`
+  raises `IllegalArgumentException`, `???` raises
+  `NotImplementedError("an implementation is missing")`; the two new exception
+  classes extend `Error`, as Scala's do, so `catch case e: Exception` does not
+  swallow a failed assertion. The message is by-name, so an assertion that holds
+  never builds it. Scala's `assert` is a macro that `-Xdisable-assertions` can
+  elide; these are methods, and nothing elides them (**D103**).
+
+  `object Main extends App` now runs the object's body as the program, the way
+  Scala's `App` does, rather than being a marker trait that silently does nothing.
+  It is deprecated in Scala 3 in favour of `@main` — which protoScala already
+  supported — and is kept because it is what a decade of Scala teaching material
+  writes. Three restrictions Scala does not have, each a compile error naming both
+  candidates: one App object per file, not an App object *and* an `@main` in the
+  same file, and none in a module (**D104**).
+
+  All of it is written in `lib/prelude.scala`, in protoScala, on no new natives:
+  an assertion is a condition test and a `throw`, so there is nothing below the
+  language to reach for, and the decisions that matter — which exception, which
+  text — are then readable where a reader looks for them, which is the same
+  argument Track F used for `Source` and `FileIO`.
+
+  **What it bought, measured on the same instrument before and after:** the
+  in-scope corpus rate went from **75/601 = 12.5 %** to **178/601 = 29.6 %**.
+  15 conformance fixtures in `tests/conformance/27-predef/`, and each one was shown
+  to be capable of failing: 11 named mutations of the implementation were built and
+  run, and every fixture is turned red by at least one of them.
+
 - **File input and output (Track F): a program can read its own input.**
   Reading is `scala.io.Source` under Scala's own names — `Source.fromFile(path)`,
   `Source.fromFile(path, enc)`, `Source.fromString(s)`, and `mkString`,

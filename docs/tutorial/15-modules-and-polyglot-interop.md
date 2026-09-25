@@ -1,8 +1,9 @@
 # 15. Modules and polyglot interop
 
-> **Implementation status.** Everything in §§15.1–15.4 and §15.7 runs today: a
-> `.scala` file is a module, all five import forms work, a selector may name a
-> type, and a failed import names what it tried. The four family prefixes
+> **Implementation status.** Everything in §§15.0–15.4 and §15.7 runs today:
+> plain Scala's member import (§15.0), a `.scala` file as a module, all five
+> import forms, a selector that names a type, and a failed import naming what it
+> tried. The four family prefixes
 > `py.`, `js.`, `st.` and `clj.` route to protoCore's provider registry — but
 > **no runtime in the family registers `py`, `js` or `clj` yet**, so those
 > imports compile, route, and stop with `no provider registered for '<alias>'`
@@ -13,6 +14,53 @@
 Up to here every program has been one file. This chapter is about the second
 file: how protoScala finds it, what an `import` binds, and what happens at the
 edge where a module stops being protoScala and starts being another language.
+
+But first, the `import` that has nothing to do with files.
+
+## 15.0 The `import` you already know
+
+In Scala, `import` mostly means "take these names out of that object". It works
+here, and it is worth showing on its own, because the rest of this chapter is
+about a *second* meaning that protoScala gives `import` and Scala does not.
+
+Fixture: [`tests/conformance/tutorial/15-modules-member-import.scala`](../../tests/conformance/tutorial/15-modules-member-import.scala)
+
+```scala
+enum Colour:
+  case Red, Green, Blue
+object Config:
+  val retries = 3
+  def label(n: Int): String = "n=" + n
+import Colour.*
+import Config.{retries, label as show}
+@main def run(): Unit =
+  println(Red.toString + " " + Blue + " " + retries + " " + show(7))
+```
+
+```text
+Red Blue 3 n=7
+```
+
+Four forms, all Scala's:
+
+| Form | Binds |
+|---|---|
+| `import Obj.*` (or `._`) | every member, plus every `enum` case and nested class or object under its simple name |
+| `import Obj.{a, b}` | just `a` and `b` |
+| `import Obj.a as b` (or `{a => b}`) | `b`; the old name is **not** bound |
+| `import Obj as O` | another name for the object itself |
+
+The prefix has to be an **`object`**, a **companion object**, or an **`enum`** —
+something whose members the compiler can list. `import someVal.*` on a `val` does
+*not* work here, although it does in Scala: a wildcard has to enumerate the
+prefix's members, and protoScala erases types, so a `val` has nothing to
+enumerate (chapter 3, §3.2, **D105**). Name the members you want off the value
+instead, or write `value.member` at each use.
+
+If this looks obvious, it is worth knowing that it stopped working for a while.
+When 0.6.0 made `import` a file-loading form (§15.1 onwards), it replaced this
+one, and `import Colour.*` failed with `ImportError: no module found for
+'Colour'`. Both forms are back, and §15.6 is where the two meet.
 
 ## 15.1 What a module is here
 
@@ -448,6 +496,37 @@ because a foreign object's attribute names cannot be enumerated, and guessing a
 set of names would fail silently at the first one that was wrong (D92). Name
 the members you want.
 
+## 15.6b How the two kinds of `import` are told apart
+
+There are now two things `import` can mean — take members out of something in
+scope (§15.0), or load a file (§15.1) — and one rule decides which:
+
+> The **longest dotted prefix of the path that names something already in
+> scope** wins, and the import reads its members. If no prefix does, the path is
+> a file to load. A family prefix (`py.`, `js.`, `st.`, `clj.`) wins over both.
+
+So `import Colour.*` never looks at the filesystem, and `import util.Strings`
+does, because nothing called `util` is in scope. A file that defines
+`object util` of its own changes that: its `import util.Strings` then means "the
+member `Strings` of my object `util`", and says so if there is none —
+
+```text
+ImportError: util has no member named 'Strings'
+```
+
+— even when `util/Strings.scala` is sitting right there. That is Scala's rule
+too: a definition in scope shadows a package of the same name. If you want both,
+rename one.
+
+Two consequences worth keeping in mind. A prefix that is in scope but is not an
+object (a `val`, a class with no companion) is *not* a member import, and falls
+through to the file loader and its message. And a member import of an object
+defined in the **same file** is resolved after that file's classes are described,
+so a class in that file cannot name, as a *parent*, a type it reaches only
+through such an import: write `class Sub extends Holder.Base` rather than
+`import Holder.*` and `class Sub extends Base`. Everything else about the
+imported name — as an expression, a pattern, a type, a constructor — works.
+
 ## 15.7 When an import goes wrong
 
 Four failures, with the message each one prints.
@@ -556,6 +635,14 @@ through the API this crosses, and binding a guessed set of names would fail
 silently at the first name that was wrong, long after the import. Named
 selectors work, because the loader can read one named attribute. A wildcard
 over a *protoScala* module is unaffected: its export list is known exactly.
+
+**D105 — one `import` keyword, two meanings, and a rule to tell them apart.**
+§15.6b states it. The member half is exactly Scala's; the file half has no Scala
+counterpart; the rule that chooses between them is protoScala's, and it follows
+Scala's shape (a definition in scope shadows a package of that name). The two
+places it is narrower than Scala: a `val` cannot be a member-import prefix
+(protoScala has no static types to enumerate, D4), and a member import of an
+object in the same file cannot supply a **parent** type for a class in that file.
 
 **D93 — `given` selectors are parsed and ignored.** `import M.given` and
 `import M.{given T}` bind nothing and are not an error, which is the same

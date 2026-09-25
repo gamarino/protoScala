@@ -44,6 +44,11 @@ level of the file run in order, like a Scala `.sc` script. That is a
 protoScala convenience rather than standard Scala 3 (chapter 3, §3.2), so the
 rest of this tutorial uses `@main`.
 
+There is a third spelling you will meet in older Scala code and in books,
+`object Main extends App`, where creating the object *is* running the program
+(chapter 1, §1.3). It works, and it is deprecated in Scala 3; `@main` is the one
+to learn.
+
 ## 2.2 Names: `val` and `var`
 
 Fixture: [`tests/conformance/tutorial/02-python-js-val-var.scala`](../../tests/conformance/tutorial/02-python-js-val-var.scala)
@@ -688,7 +693,23 @@ system, no `__init__.py` and no `package.json` — a module is found by looking
 for the file, in the importing file's own directory first, then in each
 colon-separated entry of `PROTOSCALA_PATH`, then in the working directory.
 
-The forms map almost one to one onto what you already write:
+`import` here does one more thing than it does in Python or JavaScript: it also
+takes names out of an object **in the same file**, with no file involved at all,
+which is what it mostly means in Scala. In Python terms it is closest to a class
+attribute you get tired of spelling out:
+
+```scala
+enum Colour:
+  case Red, Green
+import Colour.*
+@main def run(): Unit = println(Red)
+```
+
+Nothing is loaded; `Red` is now a name for `Colour.Red`. Chapter 15 §15.0 covers
+the forms, and §15.6b the one rule that decides whether a given `import` means
+"members of that object" or "load that file".
+
+The file-loading forms map almost one to one onto what you already write:
 
 | Python | JavaScript | protoScala |
 |---|---|---|

@@ -911,6 +911,18 @@ void desugarModule(CompilationUnit& unit, const std::string& objectName) {
             throw ParseError("a module may not define an @main method: " + objectName +
                                  " is imported, not run",
                              s->pos, false);
+        // Same argument for `object X extends App` (D104): in a module it would
+        // never be run, and a silently ignored entry point is the trap D91
+        // refused. The test is the written parent name -- desugar resolves no
+        // types -- so a trait that extends App elsewhere is not caught here.
+        if (s->kind != NodeKind::TemplateDef) continue;
+        const auto& t = static_cast<const TemplateDef&>(*s);
+        if (t.kind != TemplateKind::Object) continue;
+        for (const ParentRef& p : t.parents)
+            if (p.type && p.type->kind == TypeTree::Kind::Name && p.type->name == "App")
+                throw ParseError("a module may not define an App object: " + objectName +
+                                     " is imported, not run",
+                                 t.pos, false);
     }
     auto obj = std::make_unique<TemplateDef>(unit.stats.empty() ? SourcePos{}
                                                                 : unit.stats.front()->pos);

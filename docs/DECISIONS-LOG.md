@@ -443,3 +443,78 @@ módulos como raíz"*, and, separately, that a module's identity in that list is
 | 2026-09-25 | **The retention assertion is the conformance case's own, unchanged.** No threshold, expectation or allowlist was touched to make either case pass, and the residual is stated as a working set with its arithmetic rather than as "less than before" | [agent, pending review] | protoCore `conformance/CaseGC.cpp`, `CaseHeap.cpp` |
 | 2026-09-25 | **`ProtoMPSCQueue::takeAll`'s uncovered-node hole is diagnosed and NOT fixed.** Fixing the retention unmasked it: of a 182-message batch, exactly one element — always the last — loses every own attribute, which is a swept mutable handle. `takeAll` publishes its retain cell with the chain it loaded and then detaches a possibly longer one, and it parks for a stop-the-world every 64 nodes of the walk that follows, so the difference is reachable only from C++ locals across a whole cycle. It is a kernel change affecting five runtimes, so it stops here and goes to the maintainer with a proposed one-line fix. Consequence accepted: `heap.ceiling_progress` is intermittent, about 2 runs in 10 when run alone | [agent, pending review] | protoCore `core/ProtoMPSCQueue.cpp`, `docs/CONFORMANCE.md` |
 | 2026-09-25 | **The `ProtoMPSCQueue` diagnosis was validated against a SCRATCH CLONE of protoCore, not the repository.** The patched library was loaded into protoScala's already-built isolate binary through `LD_LIBRARY_PATH` — the change is internal to one `.cpp`, so the ABI is identical and no rebuild was needed. 40 runs each, 24 of them interleaved: 4 failures out of 40 as committed, 0 out of 40 patched. Reported as suggestive (Fisher one-sided p ≈ 0.12), not conclusive, because at that rate it is not. protoCore's working tree was never touched | [agent, pending review] | `../.agent_scratch/p4-fixes/protoCore-pmq-retain-widening.patch` |
+
+## Track X — the Predef surface, from the Scala 3 run corpus (2026-09-25)
+
+The instrument came first, and it is not ours: the Scala 3 compiler's own
+`tests/run` corpus (1654 single-file programs, dotty `a68b419c`), run one file per
+process against `build_release/protoscala` and scored by dotty's rule. 257 of its
+disagreements with real Scala were anticipated by no document in this repository.
+Every one of protoScala's other 1263 tests was written here, so they measure
+faithfulness to the implementer's model of Scala rather than to Scala.
+
+**The scalac outputs that fixed every message text.** Compiled with
+`tools/scala3-3.9.0/bin/scalac -d out Probe.scala` and run with
+`java -cp "$SCALA_HOME/lib/*:out" Probe` (never `bin/scala`), printing each
+throwable's `getClass.getName`, `getMessage` and `toString`:
+
+```text
+assert(false)        java.lang.AssertionError          msg=[assertion failed]
+assert(false,"why")  java.lang.AssertionError          msg=[assertion failed: why]
+assert(false, 42)    java.lang.AssertionError          msg=[assertion failed: 42]
+require(false)       java.lang.IllegalArgumentException msg=[requirement failed]
+require(false,"why") java.lang.IllegalArgumentException msg=[requirement failed: why]
+assume(false)        java.lang.AssertionError          msg=[assumption failed]
+assume(false,"why")  java.lang.AssertionError          msg=[assumption failed: why]
+???                  scala.NotImplementedError         msg=[an implementation is missing]
+AssertionError isa Error: true    NotImplementedError isa Error: true
+```
+
+protoScala now prints, for the same nine probes, the same classes and the same
+messages without the `java.lang.` / `scala.` prefixes (D8):
+`AssertionError: assertion failed`, `AssertionError: assertion failed: why`,
+`AssertionError: assertion failed: 42`,
+`IllegalArgumentException: requirement failed`,
+`IllegalArgumentException: requirement failed: why`,
+`AssertionError: assumption failed`, `AssertionError: assumption failed: why`,
+`NotImplementedError: an implementation is missing`, and both new classes are
+caught by `case e: Error` and *not* by `case e: Exception`.
+
+| Date | Decision | Taken by | Where |
+|---|---|---|---|
+| 2026-09-25 | **The whole Predef surface is prelude protoScala, on NO new natives.** An assertion is a condition test and a `throw`; there is nothing below the language to reach for, so a native would only move the two decisions that matter — which exception, which text — out of the file a reader opens to check them. Same argument Track F used for `Source`/`FileIO`, and it is stronger here because Track F at least had five syscalls to wrap | [agent, pending review] | `lib/prelude.scala` |
+| 2026-09-25 | **The "no message given" default is a distinguished object, not `null`.** Scala's `assert` is two overloads and protoScala has none (D31), so the two forms collapse into one method with a default. `null` cannot be the default, because `assert(false, null)` in Scala reports `assertion failed: null` — verified against scalac — and a `null` default would silently turn that into `assertion failed`. Cost: one `object __NoMessage` in the prelude, about 60 µs of start-up (D103) | [agent, pending review] | `lib/prelude.scala` |
+| 2026-09-25 | **`App` runs the object, rather than being a marker trait.** The measurement harness only needed `trait App` to exist, because it appends its own driver line; shipping that would have been a trait that parses and does nothing, which is exactly the trap `CompileTemplates.cpp` and D91 already refuse elsewhere. `App`'s entire semantic content is "this object is the program", and 160 of the 601 in-scope corpus files write it. Implementation: `CompiledUnit::appKey`, set from the object's linearization so an intermediate trait counts, forced by `Session::evaluate` after the top level when the unit declares no `@main` | [agent, pending review] | `src/compiler/Compiler.cpp`, `src/repl/Session.cpp` |
+| 2026-09-25 | **Two entry points in one file are a compile error, not a silent choice.** Scala allows several `App` objects because a JVM launcher selects one by class name; protoScala runs a *file*. Refusing names both candidates; picking one would depend on declaration order, which is not a thing a program's meaning may rest on. Same for an `App` object beside an `@main`, and for an `App` object in a module, where D91 already refuses an `@main`. Cost of reversing: pick the first and document the order (D104) | [agent, pending review] | `src/compiler/Compiler.cpp`, `src/frontend/Desugar.cpp` |
+| 2026-09-25 | **`@main` was already supported, so this track does not add it.** D27's only restriction stands (no typed `@main` parameters: there is no `FromString` without static types). 100 of the 601 in-scope corpus files use `@main`, 160 use `App`, and no corpus file uses both, so the mutual exclusion above costs nothing measurable | [agent, pending review] | pre-existing, `Compiler::compileUnit` |
+| 2026-09-25 | **`identity`, `locally` and `sys` were left OUT**, although the harness shim carried `identity`. The shim's *measured* variant did not include it, so adding it would buy nothing this measurement can attribute, and Track X's scope is the two gaps the numbers justify. They are now listed as known-missing in LANGUAGE §4 and tutorial ch. 3 §3.3, which is the change of state that matters: they went from unnoticed to recorded | [agent, pending review] | `docs/LANGUAGE.md`, `docs/tutorial/03-…` |
+| 2026-09-25 | **The 25 ms cold-start budget is reported as NOT re-certified, rather than as met or broken.** `benchmarks/cold-start.sh` exits 1 on this host for the Track X binary *and* for a binary built from `b7f6afd`, the unmodified tree the recorded 23.73 ms came from: load average 5.6 against 2.97, and every median 4–5 ms high. What the interleaved measurement does support is that the two binaries are indistinguishable (script −0.17 ms, REPL +0.28 ms, against a 1.3 ms within-binary spread). Saying "met" would have been reading a quiet-host claim off a loud host | [agent, pending review] | `docs/STATUS.md`, `../.agent_scratch/predef-import/coldstart-interleaved.txt` |
+
+## Track X — plain Scala's member import, restored (2026-09-25)
+
+**What scalac does, run rather than assumed.** One program under both compilers —
+an object with two `val`s and a `def`, an `enum` with three cases, a class with a
+companion holding a `val` and a factory — read through `import Cfg.*`,
+`import Cfg.{a, b}`, `import Cfg.a as z`, `import Color.*` and
+`import Box.{zero, make}`. scalac 3.9.0 prints
+
+```text
+wildcard: 1 2 13
+named: 1 2
+renamed: 1
+enum: Red Green 0 Blue
+companion: 0 7
+```
+
+and protoScala now prints the same five lines, byte for byte.
+
+| Date | Decision | Taken by | Where |
+|---|---|---|---|
+| 2026-09-25 | **The disambiguation rule is "longest in-scope prefix wins, module load otherwise".** The alternatives were a syntactic marker (a second keyword, or a `module` prefix), which would have made every existing module import invalid; and trying the loader first, which would let a file appearing on `PROTOSCALA_PATH` silently capture an `import` of a same-named object already in scope. The rule chosen is the one Scala already has for a definition shadowing a package, so a program means the same thing in both languages, and it needs no new syntax | [agent, pending review] | `Compiler::compileImport`, `Compiler::inScopePrefix` |
+| 2026-09-25 | **"In scope" means a term whose ClassInfo the compiler has** — an `object`, a companion, or the companion an `enum` desugars to — and NOT any stable identifier. Scala allows `import someVal.*` because it reads the val's static type; there is no static type here (D4), so a wildcard would have to guess a member set and fail later at the first wrong name, which is exactly what D92 refuses to do for a foreign module. A `val` prefix therefore falls through to the module loader and its `ImportError` (D105) | [agent, pending review] | `Compiler::inScopePrefix` |
+| 2026-09-25 | **A wildcard reads the prefix's ClassInfo AND the lifted dotted globals.** An `enum`'s cases and a template nested in an object are lifted to top-level definitions named `Color.Red`, so they are not in the companion's member map: a wildcard that walked only the members would compile `import Color.*` and bind nothing, which is the one case the whole change exists for. Two narrow accessors were added to `GlobalTable` (`bindingsUnder`, `typesUnder`) rather than exposing the whole table, whose accessors say they are for the prelude image and nothing else | [agent, pending review] | `Compiler::importScopeWildcard`, `GlobalTable` |
+| 2026-09-25 | **With no selector list the prefix search leaves the last segment.** First written as an unrestrained longest-prefix search, and that was WRONG, not merely suboptimal: `B1.B2` is itself in scope (a nested object is a lifted top-level definition with a dotted name), so `import B1.B2` consumed the whole path and bound the object under the name `B1.B2`, which no expression can spell. `import Holder.Even` bound nothing and an `unapply` reached that way could not be a pattern. Found by writing the fixture, not by reasoning; the fixture is committed with the mutation that reproduces it | [agent, pending review] | `Compiler::compileImport` |
+| 2026-09-25 | **A same-unit member import is resolved AFTER the unit's templates are described, and only those are deferred.** A wildcard needs the prefix's ClassInfo, which `buildClassInfo` produces in what is now step 1a; but a class in the unit may name an *imported* type as its parent, which is resolved in that same step, so moving every import after it would have broken module imports. Only an import whose first segment is a name this unit declares waits — nothing that compiled before this change takes a different path. Cost, recorded as part of D105: a class cannot name, as a parent, a type reached only through a member import of its own file's object; the qualified name always works | [agent, pending review] | `Compiler::compileUnit` |
+| 2026-09-25 | **The prefix is bound under a hidden name pinned to its key**, `__scope$Color`, as Phase 6 does for a module (`__module$M`). Using the user-visible name directly would work until a REPL redefinition of the prefix, after which an import taken earlier would silently follow the new binding — the failure mode D25 exists to describe. One table entry per import | [agent, pending review] | `Compiler::inScopePrefix` |
+| 2026-09-25 | **Two gaps the change exposed are RECORDED, not fixed.** An imported member cannot be an assignment target (`import Box.*; counter = 5` says `Not found: counter`) — verified pre-existing by running the identical program through Phase 6's module form on the tree before this work, so it is Phase 6's rewrite mechanism and not this change; fixing it means teaching the assignment path to emit a setter send, which belongs with D96's scoping work. And `import someVal.*` is refused where Scala accepts it, by the decision above. Both are in STATUS.md under "Known issues" with the corpus test that stops on each | [agent, pending review] | `docs/STATUS.md` |
+| 2026-09-25 | **The gap in the documentation is named as ours.** No deviation claimed the member import was absent by design — there was nothing to retract, which is worse than a wrong entry: `docs/LANGUAGE.md` §3.2 was titled "Modules and imports" and described `import` only as a file-loading form, so a reader checking whether `import Color.*` should work found a section that neither promised nor denied it. §3.2 is retitled and now opens with the member form. (The brief for this work cited "INTEROP.md §3.2"; INTEROP.md has no §3.2 and never mentions the ordinary import — the section meant is LANGUAGE.md §3.2) | [agent, pending review] | `docs/LANGUAGE.md` |

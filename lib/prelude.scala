@@ -56,6 +56,55 @@ class InterruptedException(message: String) extends Exception(message)
 class NoSuchMethodError(message: String) extends Error(message)
 class StackOverflowError(message: String) extends Error(message)
 class OutOfMemoryError(message: String) extends Error(message)
+// Track D: what `assert` and `require` raise. Both extend `Error` in Scala
+// (`java.lang.AssertionError`, `scala.NotImplementedError`), so `catch case
+// e: Exception` does NOT catch them -- which is the whole point of an assertion.
+class AssertionError(message: String) extends Error(message)
+class NotImplementedError(message: String) extends Error(message)
+
+// ---------------------------------------------------------------------------
+// Track D: the Predef surface -- assert, assume, require, ???, App
+// ---------------------------------------------------------------------------
+
+// The value that means "no message was given". Scala's `assert` is two
+// overloads and protoScala has none (D31), so one method takes a default --
+// and the default must be a value no caller can write, because `null` IS a
+// message Scala reports ("assertion failed: null").
+object __NoMessage
+
+// The exception text of a failed assertion: the bare prefix when no message was
+// given, `prefix: message` when one was. The message is read exactly ONCE, as
+// Scala reads its by-name argument once.
+def __assertionText(prefix: String, message: Any): String =
+  if message == __NoMessage then prefix
+  else if message == null then prefix + ": null"
+  else prefix + ": " + message.toString
+
+// `assert`, `assume` and `require`, with Scala's exception types and Scala's
+// exact message texts. The message is by-name, so it costs nothing when the
+// condition holds. Scala's are macros that `-Xdisable-assertions` can elide;
+// protoScala has no macros, so these are ordinary methods and there is no flag
+// that removes them (D103).
+def assert(cond: Boolean, message: => Any = __NoMessage): Unit =
+  if !cond then throw new AssertionError(__assertionText("assertion failed", message))
+
+def assume(cond: Boolean, message: => Any = __NoMessage): Unit =
+  if !cond then throw new AssertionError(__assertionText("assumption failed", message))
+
+// A failed `require` blames the CALLER, so it is an IllegalArgumentException
+// and not an AssertionError -- and `-Xdisable-assertions` never elides it.
+def require(cond: Boolean, message: => Any = __NoMessage): Unit =
+  if !cond then throw new IllegalArgumentException(__assertionText("requirement failed", message))
+
+// `???`: the placeholder for an unwritten implementation.
+def ??? : Nothing = throw new NotImplementedError("an implementation is missing")
+
+// `object Main extends App` runs the object's body as the program, the way
+// Scala's App does. protoScala runs it after the file's top level, and only
+// when the file defines no `@main` (D104). Deprecated in Scala 3 in favour of
+// `@main`, and kept for the same reason Scala keeps it: it is what a decade of
+// Scala teaching material writes.
+trait App
 
 sealed abstract class Option[+A]:
   def isEmpty: Boolean

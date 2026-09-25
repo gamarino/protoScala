@@ -46,6 +46,14 @@ route by prefix.
 | `clj.` | `provider:clj` | `import clj.core as clj` |
 | none | resolution chain (`provider:scala` first) | `import util.Strings` |
 
+**An `import` does not always reach a module at all.** Plain Scala's member
+import — `import Color.*`, `import Obj.{a, b}` — takes names out of something
+already in scope and never enters this machinery: a family prefix wins over
+everything, and otherwise an import whose longest dotted prefix names an
+in-scope object, companion or `enum` is resolved in the compiler and no provider
+is consulted. LANGUAGE.md §3.2 is the whole rule (D105). Everything below is
+about the import that *does* load a module.
+
 The prefix is stripped before `tryLoad`. A missing provider raises
 `ImportError: no provider registered for 'py'`.
 

@@ -275,7 +275,10 @@ argument. The compiler wraps it in a thunk and the body runs that thunk on every
 read of the name. So `unless(true)(…)` never prints "never printed", and `twice`
 evaluates its argument twice — `1 + 2`, leaving `n` at `2`. It is how `assert`,
 `withResource` and every "run this only if…" helper is written in Scala, and how
-`Future(expr)` (chapter 13) keeps its body off the calling thread.
+`Future(expr)` (chapter 13) keeps its body off the calling thread. protoScala's
+own `assert` is written exactly this way, which is why
+`assert(ok, expensiveReport())` costs nothing while `ok` holds (chapter 11
+§11.6).
 
 There is a limit worth knowing, because it is a real departure (**D53**). Scala
 reads the `=>` off the callee's static type; protoScala erases types and

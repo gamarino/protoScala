@@ -68,6 +68,20 @@ point: after the file's top-level definitions are set up, protoscala calls the
 `@main` method. The body is indented under the `=`, the Scala 3 way; braces
 work too (chapter 2, §2.4).
 
+Older Scala material writes the entry point as an object instead, and that works
+here too:
+
+Fixture: [`tests/conformance/tutorial/01-introduction-hello-app.scala`](../../tests/conformance/tutorial/01-introduction-hello-app.scala)
+
+```scala
+object Hello extends App:
+  println("Hello, protoScala!")
+```
+
+Initialising the object *is* the program: nothing references `Hello`, and its body
+runs. `App` is deprecated in Scala 3 in favour of `@main`, so prefer `@main` in
+new code; a file may use one or the other, never both (D104).
+
 ## 1.4 A program with a definition
 
 Fixture: [`tests/conformance/tutorial/01-introduction-first-program.scala`](../../tests/conformance/tutorial/01-introduction-first-program.scala)

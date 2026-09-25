@@ -701,7 +701,7 @@ which requires `Colour.Red` — costs nothing, so no deviation was taken.
   written in the function literal, where scalac rejects it because
   `Function2.apply`'s parameters are called `v1` and `v2`.
 
-### Modules and polyglot imports (D90–D96)
+### Modules and polyglot imports (D90–D96, D105)
 
 Modules and the `import` that reaches them are described in
 [chapter 15](15-modules-and-polyglot-interop.md), which ends with its own
@@ -746,6 +746,22 @@ no Scala counterpart rather than a departure from one.
   and D82's extensions have the same shape, so the two are scoped together or not
   at all.
 
+**D105 (Track X) — `import` has two meanings, and one rule tells them apart.**
+Phase 6 gave `import` the file-loading meaning above and, without saying so,
+*removed* plain Scala's member import: `enum Color ... import Color.*` failed with
+`ImportError: no module found for 'Color'`. Both forms exist now. The rule: the
+longest dotted prefix of the path that names something **already in scope** wins
+and the import reads its members; otherwise the path is a file to load; a family
+prefix wins over both. Scala's own resolution has the same shape — a definition in
+scope shadows a package of that name — so a file defining `object util` and
+writing `import util.Shapes` gets its own object in either language. Two places
+this is narrower than Scala: a **`val` cannot be a member-import prefix** (a
+wildcard must enumerate the prefix's members and there is no static type to
+enumerate, D4), and a member import of an object defined in the **same file**
+cannot supply a *parent* type for a class in that file — write the qualified
+`extends Holder.Base`. Everything else is Scala's, including an imported name
+working as an expression, a pattern, a type and a constructor.
+
 **What did not diverge**, and is worth stating because you will look for it: the
 five import forms have Scala's meaning; `as` and `=>` are both accepted as
 renames and `*` and `_` are both accepted as wildcards; a selector that names
@@ -756,6 +772,40 @@ because an import is resolved when the importing file is compiled.
 **Retired by Phase 4.** **D56** — an interpolator other than `s`, `f` or `raw` was
 a compile error; it is now lowered to `StringContext(<literals>).<name>(<args>)`
 and supplied as an extension method, exactly as in Scala (chapter 10 §10.8).
+
+### The Predef surface (D103–D104)
+
+The one part of this catalogue that was written *because someone else's tests
+said so*. Every other entry came from reading the Scala 3 reference and deciding;
+these two came from running the Scala 3 compiler's own `tests/run` corpus and
+discovering that `assert`, `require`, `assume`, `???` and `App` did not exist at
+all — and that no document here said so. They exist now (chapter 11 §11.6), with
+Scala's exception types and Scala's exact message texts, verified by running
+scalac.
+
+- **D103** — `assert`, `assume` and `require` are **methods, not macros**. In
+  Scala they are `inline` in `Predef`, so `-Xdisable-assertions` removes `assert`
+  and `assume` from the bytecode; here nothing removes them, and an assertion
+  always costs a call and a by-name thunk. (`require` is never elided in Scala
+  either, so that half is identical.) A second consequence of having no
+  overloading (D31): each is one method with a default message rather than Scala's
+  two overloads. The default is a distinguished object and not `null`, so
+  `assert(false, null)` still reports `assertion failed: null`, as Scala's does.
+- **D104** — **`App` is the entry point**, as in Scala: initialising
+  `object Main extends App` runs the program, and an object extending a trait that
+  extends `App` counts too. Three restrictions Scala does not have, because a
+  script has no class name with which to choose between two entry points: one App
+  object per file, not an App object *and* an `@main` in the same file, and none
+  in a module (the reason D91 refuses an `@main` there). All three are compile
+  errors naming both candidates. `App` is deprecated in Scala 3 in favour of
+  `@main`, which works here too and is the better habit.
+
+**What did not diverge:** which exception each raises, and the message text down
+to the colon — `assertion failed`, `assertion failed: why`, `requirement failed`,
+`requirement failed: why`, `assumption failed`, and `???`'s
+`an implementation is missing`. `AssertionError` and `NotImplementedError` extend
+`Error`, so a broad `catch case e: Exception` does not swallow them. The message
+parameter is by-name.
 
 ## 3.3 What is missing
 
@@ -770,6 +820,15 @@ matching and for-comprehensions. Delivered in Phase 5: actors, priority bands,
 futures and `Try`/`Success`/`Failure`. Delivered in Phase 3: `Vector`,
 `Range`, `Map`, `Set`, `Either`, the rest of the `List` surface, string
 interpolation and the `String` methods.
+
+Still missing from `Predef` and the `scala.*` surface, and now known rather than
+guessed at — this is what the Scala 3 run corpus asked for and did not find, in
+the order of how often it asked: `sys` (`sys.exit`, `sys.error`), `identity`,
+`locally`, `StringBuilder`, `Symbol`, `Enumeration`,
+`scala.util.control.Breaks`, `Int.MaxValue` and the other numeric limits,
+`scala.util.Random`, and `Function22`+. There is also no `scala.*` namespace to
+import any of them from (D90/D91), so `import scala.annotation.tailrec` does not
+compile.
 
 Still missing in the concurrency area, and not scheduled: supervision trees,
 `ExecutionContext`, actor timeouts and `Await.result(f, duration)`. Still
