@@ -16,9 +16,16 @@
 > installer phase; Phase 6 closed the `.tar.gz` half and the version.
 > **Track F** (2026-09-25) adds **file input and output**: `scala.io.Source` for
 > reading, and a four-operation `FileIO` object for writing (D97–D102).
-> **Tests:** 1247 total (`ctest --test-dir build_release -N`) — 370 unit
-> (GoogleTest, including the separate `unit/actors` and `unit/modules` binaries),
-> 841 conformance fixtures, 24 CLI checks, 12 benchmark smoke checks. **All
+> **Track X** (2026-09-25) is the first track driven by a measurement against
+> someone else's tests rather than our own: the Scala 3 compiler's `tests/run`
+> corpus (1654 single-file programs, dotty `a68b419c`). It adds the **Predef
+> surface** — `assert`, `assume`, `require`, `???`, `AssertionError`,
+> `NotImplementedError` and `App` (D103–D104). See "The Scala 3 run-corpus
+> measurement" under "Known issues" for the before/after numbers.
+> **Tests:** 1278 total (`ctest --test-dir build_release -N`) — 371 unit
+> (GoogleTest, including the separate `unit/actors` and `unit/modules` binaries
+> and `umd/protost-interop`), 856 conformance fixtures, 24 CLI checks, 12
+> benchmark smoke checks, 15 embedder-conformance rules. **All
 > green**, and green at `PROTOSCALA_ACTOR_WORKERS=1` and `=16` (1248/1248
 > including `umd/protost-interop` in all three). Under
 > `PROTOCORE_HEAP_LIMIT_CELLS=20000` (the whole suite, unfiltered) 1247 of 1248
@@ -425,6 +432,29 @@ one shown to be capable of failing by a mutation of the implementation.
 - [x] Tutorial chapter 16, with a fixture per runnable snippet and a check that
       each snippet is, verbatim, its fixture's body.
 
+### Track X — what the Scala 3 run corpus found
+
+Every one of protoScala's other 1263 tests was written here, so they encode our
+beliefs and cannot detect a misunderstanding we share with them. Track X is the
+first work driven by tests nobody here wrote: the Scala 3 compiler's own
+`tests/run` corpus. Both items below were verified against **scalac 3.9.0**
+(`bin/scalac`, then `java -cp "$SCALA_HOME/lib/*:out"`), and the actual outputs
+compared are quoted in [DECISIONS-LOG.md](DECISIONS-LOG.md).
+
+- [x] **The Predef surface**: `assert`, `assume`, `require`, `???`, and the two
+      exception classes they raise (`AssertionError`, `NotImplementedError`).
+      Scala's exception type and Scala's exact message text for each, including
+      that a call with **no** message gets the bare prefix (`assertion failed`,
+      not `assertion failed: assertion failed`) and that a message of `null` is
+      reported as `null`. The message is by-name, so an assertion that holds never
+      builds it. Written in the prelude, not as natives (D103).
+- [x] **`App`**: `object Main extends App` runs the object's body as the program,
+      as in Scala. Deprecated in Scala 3 in favour of `@main`, which protoScala
+      already supported; the restrictions protoScala adds are one App object per
+      file, not both an App object and an `@main`, and none in a module (D104).
+- [x] 15 conformance fixtures in `tests/conformance/27-predef/`, each one shown to
+      be capable of failing by a named mutation of the implementation.
+
 ## Not yet implemented
 
 - A `class`, `trait` or `object` nested in a **`class`** or **`trait`**, a local
@@ -813,10 +843,54 @@ nothing is an error rather than a silent no-op (`Strings has no member named
 then module `a.b` with member `C` — is what Scala's package-or-object resolution
 means, with the miss message naming every path that was tried.
 
+### Track X deviations — recorded 2026-09-25, pending review
+
+Decided by the implementing agent under the maintainer's standing authorisation.
+Track X's rule is narrower than Track F's, because Track X is driven by a
+measurement against Scala's own tests: **where scalac's behaviour could be run,
+it was run, and protoScala matches it**; a row below exists only where protoScala
+*cannot* match, and says what the gap costs. The highest id in use before this
+track was **D102**, so Track X uses **D103 onwards**; D57, D60, D64 and D78 remain
+deliberately unused and were not recycled.
+
+| id | Deviation | Plan | Revisit |
+|---|---|---|---|
+| D103 | **`assert`, `assume` and `require` are ordinary methods, not macros.** In Scala they are `inline` in `Predef`, so `-Xdisable-assertions` removes `assert` and `assume` from the bytecode entirely (it never removes `require`, which validates a caller's argument). protoScala has no macros and no `inline`, so there is no flag that elides them and an assertion always costs a call and a by-name thunk. What this changes for a program: nothing it can observe, except that an assertion cannot be compiled away, so a hot loop pays for one. What it changes for a *build*: `-Xdisable-assertions` has no analogue and is not accepted. Consequence of having no overloading (D31): each is **one** method with a default message rather than Scala's two overloads, and the default is a distinguished object, not `null`, so `assert(false, null)` still reports `assertion failed: null` as Scala's does | Track X | (perm) |
+| D104 | **`App` is the entry point, with three restrictions Scala does not have.** `object Main extends App` runs the object's body, as in Scala (verified against scalac 3.9.0, including an object extending a trait that extends `App`), and protoScala runs it *after* the file's top-level statements, which Scala has none of (D9). The restrictions: (a) **one App object per file** — Scala allows several because a JVM launcher picks one by class name, and a script has nothing to pick with; (b) **not an App object and an `@main` in the same file** — the same argument; (c) **no App object in a module**, refused for the reason D91 refuses an `@main` there, because a module is imported and never run and a silently ignored entry point is a trap. All three are compile errors that name both candidates. `App` is deprecated in Scala 3 and is kept because it is what a decade of Scala teaching material writes | Track X | (perm) |
+
 ## Known issues / platform dependencies
 
 See DESIGN §11 for the full table. Unchanged this phase: R2, R4, R8. **R5 was
 exercised for the first time in Phase 6** — see the three entries below it.
+
+- **The Scala 3 run-corpus measurement, and what it says about our own tests.**
+  The instrument is the Scala 3 compiler's own `tests/run` corpus (1654 single-file
+  programs, dotty `a68b419c`), run one file per process against
+  `build_release/protoscala`, scored by dotty's rule (match the `.check` file, or
+  exit 0 when there is none). Two harness adaptations, neither a change to
+  protoScala: a driver line is appended to call the test's `object X { def main }`,
+  because protoScala runs a file rather than a class; and the corpus is triaged
+  into three buckets, of which **bucket 3 (n = 601) is the in-scope set** — the
+  files in which no rule finds a construct protoScala does not claim to have
+  (Java interop, reflection, implicits/givens, `Array`, `Seq`, `Iterator`, …).
+  Every rule names the construct it matched, and nothing is excluded from the run.
+
+  | measurement | in-scope rate |
+  |---|---|
+  | 0.6.0, before Track X | **75/601 = 12.5 %** |
+  | after the Predef surface (D103–D104) | **178/601 = 29.6 %** |
+
+  **What this says about the suite:** all 1263 of protoScala's other tests were
+  written here. 257 of the corpus's disagreements with real Scala were anticipated
+  by no document in this repository, and the single largest of them — six missing
+  Predef names — cost 103 in-scope tests and was invisible to a suite that had
+  never needed them. A suite written by the implementer measures faithfulness to
+  the implementer's model, not to Scala. The remaining 423 in-scope failures are
+  attributed one reason each; the largest groups are syntax the parser does not
+  accept (96), further stdlib names (52), `C(...)` on a plain class (D41, 34),
+  classes nested in a class (D80, 34) and the absent `scala.*` namespace (D90/D91,
+  33). Reproducing the measurement needs the corpus checked out, so it is not part
+  of `ctest`.
 
 - **An uncaught failure raised inside a prelude method reports the prelude's line
   number against the user's file name.** Found by Track F, pre-existing, not
@@ -1048,6 +1122,38 @@ exercised for the first time in Phase 6** — see the three entries below it.
   question (escalation **E5**), no longer as a blocker: the budget is met with
   about 1.3 ms of headroom on the script case, which is what the next twenty
   prelude classes would spend. Full tables in `benchmarks/RESULTS.md`.
+
+- **Cold start after Track X — the delta is noise, and the budget could not be
+  re-certified on the host that measured it.** Track X adds four prelude
+  declarations that carry start-up work: `AssertionError`, `NotImplementedError`,
+  `object __NoMessage` and `trait App`. At the recorded marginal cost of ~60 µs per
+  prelude class that is ~240 µs, and the measurement agrees. Three rounds
+  interleaved in one window, alternating a binary built from `b7f6afd` (the tree
+  before Track X) with the Track X binary, both from `build_release`, all twelve
+  cases `verified=21`, load average 5.61 at the start and 5.57 at the end:
+
+  | | before (`b7f6afd`) | after (Track X) |
+  |---|---|---|
+  | script, median of three medians | 29.33 ms | 29.16 ms |
+  | script, best min | 25.89 ms | 26.23 ms |
+  | repl, median of three medians | 28.52 ms | 28.80 ms |
+  | repl, best min | 25.39 ms | 25.72 ms |
+
+  The two binaries are indistinguishable: the script median moved *down* by
+  0.17 ms and the REPL median up by 0.28 ms, against a within-binary spread of
+  1.3 ms across rounds. So Track X did not spend the recorded 1.3 ms of headroom
+  in any way this instrument can see.
+
+  **What this does not claim, and must not be read as:** the 25 ms budget was
+  *not* re-verified. `benchmarks/cold-start.sh` exits **1 for both binaries** on
+  this host, including the unmodified `b7f6afd` tree that the recorded 23.73 /
+  23.89 ms figures came from — the host was running a second agent's build
+  throughout, at load average 5.6 against 2.97 for the 0.6.0 measurement, and
+  every median is 4–5 ms above the recorded one. The honest statement is
+  therefore: **the budget is neither confirmed nor refuted here, and Track X is
+  not what would have broken it.** Re-certifying it needs a quiet host, and until
+  someone runs it on one the 0.6.0 verdict above stands unrefreshed. Raw samples:
+  `../.agent_scratch/predef-import/coldstart-interleaved.txt`.
 
   The 0.5.0 history is kept below, because the row it explains is still in the
   table and because the attribution is what told this phase what to build.

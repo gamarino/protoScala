@@ -443,3 +443,49 @@ módulos como raíz"*, and, separately, that a module's identity in that list is
 | 2026-09-25 | **The retention assertion is the conformance case's own, unchanged.** No threshold, expectation or allowlist was touched to make either case pass, and the residual is stated as a working set with its arithmetic rather than as "less than before" | [agent, pending review] | protoCore `conformance/CaseGC.cpp`, `CaseHeap.cpp` |
 | 2026-09-25 | **`ProtoMPSCQueue::takeAll`'s uncovered-node hole is diagnosed and NOT fixed.** Fixing the retention unmasked it: of a 182-message batch, exactly one element — always the last — loses every own attribute, which is a swept mutable handle. `takeAll` publishes its retain cell with the chain it loaded and then detaches a possibly longer one, and it parks for a stop-the-world every 64 nodes of the walk that follows, so the difference is reachable only from C++ locals across a whole cycle. It is a kernel change affecting five runtimes, so it stops here and goes to the maintainer with a proposed one-line fix. Consequence accepted: `heap.ceiling_progress` is intermittent, about 2 runs in 10 when run alone | [agent, pending review] | protoCore `core/ProtoMPSCQueue.cpp`, `docs/CONFORMANCE.md` |
 | 2026-09-25 | **The `ProtoMPSCQueue` diagnosis was validated against a SCRATCH CLONE of protoCore, not the repository.** The patched library was loaded into protoScala's already-built isolate binary through `LD_LIBRARY_PATH` — the change is internal to one `.cpp`, so the ABI is identical and no rebuild was needed. 40 runs each, 24 of them interleaved: 4 failures out of 40 as committed, 0 out of 40 patched. Reported as suggestive (Fisher one-sided p ≈ 0.12), not conclusive, because at that rate it is not. protoCore's working tree was never touched | [agent, pending review] | `../.agent_scratch/p4-fixes/protoCore-pmq-retain-widening.patch` |
+
+## Track X — the Predef surface, from the Scala 3 run corpus (2026-09-25)
+
+The instrument came first, and it is not ours: the Scala 3 compiler's own
+`tests/run` corpus (1654 single-file programs, dotty `a68b419c`), run one file per
+process against `build_release/protoscala` and scored by dotty's rule. 257 of its
+disagreements with real Scala were anticipated by no document in this repository.
+Every one of protoScala's other 1263 tests was written here, so they measure
+faithfulness to the implementer's model of Scala rather than to Scala.
+
+**The scalac outputs that fixed every message text.** Compiled with
+`tools/scala3-3.9.0/bin/scalac -d out Probe.scala` and run with
+`java -cp "$SCALA_HOME/lib/*:out" Probe` (never `bin/scala`), printing each
+throwable's `getClass.getName`, `getMessage` and `toString`:
+
+```text
+assert(false)        java.lang.AssertionError          msg=[assertion failed]
+assert(false,"why")  java.lang.AssertionError          msg=[assertion failed: why]
+assert(false, 42)    java.lang.AssertionError          msg=[assertion failed: 42]
+require(false)       java.lang.IllegalArgumentException msg=[requirement failed]
+require(false,"why") java.lang.IllegalArgumentException msg=[requirement failed: why]
+assume(false)        java.lang.AssertionError          msg=[assumption failed]
+assume(false,"why")  java.lang.AssertionError          msg=[assumption failed: why]
+???                  scala.NotImplementedError         msg=[an implementation is missing]
+AssertionError isa Error: true    NotImplementedError isa Error: true
+```
+
+protoScala now prints, for the same nine probes, the same classes and the same
+messages without the `java.lang.` / `scala.` prefixes (D8):
+`AssertionError: assertion failed`, `AssertionError: assertion failed: why`,
+`AssertionError: assertion failed: 42`,
+`IllegalArgumentException: requirement failed`,
+`IllegalArgumentException: requirement failed: why`,
+`AssertionError: assumption failed`, `AssertionError: assumption failed: why`,
+`NotImplementedError: an implementation is missing`, and both new classes are
+caught by `case e: Error` and *not* by `case e: Exception`.
+
+| Date | Decision | Taken by | Where |
+|---|---|---|---|
+| 2026-09-25 | **The whole Predef surface is prelude protoScala, on NO new natives.** An assertion is a condition test and a `throw`; there is nothing below the language to reach for, so a native would only move the two decisions that matter — which exception, which text — out of the file a reader opens to check them. Same argument Track F used for `Source`/`FileIO`, and it is stronger here because Track F at least had five syscalls to wrap | [agent, pending review] | `lib/prelude.scala` |
+| 2026-09-25 | **The "no message given" default is a distinguished object, not `null`.** Scala's `assert` is two overloads and protoScala has none (D31), so the two forms collapse into one method with a default. `null` cannot be the default, because `assert(false, null)` in Scala reports `assertion failed: null` — verified against scalac — and a `null` default would silently turn that into `assertion failed`. Cost: one `object __NoMessage` in the prelude, about 60 µs of start-up (D103) | [agent, pending review] | `lib/prelude.scala` |
+| 2026-09-25 | **`App` runs the object, rather than being a marker trait.** The measurement harness only needed `trait App` to exist, because it appends its own driver line; shipping that would have been a trait that parses and does nothing, which is exactly the trap `CompileTemplates.cpp` and D91 already refuse elsewhere. `App`'s entire semantic content is "this object is the program", and 160 of the 601 in-scope corpus files write it. Implementation: `CompiledUnit::appKey`, set from the object's linearization so an intermediate trait counts, forced by `Session::evaluate` after the top level when the unit declares no `@main` | [agent, pending review] | `src/compiler/Compiler.cpp`, `src/repl/Session.cpp` |
+| 2026-09-25 | **Two entry points in one file are a compile error, not a silent choice.** Scala allows several `App` objects because a JVM launcher selects one by class name; protoScala runs a *file*. Refusing names both candidates; picking one would depend on declaration order, which is not a thing a program's meaning may rest on. Same for an `App` object beside an `@main`, and for an `App` object in a module, where D91 already refuses an `@main`. Cost of reversing: pick the first and document the order (D104) | [agent, pending review] | `src/compiler/Compiler.cpp`, `src/frontend/Desugar.cpp` |
+| 2026-09-25 | **`@main` was already supported, so this track does not add it.** D27's only restriction stands (no typed `@main` parameters: there is no `FromString` without static types). 100 of the 601 in-scope corpus files use `@main`, 160 use `App`, and no corpus file uses both, so the mutual exclusion above costs nothing measurable | [agent, pending review] | pre-existing, `Compiler::compileUnit` |
+| 2026-09-25 | **`identity`, `locally` and `sys` were left OUT**, although the harness shim carried `identity`. The shim's *measured* variant did not include it, so adding it would buy nothing this measurement can attribute, and Track X's scope is the two gaps the numbers justify. They are now listed as known-missing in LANGUAGE §4 and tutorial ch. 3 §3.3, which is the change of state that matters: they went from unnoticed to recorded | [agent, pending review] | `docs/LANGUAGE.md`, `docs/tutorial/03-…` |
+| 2026-09-25 | **The 25 ms cold-start budget is reported as NOT re-certified, rather than as met or broken.** `benchmarks/cold-start.sh` exits 1 on this host for the Track X binary *and* for a binary built from `b7f6afd`, the unmodified tree the recorded 23.73 ms came from: load average 5.6 against 2.97, and every median 4–5 ms high. What the interleaved measurement does support is that the two binaries are indistinguishable (script −0.17 ms, REPL +0.28 ms, against a 1.3 ms within-binary spread). Saying "met" would have been reading a quiet-host claim off a loud host | [agent, pending review] | `docs/STATUS.md`, `../.agent_scratch/predef-import/coldstart-interleaved.txt` |

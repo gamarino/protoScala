@@ -36,8 +36,11 @@ runtime is built is in [DESIGN.md](DESIGN.md); the cross-runtime story is in
 > yet, so those imports stop with `no provider registered for '<alias>'`. Also
 > new: **file input and output** — `scala.io.Source` for reading, and a
 > four-operation `FileIO` object for writing, because Scala's writer is
-> `java.io.PrintWriter` and there is no Java here. Chapter 16 covers it. Every
-> runnable snippet in the tutorial is a conformance fixture under
+> `java.io.PrintWriter` and there is no Java here. Chapter 16 covers it. Newest of
+> all: **the `Predef` surface** — `assert`, `require`, `assume` and `???`, with
+> Scala's exception types and Scala's exact messages (chapter 11 §11.6), and
+> **`object Main extends App`** as an entry point beside `@main` (chapter 1 §1.3).
+> Every runnable snippet in the tutorial is a conformance fixture under
 > `tests/conformance/tutorial/`, run with the test suite.
 
 ## How to use this tutorial
@@ -94,7 +97,7 @@ early: reading a file is `scala.io.Source` and behaves like it, writing is not a
 | 8 | [Collections](tutorial/08-collections.md) | `List` and its full surface, `Vector`, `Range`, `Map`, `Set`, `Option` as a collection, `Either` and `Try`, conversions, and what immutability buys. |
 | 9 | [For-comprehensions](tutorial/09-for-comprehensions.md) | `for … yield` and `for … do`, the rewrite to `flatMap`/`withFilter`/`map`, patterns and value definitions, `Option` and your own types, the placeholder `_`. |
 | 10 | [Strings and interpolation](tutorial/10-strings-and-interpolation.md) | Literals and triple-quoted strings, `s"…"`, `raw"…"`, `f"…"` and its specifier table, `stripMargin`, `format`, and the `String` method surface. |
-| 11 | [Exceptions](tutorial/11-exceptions.md) | `throw` and the `Throwable` hierarchy, `try`/`catch` as an expression, `catch` as a pattern match, `finally`, what the runtime raises on its own, `Try` as the value-oriented alternative, exceptions across an actor turn and a suspended `await`. |
+| 11 | [Exceptions](tutorial/11-exceptions.md) | `throw` and the `Throwable` hierarchy, `try`/`catch` as an expression, `catch` as a pattern match, `finally`, what the runtime raises on its own, `assert`/`require`/`assume`/`???` and which exception each raises, `Try` as the value-oriented alternative, exceptions across an actor turn and a suspended `await`. |
 | 12 | [Enums and sealed hierarchies](tutorial/12-enums-and-sealed-hierarchies.md) | `enum` with simple and parameterised cases, `ordinal`/`values`/`valueOf`/`fromOrdinal`, enums as algebraic data types, `sealed trait` hierarchies, and why exhaustiveness is not checked. |
 | 13 | [Actors and futures](tutorial/13-actors-and-futures.md) | Actors, telling and asking, priority bands, futures and their combinators, cooperative `await`, handler failures, threads and time, tuning. |
 | 14 | [The REPL and tooling](tutorial/14-repl-and-tooling.md) | The REPL, multi-line input, commands, classes at the prompt, running scripts, error messages, `--disassemble`. |

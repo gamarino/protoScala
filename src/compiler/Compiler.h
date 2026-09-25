@@ -52,6 +52,11 @@ struct CompiledUnit {
     std::string mainName;                    // empty when the unit has no @main
     std::string mainKey;                     // global key of the @main method
     bool mainTakesArgs = false;              // @main def f(args: String*)
+    // `object Main extends App`: the object whose initialisation IS the program
+    // (D104). Empty when the unit declares no such object, or declares an @main.
+    // Forcing this global runs the object's body, which is what Scala's App does.
+    std::string appName;
+    std::string appKey;
     std::string resultName;                  // Repl: "res<N>" or empty
     std::string resultKey;                   // global key of resultName
     std::vector<ReplDefinition> definitions; // Repl echo, in source order

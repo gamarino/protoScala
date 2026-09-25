@@ -8,6 +8,48 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **The Predef surface (Track X): `assert`, `assume`, `require`, `???` and
+  `App`.** None of them existed. Every Scala program that checks an invariant or
+  leaves a body unwritten failed at the first line with `Not found: assert`, and
+  nothing in this repository said so — the gap was found by running the Scala 3
+  compiler's own `tests/run` corpus (1654 single-file programs, dotty
+  `a68b419c`), not by our own tests, all 1263 of which were written here and
+  therefore encode the same blind spot.
+
+  Exception types and message texts were verified against **scalac 3.9.0** and
+  match it exactly, including the two details a shim gets wrong: a call with **no**
+  message gets the bare prefix (`assertion failed`, never
+  `assertion failed: assertion failed`), and a message of `null` is still a message
+  and is reported as `null`. `assert`/`assume` raise `AssertionError`, `require`
+  raises `IllegalArgumentException`, `???` raises
+  `NotImplementedError("an implementation is missing")`; the two new exception
+  classes extend `Error`, as Scala's do, so `catch case e: Exception` does not
+  swallow a failed assertion. The message is by-name, so an assertion that holds
+  never builds it. Scala's `assert` is a macro that `-Xdisable-assertions` can
+  elide; these are methods, and nothing elides them (**D103**).
+
+  `object Main extends App` now runs the object's body as the program, the way
+  Scala's `App` does, rather than being a marker trait that silently does nothing.
+  It is deprecated in Scala 3 in favour of `@main` — which protoScala already
+  supported — and is kept because it is what a decade of Scala teaching material
+  writes. Three restrictions Scala does not have, each a compile error naming both
+  candidates: one App object per file, not an App object *and* an `@main` in the
+  same file, and none in a module (**D104**).
+
+  All of it is written in `lib/prelude.scala`, in protoScala, on no new natives:
+  an assertion is a condition test and a `throw`, so there is nothing below the
+  language to reach for, and the decisions that matter — which exception, which
+  text — are then readable where a reader looks for them, which is the same
+  argument Track F used for `Source` and `FileIO`.
+
+  **What it bought, measured on the same instrument before and after:** the
+  in-scope corpus rate went from **75/601 = 12.5 %** to **178/601 = 29.6 %**.
+  15 conformance fixtures in `tests/conformance/27-predef/`, and each one was shown
+  to be capable of failing: 11 named mutations of the implementation were built and
+  run, and every fixture is turned red by at least one of them. Cold start is
+  unchanged within the measurement's noise — see STATUS.md, which also records that
+  the 25 ms budget could not be re-certified on the host that ran this work.
+
 - **File input and output (Track F): a program can read its own input.**
   Reading is `scala.io.Source` under Scala's own names — `Source.fromFile(path)`,
   `Source.fromFile(path, enc)`, `Source.fromString(s)`, and `mkString`,

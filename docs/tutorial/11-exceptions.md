@@ -229,7 +229,9 @@ Throwable
 │   │   └── UnsupportedOperationException
 │   └── InterruptedException
 └── Error
+    ├── AssertionError
     ├── NoSuchMethodError
+    ├── NotImplementedError
     ├── OutOfMemoryError
     └── StackOverflowError
 ```
@@ -270,7 +272,66 @@ compiler or VM bug surfaces as `protoscala: internal error: …` and no
 `catch { case e: Throwable => … }` can intercept it (D74). A bug in the language
 must never be masked by a program written in it.
 
-## 11.6 `Try`, when you want a value instead
+## 11.6 Assertions: `assert`, `require` and `???`
+
+Not every failure is worth a class of its own. Three Predef functions cover the
+three commonest cases, and each raises a *different* exception on purpose.
+
+Fixture: [`tests/conformance/tutorial/11-exceptions-assertions.scala`](../../tests/conformance/tutorial/11-exceptions-assertions.scala)
+
+```scala
+def withdraw(balance: Int, amount: Int): Int =
+  require(amount > 0, "amount must be positive")
+  val left = balance - amount
+  assert(left >= 0, "balance went negative")
+  left
+@main def run(): Unit =
+  println(withdraw(100, 30))
+  try withdraw(100, -5) catch case e: IllegalArgumentException => println(e.getMessage)
+  try withdraw(100, 200) catch case e: AssertionError => println(e.getMessage)
+```
+
+```text
+amount must be positive
+```
+
+(The fixture's `// EXPECT:` line is the last of the three lines it prints:
+`70`, then `requirement failed: amount must be positive`, then
+`assertion failed: balance went negative`.)
+
+The distinction is the one Scala draws, and it is about **whose** bug it is:
+
+| Call | Raises | Whose bug |
+|---|---|---|
+| `require(cond)` / `require(cond, msg)` | `IllegalArgumentException` | the **caller's** — it passed something invalid |
+| `assert(cond)` / `assert(cond, msg)` | `AssertionError` | **this code's** — an invariant it maintains is broken |
+| `assume(cond)` / `assume(cond, msg)` | `AssertionError` | a fact this code takes on trust |
+| `???` | `NotImplementedError` | nobody's yet — the body is not written |
+
+The messages are Scala's, exactly: with no message you get the bare prefix
+(`requirement failed`, `assertion failed`, `assumption failed`); with one you get
+`prefix: message`. `AssertionError` and `NotImplementedError` are **`Error`s, not
+`Exception`s**, which matters: a `catch case e: Exception` wrapped around a call
+will not swallow a broken invariant. `require`'s `IllegalArgumentException` is a
+`RuntimeException` and *will* be caught there, which is right — a rejected
+argument is an ordinary, recoverable answer.
+
+The message is evaluated only when the check fails, so
+`assert(ok, expensiveReport())` costs nothing while `ok` holds.
+
+`???` type-checks anywhere a value is expected, so you can write a signature and
+its callers before the body:
+
+```scala
+def parse(text: String): Config = ???
+```
+
+One difference from Scala: `assert` and `assume` there are *macros*, and the
+compiler flag `-Xdisable-assertions` removes them from the bytecode entirely.
+protoScala has no macros, so they are ordinary methods and nothing removes them
+(D103). `require` is never elided in Scala either, so that half is identical.
+
+## 11.7 `Try`, when you want a value instead
 
 `Try` turns the same failure into a value you can pass around:
 
@@ -296,7 +357,7 @@ Which to reach for: a `Try` (or an `Option`, or an `Either`) when the *caller* i
 expected to handle the failure and the type should say so; a `throw` when the
 failure is genuinely exceptional and most callers should not have to mention it.
 
-## 11.7 Exceptions, actors and `await`
+## 11.8 Exceptions, actors and `await`
 
 An exception in an actor handler fails **that one message** and leaves the actor
 alive with its previous state. The ask's future carries the exception value
@@ -356,7 +417,7 @@ runs (D75): the shutdown diagnostic reports how many actors are parked, and that
 is the only notice. Scala has no equivalent situation, and making it otherwise
 would mean running arbitrary user code during shutdown.
 
-## 11.8 For the Python or JavaScript developer
+## 11.9 For the Python or JavaScript developer
 
 | Python | JavaScript | protoScala |
 |---|---|---|
@@ -369,6 +430,8 @@ would mean running arbitrary user code during shutdown.
 | `else:` clause | — | none: put the code after the `try` |
 | exception **groups** (3.11) | `AggregateError` | none |
 | `raise … from e` | `{ cause: e }` | `getCause` is always `null` |
+| `assert x, "msg"` | `console.assert` | `assert(x, "msg")` — but it always runs |
+| `raise NotImplementedError` | `throw new Error("todo")` | `???` |
 
 Two differences worth internalising. First, a `try` is an **expression** — the
 Python idiom of assigning inside both branches is unnecessary. Second, a `catch`
@@ -376,7 +439,7 @@ clause is a **pattern**, so the test and the extraction are one thing; there is
 no `except` body that has to re-examine the exception and re-`raise` when it turns
 out not to be the one it wanted.
 
-## 11.9 What differs from Scala 3 in this area
+## 11.10 What differs from Scala 3 in this area
 
 - **D72** — a `finally` body that itself throws replaces the in-flight exception.
   Scala does the same but warns; protoScala has no warnings.
@@ -392,6 +455,8 @@ out not to be the one it wanted.
   `case e => someFunction(e)`.
 - **D86** — `Throwable.getClass` returns the class's simple name as a `String`;
   protoScala has no `Class[_]` values.
+- **D103** — `assert`, `assume` and `require` are methods, not macros, so
+  `-Xdisable-assertions` has no analogue and an assertion always costs a call.
 - **D87** — the cleanup a `return` runs is excluded from its own `try`'s handler
   range, which is what makes a throwing cleanup on a `return` path propagate
   correctly. What is not implemented is the multi-level variant: with two or more
@@ -402,7 +467,7 @@ out not to be the one it wanted.
 
 Also retired in this area: `Failure` used to carry a `RuntimeError` case class
 rather than a `Throwable`, and an `await` on a failed future used to abandon the
-rest of the handler. Both are gone; the current behaviour is what §11.6 and §11.7
+rest of the handler. Both are gone; the current behaviour is what §11.7 and §11.8
 show.
 
 ---

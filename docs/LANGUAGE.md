@@ -40,6 +40,7 @@
 | `try`/`catch`/`finally`, `throw`, with pattern-matched handlers | 4 ✅ (§3.1; D72–D75, D85–D87) |
 | `import` (selectors, renames `as` and `=>`, wildcard `*` and `_`, `given` selectors parsed and ignored), and the family prefixes `py.`/`js.`/`st.`/`clj.` | 6 ✅ (§3.2; D90–D96) |
 | top-level definitions (no wrapping `object` needed), `@main` methods | 1 |
+| `object Main extends App` as the program's entry point | Track X ✅ (§4.4; D104) |
 | `package` clauses (one namespace per file) | — **not implemented and not scheduled**: a module is a file reached by its path, not a package (D91). `package p` is refused with "not implemented yet" |
 
 ### 2.1 By-name parameters
@@ -121,7 +122,7 @@ Later phases:
 
 ### 3.1 The exception hierarchy (Phase 4)
 
-Twenty-four classes in `lib/prelude.scala`, the JVM's names without the
+Twenty-six classes in `lib/prelude.scala`, the JVM's names without the
 `java.lang.`, `java.io.` and `java.nio.charset.` prefixes (D73, D8, D97). They are ordinary protoScala classes, so `case e: X` is the same
 per-class marker test as `case p: Point` and a class of your own takes its place
 in the tree by extending one of them.
@@ -148,7 +149,9 @@ Throwable(message)
 │       └── CharacterCodingException
 │           └── MalformedInputException
 └── Error
+    ├── AssertionError                     (Track X)
     ├── NoSuchMethodError
+    ├── NotImplementedError                (Track X)
     ├── OutOfMemoryError
     └── StackOverflowError
 ```
@@ -158,8 +161,11 @@ simple name as a `String` — D86) and a `toString` of `<class>: <message>`.
 `UninitializedFieldError` extends `RuntimeException` despite its name, as
 `scala.UninitializedFieldError` does. `IOException` sits under `Exception` and
 **not** under `RuntimeException`, as on the JVM, so `catch case e: IOException`
-sees every file failure and nothing else (D97). A defect in protoScala itself is
-**not** in this tree and is not catchable (D74).
+sees every file failure and nothing else (D97). `AssertionError` and
+`NotImplementedError` sit under `Error`, as `java.lang.AssertionError` and
+`scala.NotImplementedError` do, so `catch case e: Exception` does **not** swallow
+a failed `assert` or a `???` (§4.4). A defect in protoScala itself is **not** in
+this tree and is not catchable (D74).
 
 ### 3.2 Modules and imports (Phase 6)
 
@@ -226,8 +232,14 @@ Delivered:
 - The collection methods of §4.2.
 - `println`, `print`, `scala.math` basics.
 - `Actor`, `Future`, `Priority`, `Thread`, `System` (Phase 5, §4.1).
+- The Predef surface of §4.4: `assert`, `assume`, `require`, `???` and `App`
+  (Track X).
 
-Still ahead: `sys.exit`, and the `scala.math` surface beyond the basics.
+Still ahead: `sys.exit`, `identity`, `locally`, `StringBuilder`, `Symbol`,
+`Enumeration`, `scala.util.control.Breaks`, and the `scala.math` surface beyond
+the basics. That list is not a guess: it is what the Scala 3 run-corpus
+measurement (STATUS.md, "Known issues") found the corpus asking for, in the order
+of how often it asked.
 
 **Not provided, and not scheduled.** `Seq` and `Iterable` are **not** traits of
 this dialect and no phase's done-when contains them: `case xs: Seq[_]` and
@@ -382,6 +394,49 @@ What is absent: directories, listing, rename, binary files, random access, stdin
 streaming of any kind (a file is read whole), and everything in `java.io` and
 `java.nio`.
 
+### 4.4 The Predef surface (Track X)
+
+Scala puts `assert`, `require`, `???` and friends in `scala.Predef`, which every
+file sees without importing it. There are no packages here (§3.2), so they are
+prelude globals, like `List` and `Try`. Every exception type and every message
+text below was verified against **scalac 3.9.0** and matches it exactly.
+
+```text
+assert(cond: Boolean, message: => Any = <none>): Unit
+    cond false  ->  AssertionError("assertion failed")
+                    AssertionError("assertion failed: " + message)
+assume(cond: Boolean, message: => Any = <none>): Unit
+    cond false  ->  AssertionError("assumption failed")
+                    AssertionError("assumption failed: " + message)
+require(cond: Boolean, message: => Any = <none>): Unit
+    cond false  ->  IllegalArgumentException("requirement failed")
+                    IllegalArgumentException("requirement failed: " + message)
+???: Nothing   ->  NotImplementedError("an implementation is missing")
+```
+
+Three details a program can depend on:
+
+- **A call with no message gets the bare prefix.** `assert(false)` says
+  `assertion failed`, not `assertion failed: assertion failed`. A message of
+  `null` is a message, and is reported as `null`.
+- **`AssertionError` and `NotImplementedError` extend `Error`, not `Exception`**
+  (§3.1), so `catch case e: Exception` does not swallow a failed assertion. A
+  failed `require` is an `IllegalArgumentException` — a `RuntimeException` — because
+  it blames the caller's argument, not the code that checked it.
+- **The message is by-name**, so an assertion that holds never builds it.
+
+`assert` and `assume` are *macros* in Scala, which `-Xdisable-assertions` can
+remove from the bytecode; these are methods, and nothing elides them (**D103**).
+
+`object Main extends App` runs the object's body as the program (**D104**), as in
+Scala. It is deprecated in Scala 3 in favour of `@main`, which protoScala also
+supports, and it is kept because it is what most Scala teaching material writes.
+protoScala adds three restrictions Scala does not have: one App object per file,
+not an App object *and* an `@main` in the same file, and no App object in a
+module — each a compile error naming both candidates, because a script has no
+class name with which to choose an entry point and a silently ignored one is a
+trap.
+
 ## 5. Departures from Scala (stable ids; mirrored in STATUS.md)
 
 | Id | Departure | Reason |
@@ -482,6 +537,8 @@ and `Priority` was three integers on an object. Their ids are not reused.
 | D100 | **`getLines()` answers a `List[String]`**, not an `Iterator[String]`; a `Source` is not an `Iterator[Char]`, and nothing streams | there is no `Iterator` in this dialect. `getLines().toList` still works, since `toList` on a `List` is the identity |
 | D101 | **A `Source` may be read again**; Scala's is consumed as it is read, and answers `List()` the second time. A **closed** source still fails to be read | matching Scala costs a cursor and a consumed-ness flag to reproduce a reliable source of bugs; strictly more programs work this way. Closing still means something, because reading a closed source is a bug worth reporting |
 | D102 | **Writing is `FileIO.write` / `append` / `exists` / `delete`**, not a simulated `java.io.PrintWriter` or `java.nio.file.Files` | the absence of Java (D8) leaves nothing to imitate, and a simulated `PrintWriter` would mean a `Writer`, a stream hierarchy, a `flush` and a buffering policy for no gain |
+| D103 | `assert`, `assume` and `require` are **methods, not macros**: `-Xdisable-assertions` has no analogue and an assertion always costs a call. Each is one method with a default message rather than Scala's two overloads | no macros and no `inline`; no overloading (D31). The default is a distinguished object, not `null`, so `assert(false, null)` still reports `assertion failed: null` |
+| D104 | **`App` is the entry point**, with three restrictions Scala does not have: one App object per file, not an App object and an `@main` in the same file, and none in a module | a script has no class name with which to choose between two entry points, and a silently ignored entry point is the trap D91 refused |
 
 **D57, D60, D64 and D78 do not exist**, and are not reused. They were reserved for
 a `Char`-key divergence, a `Range == List` divergence, a `Try.apply` divergence

@@ -1596,6 +1596,30 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
         const std::vector<const TemplateDef*> sorted = sortTemplates(templates);
         for (const TemplateDef* t : sorted) globals_.defineType(buildClassInfo(*t, typeKeys.at(t)));
         linkCompanions(sorted);
+        // 1c. `object Main extends App` is the program (D104). The test is on the
+        //     linearization, so a trait that itself extends App counts, and it
+        //     runs only when the file declares no @main -- two entry points in one
+        //     file would need a name to choose between them, and a script has none.
+        if (const ClassInfo* app = globals_.findType("App")) {
+            for (const TemplateDef* t : sorted) {
+                if (t->kind != TemplateKind::Object) continue;
+                const ClassInfo& info = *globals_.findTypeByKey(typeKeys.at(t));
+                if (std::find(info.linearization.begin(), info.linearization.end(), app->key) ==
+                    info.linearization.end())
+                    continue;
+                if (!out.appName.empty())
+                    throw CompileError("only one App object is allowed per file: " + out.appName +
+                                           " and " + t->name + " would both be the program",
+                                       t->pos);
+                out.appName = t->name;
+                out.appKey = globals_.binding(t->name)->key;
+            }
+            if (!out.appName.empty() && main)
+                throw CompileError("a file defines either an @main method or an App object, not "
+                                   "both: " + main->name + " and " + out.appName +
+                                   " would both be the program",
+                                   main->pos);
+        }
         // 2. Hoisted templates, object holders, top-level defs and lazy vals.
         for (const TemplateDef* t : sorted)
             compileTemplate(*t, *globals_.findTypeByKey(typeKeys.at(t)));

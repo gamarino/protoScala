@@ -145,6 +145,11 @@ EvalStatus Session::evaluate(const std::string& source, const std::string& sourc
         engine_.run(&ctx, mod);
         if (!cu.mainName.empty() && mainArgs)
             callMain(&ctx, cu.mainKey, cu.mainTakesArgs, *mainArgs);
+        // `object Main extends App`: initialising the object IS running the
+        // program, as in Scala (D104). Only in script mode -- the REPL defines an
+        // object without running it, which is what Scala's REPL does too.
+        else if (!cu.appKey.empty() && mainArgs)
+            forceGlobal(&ctx, cu.appKey);
     } catch (const ScalaThrow& t) {
         // An uncaught Scala exception, reported through the VALUE's own
         // toString, so a user-defined class says what its class says. The engine
