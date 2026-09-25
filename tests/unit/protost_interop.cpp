@@ -181,10 +181,19 @@ TEST(ProtoSTInterop, TheProviderAnswersCallersInEitherProtoSpace) {
         << "provider:st missed a caller in protoScala's ProtoSpace — the Phase 6 "
            "defect is back";
 
-    // A name too long for protoCore to embed in a pointer word is the case that
-    // decides whether the namespace was re-keyed in the CALLER's space: symbols
-    // are interned per space, so `Counter` (7 bytes) is a different pointer in
-    // each, while a 5-byte name would match by accident.
+    // A name too long for protoCore to embed in a pointer word.
+    //
+    // THE REASONING HERE WAS REVERSED BY protoCore 2.2.0 (P3). It used to read:
+    // "symbols are interned per space, so `Counter` (7 bytes) is a different
+    // pointer in each, while a 5-byte name would match by accident". Interning is
+    // now process-global — one canonical pointer per spelling per process — so
+    // `Counter` is the SAME pointer in protoST's space and in protoScala's.
+    //
+    // Both assertions below still hold, and both are still worth making. The
+    // positive one now checks that the facade carries the binding at all rather
+    // than that it was re-keyed; the negative one is unaffected by interning. The
+    // facade itself is still required, for PROTOTYPES, which remain per space
+    // (P3 D9): global interning fixed names, not prototype chains.
     const proto::ProtoString* counterInScala =
         proto::ProtoString::createSymbol(&scalaCtx, "Counter");
     EXPECT_EQ(inOtherSpace->hasAttribute(&scalaCtx, counterInScala), PROTO_TRUE)

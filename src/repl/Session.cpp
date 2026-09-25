@@ -471,9 +471,12 @@ const ModuleExports& Session::load(const std::string& providerSpec, const std::s
 
 const ModuleExports& Session::loadForeign(const std::string& providerSpec,
                                           const std::string& logicalPath, SourcePos pos) {
-    const std::string cacheKey = providerSpec + "/" + logicalPath;
-    if (auto it = foreignModules_.find(cacheKey); it != foreignModules_.end()) return it->second;
-
+    // The provider is resolved FIRST, because a module's identity is provider +
+    // path + version (protoCore 2.2.0, P3 D11) and `providerSpec` is an
+    // alias-or-GUID spec, not the provider's stable identity: two specs can name
+    // one provider, and an alias can be re-pointed. Resolving first is safe —
+    // ProviderRegistry is a process singleton with no unregister, so a provider
+    // that answered once still answers.
     proto::ModuleProvider* provider =
         proto::ProviderRegistry::instance().getProviderForSpec(providerSpec);
     if (!provider)
@@ -481,6 +484,15 @@ const ModuleExports& Session::loadForeign(const std::string& providerSpec,
                                "'. Install the runtime that provides it, or point "
                                "PROTOSCALA_PROVIDERS at its plug-in",
                            pos);
+
+    // P3 D13: this Session's local cache is keyed by the KERNEL's identity, so
+    // the two cannot disagree. The old key was `providerSpec + "/" + logicalPath`
+    // — half the answer, and alias-dependent.
+    const proto::ModuleIdentity id =
+        proto::ModuleIdentity::unversioned(provider->getGUID(), logicalPath);
+    const std::string cacheKey = id.asKey();
+    if (auto it = foreignModules_.find(cacheKey); it != foreignModules_.end()) return it->second;
+
     proto::ProtoContext ctx(&space_, runtime_.rootContext());
     const proto::ProtoObject* mod = nullptr;
     try {
@@ -494,6 +506,27 @@ const ModuleExports& Session::loadForeign(const std::string& providerSpec,
     if (!mod || mod == PROTO_NONE)
         throw CompileError("ImportError: provider '" + aliasOfSpec(providerSpec) +
                                "' has no module '" + logicalPath + "'",
+                           pos);
+
+    // P3 D13: publish through the kernel so the module is in the process-global
+    // module list under the ruled identity (provider GUID + path + version) and
+    // is rooted in THIS space — the space whose lifetime this importer controls.
+    //
+    // Before P3 this path called provider->tryLoad directly and reached neither
+    // SharedModuleCache nor any moduleRoots, so the module's only anchor was
+    // inside the PROVIDING runtime (protoST's liveRegistry root set and its
+    // globals). A host that destroyed that runtime while this Session still held
+    // the module's values dropped the only anchor; the tests survived only
+    // because construction order happened to make the runtime destroyed last,
+    // and nothing enforced that.
+    //
+    // registerModule is publish-or-adopt: if this identity is already served, it
+    // returns the module already published, so two importers of one identity
+    // share one module.
+    mod = space_.registerModule(id, mod);
+    if (!mod || mod == PROTO_NONE)
+        throw CompileError("ImportError: provider '" + aliasOfSpec(providerSpec) +
+                               "' module '" + logicalPath + "' could not be published",
                            pos);
 
     ModuleExports ex;
