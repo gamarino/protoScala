@@ -10,7 +10,11 @@ const std::vector<std::string>& builtinGlobalNames() {
                                       "Actor", "Future", "Thread", "System",
                                       "__fmt", "__tryOf", "__classNameOf", "__kwprobe",
                                       "__installExtension",
-                                      "Vector", "Map", "Set"};
+                                      "Vector", "Map", "Set",
+                                      // Track F: the filesystem natives the
+                                      // prelude's Source and FileIO call.
+                                      "__fileReadText", "__fileWriteText",
+                                      "__fileExists", "__fileDelete", "__splitLines"};
         for (unsigned n = 2; n <= kMaxTupleArity; ++n) v.push_back("Tuple" + std::to_string(n));
         return v;
     }();

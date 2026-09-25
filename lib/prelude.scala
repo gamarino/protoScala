@@ -32,6 +32,16 @@ class NoSuchElementException(message: String) extends RuntimeException(message)
 class NullPointerException(message: String) extends RuntimeException(message)
 class NumberFormatException(message: String) extends IllegalArgumentException(message)
 class UnsupportedOperationException(message: String) extends RuntimeException(message)
+// Track F: the exceptions file I/O raises. The hierarchy is the JVM's with the
+// `java.io.` and `java.nio.charset.` prefixes dropped (D8): IOException under
+// Exception (NOT under RuntimeException -- an I/O failure is checked on the JVM,
+// and a Scala programmer expects `catch case e: IOException` to see a missing
+// file AND a bad byte), FileNotFoundException and CharacterCodingException under
+// it, MalformedInputException under that (D97).
+class IOException(message: String) extends Exception(message)
+class FileNotFoundException(message: String) extends IOException(message)
+class CharacterCodingException(message: String) extends IOException(message)
+class MalformedInputException(message: String) extends CharacterCodingException(message)
 class MatchError(message: String) extends RuntimeException(message)
 // scala.UninitializedFieldError extends RuntimeException despite its name, and
 // matching that is free.
@@ -193,6 +203,63 @@ object Try:
 
 // Phase 5: the value Actor.stats returns.
 final case class ActorStats(workers: Int, messagesProcessed: Int)
+
+// ---------------------------------------------------------------------------
+// Track F: reading and writing files
+// ---------------------------------------------------------------------------
+
+// `scala.io.Source`'s reading surface, under the same names (there is no
+// `scala.io` namespace to put it in, so it is a global, like every other prelude
+// name). Two deliberate differences from Scala, both recorded in STATUS.md:
+//
+//  * `getLines()` answers a `List[String]`, not an `Iterator[String]`: protoScala
+//    has no Iterator (D100).
+//  * a source is read in full when it is opened and can be read again as often
+//    as you like, where Scala's is consumed as it is read -- in Scala,
+//    `src.mkString` followed by `src.getLines()` gives an EMPTY list (D101).
+//
+// Everything else matches, including which exception each failure raises and the
+// fact that reading a CLOSED source fails.
+final class BufferedSource(text: String, origin: String):
+  private var isClosed = false
+  // Every read goes through here, so no read can bypass the closed check.
+  private def contents: String =
+    if isClosed then throw new IOException(origin + " (Stream Closed)") else text
+  def mkString: String = contents
+  def getLines(): List[String] = __splitLines(contents)
+  def close(): Unit = isClosed = true
+  def isOpen: Boolean = !isClosed
+  override def toString: String = "BufferedSource"
+
+object Source:
+  // `enc` exists so that the common Scala spelling `Source.fromFile(p, "UTF-8")`
+  // compiles and means what it says. protoScala decodes UTF-8 only, and any
+  // other charset name is refused with an UnsupportedOperationException rather
+  // than decoded as if it had been UTF-8 (D99).
+  def fromFile(path: String, enc: String = "UTF-8"): BufferedSource =
+    new BufferedSource(__fileReadText(path, enc), path)
+  def fromString(s: String): BufferedSource = new BufferedSource(s, "<string>")
+
+// Writing. Scala's writer is `java.io.PrintWriter` / `java.nio.file.Files`, and
+// protoScala has no Java interop and will not have one, so this is protoScala's
+// own explicit surface and NOT a simulation of either (D102). Four operations,
+// each one call, each naming its path in every failure:
+//
+//   FileIO.write(path, text)   replace the file's contents (creating it)
+//   FileIO.append(path, text)  add to the end (creating it)
+//   FileIO.exists(path)        is there anything at this path
+//   FileIO.delete(path)        remove a file; false if there was none
+//
+// The text is written as UTF-8, which is what `Source.fromFile` reads back.
+object FileIO:
+  def write(path: String, text: String): Unit = __fileWriteText(path, text, false)
+  def append(path: String, text: String): Unit = __fileWriteText(path, text, true)
+  def exists(path: String): Boolean = __fileExists(path)
+  // `true` when a file was removed, `false` when there was nothing at the path.
+  // Every OTHER failure -- no permission, a directory, an I/O error -- raises an
+  // IOException naming the path, because a `false` there would be a swallowed
+  // error rather than an answer.
+  def delete(path: String): Boolean = __fileDelete(path)
 
 // Constructors the runtime's native methods call. A native cannot name a
 // global directly (a REPL redefinition gives `Some#1`, D25), so it resolves

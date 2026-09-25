@@ -1202,6 +1202,7 @@ void installPrimitives(ProtoContext* ctx, const RuntimeLayout& L) {
     installActorPrimitives(ctx, L);
     installKeywordProbe(ctx, L);
     installCollectionPrimitives(ctx, L);
+    installFilePrimitives(ctx, L);
 }
 
 // __kwprobe.call(positional..., named = ...) -> a deterministic report.

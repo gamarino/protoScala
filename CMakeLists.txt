@@ -254,6 +254,7 @@ add_library(protoscala_runtime STATIC
     src/runtime/ProductPrimitives.cpp
     src/runtime/CollectionPrimitives.cpp
     src/runtime/ActorPrimitives.cpp
+    src/runtime/FilePrimitives.cpp
     src/runtime/ActorScheduler.cpp
     src/runtime/Futures.cpp
     src/runtime/Mailbox.cpp

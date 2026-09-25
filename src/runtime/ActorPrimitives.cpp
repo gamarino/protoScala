@@ -580,7 +580,13 @@ void bindPreludeHooks(proto::ProtoContext* ctx, RuntimeLayout& layout, const Glo
             "UnsupportedOperationException", "MatchError", "UninitializedFieldError",
             "InterruptedException", "NoSuchMethodError", "StackOverflowError",
             "OutOfMemoryError",
-            "ImportError"};  // Phase 6: a UMD module load that failed
+            "ImportError",   // Phase 6: a UMD module load that failed
+            // Track F: every class a filesystem primitive can raise. A name
+            // missing from this list would not fail the build -- it would
+            // silently downgrade to RuntimeException and stop being catchable as
+            // an IOException, which is the whole point of having the hierarchy.
+            "IOException", "FileNotFoundException", "CharacterCodingException",
+            "MalformedInputException"};
         layout.hooks.throwableClasses.clear();
         for (const char* name : kThrowables) {
             const ClassInfo* info = globals.findType(name);

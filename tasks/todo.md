@@ -177,3 +177,20 @@ passed argument working instead of crashing.
 
 Still owed, unchanged by this task: the ThreadSanitizer run against the actors,
 and a cold-start measurement on a quiet host.
+
+## Track F — file input and output (2026-09-24)
+
+- [ ] Task 1: `src/runtime/FilePrimitives.cpp` — five natives
+      (`__fileReadText`, `__fileWriteText`, `__fileExists`, `__fileDelete`,
+      `__splitLines`), the errno → English reason table, strict UTF-8
+      validation, CMake + `builtinGlobalNames()`
+- [ ] Task 2: prelude — `IOException` / `FileNotFoundException` /
+      `CharacterCodingException` / `MalformedInputException`, registered in
+      `bindPreludeHooks`; `BufferedSource`, `object Source`, `object FileIO`
+- [ ] Task 3: conformance fixtures `tests/conformance/26-file-io/`, reading
+      inputs from `_data/` and writing only under `PROTOSCALA_TEST_TMP`
+- [ ] Task 4: unit tests for the splitter and the UTF-8 validator
+- [ ] Task 5: tutorial chapter + fixtures under `tests/conformance/tutorial/`
+- [ ] Task 6: the worked example reads `sample.log` itself
+- [ ] Task 7: STATUS.md `D97`–`D102`, LANGUAGE.md, ROADMAP.md, CHANGELOG.md,
+      DECISIONS-LOG.md

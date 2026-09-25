@@ -73,13 +73,30 @@ foreach(conf_file ${PROTOSCALA_CONFORMANCE_FILES})
     endif()
 endforeach()
 
+# Track F: the one directory in the tree a conformance fixture may write into.
+# Created at configure time, inside the build tree, so that a fixture never has
+# to invent a location and never writes into the source tree or into /tmp. It is
+# handed to the 26-file-io fixtures (and to the tutorial's file-I/O fixtures) as
+# PROTOSCALA_TEST_TMP below.
+set(PROTOSCALA_FILE_IO_SCRATCH "${CMAKE_CURRENT_BINARY_DIR}/file-io-scratch")
+file(MAKE_DIRECTORY "${PROTOSCALA_FILE_IO_SCRATCH}")
+
 # tests/conformance/24-modules/ and 25-interop/ import from the helper module
 # tree beside them (`_modules`, a `_`-prefixed directory the runner ignores).
 foreach(conf_file ${PROTOSCALA_CONFORMANCE_FILES})
     if(conf_file MATCHES "(^|/)_")
         continue()
     endif()
-    if(conf_file MATCHES "^tutorial/00-readme-a-module")
+    if(conf_file MATCHES "^26-file-io/")
+        # Track F. The fixtures that WRITE need a directory they may create files
+        # in. The conformance runner starts each fixture in its own source
+        # directory, so a relative path would write into the repository -- these
+        # fixtures therefore take the directory from the environment, and refuse
+        # to run when it is unset rather than fall back to the working directory.
+        # It lives in the BUILD tree and is never `/tmp`.
+        set_tests_properties("conformance/${conf_file}" PROPERTIES
+            ENVIRONMENT "PROTOSCALA_TEST_TMP=${PROTOSCALA_FILE_IO_SCRATCH}")
+    elseif(conf_file MATCHES "^tutorial/00-readme-a-module")
         set_tests_properties("conformance/${conf_file}" PROPERTIES
             ENVIRONMENT
             "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/tutorial/_readme")

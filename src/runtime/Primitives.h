@@ -32,6 +32,10 @@ void installActorPrimitives(proto::ProtoContext* ctx, const RuntimeLayout& layou
 // installPrimitives after installProductPrimitives.
 void installCollectionPrimitives(proto::ProtoContext* ctx, const RuntimeLayout& layout);
 
+// Track F: the five filesystem natives behind `scala.io.Source` and `FileIO`
+// (FilePrimitives.cpp). installPrimitives calls it.
+void installFilePrimitives(proto::ProtoContext* ctx, const RuntimeLayout& layout);
+
 // Resolves the prelude values the native methods construct. Call once, right
 // after loadPrelude, from every entry point that builds a runtime (Session,
 // EvalHarness). A missing name is a build defect, not user input: it throws.

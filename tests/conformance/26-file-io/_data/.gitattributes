@@ -1,0 +1,6 @@
+# These are byte-exact test inputs. The repository's core.autocrlf is `input`,
+# which rewrites CRLF to LF on commit -- that would silently destroy crlf.txt and
+# cr.txt, and the fixtures that read them would then pass for the wrong reason.
+# `-text` tells git to store and check out every byte of this directory
+# untouched.
+* -text
