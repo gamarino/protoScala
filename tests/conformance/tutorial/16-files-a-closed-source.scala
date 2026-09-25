@@ -1,0 +1,6 @@
+// EXPECT: IOException: closed.txt (Stream Closed)
+FileIO.write("closed.txt", "text\n")
+val src = Source.fromFile("closed.txt")
+src.close()
+try println(src.mkString)
+catch case e: IOException => println(s"${e.getClass}: ${e.getMessage}")

@@ -610,4 +610,5 @@ dotted path is what Scala's package-or-object resolution means.
 ---
 
 Previous: [14. The REPL and tooling](14-repl-and-tooling.md) ·
+Next: [16. Reading and writing files](16-reading-and-writing-files.md) ·
 Back to [the tutorial index](../TUTORIAL.md)

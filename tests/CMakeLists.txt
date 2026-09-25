@@ -104,6 +104,18 @@ foreach(conf_file ${PROTOSCALA_CONFORMANCE_FILES})
         set_tests_properties("conformance/${conf_file}" PROPERTIES
             ENVIRONMENT
             "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/24-modules/_modules")
+    elseif(conf_file MATCHES "^tutorial/16-")
+        # Track F. The chapter-16 snippets name their files the way a reader
+        # would (`"notes.txt"`), so each one is run from a private directory of
+        # its own inside the build tree -- never the source tree, never /tmp.
+        # "Private" removes every chance of two fixtures colliding under
+        # `ctest -j`.
+        get_filename_component(file_io_stem "${conf_file}" NAME_WE)
+        set(file_io_cwd "${PROTOSCALA_FILE_IO_SCRATCH}/${file_io_stem}")
+        file(MAKE_DIRECTORY "${file_io_cwd}")
+        set_tests_properties("conformance/${conf_file}" PROPERTIES
+            ENVIRONMENT
+            "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/tutorial/_modules;PROTOSCALA_RUN_CWD=${file_io_cwd}")
     elseif(conf_file MATCHES "^tutorial/")
         # The chapter 15 (and chapter 2 "Modules") fixtures import the helper
         # module tree at tests/conformance/tutorial/_modules, exactly as the

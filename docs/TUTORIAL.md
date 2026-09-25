@@ -33,7 +33,10 @@ runtime is built is in [DESIGN.md](DESIGN.md); the cross-runtime story is in
 > polyglot prefixes `py.`, `js.`, `st.` and `clj.` routed to protoCore's
 > provider registry**. Chapter 15 covers all of it, including the honest limit:
 > the prefixes route, but no runtime in the family registers `py`, `js` or `clj`
-> yet, so those imports stop with `no provider registered for '<alias>'`. Every
+> yet, so those imports stop with `no provider registered for '<alias>'`. Also
+> new: **file input and output** — `scala.io.Source` for reading, and a
+> four-operation `FileIO` object for writing, because Scala's writer is
+> `java.io.PrintWriter` and there is no Java here. Chapter 16 covers it. Every
 > runnable snippet in the tutorial is a conformance fixture under
 > `tests/conformance/tutorial/`, run with the test suite.
 
@@ -73,7 +76,9 @@ ends with a section listing what differs from Scala 3 in its area. Read chapter
 15 early rather than last: a module here is a **file**, not a package — there is
 no `package` clause and no classpath — and its D90–D96 are the choices that
 follow from that, including a module's top level running at import and an
-`import` being hoisted to its whole unit.
+`import` being hoisted to its whole unit. Chapter 16 is the other one to read
+early: reading a file is `scala.io.Source` and behaves like it, writing is not a
+`PrintWriter` and says why, and its D97-D102 are the choices that follow.
 
 ## Chapters
 
@@ -94,6 +99,7 @@ follow from that, including a module's top level running at import and an
 | 13 | [Actors and futures](tutorial/13-actors-and-futures.md) | Actors, telling and asking, priority bands, futures and their combinators, cooperative `await`, handler failures, threads and time, tuning. |
 | 14 | [The REPL and tooling](tutorial/14-repl-and-tooling.md) | The REPL, multi-line input, commands, classes at the prompt, running scripts, error messages, `--disassemble`. |
 | 15 | [Modules and polyglot interop](tutorial/15-modules-and-polyglot-interop.md) | A module is a file, the five import forms, where modules are found, importing a type, the four polyglot prefixes and what each needs, named arguments across the boundary, and what each failed import prints. |
+| 16 | [Reading and writing files](tutorial/16-reading-and-writing-files.md) | `Source.fromFile`, `getLines()` and `mkString`, how lines are counted, the `FileIO` writing surface, every failure and the class it raises, and the two deliberate divergences from Scala's `Source`. |
 | — | [**Worked example**](tutorial/worked-example.md) | One complete program, `examples/log-report/`, rather than one feature at a time: three files and two imports, an `enum` with methods, case classes and pattern matching, `Try` and a `catch` for a malformed line, `Map` aggregation, `for … yield`, interpolation, and actors fanned out with `?` and folded back with `await`. |
 
 ## Running the examples
