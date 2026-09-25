@@ -38,12 +38,16 @@ set(PROTOCORE_ABI_SOVERSION    "2")
 # The protoCore release that introduced ProtoMPSCQueue. Kept separate from the
 # floor above so the two can be reasoned about independently.
 set(PROTOSCALA_PMQ_MIN_PROTOCORE "2.1.0")
-# Phase 6 Task 10: the two-runtime interop experiment (R5). Off by default
-# because it links a SIBLING repository's build output into a test executable,
-# which makes protoScala's suite depend on another tree's build state. The
-# outcome of running it is recorded in docs/STATUS.md under R5.
+# Phase 6 Task 10 / Track Y: the two-runtime interop tests. ON by default since
+# Track Y, because `import st.<module>` WORKS and this is the only place it is
+# tested — an interop claim nobody runs is a claim nobody keeps. It still links a
+# SIBLING repository's build output into a test executable, so it is built only
+# when protoST is actually found beside this tree (tests/unit/CMakeLists.txt
+# reports it either way) and never into the shipped binary; set it to OFF to
+# build protoScala's suite with no reference to another tree's build state. See
+# docs/STATUS.md under R5 and docs/INTEROP.md §6.
 option(PROTOSCALA_PROTOST_INTEROP
-    "Build umd/protost-interop, which links protoST into a test executable (R5)" OFF)
+    "Build umd/protost-interop, which links protoST into a test executable (R5)" ON)
 option(PROTOCORE_REQUIRE_PACKAGE
     "Require an installed protoCore CMake package; never fall back to ../protoCore" OFF)
 
