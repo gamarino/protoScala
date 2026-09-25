@@ -7,7 +7,8 @@ feature at a time; this one shows them together.
 ## Run it
 
 ```bash
-protoscala examples/log-report/Main.scala
+cd examples/log-report
+protoscala Main.scala
 ```
 
 ```text
@@ -16,13 +17,24 @@ Debug 2 | Info 5 | Warn 2 | Error 3 | malformed 2
 
 There is no build step, no classpath and no `PROTOSCALA_PATH`. `Main.scala`
 writes `import report.Levels`, and an import is resolved against the importing
-file's own directory first, so the example is self-contained wherever you run
-it from.
+file's own directory first, so the **modules** are found wherever you run it
+from.
 
-An optional argument sets how many parser actors the work is fanned out over:
+The **log** is different: it is data, and its path is resolved against the
+working directory, here exactly as on the JVM. So from anywhere else, name it:
 
 ```bash
-protoscala examples/log-report/Main.scala 7
+protoscala examples/log-report/Main.scala examples/log-report/sample.log
+```
+
+Name a path with nothing at it and the program stops with
+`FileNotFoundException: <path> (No such file or directory)` rather than
+reporting an empty log.
+
+A second argument sets how many parser actors the work is fanned out over:
+
+```bash
+protoscala examples/log-report/Main.scala examples/log-report/sample.log 7
 ```
 
 ```text
@@ -53,21 +65,30 @@ The number must not change the answer — that is the point of the exercise, and
 | `Main.scala` | the `@main`: fans the parse out, folds the counts back, prints the report |
 | `report/Levels.scala` | the severity scale: the cases, their labels, their order |
 | `report/Lines.scala` | `case class Line` and the parser that answers `Try[Line]` |
-| `report/Sample.scala` | the log as text (see below) |
+| `report/Sample.scala` | opens the log and hands back its non-blank lines |
 | `sample.log` | the input, committed so the output is deterministic |
 
-## Why the log is in two places
+## The log is in one place
 
-protoScala 0.5.0 has **no file I/O**: a program cannot open `sample.log` for
-itself. So the log ships twice — as the real file, which is what a reader
-should look at, and as a string in `report/Sample.scala`, which is what the
-program actually parses.
+It was in two. protoScala 0.6.0 had no file I/O, so the log shipped twice — as
+the real file, which is what a reader should look at, and again as a string in
+`report/Sample.scala`, which is what the program actually parsed — and
+`tests/cli/examples.sh` diffed the two so they could not drift apart.
 
-That duplication is a hazard, so it is checked rather than trusted:
-`tests/cli/examples.sh` diffs the text between the two `"""` markers in
-`report/Sample.scala` against `sample.log` and fails if they have drifted. Edit
-`sample.log`, copy the lines into the module, and the expected report in
-`tests/cli/examples.sh` will tell you what changed.
+Track F removed the need for all of it. `report/Sample.scala` is now three lines
+that open the file:
+
+```scala
+def lines(path: String): List[String] =
+  Source.fromFile(path).getLines().filter(l => l.trim.nonEmpty)
+```
+
+Edit `sample.log` and the report follows; nothing has to be copied and there is
+nothing left to keep in step. What `tests/cli/examples.sh` checks instead is that
+the file really is being read: it copies `sample.log`, appends one more `ERROR`
+line to the copy, runs the program against the copy, and requires a **different**
+report. A program that had gone back to carrying its own text would produce the
+same one.
 
 ## The malformed lines
 

@@ -45,8 +45,8 @@ examples/log-report/
 ├── Main.scala           the @main: fan out, fold back, print
 ├── report/Levels.scala  the severity scale
 ├── report/Lines.scala   the record and the parser
-├── report/Sample.scala  the log, as text
-├── sample.log           the log, as a file
+├── report/Sample.scala  opens the log and hands back its lines
+├── sample.log           the log
 └── README.md
 ```
 
@@ -67,7 +67,8 @@ the same line from all three.
 ### Running it
 
 ```bash
-protoscala examples/log-report/Main.scala
+cd examples/log-report
+protoscala Main.scala
 ```
 
 ```text
@@ -78,9 +79,25 @@ No build tool, no classpath, no `PROTOSCALA_PATH`. `Main.scala` writes
 `import report.Levels`, and a module path is resolved against the **importing
 file's own directory** first, then against `PROTOSCALA_PATH`, then against the
 working directory. The first of those is what makes an example directory
-self-contained: the program finds its own modules because they are next to it,
-not because the shell was standing in the right place. It runs identically from
-the repository root, from your home directory or from `/`.
+self-contained: the program finds its own **modules** because they are next to
+it, not because the shell was standing in the right place. That holds from the
+repository root, from your home directory or from `/`.
+
+The **log** is not a module, and this is worth being precise about, because it is
+the first thing a reader will trip over. A data path is resolved against the
+**working directory**, here exactly as on the JVM: protoScala has no notion of
+"the directory the script is in", because Scala has none either. So from anywhere
+other than the example's own directory, name the file:
+
+```bash
+protoscala examples/log-report/Main.scala examples/log-report/sample.log
+```
+
+Name a path with nothing at it and the program stops with
+`FileNotFoundException: <path> (No such file or directory)`. It does not report
+an empty log, and that is the whole point of chapter 16's insistence on it: the
+failure a program is most likely to meet is the one it must not be able to
+mistake for an answer.
 
 ---
 
@@ -176,30 +193,39 @@ there is no regex engine in this dialect), so runs of spaces are handled by
 splitting on one space and filtering the empties out. That is less elegant than
 a pattern and, for a fixed-shape log line, entirely sufficient.
 
-## `report/Sample.scala` — the log, and an honest workaround
+## `report/Sample.scala` — opening the log
 
 ```scala
-val text: String = """
-INFO auth user ada signed in
-…
-ERROR
-"""
-
-def lines: List[String] = text.split("\n").toList.filter(l => l.trim.nonEmpty)
+def lines(path: String): List[String] =
+  Source.fromFile(path).getLines().filter(l => l.trim.nonEmpty)
 ```
 
-protoScala 0.5.0 has **no file I/O**. A program cannot open `sample.log`, so a
-worked example that reads a log has to carry the log inside itself. The example
-ships it twice: `sample.log` is the real file, which is what a reader should
-look at and what a future version of this example will actually open, and
-`report/Sample.scala` is the copy the program parses.
+Three lines, and they are worth a paragraph because of what they replaced.
 
-Duplication that nobody checks is duplication that drifts, so this one is
-checked. `tests/cli/examples.sh` extracts the text between the two `"""` markers
-and diffs it against `sample.log`; if they differ, `ctest` fails and names the
-difference. That is the general shape of the compromise worth making when a
-platform is missing something: take the workaround, write down why, and make the
-part that can rot fail loudly when it does.
+When this example was written, protoScala had **no file I/O** — a program could
+not open `sample.log` — so the log shipped twice: once as the real file, for a
+reader to look at, and once again as a triple-quoted string in this module, which
+was what the program actually parsed. Duplication that nobody checks is
+duplication that drifts, so `tests/cli/examples.sh` extracted the text between the
+two `"""` markers and diffed it against `sample.log`. The workaround was honest,
+it was written down, and the part that could rot failed loudly when it did.
+
+Track F removed the need for it, and the removal is the more interesting half of
+the story: the workaround is gone, the duplication is gone, and the diff that
+guarded the duplication is gone with it. What replaced the diff is a check of the
+property that actually matters — that the program reads the file it is given.
+`tests/cli/examples.sh` copies `sample.log`, appends one more `ERROR` line to the
+copy, runs the program against the copy, and demands a **different** report
+(`Error 4` instead of `Error 3`). A program that had quietly gone back to parsing
+embedded text would print the same line as before and fail that check. Removing a
+workaround is not finished until the test that guarded it has been replaced by a
+test of the real thing.
+
+`getLines()` answers a `List[String]`, not an `Iterator[String]`, because there is
+no `Iterator` in this dialect (D100), so `.filter` applies to it directly. The
+filter drops blank lines: nothing in `sample.log` is blank today, and it is there
+so that an edited log with a stray blank line still produces the same report
+rather than one extra malformed count.
 
 The sample contains two lines that do not parse — `*** truncated by logrotate
 ***` and a bare `ERROR` — and they are there so that the `Try` in the parser and
@@ -211,12 +237,13 @@ An error path with no test is not an error path.
 ### The parser pool
 
 ```scala
-val width = if args.isEmpty then 3 else args(0).toInt
+val path = if args.isEmpty then "sample.log" else args(0)
+val width = if args.length < 2 then 3 else args(1).toInt
 
 val parsers = for i <- (0 until width).toList yield
   Actor.spawn(i) { (id, line) => (id, parse(line.toString)) }
 
-val answers = for pair <- Sample.lines.zipWithIndex yield
+val answers = for pair <- Sample.lines(path).zipWithIndex yield
   parsers(pair._2 % width) ? pair._1
 ```
 
@@ -358,8 +385,12 @@ that one message and leaves the actor alive with its previous state.
 [Chapter 13](13-actors-and-futures.md) lists the whole surface.
 
 **Integers do not overflow**, so a count is never wrong because it got large.
-And there is no file I/O at all, which is the one absence this example had to
-work around rather than around which it could design.
+
+**File I/O is `scala.io.Source` and nothing else.** `Source.fromFile`,
+`getLines()`, `mkString` and `close()` behave as they do on the JVM, with the two
+divergences chapter 16 lists (`getLines()` gives a `List`, and a source may be
+read again). There is no `java.io`, no `java.nio.file`, no `PrintWriter` and no
+`Using`; writing is a four-operation `FileIO` object of protoScala's own (D102).
 
 ## The same program in Python
 
@@ -384,7 +415,7 @@ are immutable.
 it answers a new map that shares almost all of its structure with the old one.
 The habit that breaks first coming from Python is `d[k] = v`; the habit that
 replaces it is returning the new value, which is exactly what an actor handler
-is asked to do. `Sample.lines` is a `List`, not a Python list: you cannot append
+is asked to do. `Sample.lines(path)` is a `List`, not a Python list: you cannot append
 to it, and `for l <- Level.values yield …` is a comprehension rather than a loop
 that mutates an accumulator.
 

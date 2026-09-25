@@ -1,7 +1,9 @@
 // A log report in one program: modules, an enum, case classes and patterns,
-// Try and catch, Map aggregation, for-yield, interpolation, and actors.
+// Try and catch, Map aggregation, for-yield, interpolation, actors -- and, since
+// Track F, reading its own input from a file.
 //
-// Run from anywhere: protoscala examples/log-report/Main.scala
+//   cd examples/log-report && protoscala Main.scala
+//   protoscala examples/log-report/Main.scala examples/log-report/sample.log
 //
 // The three imports below are resolved against THIS file's directory first, so
 // the example is self-contained and needs no PROTOSCALA_PATH and no build tool.
@@ -14,9 +16,18 @@ import report.Sample
 case object Report
 
 @main def run(args: String*): Unit =
-  // How many parsers to fan out over. An argument makes the fan width easy to
-  // play with; the result must not depend on it, and that is the point.
-  val width = if args.isEmpty then 3 else args(0).toInt
+  // The log to read. `protoscala Main.scala` works unchanged from this directory;
+  // from anywhere else, name the file. A relative path is resolved against the
+  // WORKING directory, here as on the JVM: a module path is resolved against the
+  // importing file's own directory, but a data path is data and protoScala has no
+  // notion of "the directory the script is in" -- Scala has none either. A path
+  // with nothing at it stops the program with
+  // `FileNotFoundException: <path> (No such file or directory)`.
+  val path = if args.isEmpty then "sample.log" else args(0)
+
+  // How many parsers to fan out over. A second argument makes the fan width easy
+  // to play with; the result must not depend on it, and that is the point.
+  val width = if args.length < 2 then 3 else args(1).toInt
 
   // Each parser is an actor whose state is its own index -- it needs no state
   // at all, but an actor must have one, and the index makes it identifiable.
@@ -26,7 +37,7 @@ case object Report
   // The ask is what fans the work out: `?` queues the line and hands back a
   // Future immediately, so every parser is busy before the first answer is
   // read. Round-robin keeps the distribution independent of line length.
-  val answers = for pair <- Sample.lines.zipWithIndex yield
+  val answers = for pair <- Sample.lines(path).zipWithIndex yield
     parsers(pair._2 % width) ? pair._1
 
   // The fold-back point. One actor owns the counts, so no lock is needed and

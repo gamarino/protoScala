@@ -1,28 +1,18 @@
-// The input, carried as text.
+// The input: the log file, read from disk.
 //
-// protoScala 0.6.0 has no file I/O: a program cannot open `sample.log` itself.
-// So the log ships twice -- once as the real file, for a reader to look at, and
-// once here, as the text this program actually parses. The two are kept honest
-// mechanically: `tests/cli/examples.sh` diffs the block between the `"""`
-// markers below against `sample.log` and fails if they ever drift apart.
-val text: String = """
-INFO auth user ada signed in
-INFO auth user grace signed in
-DEBUG cache warming 128 entries
-WARN cache eviction rate 0.83 above threshold
-ERROR db connection refused by replica 2
-INFO http GET /orders 200
-WARN http slow response 1.4s on /orders
-ERROR db replica 2 still unreachable
-INFO http GET /orders 200
-ERROR queue dead letter for job 7741
-INFO auth user ada signed out
-*** truncated by logrotate ***
-DEBUG cache 12 entries expired
-ERROR
-"""
-
-// One entry per non-blank line. `split` here is a plain substring split, not a
-// regular expression, so the blank first line the opening `"""` leaves behind
-// is dropped by the filter rather than by a clever pattern.
-def lines: List[String] = text.split("\n").toList.filter(l => l.trim.nonEmpty)
+// This module used to carry the text of `sample.log` a SECOND time, between two
+// `"""` markers, because protoScala 0.6.0 had no file I/O and the program could
+// not open its own input. A CLI check diffed the two copies so that a reader who
+// edited the `.log` file and not the module would not silently see the old
+// report. Track F removed the need for all of it: the program opens the file, so
+// there is one copy and nothing to keep in step.
+//
+// The path arrives from `Main.scala`, which takes it from the command line. A
+// relative path is resolved against the working directory, here exactly as on the
+// JVM -- protoScala has no notion of "the directory the script is in", because
+// Scala has none either.
+def lines(path: String): List[String] =
+  // A blank line is not a log entry. Nothing in `sample.log` is blank today; the
+  // filter is here so that an edited log with a trailing newline or a stray blank
+  // line still produces the same report rather than one extra malformed count.
+  Source.fromFile(path).getLines().filter(l => l.trim.nonEmpty)
