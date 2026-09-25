@@ -15,7 +15,7 @@ give, and what each capability of the adaptor does and does not prove.
 |---|---|---|---|
 | `gc.young_submitted` | 1 | **PASS** | grew in-use by 363,162 cells; 3 cycles reclaimed 360,082; residual 3,080 |
 | `gc.transient_reclaimed` | 5 | **PASS** | grew 305,818; residual −264 (`List` is a `ProtoList`, not a `ProtoTuple`) |
-| **`gc.host_stress`** | **3** | **FAIL** | live set 316,230 under a 400,000-cell ceiling, reclaimed 0 — **see the mailbox-retention finding below.** An earlier run of this case passed (34 cycles, 1,323,476 reclaimed) with a workload that spawned a fresh actor per call; that pass was an artefact of a shorter-lived actor |
+| **`gc.host_stress`** | **3** | **PASS** (was FAIL) | first run: live set 316,230 under a 400,000-cell ceiling, reclaimed 0. **Fixed** — see the resolved retention finding below. Now 20/20 rounds, 3 runs out of 3 |
 | `symbol.fast_path_key_hits` | 4 | **PASS** | a 31-byte key is readable through both `getAttribute` and `getOwnAttributeDirect` |
 | `external.finalizer_runs` | 7 | **PASS** | kernel characterisation: one call, right pointer |
 | `module.root_survives_cycle` | 9b | **PASS** | kernel characterisation: module and contents survived 3 cycles |
@@ -24,96 +24,119 @@ give, and what each capability of the adaptor does and does not prove.
 | `thread.registered` | 11 | **NOTAPPLICABLE** | `forEachThreadKind` not implemented — see below. **The rule is UNVERIFIED by this case** |
 | `stw.quorum_completes` | 2 | **PASS** (isolated) | a cycle completed with an actor worker idle |
 | `join.parks` | 2b | **PASS** (isolated) | a cycle completed while `Thread.start`/`t.join()` was blocked |
-| **`heap.ceiling_progress`** | **8** | **FAIL** (isolated) | **see the finding below** |
+| **`heap.ceiling_progress`** | **8** | **PASS** (isolated, was FAIL) | same cause, same fix. **Intermittent: about 2 runs in 10 alone**, for a second defect the retention had been masking — a protoCore `ProtoMPSCQueue` finding, diagnosed and not fixed here. See below |
 
-Suite total: **1263** ctest cases, **1261 passing** — 1248 pre-existing plus 15
-conformance entries, with **no previously-passing test newly failing**. The two
-failures are both new conformance findings: the mailbox retention above and rule
-8 below (which is very likely the same mechanism reached by a different route).
+Suite total, first run: **1263** ctest cases, **1261 passing** — 1248 pre-existing
+plus 15 conformance entries, with **no previously-passing test newly failing**.
+Both failures were one defect.
+
+Suite total after the fix: **1263 / 1263**, 88 s. The two cases that were red are
+green, and the retention they measured is gone rather than reduced. Read the rule-8
+section before trusting that number: the case is intermittent for a reason that is
+not protoScala's.
 
 Static check: **0 unjustified findings**, 1 justified entry, 3 informational.
 
-## The finding: the actor mailbox appears to retain every message ever delivered
+## RESOLVED — the actor worker retained every message it ever delivered
 
-This is the phase's most specific finding for protoScala and it reproduces in
-**two independent cases**, so it is reported first.
+Both of the phase's failing cases, `gc.host_stress` (rule 3) and
+`heap.ceiling_progress` (rule 8), had **one cause**, and it is fixed
+(`src/runtime/ActorScheduler.cpp`, `ActorScheduler::drainOne`). Both are green.
 
-`gc.host_stress` aborts:
+### The named hypothesis was WRONG
+
+The first report named `ActorState::pendingIdx` advancing over an untruncated
+`__pend<n>__` list. **Measured and refuted:** with one actor and a 2,000-message
+backlog, `__pend1__` holds between 26 and 1,424 entries across 80,000 messages —
+bounded, exactly as the batch protocol intends. The cursor is not the mechanism.
+A fourth guess is not evidence, so the mechanism below was measured, not argued.
+
+### The actual cause
+
+A `ProtoContext` destroyed while its `returnValue` resolves to a cell anchors that
+cell in its **parent's** young chain, through a `ReturnReference`
+(`protoCore/core/ProtoContext.cpp`, `~ProtoContext`). A young chain reaches the
+collector only on the context's destruction or when `ProtoContext::safepoint()`
+finds the context above `ProtoSpace::maxAllocatedCellsPerContext`
+(`CONTEXT_GC_THRESHOLD_DEFAULT`, 10,000 cells) — **never merely because a cycle
+ran**.
+
+`runTurn` opened one context per message (correct, P2) whose parent was the
+**worker's session-long context**, and set `turn.returnValue = env`. The worker's
+context is never destroyed while the pool lives, and each message added exactly
+one cell to it, so those anchors accumulated for 10,000 messages per worker and
+each one held a whole envelope live.
+
+**Measured, one persistent actor, 2,000-message backlog, a forced collection at
+every checkpoint** (`liveCellsLastCycle`, the collector's own reachable count):
+
+| messages delivered | before the fix | after the fix |
+|---|---|---|
+| 2,000 | 23,193 | 24,106 |
+| 20,000 | 130,769 | 22,920 |
+| 80,000 | 491,145 | — |
+
+Before: **6.0 cells retained per message delivered**, linear, never falling.
+After: **flat**, and the residual is not "less than before" but a real working
+set — about 23,000 cells at every message count, which is protoScala's settled
+live set (≈22,000) plus the in-flight batch the case deliberately allows. The
+per-message term is **zero**: 22,920 at 20,000 messages against 24,106 at 2,000.
+
+### The fix
+
+`drainOne` opens **one context per turn**, between the worker's context and the
+per-message ones. It is destroyed at the end of every turn, so the anchors a turn
+leaves behind are submitted then, unconditionally; it carries no `returnValue` of
+its own, so it anchors nothing in the worker's context.
+
+### Mutation
+
+Remove that context and pass the worker's `ctx` straight to `runTurn` /
+`finishTurn`. `gc.host_stress` aborts 3 runs out of 3 with live sets of 325,030,
+313,358 and 307,125 cells against its 400,000-cell ceiling. Restored, it passes
+3 out of 3.
+
+## Rule 8 is green, and it is INTERMITTENT — a protoCore finding, not a protoScala one
+
+`heap.ceiling_progress` passes with the fix, including in a full suite run
+(1263/1263, 5.59 s). **It fails about 2 runs in 10 when run alone**, and the
+failure is a different defect that the retention had been masking — which is what
+the case's own text warns about ("the third was unreachable until the first was
+fixed").
 
 ```
-protoCore: heap hard limit 400000 cells reached; live set 316230 cells,
-last cycle reclaimed 0 — out of memory
+protoscala: actor handler failed: ClassCastException: + expects a number, got Null
 ```
 
-**Reproduction:**
-`build_release/tests/unit/protoscala_conformance --gtest_filter='*gc_host_stress*'`
-(exit 134). Twenty rounds of the actor path under a 400,000-cell ceiling with a
-forced cycle between rounds, **one actor for the whole run** and at most 2,000
-messages in flight at a time.
+**Diagnosed, in protoCore, and NOT fixed here** — a kernel change affects five
+runtimes and is the maintainer's call.
 
-**The arithmetic is the finding.** The run delivers 20 × 4,000 = **80,000
-messages** through that one actor, and the live set at the abort is **316,230
-cells**: **3.95 cells per message delivered**, with `reclaimedLastCycle` at zero.
-A live set that grows by a small constant per message, while at most 2,000
-messages are ever queued, is retention — not an unrooted local, and not the
-actor registry.
-
-**Named hypothesis, unproven:** `ActorState::pendingIdx` is a *read cursor* into
-the actor's `__pend<n>__` list (`src/runtime/ActorScheduler.h:47-51`). If the list
-itself is never truncated or replaced as the cursor advances, every envelope ever
-delivered stays reachable from the actor, which is anchored in the registry for
-the session. That would produce exactly this shape: a bounded queue depth, an
-unbounded live set, and zero reclamation. **The first thing to do with this is to
-measure cells-per-message at two different message counts** — if the ratio holds,
-the hypothesis is confirmed without reading any more code.
-
-Three alternatives were eliminated by measurement rather than by argument:
-
-1. *Actor accumulation.* A fresh actor per round aborted at 237,536 cells and a
-   fresh actor per call at 322,474; one actor for the whole run still aborts at
-   316,230. So the registry is not the mechanism here (it is a real property —
-   `Actor.spawn` retains for the session — but not this).
-2. *An unbounded backlog.* At most 2,000 messages are in flight.
-3. *A ceiling below the working set.* protoScala's settled live set is ~22,000
-   cells; the ceiling here is 400,000.
-
-**Severity: high.** A long-running protoScala program that sends messages to a
-long-lived actor has a live set proportional to total messages sent. Without a
-configured heap ceiling that is unbounded RSS; with one it is an abort.
-
-## The finding: rule 8 — the same shape, reached by a different route
+The envelope being delivered has lost **every own attribute**: its mutable handle
+was swept and GC phase 5b removed its mutables-tree entry, while the batch list
+still referenced it. Instrumented, the pattern is unambiguous — of a 182-message
+batch, **exactly one element is lost, always the last one**:
 
 ```
-protoCore: heap hard limit 221865 cells reached; live set 215351 cells,
-last cycle reclaimed 0 — out of memory
+DIAG-C env=0x7087e89ab280 cursor=182 batch=182 lost=1 first=181 last=181
 ```
 
-**Reproduction:**
-`build_release/tests/unit/protoscala_conformance_isolate --case=heap.ceiling_progress`
-(exit 134). The case settles the space, measures protoScala's own live set
-(≈21,865 cells), and sets a hard ceiling **200,000 cells above it** — which no
-protoScala code does, because protoScala never calls `setHeapLimits`. The workload
-is one actor with a bounded 2,000-message backlog.
+The last element of a batch is the most recently pushed, i.e. the node most likely
+to have been prepended **between `takeAll`'s `head` load and its detaching
+exchange**. `ProtoMPSCQueue::takeAll` publishes its retain cell with the chain it
+*loaded* (`retain->chain.store(h)`) and then detaches with
+`q->head.exchange(nullptr)`, which may return a **longer** chain. The nodes in the
+difference are covered by nothing the collector reads, and `takeAll` then calls
+`parkForStopTheWorld` every 64 nodes of its walk — so a whole stop-the-world can
+complete while those items are reachable only from a `std::vector` of C++ locals.
+The file's own comment states the premise that fails: "nothing this loop still
+needs lives only in a C++ local. The nodes hang off the retain cell this takeAll
+published onto `retained`."
 
-**This is very likely the mailbox retention above, reached through a different
-case**, and the numbers say so: the live set climbs to the ceiling with zero
-reclamation, exactly as in `gc.host_stress`. It is reported separately because the
-two cases configure the ceiling differently and a single mechanism explaining both
-is a conclusion, not an observation.
-
-**Not a regression.** protoScala never configures a ceiling, so `maxHeapSize == 0`,
-`waitForHeapHeadroom` returns immediately and this code was unreachable before
-this case existed. The finding was **latent, not new** — which is the whole point
-of a case that configures its own ceiling.
-
-**Two earlier versions of this measurement were invalid, and both are recorded
-because the abort surviving the fixes is what makes the number trustworthy.** The
-first used a ceiling of `heapSize + 32768` — only 32,768 cells above what the
-runtime already held — which cannot distinguish "cannot make progress" from "the
-ceiling is below the working set". The second bounded the ceiling properly but
-used a workload that enqueued all 200,000 messages before reading any, so the
-live set was unboundedly live **by construction**. Both are fixed;
-`Host::runProducerConsumer`'s contract now requires a bounded backlog.
+**Proposed one-line kernel fix, for the maintainer:** after the detaching
+exchange, and still inside the same critical section, widen the retain cell to the
+chain actually detached (`retain->chain.store(chain)`). The published-before-detach
+ordering the soundness proof needs is untouched — the cell was already published
+with `h` before the detach; widening it afterwards only adds coverage.
 
 ## What the adaptor does not prove
 

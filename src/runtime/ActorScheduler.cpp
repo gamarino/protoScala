@@ -450,14 +450,36 @@ void ActorScheduler::finishTurn(proto::ProtoContext* ctx, ActorState* a, bool su
 bool ActorScheduler::drainOne(proto::ProtoContext* ctx) {
     ActorState* a = dequeue();
     if (!a) return false;
+    // ONE CONTEXT PER TURN, between the worker's session-long context and the
+    // per-message ones (P2).  This is not tidiness; without it the worker
+    // retains every message it ever delivered.
+    //
+    // A ProtoContext that is destroyed while its `returnValue` resolves to a
+    // cell anchors that cell in its PARENT's young chain, through a
+    // ReturnReference (protoCore ProtoContext::~ProtoContext).  A young chain
+    // reaches the collector on the context's destruction or when
+    // ProtoContext::safepoint() finds the context over
+    // ProtoSpace::maxAllocatedCellsPerContext (10,000 cells by default) --
+    // never merely because a cycle ran.  The worker's context is never
+    // destroyed while the pool lives, and a turn adds only one cell to it per
+    // message, so those anchors accumulated for 10,000 messages per worker,
+    // each one holding a whole envelope live.  Measured before this context
+    // existed: 6.0 cells retained per message delivered, growing linearly to
+    // 491,145 live cells at 80,000 messages, which is what made
+    // gc.host_stress and heap.ceiling_progress abort under their ceilings.
+    //
+    // This context is destroyed at the end of every turn, so the anchors a
+    // turn leaves behind are submitted then, unconditionally.  It carries no
+    // returnValue of its own, so it anchors nothing in the worker's context.
+    proto::ProtoContext turnScope(ctx->space, ctx);
     bool suspended = false;
     try {
-        suspended = runTurn(ctx, a);
+        suspended = runTurn(&turnScope, a);
     } catch (...) {  // never leave an actor claimed on an unknown error
-        finishTurn(ctx, a, false);
+        finishTurn(&turnScope, a, false);
         throw;
     }
-    finishTurn(ctx, a, suspended);
+    finishTurn(&turnScope, a, suspended);
     return true;
 }
 
