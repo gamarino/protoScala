@@ -98,3 +98,43 @@ elseif(NOT PROTOSCALA_PROTOST_INTEROP)
 else()
     message(STATUS "protoScala: protoST not found beside this tree; umd/protost-interop is skipped")
 endif()
+
+# protoCore's embedder conformance suite (P4).
+#
+# Its own executable, for the same reason the actor and module suites have one
+# (R5, one runtime per process): the GC cases measure heap state, so sharing a
+# process with tests that allocate would let one test decide another's verdict.
+# It also needs the actor workers joined before the space dies, which only a
+# dedicated main() can guarantee.
+if(PROTOCORE_CONFORMANCE_LIBRARY)
+    add_executable(protoscala_conformance ConformanceTests.cpp)
+    target_link_libraries(protoscala_conformance
+        PRIVATE protoscala_runtime protoscala_compiler protoscala_frontend
+                protoscala_support "${PROTOCORE_CONFORMANCE_LIBRARY}"
+                gtest gtest_main)
+    target_include_directories(protoscala_conformance PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    gtest_discover_tests(protoscala_conformance
+        TEST_PREFIX embedder-conformance/
+        PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
+
+    # The isolate binary: one case per process, for the case whose failure mode
+    # is std::abort() inside waitForHeapHeadroom.  Without it that case can only
+    # be Skipped, and a Skipped that cannot be run is a rule nobody checks.
+    add_executable(protoscala_conformance_isolate ConformanceIsolate.cpp)
+    target_link_libraries(protoscala_conformance_isolate
+        PRIVATE protoscala_runtime protoscala_compiler protoscala_frontend
+                protoscala_support "${PROTOCORE_CONFORMANCE_LIBRARY}")
+    target_include_directories(protoscala_conformance_isolate PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    # The three cases that cannot report their own failure in-process: one
+    # aborts, two deadlock the space.  The external TIMEOUT is the verdict.
+    foreach(_case heap.ceiling_progress join.parks stw.quorum_completes)
+        add_test(NAME embedder-conformance/isolate.${_case}
+                 COMMAND protoscala_conformance_isolate --case=${_case})
+        set_tests_properties(embedder-conformance/isolate.${_case}
+                             PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
+    endforeach()
+else()
+    message(STATUS "protoScala: protoCoreConformance not found; the embedder "
+                   "conformance suite is not built.  Build protoCore with its "
+                   "conformance target (protoCore >= 2.3) to run it.")
+endif()
