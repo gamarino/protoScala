@@ -104,7 +104,7 @@ foreach(conf_file ${PROTOSCALA_CONFORMANCE_FILES})
         set_tests_properties("conformance/${conf_file}" PROPERTIES
             ENVIRONMENT
             "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/24-modules/_modules")
-    elseif(conf_file MATCHES "^tutorial/16-")
+    elseif(conf_file MATCHES "^tutorial/(16-|00-readme-10min-(scala|pyjs)-files)")
         # Track F. The chapter-16 snippets name their files the way a reader
         # would (`"notes.txt"`), so each one is run from a private directory of
         # its own inside the build tree -- never the source tree, never /tmp.

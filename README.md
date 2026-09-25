@@ -110,7 +110,7 @@ given x: Int = 1                              // error: implicits and givens are
 Type classes, `Ordering`, `ExecutionContext` and everything built on them are
 therefore absent. Extension methods exist and are session-wide (D82).
 
-**4. There is no Java, and the exception hierarchy is twenty unqualified names.**
+**4. There is no Java, and the exception hierarchy is unqualified names.**
 
 ```scala
 println(new java.io.File("x"))                // error: Not found: type java.io.File
@@ -120,7 +120,18 @@ catch case e: Exception => println(e.getMessage)    // bad
 ```
 
 `catch { case e: java.io.IOException => }` does not compile: there is no `java`
-namespace (D8, D73).
+namespace (D8, D73). Write `catch case e: IOException` — the classes are there,
+under the JVM's names with the prefixes dropped.
+
+Where you feel the absence is **writing a file**. Reading is `scala.io.Source`
+and behaves as you expect; there is no `PrintWriter` and no `Files`, so writing is
+protoScala's own four operations (D102):
+
+```scala
+FileIO.write("notes.txt", "one\ntwo\n")
+val lines = Source.fromFile("notes.txt").getLines()   // a List[String], not an Iterator
+println(lines.mkString(" | "))                        // one | two
+```
 
 **5. Modules instead of packages.** There is no `package` clause and no
 classpath. A `.scala` file *is* a module, reached by its path, and an import is
@@ -146,7 +157,7 @@ scala> 1 + 1
 val res0 = 2
 ```
 
-Five things are new if you are coming from Python or JavaScript.
+Six things are new if you are coming from Python or JavaScript.
 
 **1. `val` and immutability by default.** `val` is a binding you cannot reassign —
 `const`, or a name you agree not to rebind. Collections go further: they are
@@ -197,6 +208,22 @@ an actor waiting on a future does not consume one.
 ```scala
 println(2147483647 + 1)                       // 2147483648
 ```
+
+**6. Reading a file, which you will try early.** There is no `with` and no
+`open()`; there is `Source`, and a missing file raises rather than returning
+`None` or `undefined`:
+
+```scala
+FileIO.write("shopping.txt", "milk\nbread\n")
+println(Source.fromFile("shopping.txt").getLines().mkString(", "))   // milk, bread
+println(try Source.fromFile("gone.txt").mkString
+        catch case e: IOException => e.getClass)                     // FileNotFoundException
+```
+
+`getLines()` gives you a `List[String]` with no trailing empty entry, which is the
+bug `"…".split("\n")` leaves you in Node. [Tutorial chapter
+16](docs/tutorial/16-reading-and-writing-files.md) puts all of it beside `open()`
+and `fs.readFileSync`.
 
 The bridge from Python and JavaScript, concept by concept, is
 [tutorial chapter 2](docs/tutorial/02-for-the-python-or-javascript-developer.md).
@@ -313,7 +340,9 @@ roadmap named is now closed; what remains is listed in
 [docs/ROADMAP.md](docs/ROADMAP.md) as tracks rather than phases. **Track Y**
 delivered the first working cross-runtime import (`import st.<module>`); what it
 did not deliver is `import py.numpy`, which needs work in protoPython rather than
-here. The binary runs Scala 3 scripts and offers a REPL,
+here. **Track F** added file input and output, so a program can read its own
+input; the worked example now opens `sample.log` instead of carrying a second copy
+of it. The binary runs Scala 3 scripts and offers a REPL,
 in both brace and significant-indentation syntax:
 
 - `val`/`var`/`lazy val`/`def`, `if`/`while`, lambdas and closures, placeholder
@@ -374,7 +403,14 @@ in both brace and significant-indentation syntax:
 - **extension methods**, dispatched on the receiver's runtime prototype, and the
   **custom string interpolators** they bring;
 - **`super[T].m`**, templates nested in an `object`, and multiple constructor
-  parameter lists.
+  parameter lists;
+- **file input and output**: `scala.io.Source` for reading — `fromFile`,
+  `fromString`, `getLines()`, `mkString`, `close()`, with Scala's own line-splitting
+  rules verified against `scalac` — and `FileIO.write`/`append`/`exists`/`delete`
+  for writing, which is protoScala's own surface because Scala's is
+  `java.io.PrintWriter` (D97–D102). Every failure raises the class the JVM raises,
+  with a message naming the path: a missing file, a directory where a file was
+  expected, no permission, and bytes that are not valid UTF-8.
 
 ```scala
 val counter = Actor.spawn(0) { (state, msg) => (state + msg, state + msg) }
@@ -385,10 +421,14 @@ val sink = Actor.spawn(0) { (state, msg) => state + msg }   // no reply to give
 println(Future(6 * 7).await)     // Future takes its body by name  ->  42
 ```
 
-Exceptions, `enum`, extension methods, the Phase 3 collections, string
-interpolation and UMD are not implemented yet — see
-[docs/STATUS.md](docs/STATUS.md) for the exact boundary and
-[docs/ROADMAP.md](docs/ROADMAP.md) for what each later phase brings.
+Everything in the list above is implemented; the sentence that used to stand here
+said otherwise and had outlived four phases. For the exact boundary — what is
+implemented, what is not, and every deviation with its `D<n>` id — see
+[docs/STATUS.md](docs/STATUS.md); [docs/ROADMAP.md](docs/ROADMAP.md) lists what
+remains, as tracks rather than phases. The largest absences today are a `py`, `js`
+or `clj` provider, nested classes in a `class` or `trait`, and anything about files
+beyond reading and writing one whole text file (no directories, no binary files, no
+streaming).
 
 ## Performance
 

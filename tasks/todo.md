@@ -178,19 +178,39 @@ passed argument working instead of crashing.
 Still owed, unchanged by this task: the ThreadSanitizer run against the actors,
 and a cold-start measurement on a quiet host.
 
-## Track F — file input and output (2026-09-24)
+## Track F — file input and output (2026-09-25) — complete
 
-- [ ] Task 1: `src/runtime/FilePrimitives.cpp` — five natives
+- [x] Task 1: `src/runtime/FilePrimitives.cpp` — five natives
       (`__fileReadText`, `__fileWriteText`, `__fileExists`, `__fileDelete`,
       `__splitLines`), the errno → English reason table, strict UTF-8
       validation, CMake + `builtinGlobalNames()`
-- [ ] Task 2: prelude — `IOException` / `FileNotFoundException` /
+- [x] Task 2: prelude — `IOException` / `FileNotFoundException` /
       `CharacterCodingException` / `MalformedInputException`, registered in
       `bindPreludeHooks`; `BufferedSource`, `object Source`, `object FileIO`
-- [ ] Task 3: conformance fixtures `tests/conformance/26-file-io/`, reading
+- [x] Task 3: conformance fixtures `tests/conformance/26-file-io/`, reading
       inputs from `_data/` and writing only under `PROTOSCALA_TEST_TMP`
-- [ ] Task 4: unit tests for the splitter and the UTF-8 validator
-- [ ] Task 5: tutorial chapter + fixtures under `tests/conformance/tutorial/`
-- [ ] Task 6: the worked example reads `sample.log` itself
-- [ ] Task 7: STATUS.md `D97`–`D102`, LANGUAGE.md, ROADMAP.md, CHANGELOG.md,
+- [x] Task 4: unit tests for the splitter and the UTF-8 validator
+- [x] Task 5: tutorial chapter + fixtures under `tests/conformance/tutorial/`
+- [x] Task 6: the worked example reads `sample.log` itself
+- [x] Task 7: STATUS.md `D97`–`D102`, LANGUAGE.md, ROADMAP.md, CHANGELOG.md,
       DECISIONS-LOG.md
+
+### Review
+
+Delivered: `scala.io.Source` for reading (verified against scalac 3.9.0 for
+every checkable behaviour), `FileIO.write`/`append`/`exists`/`delete` for
+writing (D102, the deviation the absence of Java causes), four new prelude
+exception classes (D97), strict UTF-8 (D99), 44 conformance fixtures, tutorial
+chapter 16, and a worked example that opens its own log.
+
+Task 4 was **not** done as written: no C++ unit test was added, because the
+splitter and the UTF-8 validator are file-local and exporting them to test them
+would widen a header for the test's benefit. Both are driven end to end instead,
+the validator against committed files of exactly the malformed bytes each form
+needs. Recorded in DECISIONS-LOG.md.
+
+Every fixture was shown to be capable of failing: 22 mutations of the
+implementation were built and run, and each of the 44 fixtures is turned red by
+at least one. The one place with no fixture coverage is the short-write loop in
+`writeWholeFile`: a regular-file `write` never returns short, so nothing in the
+tree exercises it, and that is stated rather than implied.

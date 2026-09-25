@@ -284,19 +284,48 @@ introduced; actor mailboxes use three `ProtoMPSCQueue`s per actor, with
 `actor-bench.sh` tables recorded before and after. Requires P1, P2 and a
 maintainer decision on R2.
 
-## Track F — file I/O *(language)*
+## Track F — file I/O *(language)* — **DELIVERED (2026-09-25)**
 
-**Goal:** a program can read its own input.
-**Done when:** a script can open, read and write a text file, and the worked
-example (`examples/log-report/`) parses `sample.log` itself instead of carrying
-the same text a second time in `report/Sample.scala`.
+**Goal:** a program can read its own input. **Met.**
 
-Found while writing Phase 6's worked example. There is no `scala.io.Source`, no
-`java.io` (D8) and no primitive that touches the filesystem, so the first thing a
-script-oriented runtime is asked for is missing. It is a missing capability rather
-than a divergence, so it has no `D<n>` id; the shape it should take — a `Source`
-object, or the `os-lib`-style surface a dynamic dialect might prefer — is a
-language decision and therefore the maintainer's.
+The maintainer ruled the shape: **be faithful to Scala when reading**, because
+`scala.io.Source` is real Scala standard library; **do not simulate
+`PrintWriter`** when writing, because protoScala has no Java interop and never
+will, and imitating one would drag in half a stream hierarchy for nothing.
+
+Delivered:
+
+- **Reading — `scala.io.Source`**, under Scala's own names:
+  `Source.fromFile(path)`, `Source.fromFile(path, enc)`, `Source.fromString(s)`,
+  and `mkString`, `getLines()`, `close()`, `isOpen` on the `BufferedSource` they
+  answer. Every checkable behaviour was checked against **scalac 3.9.0** rather
+  than assumed: which exception class each failure raises, the `<path> (<reason>)`
+  shape of its message, and every rule for splitting lines (on `\n`, `\r\n` and a
+  lone `\r`, terminator stripped, no final empty line for a trailing terminator, no
+  lines at all for an empty file).
+- **Writing — `FileIO.write` / `append` / `exists` / `delete`** (D102), four
+  operations and one call each, documented as the deviation the absence of Java
+  causes.
+- **Errors.** Every syscall's result is checked; every failure raises a prelude
+  `Throwable` a Scala programmer would catch, with a message naming the path;
+  `IOException`, `FileNotFoundException`, `CharacterCodingException` and
+  `MalformedInputException` join the hierarchy (D97). UTF-8 decoding is strict like
+  the JVM's. A path holding a NUL byte is refused rather than truncated at the NUL.
+- **The worked example opens `sample.log`.** The second copy it carried in
+  `report/Sample.scala`, and the diff that kept the two in step, are both gone;
+  `tests/cli/examples.sh` checks instead that the program reads the file it is
+  given, by running it against an edited copy and demanding a different report.
+- **Tutorial chapter 16**, dual-audience, with a fixture per runnable snippet.
+- **44 conformance fixtures**, each one shown to be capable of failing by a
+  mutation of the implementation.
+
+Deviations recorded: **D97–D102** in [STATUS.md](STATUS.md).
+
+**Not** delivered, and now the file-shaped gap: directories (no `mkdir`, no
+listing, no rename), binary files and random access, any encoding but UTF-8 (D99),
+streaming — there is no `Iterator`, so a file is read whole and one larger than
+memory cannot be processed (D100) — and stdin. Each is a separate decision and
+none of them blocked the goal.
 
 ## Track Y — a working cross-runtime import *(platform)*
 

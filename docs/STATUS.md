@@ -3,7 +3,8 @@
 > Living tracker of the gap between [LANGUAGE.md](LANGUAGE.md) and the
 > implementation. Update it with every change.
 >
-> **Current state (2026-09-24):** Phase 4 complete (**0.5.0**): everything
+> **Current state (2026-09-25):** Track F complete (file input and output);
+> Phase 4 complete (**0.5.0**): everything
 > Phases 1, 2, 3 and 5 delivered, plus **`try`/`catch`/`finally` and `throw` with
 > pattern-matched handlers, the `Throwable` hierarchy and native error
 > translation, `super[T].m`, `enum` and sealed hierarchies, named and default
@@ -13,23 +14,28 @@
 > minor version went 0.2.0 → 0.3.0 (Phase 5) → 0.4.0 (Phase 3) → 0.5.0 (Phase 4)
 > → 0.6.0 (Phase 6: modules, UMD and packaging). Packaging in fact landed in the
 > installer phase; Phase 6 closed the `.tar.gz` half and the version.
-> **Tests:** 1203 total (`ctest --test-dir build_release -N`) — 370 unit
+> **Track F** (2026-09-25) adds **file input and output**: `scala.io.Source` for
+> reading, and a four-operation `FileIO` object for writing (D97–D102).
+> **Tests:** 1247 total (`ctest --test-dir build_release -N`) — 370 unit
 > (GoogleTest, including the separate `unit/actors` and `unit/modules` binaries),
-> 797 conformance fixtures, 24 CLI checks, 12 benchmark smoke checks. **All
-> green**, from a clean build with no compiler warning, and green at
-> `PROTOSCALA_ACTOR_WORKERS=1` and `=16` (1203/1203 in all three). Under
-> `PROTOCORE_HEAP_LIMIT_CELLS=20000` (the whole suite, unfiltered) 1202 of 1203
+> 841 conformance fixtures, 24 CLI checks, 12 benchmark smoke checks. **All
+> green**, and green at `PROTOSCALA_ACTOR_WORKERS=1` and `=16` (1248/1248
+> including `umd/protost-interop` in all three). Under
+> `PROTOCORE_HEAP_LIMIT_CELLS=20000` (the whole suite, unfiltered) 1247 of 1248
 > pass: `Mailbox.EightProducersLoseNothingAndDuplicateNothing` aborts, which was
 > verified to be **pre-existing** — it fails the same way on `main` at `bca0352`
 > — and is recorded under "Open bugs". It is the only failure in that
-> configuration, so it masks nothing.
+> configuration, so it masks nothing, and it is what makes the low-heap sweep a
+> usable rooting check for new native code: Track F's 44 fixtures, including one
+> that round-trips a megabyte through a 64 KiB read loop, pass at a 20000-cell
+> ceiling.
 >
-> `umd/protost-interop` is the 1204th case: it links protoST into a test
+> `umd/protost-interop` is the 1248th case: it links protoST into a test
 > executable and, since Track Y, is built by default whenever protoST is found
 > beside this tree (`-DPROTOSCALA_PROTOST_INTEROP=OFF` restores a suite that
 > refers to no other tree). It holds the cross-runtime import tests; see R5 under
 > "Known issues".
-> Last verified 2026-09-24 (Phase 6, 0.6.0).
+> Last verified 2026-09-25 (Track F).
 
 ## Implemented
 
@@ -379,6 +385,46 @@ file-level modules in Scala) are recorded as D90-D96.
 - [x] Tutorial chapter 15 and the worked example, with a conformance fixture per
       runnable snippet, and two "protoScala in 10 minutes" sections in the README.
 
+### Track F — file input and output
+
+Reading imitates `scala.io.Source`, which is real Scala standard library, and
+every behaviour that can be checked was checked against **scalac 3.9.0** rather
+than assumed. Writing is protoScala's own explicit surface, because Scala's writer
+is `java.io.PrintWriter` and there is no Java here (D102). 44 conformance fixtures
+(`tests/conformance/26-file-io/`, `tests/conformance/tutorial/16-files-*`, and two
+README snippets), each
+one shown to be capable of failing by a mutation of the implementation.
+
+- [x] **`Source.fromFile(path)`**, **`Source.fromFile(path, enc)`** (UTF-8 only,
+      D99) and **`Source.fromString(s)`**, answering a `BufferedSource` with
+      `mkString`, `getLines()`, `close()`, `isOpen` and `toString`.
+- [x] **`getLines()`** splits on `\n`, `\r\n` and a lone `\r`, strips the
+      terminator, adds no final empty line for a trailing terminator, and answers
+      no lines at all for an empty file. Every row of that table was verified
+      against scalac (D100). One splitter serves `fromFile` and `fromString`.
+- [x] **UTF-8 decoding is strict**, as the JVM's is: an overlong form, a surrogate
+      code point, a value above U+10FFFF and a sequence truncated at end of input
+      are all `MalformedInputException` rather than replacement characters. The
+      three forms a lenient decoder lets through are pinned by committed files of
+      exactly those bytes.
+- [x] **`FileIO.write` / `append` / `exists` / `delete`** (D102), each one call,
+      each naming its path in every failure.
+- [x] **Every failure mode raises**, with the class the JVM uses and a message
+      naming the path (D97, D98): a missing file, a directory where a file was
+      expected, no read or write permission, a missing parent directory on write,
+      invalid UTF-8, a read of a closed source, `delete` on a directory, and a
+      path containing a NUL byte — which is refused rather than truncated at the
+      NUL, since truncating would silently operate on a **different** file.
+- [x] **Every syscall's result is checked**, including `close` on the write path,
+      where some filesystems report a failed write for the first time; a short
+      `write` loops rather than being mistaken for a whole one.
+- [x] The worked example (`examples/log-report/`) **opens `sample.log`**. The
+      duplicate copy it used to carry, and the diff that kept the two in step, are
+      both gone; `tests/cli/examples.sh` now checks the property that matters, by
+      running the program against an edited copy and demanding a different report.
+- [x] Tutorial chapter 16, with a fixture per runnable snippet and a check that
+      each snippet is, verbatim, its fixture's body.
+
 ## Not yet implemented
 
 - A `class`, `trait` or `object` nested in a **`class`** or **`trait`**, a local
@@ -387,15 +433,17 @@ file-level modules in Scala) are recorded as D90-D96.
   records them for a later phase. Nesting in an **`object`** is implemented
   (Phase 4).
 - Exhaustiveness checking for `match` (D4: types are erased).
-- **File I/O of any kind.** There is no `scala.io.Source`, no `java.io`, and no
-  primitive that opens a file, so a program cannot read its own input. Found
-  while writing the Phase 6 worked example, which therefore carries its sample
-  log twice — once as a real file for a reader and once as a `"""` block for the
-  program — with `tests/cli/examples.sh` diffing the two so they cannot drift.
-  Not scheduled, and not a deviation with an id: it is a missing capability
-  rather than a divergence from Scala. It is the first thing a script-oriented
-  runtime is asked for, so it is recorded here rather than left to be
-  rediscovered.
+- **Anything about files beyond reading and writing one whole text file.**
+  Track F delivered `scala.io.Source` (`fromFile`, `fromString`, `mkString`,
+  `getLines()`, `close()`) and `FileIO` (`write`, `append`, `exists`, `delete`);
+  see D97–D102. Still absent: **directories** (no `mkdir`, no listing, no
+  rename, no `java.nio.file.Path`), **binary files and random access** (no
+  `InputStream`, no `FileChannel`, no byte arrays), **any encoding but UTF-8**
+  (D99), **an `Iterator`**, so nothing streams — a file is read whole into memory
+  (D100, D101) — **stdin** (no `Source.stdin`, no `readLine`), and
+  **`java.io` / `java.nio` of any kind** (D8). A file larger than memory cannot
+  be processed, and that limit is a consequence of having no `Iterator` rather
+  than of anything in the file layer.
 - A **`py`, `js` or `clj` provider**. protoScala routes all four family prefixes
   and reports `no provider registered for '<alias>'`; no runtime in the family
   registers those three aliases. `st` is the one prefix with a provider behind it
@@ -726,6 +774,25 @@ recycled.
 | D94 | A **foreign module binds no types**: `new`, a type pattern and `isInstanceOf` on a class reached through `py.`, `js.`, `st.` or `clj.` are unavailable, because a foreign value carries no `ClassInfo`. Its members resolve by name at run time, which is what DESIGN §5's type-mapping table already says ("other objects → dynamic objects") | A0-4 | (perm) |
 | D95 | `--disassemble` **resolves imports**, and therefore runs the top level of every module the file imports: a file cannot be compiled without its imports, and an import is resolved by loading (D90) | A0-1 | (perm) |
 | D96 | An `import` is **hoisted to its compilation unit**. A top-level import is processed before every other declaration and is visible for the whole unit; an import written inside a block or a template body is compiled where it is found and its binding **outlives that block**, so it is visible from there to the end of the unit. Scala scopes an import lexically. Lexical scoping needs a scope-aware name resolver the compiler does not have, and D82's extensions have exactly the same shape, so the two are scoped together or not at all | A0-6, A0-11 | later |
+### Track F deviations — recorded 2026-09-25, pending review
+
+Decided by the implementing agent under the maintainer's standing authorisation,
+and under the maintainer's two rulings for this track: **be faithful to Scala
+when reading**, because `scala.io.Source` is real Scala standard library, and
+**do not simulate `PrintWriter` when writing**, because it would drag in half a
+stream hierarchy for nothing. Each row states what Scala does, what protoScala
+does, and the cost that decided it. `Track F` in the "plan" column means there was
+no written plan step: the decision is the agent's, and it is recorded with its
+argument in [DECISIONS-LOG.md](DECISIONS-LOG.md).
+
+| id | Deviation | Plan | Revisit |
+|---|---|---|---|
+| D97 | The exceptions file I/O raises are the JVM's **without the `java.io.` and `java.nio.charset.` prefixes** (D8), in the JVM's own shape: `IOException` extends `Exception`, `FileNotFoundException` and `CharacterCodingException` extend `IOException`, and `MalformedInputException` extends `CharacterCodingException`. `IOException` is deliberately **not** under `RuntimeException`: on the JVM an I/O failure is checked, and a Scala programmer writes `catch case e: IOException` expecting it to see a missing file *and* a bad byte. Which class each failure raises follows the JVM's rule, which is simpler than it looks: a failure of `open` is a `FileNotFoundException` whatever its errno (this is why the JVM reports "Permission denied" and "Is a directory" through that class), and a failure after the descriptor exists is an `IOException`. Verified against scalac 3.9.0 for a missing file, a directory, a file with no read permission and a file of invalid UTF-8 | Track F | (perm) |
+| D98 | A failure **message** keeps the JVM's `<path> (<reason>)` shape, but the reason is spelled out in **English** from a table of errnos instead of taken from `strerror`, which is localised — on the development machine the JVM reports `sample.log (No existe el archivo o el directorio)`. An errno outside the table keeps `std::strerror` and is therefore locale-dependent; the table covers every errno these operations can produce. `MalformedInputException`'s message also diverges: it names the path and the byte offset (`bad.bin: malformed UTF-8 input at byte 1`) where Scala's says only `Input length = 1`, because a message that does not name the file is of no use when several were read | Track F | (perm) |
+| D99 | **UTF-8 is the only encoding.** `Source.fromFile(path, enc)` accepts the second argument so the common Scala spelling compiles, and accepts only a name for UTF-8 (`UTF-8`/`UTF8`, any case); any other name — including one the JVM supports, such as `ISO-8859-1` — raises an `UnsupportedOperationException` naming it. Refusing is the point: decoding Latin-1 bytes as if they were UTF-8 hands the program plausible nonsense. Decoding is **strict**, as the JVM's is: an overlong form, a surrogate code point, a value above U+10FFFF and a sequence truncated at end of input are all `MalformedInputException`, never replacement characters. There is no implicit `Codec` because there are no implicits (D3) | Track F | later |
+| D100 | **`getLines()` answers a `List[String]`**, not an `Iterator[String]`: protoScala has no `Iterator` at all. `getLines().toList` therefore also works and means the same thing, since `toList` on a `List` is the identity. Consequences: a `Source` is not an `Iterator[Char]` either, so `src.next()` and the character-wise `src.toList` are unavailable; and nothing streams — the file is read whole, so a file larger than memory cannot be processed. How lines are split matches Scala exactly and was verified row by row against scalac 3.9.0: on `\n`, `\r\n` and a lone `\r`, the terminator stripped, a trailing terminator adding no final empty line, and an empty file answering no lines rather than one empty one | Track F | later |
+| D101 | **A `Source` may be read again.** Scala's is consumed as it is read: `src.mkString` followed by `src.getLines()` answers `List()` on the JVM (verified against scalac 3.9.0), because the underlying iterator is exhausted. protoScala reads the file when `fromFile` opens it and answers the same thing however often it is asked. Cost of matching Scala: a cursor and a consumed-ness flag, to reproduce a behaviour that is a reliable source of bugs — strictly more programs work this way, and only a program relying on exhaustion can tell. What does **not** change is that a **closed** source is closed: `close()` could have been a no-op, since nothing is held open, and it is not, because a program that reads a source it has already closed has a bug and should be told (`IOException`, message `<origin> (Stream Closed)`, where Scala's says only `Stream Closed`) | Track F | (perm) |
+| D102 | **Writing is protoScala's own surface, not a simulated `PrintWriter`.** Scala's canonical writers are `java.io.PrintWriter` and `java.nio.file.Files`; protoScala has no Java interop and will not have one (D8), so there is nothing to imitate, and imitating a `PrintWriter` would mean inventing a `Writer`, a stream hierarchy, a `flush` and a buffering policy so that one line of user code could look familiar. Instead: `FileIO.write(path, text)`, `FileIO.append(path, text)`, `FileIO.exists(path)`, `FileIO.delete(path)` — four operations, one call each. `write` replaces the whole file; the text is encoded as UTF-8, which is what `Source.fromFile` reads back; neither `write` nor `append` creates parent directories. `exists` answers `true` for a directory and `false` for a dangling symbolic link, as `java.io.File.exists()` does. `delete` answers `true` when it removed a file and `false` when there was nothing at the path, and **raises** for every other failure — a permission denial or a directory reported as `false` would be a swallowed error rather than an answer | Track F | (perm) |
 
 Two rules that are *not* deviations but decide what a program means, so they are
 recorded here rather than left to be discovered:
@@ -750,6 +817,28 @@ means, with the miss message naming every path that was tried.
 
 See DESIGN §11 for the full table. Unchanged this phase: R2, R4, R8. **R5 was
 exercised for the first time in Phase 6** — see the three entries below it.
+
+- **An uncaught failure raised inside a prelude method reports the prelude's line
+  number against the user's file name.** Found by Track F, pre-existing, not
+  introduced by it, and not fixed here. Running the worked example without its log
+  prints
+
+  ```text
+  examples/log-report/Main.scala:240: error: FileNotFoundException: sample.log (No such file or directory)
+  ```
+
+  Line 240 is `lib/prelude.scala`'s, where `Source.fromFile` calls the native; the
+  **name** comes from the outermost compilation unit and the **line** from the
+  innermost VM frame, and the two need not belong to the same file. The class, the
+  path and the reason — everything a reader needs — are right; only the `file:line`
+  prefix is misleading. The same mismatch has always applied to a failure raised
+  inside an imported module (it reports the importing file's name with the module's
+  line), so nothing about the diagnostic changed; Track F made it **common**,
+  because `Source.fromFile` failing is the ordinary case rather than an unusual
+  one. Fixing it means changing what D14's `file:line` prefix reports for every
+  cross-unit frame, which is a change to a public surface and outside this track's
+  brief. Recorded rather than left to be rediscovered; the fixtures that pin these
+  failures match on the message and not on the prefix, deliberately.
 
 - **R5 / two runtimes in one process: a cross-runtime import now works.**
   Phase 6 measured co-residency working and `import st.counter_lib` missing, and
@@ -1080,13 +1169,13 @@ Smaller notes:
 ## Open bugs
 
 **One, pre-existing.** `Mailbox.EightProducersLoseNothingAndDuplicateNothing`
-aborts under `PROTOCORE_HEAP_LIMIT_CELLS=20000`: 1101 of 1102 pass in that
-configuration. It is **not** a Phase 3 or Phase 4 regression — it fails the same
+aborts under `PROTOCORE_HEAP_LIMIT_CELLS=20000`: at Track F, 1247 of 1248 pass in
+that configuration. It is **not** a Phase 3 or Phase 4 regression — it fails the same
 way on `main` at `bca0352`, which was checked before the first Phase 3 commit and
 again before the first Phase 4 one. It is Phase 5 code and was left undiagnosed
 rather than fixed outside either phase's scope, but it is recorded here rather
-than left to be rediscovered. Every other configuration is fully green: 1102/1102
-plain, 1102/1102 at `PROTOSCALA_ACTOR_WORKERS=1` and at `=16`.
+than left to be rediscovered. Every other configuration is fully green: at
+Track F, 1248/1248 plain, 1248/1248 at `PROTOSCALA_ACTOR_WORKERS=1` and at `=16`.
 
 Not run in this phase either, and therefore still not claimed: the
 ThreadSanitizer build of the Phase 5 plan's Task 8 Step 4. Phase 4 adds no new

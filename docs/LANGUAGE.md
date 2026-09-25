@@ -121,8 +121,8 @@ Later phases:
 
 ### 3.1 The exception hierarchy (Phase 4)
 
-Twenty classes in `lib/prelude.scala`, the JVM's names without the `java.lang.`
-prefix (D73). They are ordinary protoScala classes, so `case e: X` is the same
+Twenty-four classes in `lib/prelude.scala`, the JVM's names without the
+`java.lang.`, `java.io.` and `java.nio.charset.` prefixes (D73, D8, D97). They are ordinary protoScala classes, so `case e: X` is the same
 per-class marker test as `case p: Point` and a class of your own takes its place
 in the tree by extending one of them.
 
@@ -142,7 +142,11 @@ Throwable(message)
 │   │   ├── NullPointerException
 │   │   ├── UninitializedFieldError
 │   │   └── UnsupportedOperationException
-│   └── InterruptedException
+│   ├── InterruptedException
+│   └── IOException                        (Track F)
+│       ├── FileNotFoundException
+│       └── CharacterCodingException
+│           └── MalformedInputException
 └── Error
     ├── NoSuchMethodError
     ├── OutOfMemoryError
@@ -152,8 +156,10 @@ Throwable(message)
 `Throwable` answers `getMessage`, `getCause` (always `null`), `getClass` (the
 simple name as a `String` — D86) and a `toString` of `<class>: <message>`.
 `UninitializedFieldError` extends `RuntimeException` despite its name, as
-`scala.UninitializedFieldError` does. A defect in protoScala itself is **not** in
-this tree and is not catchable (D74).
+`scala.UninitializedFieldError` does. `IOException` sits under `Exception` and
+**not** under `RuntimeException`, as on the JVM, so `catch case e: IOException`
+sees every file failure and nothing else (D97). A defect in protoScala itself is
+**not** in this tree and is not catchable (D74).
 
 ### 3.2 Modules and imports (Phase 6)
 
@@ -325,6 +331,57 @@ The prelude gains `Try`/`Success`/`Failure` ahead of Phase 3; since Phase 4
 `Failure` carries the `Throwable` itself, so an `await` on a failed future raises
 that value at its own call site and an enclosing `try` catches it.
 
+### 4.3 Files (Track F)
+
+**Reading** is `scala.io.Source`, under Scala's own names. There is no `scala.io`
+namespace to hold it — there are no packages (§3.2) — so `Source` is a prelude
+global, like `List` and `Try`.
+
+```text
+Source.fromFile(path: String, enc: String = "UTF-8"): BufferedSource
+Source.fromString(s: String): BufferedSource
+
+BufferedSource.mkString: String            the whole file, terminators included
+BufferedSource.getLines(): List[String]    the lines, terminators stripped (D100)
+BufferedSource.close(): Unit
+BufferedSource.isOpen: Boolean
+```
+
+`getLines()` breaks on `\n`, `\r\n` and a lone `\r`, strips the terminator, adds
+no final empty line for a file that ends in one, and answers no lines at all for
+an empty file — all of it as Scala 3 does, verified against scalac 3.9.0. It
+answers a `List[String]` and not an `Iterator[String]`, because there is no
+`Iterator` (D100), and a source may be read more than once, because the file is
+read when it is opened (D101). Only UTF-8 is decoded, and strictly (D99).
+
+**Writing** is protoScala's own surface and deliberately **not** a simulated
+`java.io.PrintWriter`: there is no Java interop to build one on (D8), and
+imitating one would mean inventing a `Writer`, a stream hierarchy, a `flush` and a
+buffering policy. This is the deviation the absence of Java causes, and it has its
+own id, **D102**.
+
+```text
+FileIO.write(path: String, text: String): Unit     replace the contents, creating the file
+FileIO.append(path: String, text: String): Unit    add to the end, creating the file
+FileIO.exists(path: String): Boolean               is anything at this path
+FileIO.delete(path: String): Boolean               true if removed, false if there was nothing
+```
+
+The text is written as UTF-8, which is what `Source.fromFile` reads back. Neither
+`write` nor `append` creates parent directories. `delete` removes a file and
+**raises** rather than answering `false` for any failure other than "there was
+nothing there" — including a directory, which it refuses.
+
+Every failure raises a class from §3.1 with a message naming the path: a failure
+of `open` is a `FileNotFoundException` whatever its cause, a failure after that is
+an `IOException`, invalid UTF-8 is a `MalformedInputException`, and a path holding
+a NUL byte is an `IllegalArgumentException` rather than a silent read of a
+different file (D97, D98).
+
+What is absent: directories, listing, rename, binary files, random access, stdin,
+streaming of any kind (a file is read whole), and everything in `java.io` and
+`java.nio`.
+
 ## 5. Departures from Scala (stable ids; mirrored in STATUS.md)
 
 | Id | Departure | Reason |
@@ -419,6 +476,12 @@ and `Priority` was three integers on an object. Their ids are not reused.
 | D94 | A **foreign module binds no types**: `new`, a type pattern and `isInstanceOf` are unavailable on a class reached through a family prefix; its members resolve by name at run time | a foreign value carries no `ClassInfo`, which is what DESIGN §5's type-mapping table already says |
 | D95 | `--disassemble` **resolves imports**, and therefore runs the top level of every module the file imports | a file cannot be compiled without its imports, and an import is resolved by loading (D90) |
 | D96 | An `import` is **hoisted to its compilation unit** rather than scoped lexically: a top-level import is visible for the whole unit, and one inside a block outlives that block | lexical scoping needs a scope-aware name resolver the compiler does not have, and D82's extensions have the same shape, so the two are scoped together or not at all |
+| D97 | The file-I/O exceptions are the JVM's **without the `java.io.` / `java.nio.charset.` prefixes**, in the JVM's shape, with `IOException` under `Exception` and not `RuntimeException`. A failure of `open` is a `FileNotFoundException` whatever its errno; a failure after it is an `IOException` | no `java` namespace (D8); a Scala programmer's `catch case e: IOException` must see a missing file and a bad byte alike. The class of each failure was verified against scalac 3.9.0 |
+| D98 | A failure message keeps the JVM's `<path> (<reason>)` shape with the reason in **English** from an errno table, not from the localised `strerror`. `MalformedInputException` names the path and the byte offset where Scala's says only `Input length = 1` | a fixture cannot pin a locale-dependent message, and a message that does not name the file is useless once several were read |
+| D99 | **UTF-8 only.** `Source.fromFile(path, enc)` accepts the argument and refuses any name but UTF-8 with an `UnsupportedOperationException`. Decoding is strict: overlong forms, surrogates, values above U+10FFFF and truncated sequences are all `MalformedInputException` | a charset table is real machinery; decoding Latin-1 as UTF-8 would hand the program plausible nonsense, so it is refused instead. No implicit `Codec` (D3) |
+| D100 | **`getLines()` answers a `List[String]`**, not an `Iterator[String]`; a `Source` is not an `Iterator[Char]`, and nothing streams | there is no `Iterator` in this dialect. `getLines().toList` still works, since `toList` on a `List` is the identity |
+| D101 | **A `Source` may be read again**; Scala's is consumed as it is read, and answers `List()` the second time. A **closed** source still fails to be read | matching Scala costs a cursor and a consumed-ness flag to reproduce a reliable source of bugs; strictly more programs work this way. Closing still means something, because reading a closed source is a bug worth reporting |
+| D102 | **Writing is `FileIO.write` / `append` / `exists` / `delete`**, not a simulated `java.io.PrintWriter` or `java.nio.file.Files` | the absence of Java (D8) leaves nothing to imitate, and a simulated `PrintWriter` would mean a `Writer`, a stream hierarchy, a `flush` and a buffering policy for no gain |
 
 **D57, D60, D64 and D78 do not exist**, and are not reused. They were reserved for
 a `Char`-key divergence, a `Range == List` divergence, a `Try.apply` divergence

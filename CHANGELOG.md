@@ -6,6 +6,70 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **File input and output (Track F): a program can read its own input.**
+  Reading is `scala.io.Source` under Scala's own names — `Source.fromFile(path)`,
+  `Source.fromFile(path, enc)`, `Source.fromString(s)`, and `mkString`,
+  `getLines()`, `close()`, `isOpen`. Writing is `FileIO.write` / `append` /
+  `exists` / `delete`: four operations, one call each, and deliberately **not** a
+  simulated `java.io.PrintWriter`, because there is no Java interop to build one on
+  and imitating one would mean inventing a `Writer`, a stream hierarchy, a `flush`
+  and a buffering policy (D102).
+
+  Every behaviour of the reading half that can be checked was checked against
+  **scalac 3.9.0** rather than assumed: which exception class each failure raises,
+  the `<path> (<reason>)` shape of its message, and every rule for splitting lines
+  — on `\n`, `\r\n` and a lone `\r`, the terminator stripped, a trailing terminator
+  adding no final empty line, and an empty file answering no lines rather than one
+  empty one. Two divergences are deliberate and documented: `getLines()` answers a
+  `List[String]` because there is no `Iterator` (D100), and a source may be read
+  again because the file is read when it is opened, where Scala's is consumed as it
+  is read (D101).
+
+  Errors were the point of the exercise. Every syscall's result is checked,
+  including `close` on the write path, where some filesystems report a failed write
+  for the first time; a short `write` loops rather than being mistaken for a whole
+  one. Every failure raises a prelude `Throwable` a Scala programmer would think to
+  catch, with a message naming the path and saying what went wrong:
+  `IOException`, `FileNotFoundException`, `CharacterCodingException` and
+  `MalformedInputException` join the hierarchy in the JVM's own shape, with
+  `IOException` under `Exception` and not `RuntimeException` (D97). The reason in a
+  message is spelled in English from an errno table rather than taken from the
+  localised `strerror` (D98). UTF-8 decoding is strict as the JVM's is — an overlong
+  form, a surrogate, a value above U+10FFFF and a sequence truncated at end of input
+  are all refused rather than turned into replacement characters (D99). A path
+  holding a NUL byte is refused rather than silently truncated at the NUL, which
+  would have operated on a different file than the program named.
+
+  44 conformance fixtures, and each one was shown to be capable of failing: 22
+  mutations of the implementation were built and run, and every fixture is turned
+  red by at least one of them.
+
+- **Tutorial chapter 16, "Reading and writing files"**, dual-audience, with a
+  conformance fixture for every runnable snippet and a check that each snippet is
+  verbatim its fixture's body. For the Python and JavaScript reader it puts reading
+  a file beside `open()` and `fs.readFileSync`, with the four things that do not
+  carry over, and a table of the writing operations in all three languages.
+
+### Changed
+
+- **The worked example (`examples/log-report/`) opens `sample.log`.** It was
+  written around the absence of file I/O and carried the log twice, once as the real
+  file and once as a triple-quoted string in `report/Sample.scala`, with a diff in
+  `tests/cli/examples.sh` keeping the two in step. All of that is gone.
+  `report/Sample.scala` is three lines. The log's path is the program's first
+  argument, defaulting to `"sample.log"`, and the fan width moves to the second;
+  the documented invocation becomes `cd examples/log-report && protoscala
+  Main.scala`, because a data path is resolved against the working directory here
+  exactly as on the JVM. The diff that guarded the duplication is replaced by a
+  check of the property that matters: the program is run against an edited copy of
+  the log and must produce a **different** report.
+
+- The conformance runner honours `PROTOSCALA_RUN_CWD`, so a fixture that
+  demonstrates file I/O can name its files the way a reader would (`"notes.txt"`)
+  and still never write into the source tree. Unset, nothing changes.
+
 ### Fixed
 
 - **A cross-runtime import works: `import st.<module>` loads a protoST module,
