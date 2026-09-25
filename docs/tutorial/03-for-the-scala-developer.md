@@ -701,7 +701,7 @@ which requires `Colour.Red` — costs nothing, so no deviation was taken.
   written in the function literal, where scalac rejects it because
   `Function2.apply`'s parameters are called `v1` and `v2`.
 
-### Modules and polyglot imports (D90–D96)
+### Modules and polyglot imports (D90–D96, D105)
 
 Modules and the `import` that reaches them are described in
 [chapter 15](15-modules-and-polyglot-interop.md), which ends with its own
@@ -745,6 +745,22 @@ no Scala counterpart rather than a departure from one.
   Lexical scoping needs a scope-aware name resolver the compiler does not have,
   and D82's extensions have the same shape, so the two are scoped together or not
   at all.
+
+**D105 (Track X) — `import` has two meanings, and one rule tells them apart.**
+Phase 6 gave `import` the file-loading meaning above and, without saying so,
+*removed* plain Scala's member import: `enum Color ... import Color.*` failed with
+`ImportError: no module found for 'Color'`. Both forms exist now. The rule: the
+longest dotted prefix of the path that names something **already in scope** wins
+and the import reads its members; otherwise the path is a file to load; a family
+prefix wins over both. Scala's own resolution has the same shape — a definition in
+scope shadows a package of that name — so a file defining `object util` and
+writing `import util.Shapes` gets its own object in either language. Two places
+this is narrower than Scala: a **`val` cannot be a member-import prefix** (a
+wildcard must enumerate the prefix's members and there is no static type to
+enumerate, D4), and a member import of an object defined in the **same file**
+cannot supply a *parent* type for a class in that file — write the qualified
+`extends Holder.Base`. Everything else is Scala's, including an imported name
+working as an expression, a pattern, a type and a constructor.
 
 **What did not diverge**, and is worth stating because you will look for it: the
 five import forms have Scala's meaning; `as` and `=>` are both accepted as

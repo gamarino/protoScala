@@ -40,6 +40,9 @@ runtime is built is in [DESIGN.md](DESIGN.md); the cross-runtime story is in
 > all: **the `Predef` surface** — `assert`, `require`, `assume` and `???`, with
 > Scala's exception types and Scala's exact messages (chapter 11 §11.6), and
 > **`object Main extends App`** as an entry point beside `@main` (chapter 1 §1.3).
+> Also restored: plain Scala's **member import**, `import Color.*`, which 0.6.0
+> had silently replaced with the file-loading form (chapter 15 §15.0, and §15.6b
+> for the rule that tells the two apart).
 > Every runnable snippet in the tutorial is a conformance fixture under
 > `tests/conformance/tutorial/`, run with the test suite.
 
@@ -101,7 +104,7 @@ early: reading a file is `scala.io.Source` and behaves like it, writing is not a
 | 12 | [Enums and sealed hierarchies](tutorial/12-enums-and-sealed-hierarchies.md) | `enum` with simple and parameterised cases, `ordinal`/`values`/`valueOf`/`fromOrdinal`, enums as algebraic data types, `sealed trait` hierarchies, and why exhaustiveness is not checked. |
 | 13 | [Actors and futures](tutorial/13-actors-and-futures.md) | Actors, telling and asking, priority bands, futures and their combinators, cooperative `await`, handler failures, threads and time, tuning. |
 | 14 | [The REPL and tooling](tutorial/14-repl-and-tooling.md) | The REPL, multi-line input, commands, classes at the prompt, running scripts, error messages, `--disassemble`. |
-| 15 | [Modules and polyglot interop](tutorial/15-modules-and-polyglot-interop.md) | A module is a file, the five import forms, where modules are found, importing a type, the four polyglot prefixes and what each needs, named arguments across the boundary, and what each failed import prints. |
+| 15 | [Modules and polyglot interop](tutorial/15-modules-and-polyglot-interop.md) | The member import you already know, a module is a file, the five import forms, where modules are found, importing a type, the four polyglot prefixes and what each needs, named arguments across the boundary, and what each failed import prints. |
 | 16 | [Reading and writing files](tutorial/16-reading-and-writing-files.md) | `Source.fromFile`, `getLines()` and `mkString`, how lines are counted, the `FileIO` writing surface, every failure and the class it raises, and the two deliberate divergences from Scala's `Source`. |
 | — | [**Worked example**](tutorial/worked-example.md) | One complete program, `examples/log-report/`, rather than one feature at a time: three files and two imports, an `enum` with methods, case classes and pattern matching, `Try` and a `catch` for a malformed line, `Map` aggregation, `for … yield`, interpolation, and actors fanned out with `?` and folded back with `await`. |
 

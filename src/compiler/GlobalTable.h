@@ -196,6 +196,42 @@ public:
         return it == typesByKey_.end() ? nullptr : &it->second;
     }
 
+    // --- Prefixed names, for a member import (Track X) --------------------
+    // A template nested in an `object` is lifted to a top-level definition with
+    // a dotted name (`Color.Red`), so the members an `object` or `enum`
+    // contributes are partly its ClassInfo's members and partly these. Both
+    // helpers answer the names exactly ONE level under `prefix` (which must end
+    // in '.'), as `<simple name>, <value>`: `Color.Red` under `Color.` is `Red`,
+    // and `Color.Red.Inner` is not answered at all, staying qualified as it does
+    // in Scala. A type's `.type` suffix is not a level: `Color.Red.type` is
+    // answered as `Red.type`, so the class of the nested object stays reachable.
+    std::vector<std::pair<std::string, const GlobalBinding*>> bindingsUnder(
+        const std::string& prefix) const {
+        std::vector<std::pair<std::string, const GlobalBinding*>> out;
+        for (const auto& kv : table_) {
+            if (kv.first.compare(0, prefix.size(), prefix) != 0) continue;
+            const std::string rest = kv.first.substr(prefix.size());
+            if (rest.empty() || rest.find('.') != std::string::npos) continue;
+            out.emplace_back(rest, &kv.second);
+        }
+        return out;
+    }
+
+    std::vector<std::pair<std::string, std::string>> typesUnder(
+        const std::string& prefix) const {
+        std::vector<std::pair<std::string, std::string>> out;
+        for (const auto& kv : typeKeyOfName_) {
+            if (kv.first.compare(0, prefix.size(), prefix) != 0) continue;
+            std::string rest = kv.first.substr(prefix.size());
+            const bool dotType = rest.size() > 5 &&
+                                 rest.compare(rest.size() - 5, 5, ".type") == 0;
+            const std::string head = dotType ? rest.substr(0, rest.size() - 5) : rest;
+            if (head.empty() || head.find('.') != std::string::npos) continue;
+            out.emplace_back(rest, kv.second);
+        }
+        return out;
+    }
+
     // --- Whole-table access, for the prelude image and its generator -------
     // `protoscala-precompile` writes these out and buildPreludeImage replays
     // them, so a session that takes the image path ends up with exactly the

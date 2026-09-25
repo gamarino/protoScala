@@ -39,6 +39,7 @@
 | `match` with the patterns of DESIGN §5.3, pattern `val`s, `{ case ... }` literals | 2 ✅ |
 | `try`/`catch`/`finally`, `throw`, with pattern-matched handlers | 4 ✅ (§3.1; D72–D75, D85–D87) |
 | `import` (selectors, renames `as` and `=>`, wildcard `*` and `_`, `given` selectors parsed and ignored), and the family prefixes `py.`/`js.`/`st.`/`clj.` | 6 ✅ (§3.2; D90–D96) |
+| `import Obj.*` / `.{a, b}` / `.a as b` on an object, companion or `enum` in scope — plain Scala's **member** import | Track X ✅ (§3.2; D105). Phase 6 had replaced it with the module-loading form |
 | top-level definitions (no wrapping `object` needed), `@main` methods | 1 |
 | `object Main extends App` as the program's entry point | Track X ✅ (§4.4; D104) |
 | `package` clauses (one namespace per file) | — **not implemented and not scheduled**: a module is a file reached by its path, not a package (D91). `package p` is refused with "not implemented yet" |
@@ -167,7 +168,58 @@ sees every file failure and nothing else (D97). `AssertionError` and
 a failed `assert` or a `???` (§4.4). A defect in protoScala itself is **not** in
 this tree and is not catchable (D74).
 
-### 3.2 Modules and imports (Phase 6)
+### 3.2 Imports, and modules (Phase 6, corrected by Track X)
+
+`import` has **two** meanings here, and until Track X this section documented
+only one of them. Plain Scala's **member import** brings names out of something
+already in scope:
+
+```scala
+enum Color:
+  case Red, Green
+import Color.*
+println(Red)          // Red
+```
+
+and Phase 6 added a second form, the **module import**, which loads a file:
+
+```scala
+import util.Strings.shout     // loads util/Strings.scala
+```
+
+**How they are told apart.** The longest dotted prefix of the path that names
+something **already in scope** wins, and the import reads its members; if no
+prefix does, the path is a module to load, exactly as in Phase 6. A family
+prefix (`py.`, `js.`, `st.`, `clj.`) still wins over both. Scala's own rule has
+the same shape — a definition in scope shadows a package of that name — so a file
+that defines `object util` and writes `import util.Shapes` gets its own object in
+Scala too, and gets it here.
+
+"In scope" is deliberately narrow: a term whose **class the compiler knows**,
+which is an `object`, a companion object, or the companion an `enum` desugars to.
+A wildcard has to enumerate the prefix's members, and a `val` has no static type
+to enumerate (D4), so `import someVal.*` is **not** a member import and falls
+through to the module loader and its `ImportError`. A prefix that is neither gets
+Phase 6's message, naming every path it tried.
+
+| Form, with `Obj` an object / companion / enum in scope | Binds |
+|---|---|
+| `import Obj.*` / `._` | every member of `Obj`, plus every `enum` case and nested template of `Obj` under its simple name |
+| `import Obj.{a, b}` | `a` and `b`, each rewriting to the member access `Obj.a` compiles to |
+| `import Obj.a as b` / `.{a => b}` | `b` only; `a` is not bound |
+| `import Obj.Inner` | the **type** `Inner` and its companion term, so `new Inner(…)`, `case i: Inner` and `case Inner(x)` all compile |
+| `import Obj as O` | `O` as another name for the object |
+| `import Obj.given` | parsed and **ignored** (D3, D93) |
+
+Two details this form turns on. An `enum`'s cases and a template nested in an
+object are lifted to top-level definitions with **dotted** names (`Color.Red`), so
+they are not members of the companion; a wildcard that only walked the companion's
+members would bind nothing at all, which is why `import Color.*` reads both. And
+the prefix is bound internally under a name no user can write, pinned to the key
+it had when the import was taken, so a later REPL redefinition of the prefix
+cannot redirect an import made before it (D25).
+
+The rest of this section is the **module** half.
 
 A **module** is a `.scala` file reached by its path. `util/Shapes.scala` is the
 module `util.Shapes`; the file is desugared into a synthetic `object Shapes`, so
@@ -183,7 +235,7 @@ for its effects would otherwise never run. A cycle is refused
 (`cyclic module import: <path>`), and a failed load is not cached, so a fixed file
 can be imported again in the same session.
 
-| Form | Binds |
+| Form, with `util.Strings` a **file** and nothing of that name in scope | Binds |
 |---|---|
 | `import util.Strings` | `Strings` → the module object |
 | `import util.Strings as S` | `S` → the same |
@@ -539,6 +591,7 @@ and `Priority` was three integers on an object. Their ids are not reused.
 | D102 | **Writing is `FileIO.write` / `append` / `exists` / `delete`**, not a simulated `java.io.PrintWriter` or `java.nio.file.Files` | the absence of Java (D8) leaves nothing to imitate, and a simulated `PrintWriter` would mean a `Writer`, a stream hierarchy, a `flush` and a buffering policy for no gain |
 | D103 | `assert`, `assume` and `require` are **methods, not macros**: `-Xdisable-assertions` has no analogue and an assertion always costs a call. Each is one method with a default message rather than Scala's two overloads | no macros and no `inline`; no overloading (D31). The default is a distinguished object, not `null`, so `assert(false, null)` still reports `assertion failed: null` |
 | D104 | **`App` is the entry point**, with three restrictions Scala does not have: one App object per file, not an App object and an `@main` in the same file, and none in a module | a script has no class name with which to choose between two entry points, and a silently ignored entry point is the trap D91 refused |
+| D105 | An `import` is a **member import when its longest in-scope prefix names an object, a companion or an `enum`**, and a module load otherwise. Both forms are Scala-conformant; what has no Scala counterpart is the fallback to loading a file, and what is narrower than Scala is that a `val` cannot be a member-import prefix | a wildcard must enumerate the prefix's members and a dynamic value has no static type to enumerate (D4). A same-unit member import is resolved after the unit's templates are described, so a class in the same file cannot name an imported-from-its-own-object type as a **parent**; the qualified name always works |
 
 **D57, D60, D64 and D78 do not exist**, and are not reused. They were reserved for
 a `Char`-key divergence, a `Range == List` divergence, a `Try.apply` divergence

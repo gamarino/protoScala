@@ -258,6 +258,22 @@ runs. Every form works: `import util.Shapes`, `… as S`, `… .{a, b as c}`,
 `PROTOSCALA_PATH`, then in the working directory, and a miss names every path it
 tried.
 
+`import` also means what it means in ordinary Scala — taking names out of
+something already in scope, with no file involved:
+
+```scala
+enum Colour:
+  case Red, Green
+import Colour.*
+@main def run(): Unit = println(Red)   // Red
+```
+
+The rule that tells the two apart: the longest dotted prefix of the path that
+names something **already in scope** wins and the import reads its members;
+otherwise the path is a file to load. That is the shape Scala's own resolution
+has, where a definition in scope shadows a package of that name. See
+[LANGUAGE.md §3.2](docs/LANGUAGE.md).
+
 **What routes but has nowhere to go.** The four family prefixes are wired to
 protoCore's provider registry:
 

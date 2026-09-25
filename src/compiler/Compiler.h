@@ -17,6 +17,7 @@
 
 #include <deque>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -165,6 +166,26 @@ private:
     // resolution rule: Phase 4's lifting already gave them those names.
     void adoptExportedNames(const ModuleExports& mod);
     void importWildcard(const ModuleExports& mod, SourcePos pos);
+    // --- Member imports of something already in scope (Track X) -----------
+    // Plain Scala's `import Color.*`, which Phase 6 had replaced with the
+    // module-loading form. An in-scope prefix is a term the compiler knows the
+    // class of -- an `object`, a companion or an `enum` -- because a wildcard
+    // must be able to enumerate its members and a dynamic value has no static
+    // type to enumerate (D4). The prefix is bound under a hidden name pinned to
+    // the key it had at import time, so a later REPL redefinition of the prefix
+    // cannot silently redirect an import taken before it (D25).
+    struct ScopePrefix {
+        std::string name;      // `Color`, or a dotted `B1.B2`
+        std::string hidden;    // `__scope$Color`, bound to the key, not the name
+        const ClassInfo* cls;  // the class of the object: its members
+    };
+    // The longest dotted prefix of `path`, of at most `maxPrefix` segments, that
+    // names an in-scope object; nullopt when none does. `end` is set to the
+    // number of path segments it consumed, and the rest are members.
+    std::optional<ScopePrefix> inScopePrefix(const std::vector<std::string>& path,
+                                             std::size_t maxPrefix, std::size_t* end);
+    void importFromScope(const Import& imp, const ScopePrefix& p, std::size_t end);
+    void importScopeWildcard(const ScopePrefix& p, SourcePos pos);
     // The member alias `name` denotes, or nullptr. Consulted AFTER locals and
     // members (an inner scope wins) and BEFORE globals (an import shadows an
     // outer binding, as in Scala).

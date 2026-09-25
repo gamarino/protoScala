@@ -1374,9 +1374,152 @@ void Compiler::importWildcard(const ModuleExports& mod, SourcePos pos) {
     }
 }
 
+// --- Member imports of something already in scope (Track X) -----------------
+// `import Color.*` is plain Scala's member import, and Phase 6 replaced it with
+// the module-loading form: the resolver went straight to the filesystem and the
+// idiomatic `enum Color ... import Color.*` failed with "no module found for
+// 'Color'". Both forms exist now, told apart by ONE rule: if the longest dotted
+// prefix of the path names something already IN SCOPE, the import reads its
+// members; otherwise it loads a module, exactly as before. A family prefix
+// (`py.`/`js.`/`st.`/`clj.`) still wins over both. Scala's own rule is the same
+// shape -- a name in scope shadows a package of that name -- so a file that
+// defines `object util` and writes `import util.Shapes` gets its own object,
+// which is what Scala does too.
+//
+// "In scope" is deliberately narrow: a term the compiler knows the CLASS of,
+// which is an `object`, a companion or an `enum`'s companion. A wildcard has to
+// enumerate members, and a `val` has no static type to enumerate (D4), so a
+// `val` prefix is not one and falls through to the module loader and its
+// ImportError.
+std::optional<Compiler::ScopePrefix> Compiler::inScopePrefix(
+    const std::vector<std::string>& path, std::size_t maxPrefix, std::size_t* end) {
+    for (std::size_t n = maxPrefix; n > 0; --n) {
+        const std::string name = joinPath(path, 0, n);
+        const GlobalBinding* term = globals_.binding(name);
+        if (!term) continue;
+        const ClassInfo* cls = globals_.findType(name + ".type");
+        if (!cls) continue;
+        // The hidden alias pins the key the prefix has NOW, so a later
+        // redefinition of the prefix cannot redirect this import (D25).
+        const std::string hidden = "__scope$" + name;
+        globals_.bind(hidden, *term);
+        globals_.aliasType(hidden + ".type", cls->key);
+        *end = n;
+        return ScopePrefix{name, hidden, cls};
+    }
+    return std::nullopt;
+}
+
+void Compiler::importScopeWildcard(const ScopePrefix& p, SourcePos pos) {
+    for (const auto& kv : p.cls->members) {
+        // `<init>` and the setters of a var are not names a user can import.
+        if (kv.first == kPrimaryCtorKey || kv.first.rfind("<init>", 0) == 0) continue;
+        if (kv.first.size() > 2 && kv.first.compare(kv.first.size() - 2, 2, "_=") == 0) continue;
+        if (kv.first.find("::") != std::string::npos) continue;  // a private member (D5)
+        importedTerms_[kv.first] = ImportedTerm{p.hidden, p.name, kv.first, true};
+    }
+    // An `enum`'s cases and a template nested in the object are lifted to
+    // top-level definitions with dotted names, so they are not in `members` and
+    // have to be picked up from the tables. This is the half `import Color.*`
+    // lives or dies on: `Red` is the global `Color.Red`, not a member of `Color`.
+    const std::string prefix = p.name + ".";
+    for (const auto& kv : globals_.typesUnder(prefix)) globals_.aliasType(kv.first, kv.second);
+    for (const auto& kv : globals_.bindingsUnder(prefix)) globals_.bind(kv.first, *kv.second);
+    (void)pos;
+}
+
+void Compiler::importFromScope(const Import& imp, const ScopePrefix& p, std::size_t end) {
+    std::vector<std::string> trailing(imp.path.begin() + static_cast<long>(end), imp.path.end());
+    if (trailing.size() > 1)
+        throw CompileError("ImportError: " + p.name + " has no member named '" + trailing.front() +
+                               "." + trailing[1] + "'",
+                           imp.pos);
+
+    // `import Cfg` / `import Cfg as C`: the object itself, under the alias. Only a
+    // single-segment path reaches here, so `p.name` has no dot in it: a path with
+    // no selector list always leaves its last segment to be one, which is what
+    // makes `import B1.B2` bind `B2` rather than the unspellable `B1.B2` (see
+    // compileImport, and the fixture that pins it).
+    if (imp.selectors.empty() && trailing.empty()) {
+        const std::string bound = imp.moduleAlias.empty() ? p.name : imp.moduleAlias;
+        globals_.bind(bound, *globals_.binding(p.hidden));
+        globals_.aliasType(bound + ".type", p.cls->key);
+        return;
+    }
+
+    std::vector<ImportSelector> selectors = imp.selectors;
+    if (!trailing.empty()) {
+        ImportSelector sel;
+        sel.name = trailing.front();
+        sel.alias = imp.moduleAlias;
+        sel.pos = imp.pos;
+        selectors.insert(selectors.begin(), sel);
+    }
+
+    for (const ImportSelector& s : selectors) {
+        if (s.given) continue;  // parsed and ignored (D3, D93)
+        if (s.wildcard) { importScopeWildcard(p, s.pos); continue; }
+        const std::string as = s.alias.empty() ? s.name : s.alias;
+        const std::string qualified = p.name + "." + s.name;
+        const std::string nestedPrefix = qualified + ".";
+        bool bound = false;
+        // A nested type or enum case, which is a top-level definition with a
+        // dotted name: alias the type, its `.type`, its companion term and
+        // everything one level under it, so `new Point(1, 2)`,
+        // `case Point(x, y)` and `Level.Debug` all compile.
+        if (const ClassInfo* c = globals_.findType(qualified)) {
+            globals_.aliasType(as, c->key);
+            bound = true;
+        }
+        if (const ClassInfo* c = globals_.findType(qualified + ".type")) {
+            globals_.aliasType(as + ".type", c->key);
+            bound = true;
+        }
+        for (const auto& kv : globals_.typesUnder(nestedPrefix)) {
+            globals_.aliasType(as + "." + kv.first, kv.second);
+            bound = true;
+        }
+        if (const GlobalBinding* b = globals_.binding(qualified)) {
+            globals_.bind(as, *b);
+            bound = true;
+        }
+        for (const auto& kv : globals_.bindingsUnder(nestedPrefix)) {
+            globals_.bind(as + "." + kv.first, *kv.second);
+            bound = true;
+        }
+        if (bound) continue;
+        // An ordinary member of the object: a rewrite to the member access the
+        // qualified spelling compiles to, as a module's selector import does.
+        if (!p.cls->members.count(s.name))
+            throw CompileError("ImportError: " + p.name + " has no member named '" + s.name + "'",
+                               s.pos);
+        importedTerms_[as] = ImportedTerm{p.hidden, p.name, s.name, true};
+    }
+}
+
 void Compiler::compileImport(const Import& imp) {
-    if (!loader_) throw CompileError("imports are not available here", imp.pos);
     if (imp.path.empty()) throw CompileError("import selector expected", imp.pos);
+
+    // A member import of something in scope is resolved first, and without the
+    // loader, so `import Color.*` never touches the filesystem -- and so the
+    // prelude and `--disassemble`, neither of which has a loader, can use it.
+    if (!(imp.path.size() >= 2 && isFamilyPrefix(imp.path[0]))) {
+        // With no selector list the LAST segment is the name being imported, so
+        // the prefix search must leave it: `import Holder.Even` binds `Even`, not
+        // the object `Holder.Even` under its own dotted name. With a selector
+        // list the whole path may be the prefix, because the names come from the
+        // braces: `import Holder.Even.{unapply}`.
+        const std::size_t maxPrefix = imp.selectors.empty() && imp.path.size() > 1
+                                          ? imp.path.size() - 1
+                                          : imp.path.size();
+        std::size_t end = 0;
+        if (const auto p = inScopePrefix(imp.path, maxPrefix, &end)) {
+            importFromScope(imp, *p, end);
+            return;
+        }
+    }
+
+    if (!loader_) throw CompileError("imports are not available here", imp.pos);
 
     // Segment 0 is a family prefix, or it is part of the path (plan A0-4). One
     // segment is never a prefix: `import py` names a module called `py`.
@@ -1507,8 +1650,35 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
         //    LOADING the module (D90), which is why a module's top level runs
         //    during the importing unit's compilation -- and why --disassemble
         //    runs them too (D95).
-        for (const auto& s : unit.stats)
-            if (s->kind == NodeKind::Import) compileImport(as<Import>(*s));
+        //
+        //    Except one kind: an import whose first segment is a name THIS unit
+        //    declares is a member import of something that does not exist yet
+        //    (`enum Color ...` then `import Color.*`). Those wait for step 1d,
+        //    when the declaration has a ClassInfo to enumerate. Every other
+        //    import keeps its Phase 6 position, so no program that compiled
+        //    before this change takes a different path -- which matters, because
+        //    a class in this unit may name an imported type as its parent, and
+        //    that is resolved in step 1b.
+        std::unordered_set<std::string> declaredHeads;
+        for (const auto& s : unit.stats) {
+            std::string name;
+            if (s->kind == NodeKind::DefDef) name = as<DefDef>(*s).name;
+            else if (s->kind == NodeKind::ValDef) name = as<ValDef>(*s).name;
+            else if (s->kind == NodeKind::TemplateDef) name = as<TemplateDef>(*s).name;
+            else continue;
+            const auto dot = name.find('.');  // a lifted `Color.Red` heads on `Color`
+            declaredHeads.insert(dot == std::string::npos ? name : name.substr(0, dot));
+        }
+        std::vector<const Import*> deferredImports;
+        for (const auto& s : unit.stats) {
+            if (s->kind != NodeKind::Import) continue;
+            const auto& imp = as<Import>(*s);
+            const bool family = imp.path.size() >= 2 && isFamilyPrefix(imp.path[0]);
+            if (!imp.path.empty() && !family && declaredHeads.count(imp.path[0]))
+                deferredImports.push_back(&imp);
+            else
+                compileImport(imp);
+        }
         // 1. Declare every top-level name; validate @main.
         const DefDef* main = nullptr;
         std::vector<const TemplateDef*> templates;
@@ -1581,7 +1751,19 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
             out.mainKey = globalKey(main->name);
             out.mainTakesArgs = varargs;
         }
-        // 1a. A name this unit declares and an import also binds is ambiguous.
+        // 1a. Describe the templates, parents first, and link the companions.
+        const std::vector<const TemplateDef*> sorted = sortTemplates(templates);
+        for (const TemplateDef* t : sorted) globals_.defineType(buildClassInfo(*t, typeKeys.at(t)));
+        linkCompanions(sorted);
+        // 1b. The member imports step 0 deferred: `import Color.*` for a `Color`
+        //     this unit declares. They wait until here and no longer, because a
+        //     wildcard enumerates the prefix's ClassInfo, which step 1a builds.
+        //     Consequence, and the one thing this ordering cannot give: a class in
+        //     THIS unit cannot name, as its parent, a type reached only through a
+        //     member import of this unit's own object -- write the qualified name
+        //     (`Holder.Base`), which always works.
+        for (const Import* i : deferredImports) compileImport(*i);
+        // 1c. A name this unit declares and an import also binds is ambiguous.
         //     Scala reports it; reporting it here turns a silent shadow -- which
         //     of the two wins would depend on the compiler's lookup order -- into
         //     an error the programmer can act on.
@@ -1592,11 +1774,7 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
                                    kv.second.moduleName + " and defined here; rename one of them",
                                unit.stats.empty() ? SourcePos{} : unit.stats.front()->pos);
         }
-        // 1b. Describe the templates, parents first, and link the companions.
-        const std::vector<const TemplateDef*> sorted = sortTemplates(templates);
-        for (const TemplateDef* t : sorted) globals_.defineType(buildClassInfo(*t, typeKeys.at(t)));
-        linkCompanions(sorted);
-        // 1c. `object Main extends App` is the program (D104). The test is on the
+        // 1d. `object Main extends App` is the program (D104). The test is on the
         //     linearization, so a trait that itself extends App counts, and it
         //     runs only when the file declares no @main -- two entry points in one
         //     file would need a name to choose between them, and a script has none.

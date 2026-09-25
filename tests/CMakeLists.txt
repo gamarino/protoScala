@@ -104,6 +104,15 @@ foreach(conf_file ${PROTOSCALA_CONFORMANCE_FILES})
         set_tests_properties("conformance/${conf_file}" PROPERTIES
             ENVIRONMENT
             "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/24-modules/_modules")
+    elseif(conf_file MATCHES "^28-member-imports/")
+        # Track X. Two fixtures here import a MODULE, on purpose: one checks that
+        # adding plain Scala's member import did not shadow Phase 6's module
+        # loading, and the other checks that an `object util` in scope wins over
+        # the module file of that name. Both need the module tree to exist, or
+        # they would pass for the wrong reason.
+        set_tests_properties("conformance/${conf_file}" PROPERTIES
+            ENVIRONMENT
+            "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/28-member-imports/_modules")
     elseif(conf_file MATCHES "^tutorial/(16-|00-readme-10min-(scala|pyjs)-files)")
         # Track F. The chapter-16 snippets name their files the way a reader
         # would (`"notes.txt"`), so each one is run from a private directory of

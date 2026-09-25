@@ -20,11 +20,13 @@
 > someone else's tests rather than our own: the Scala 3 compiler's `tests/run`
 > corpus (1654 single-file programs, dotty `a68b419c`). It adds the **Predef
 > surface** — `assert`, `assume`, `require`, `???`, `AssertionError`,
-> `NotImplementedError` and `App` (D103–D104). See "The Scala 3 run-corpus
-> measurement" under "Known issues" for the before/after numbers.
-> **Tests:** 1278 total (`ctest --test-dir build_release -N`) — 371 unit
+> `NotImplementedError` and `App` (D103–D104) — and restores plain Scala's
+> **member import** (`import Color.*`, D105), which Phase 6 had silently replaced
+> with the module-loading form. See "The Scala 3 run-corpus measurement" under
+> "Known issues" for the before/after numbers.
+> **Tests:** 1299 total (`ctest --test-dir build_release -N`) — 371 unit
 > (GoogleTest, including the separate `unit/actors` and `unit/modules` binaries
-> and `umd/protost-interop`), 856 conformance fixtures, 24 CLI checks, 12
+> and `umd/protost-interop`), 877 conformance fixtures, 24 CLI checks, 12
 > benchmark smoke checks, 15 embedder-conformance rules. **All
 > green**, and green at `PROTOSCALA_ACTOR_WORKERS=1` and `=16` (1248/1248
 > including `umd/protost-interop` in all three). Under
@@ -452,8 +454,19 @@ compared are quoted in [DECISIONS-LOG.md](DECISIONS-LOG.md).
       as in Scala. Deprecated in Scala 3 in favour of `@main`, which protoScala
       already supported; the restrictions protoScala adds are one App object per
       file, not both an App object and an `@main`, and none in a module (D104).
-- [x] 15 conformance fixtures in `tests/conformance/27-predef/`, each one shown to
-      be capable of failing by a named mutation of the implementation.
+- [x] **Plain Scala's member import** is back, alongside Phase 6's module-loading
+      form (**D105**): `import Color.*`, `import Obj.{a, b}`, `import Obj.a as b`
+      and `import Obj as O`, on an `object`, a companion or an `enum` in scope.
+      `docs/LANGUAGE.md` §3.2 documented `import` **only** as file-modules and
+      never said the ordinary form had gone; that section is now corrected and
+      names both forms and the rule that tells them apart. Phase 6 recorded no
+      deviation claiming the member import was absent by design, so there was no
+      deviation to retract — the omission was silent, which is worse.
+- [x] 15 conformance fixtures in `tests/conformance/27-predef/` and 17 in
+      `tests/conformance/28-member-imports/`, plus 2 tutorial fixtures, each one
+      shown to be capable of failing by a named mutation of the implementation:
+      11 mutations for the Predef half and 12 for the import half, every fixture
+      turned red by at least one. Plus 4 tutorial/README fixtures.
 
 ## Not yet implemented
 
@@ -857,11 +870,35 @@ deliberately unused and were not recycled.
 |---|---|---|---|
 | D103 | **`assert`, `assume` and `require` are ordinary methods, not macros.** In Scala they are `inline` in `Predef`, so `-Xdisable-assertions` removes `assert` and `assume` from the bytecode entirely (it never removes `require`, which validates a caller's argument). protoScala has no macros and no `inline`, so there is no flag that elides them and an assertion always costs a call and a by-name thunk. What this changes for a program: nothing it can observe, except that an assertion cannot be compiled away, so a hot loop pays for one. What it changes for a *build*: `-Xdisable-assertions` has no analogue and is not accepted. Consequence of having no overloading (D31): each is **one** method with a default message rather than Scala's two overloads, and the default is a distinguished object, not `null`, so `assert(false, null)` still reports `assertion failed: null` as Scala's does | Track X | (perm) |
 | D104 | **`App` is the entry point, with three restrictions Scala does not have.** `object Main extends App` runs the object's body, as in Scala (verified against scalac 3.9.0, including an object extending a trait that extends `App`), and protoScala runs it *after* the file's top-level statements, which Scala has none of (D9). The restrictions: (a) **one App object per file** — Scala allows several because a JVM launcher picks one by class name, and a script has nothing to pick with; (b) **not an App object and an `@main` in the same file** — the same argument; (c) **no App object in a module**, refused for the reason D91 refuses an `@main` there, because a module is imported and never run and a silently ignored entry point is a trap. All three are compile errors that name both candidates. `App` is deprecated in Scala 3 and is kept because it is what a decade of Scala teaching material writes | Track X | (perm) |
+| D105 | **An `import` is a member import when its longest in-scope prefix names an object, a companion or an `enum`, and a module load otherwise.** Both halves are Scala-conformant; the *rule* is protoScala's, because Scala has no module-loading form to disambiguate against. Scala's own resolution has the same shape — a definition in scope shadows a package of that name — so a file defining `object util` and writing `import util.Shapes` gets its own object in either language. Two places this is narrower than Scala. (a) A **`val` cannot be a member-import prefix**: a wildcard has to enumerate the prefix's members and a dynamic value has no static type to enumerate (D4), so `import someVal.*` falls through to the module loader and its `ImportError` rather than guessing a member set. (b) A member import of a prefix **this same file declares** is resolved after the file's templates are described, so a class in that file cannot name, as a **parent**, a type reached only through such an import — `class Sub extends Base` after `import Holder.*` in the same file; `extends Holder.Base` always works. Everything else is Scala's: the four forms, `as` and `=>` as renames, `*` and `_` as wildcards, an `enum`'s cases and an object's nested templates under their simple names, an import losing to a local and shadowing an outer global, and a selector that names nothing being an error | Track X | (perm) |
 
 ## Known issues / platform dependencies
 
 See DESIGN §11 for the full table. Unchanged this phase: R2, R4, R8. **R5 was
 exercised for the first time in Phase 6** — see the three entries below it.
+
+- **An imported member cannot be an assignment target — pre-existing, and now
+  easier to hit.** `object Box { var counter = 0 }` then `import Box.*` and
+  `counter = 5` fails with `Not found: counter`, because a selector import binds a
+  name that rewrites to a *read* of the member (`Compiler::importedTermSelect`
+  builds a `Select`) and the assignment path does not consult the import table.
+  Verified to be **pre-existing**, not introduced by Track X: the identical
+  program through Phase 6's module form — a module with a `var`, `import
+  util.Box.*`, then `counter = 5` — fails the same way on the tree before this
+  work. Track X only makes it reachable more often, because member imports of a
+  same-file object are now the common case. The fix is to consult
+  `importedTerms_` in the assignment path and emit the setter send, and it is not
+  attempted here: it widens Phase 6's rewrite mechanism and belongs with D96's
+  scoping work. One corpus test (`traits-initialization`) stops here.
+
+- **`import someVal.*` is refused where Scala accepts it.** Scala allows any
+  stable identifier as an import prefix, including a `val` of a known type;
+  protoScala requires an `object`, a companion or an `enum`, because a wildcard
+  has to enumerate the prefix's members and an erased `val` has no type to
+  enumerate (D4, D105). One corpus test (`triple-quoted-expr`) stops here, and
+  the message is the module-loader's `ImportError`, which names the paths it
+  tried rather than saying "not an object" — clear, but not as pointed as it
+  could be.
 
 - **The Scala 3 run-corpus measurement, and what it says about our own tests.**
   The instrument is the Scala 3 compiler's own `tests/run` corpus (1654 single-file
@@ -879,6 +916,14 @@ exercised for the first time in Phase 6** — see the three entries below it.
   |---|---|
   | 0.6.0, before Track X | **75/601 = 12.5 %** |
   | after the Predef surface (D103–D104) | **178/601 = 29.6 %** |
+  | after member imports as well (D105) | **183/601 = 30.4 %** |
+
+  Zero regressions: no test that passed anywhere in the 1654-file corpus before
+  this work fails after it. Across the whole corpus, in-scope and out, 82 → 206.
+  The member-import half is worth 5 in-scope tests on its own, which is small and
+  was expected — its case is that it is the first thing a new user hits, not that
+  it moves a number — and it also cut the in-scope `no module found` failures from
+  45 to 37, the rest being `import scala.*` (D90/D91) and `Double.NaN`.
 
   **What this says about the suite:** all 1263 of protoScala's other tests were
   written here. 257 of the corpus's disagreements with real Scala were anticipated
@@ -1123,37 +1168,40 @@ exercised for the first time in Phase 6** — see the three entries below it.
   about 1.3 ms of headroom on the script case, which is what the next twenty
   prelude classes would spend. Full tables in `benchmarks/RESULTS.md`.
 
-- **Cold start after Track X — the delta is noise, and the budget could not be
-  re-certified on the host that measured it.** Track X adds four prelude
-  declarations that carry start-up work: `AssertionError`, `NotImplementedError`,
+- **Cold start after Track X — the delta is below the noise floor, and the budget
+  could not be re-certified on this host.** Track X adds four prelude declarations
+  that carry start-up work: `AssertionError`, `NotImplementedError`,
   `object __NoMessage` and `trait App`. At the recorded marginal cost of ~60 µs per
-  prelude class that is ~240 µs, and the measurement agrees. Three rounds
+  prelude class that is ~240 µs, and the measurement cannot see it. Three rounds
   interleaved in one window, alternating a binary built from `b7f6afd` (the tree
-  before Track X) with the Track X binary, both from `build_release`, all twelve
-  cases `verified=21`, load average 5.61 at the start and 5.57 at the end:
+  before Track X) with the complete Track X binary, both from `build_release` so
+  nothing but the code differs, all twelve cases `verified=21`, load average 5.47
+  at the start and 6.45 at the end:
 
   | | before (`b7f6afd`) | after (Track X) |
   |---|---|---|
-  | script, median of three medians | 29.33 ms | 29.16 ms |
-  | script, best min | 25.89 ms | 26.23 ms |
-  | repl, median of three medians | 28.52 ms | 28.80 ms |
-  | repl, best min | 25.39 ms | 25.72 ms |
+  | script, median of three medians | 25.99 ms | 25.30 ms |
+  | script, best of three minima | 21.90 ms | 21.60 ms |
+  | repl, median of three medians | 26.15 ms | 25.83 ms |
+  | repl, best of three minima | 22.74 ms | 22.82 ms |
 
-  The two binaries are indistinguishable: the script median moved *down* by
-  0.17 ms and the REPL median up by 0.28 ms, against a within-binary spread of
-  1.3 ms across rounds. So Track X did not spend the recorded 1.3 ms of headroom
-  in any way this instrument can see.
+  The Track X binary measures *faster* on three of the four statistics, which is
+  not a claim that it is faster — it is what "below the noise floor" looks like.
+  Within-binary spread across rounds is 1.2–2.5 ms, an order above any difference
+  between the two. So Track X did not spend the 1.3 ms of headroom the 0.6.0
+  measurement recorded, in any way this instrument can see.
 
   **What this does not claim, and must not be read as:** the 25 ms budget was
-  *not* re-verified. `benchmarks/cold-start.sh` exits **1 for both binaries** on
-  this host, including the unmodified `b7f6afd` tree that the recorded 23.73 /
+  *not* re-verified. `benchmarks/cold-start.sh` exits **1 for both binaries** in
+  most rounds, including the unmodified `b7f6afd` tree that the recorded 23.73 /
   23.89 ms figures came from — the host was running a second agent's build
-  throughout, at load average 5.6 against 2.97 for the 0.6.0 measurement, and
-  every median is 4–5 ms above the recorded one. The honest statement is
+  throughout, at load average 5.5–6.5 against 2.97 for the 0.6.0 measurement, and
+  every median is 1–3 ms above the recorded one. The honest statement is
   therefore: **the budget is neither confirmed nor refuted here, and Track X is
   not what would have broken it.** Re-certifying it needs a quiet host, and until
   someone runs it on one the 0.6.0 verdict above stands unrefreshed. Raw samples:
-  `../.agent_scratch/predef-import/coldstart-interleaved.txt`.
+  `../.agent_scratch/predef-import/coldstart-interleaved-final.txt` (and
+  `coldstart-interleaved.txt` for the Predef half alone, measured at load 5.6).
 
   The 0.5.0 history is kept below, because the row it explains is still in the
   table and because the attribution is what told this phase what to build.
