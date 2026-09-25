@@ -132,11 +132,30 @@ The file's own comment states the premise that fails: "nothing this loop still
 needs lives only in a C++ local. The nodes hang off the retain cell this takeAll
 published onto `retained`."
 
-**Proposed one-line kernel fix, for the maintainer:** after the detaching
-exchange, and still inside the same critical section, widen the retain cell to the
-chain actually detached (`retain->chain.store(chain)`). The published-before-detach
-ordering the soundness proof needs is untouched — the cell was already published
-with `h` before the detach; widening it afterwards only adds coverage.
+**Proposed one-line kernel fix, for the maintainer, and it is MEASURED rather than
+argued:** after the detaching exchange, and still inside the same critical section,
+widen the retain cell to the chain actually detached
+(`retain->chain.store(chain, std::memory_order_release)`). The
+published-before-detach ordering the soundness proof needs is untouched — the cell
+was already published with `h` before the detach; widening it afterwards only adds
+coverage.
+
+Validated against a **scratch clone** of protoCore, never against the repository:
+the patched library was loaded into protoScala's own already-built isolate binary
+through `LD_LIBRARY_PATH` (the change is internal to one `.cpp`, so the ABI is
+identical), with 24 of the runs interleaved control/patched so machine state hits
+both equally.
+
+| protoCore | runs | `heap.ceiling_progress` failures |
+|---|---|---|
+| as committed | 40 | **4** (10%) |
+| retain widened | 40 | **0** |
+
+The patch is saved at
+`../.agent_scratch/p4-fixes/protoCore-pmq-retain-widening.patch`. **0 of 40 against
+4 of 40 is suggestive, not conclusive** (Fisher one-sided p ≈ 0.12): it is worth
+what the mechanism reading is worth, and no more. The kernel change is still the
+maintainer's, and nothing in this repository depends on it.
 
 ## What the adaptor does not prove
 
