@@ -39,21 +39,56 @@ void writeFile(const std::string& path, const std::string& body) {
     f << body;
 }
 
-// Unreachable garbage in `ctx`'s space: `n` one-element lists, none of them
-// kept. A cycle only starts when the heap is short of free cells, so a space
-// nobody allocates in has, by protoCore's design, no reason to collect at all —
-// which is why each round makes the pressure first and asks second.
+// How many throwaway objects one round of pressure creates. The reclaim
+// assertion below is stated in terms of this, so it demands a number tied to the
+// work the test actually did rather than a bare "greater than zero".
+constexpr int kGarbagePerRound = 20000;
+
+// FORCING A COLLECTION IS NOT THE SAME THING AS SUBMITTING THE YOUNG
+// GENERATION, and conflating the two produces a test that cannot fail. Read this
+// before touching the loop below.
+//
+// protoCore chains every cell a context allocates onto that context's young
+// generation, and the collector's root scan treats an UNSUBMITTED chain as a
+// root — so those cells are live by definition, however unreachable the program
+// has made them. A context submits its chain in exactly two places: when it is
+// destroyed, and from `ProtoContext::safepoint()` once it is past
+// `maxAllocatedCellsPerContext`. A test that allocates on a long-lived context
+// and never calls `safepoint()` therefore creates no sweep candidates at all:
+// cycles run, `getGCCycleCount()` advances, and the collector reclaims a handful
+// of cells that came from somewhere else. Measured on this host: **without** the
+// `safepoint()` calls below a cycle reclaimed 4-7 cells; **with** them, 205,120.
+// An assertion of "reclaimed > 0" passes in both cases, which is why it is not
+// the assertion this file makes.
+//
+// This is the third appearance of the same confusion in this family in two days.
+// protoST reclaimed NOTHING for its entire history because its interpreter
+// called `safepoint()` nowhere (bug S15), a `newList` critical section was added
+// to protect what the unsubmitted young chain already protected, and then this
+// helper forced cycles without submitting anything. If you are about to remove a
+// `safepoint()` call here, the question to ask is not "does a cycle run" but
+// "would this test fail if the collector reclaimed nothing".
 void makeGarbage(proto::ProtoContext* ctx, int n) {
     for (int i = 0; i < n; ++i) {
         const proto::ProtoList* junk = ctx->newList();
         junk = junk->appendLast(ctx, ctx->fromInteger(i));
         (void)junk;
+        // Submit the young generation so these cells become sweep candidates.
+        // Every 256 allocations rather than every one: `safepoint()` is cheap
+        // but not free, and the submission only happens past the per-context
+        // threshold anyway.
+        if ((i & 0xFF) == 0) ctx->safepoint();
     }
+    ctx->safepoint();
 }
 
 // Ask `space` for a collection and wait, with this thread parked, until its
 // cycle counter advances or the budget runs out. Returns true when a cycle ran,
 // and records the largest per-cycle reclaim seen.
+//
+// A cycle only starts when the heap is short of free cells, so a space nobody
+// allocates in has, by protoCore's design, no reason to collect at all — which
+// is why each round makes the pressure first and asks second.
 //
 // Parking matters: protoCore's stop-the-world phase waits for every registered
 // thread, and a thread sitting in native C++ outside an unmanaged region is not
@@ -65,7 +100,7 @@ bool forceOneCycle(proto::ProtoSpace* space, proto::ProtoContext* ctx,
                    unsigned long* maxReclaimed) {
     const uint64_t start = space->getGCCycleCount();
     for (int round = 0; round < 40; ++round) {
-        makeGarbage(ctx, 20000);
+        makeGarbage(ctx, kGarbagePerRound);
         space->triggerGC();
         {
             proto::ProtoContext::UnmanagedScope parked(ctx);
@@ -282,9 +317,21 @@ TEST(ProtoSTInterop, AForeignValueSurvivesACollectionOnBothSides) {
     ASSERT_GT(st.space()->getGCCycleCount(), stCyclesBefore)
         << "no collection ran in protoST's space: this test would pass "
            "whatever the GC did";
-    EXPECT_GT(scalaReclaimed, 0u)
-        << "protoScala's collector reclaimed nothing, so it never looked at "
-           "this heap";
+    // Tied to the work done: one round throws away kGarbagePerRound lists, each
+    // of which costs more than one Cell, so a cycle that swept this heap must
+    // reclaim at least that many cells. The number a working run reports on this
+    // host is ~205,000; the figure a helper that forces cycles WITHOUT
+    // submitting the young generation reports is 4-7, which is why "> 0" is not
+    // the bar (see makeGarbage's comment).
+    std::printf("GC: protoScala's best cycle reclaimed %lu cells "
+                "(threshold %d)\n",
+                scalaReclaimed, kGarbagePerRound);
+    std::fflush(stdout);
+    EXPECT_GE(scalaReclaimed, static_cast<unsigned long>(kGarbagePerRound))
+        << "protoScala's collector reclaimed " << scalaReclaimed
+        << " cells after this test threw away " << kGarbagePerRound
+        << " lists per round: the garbage never became a sweep candidate, so "
+           "this test is not exercising the collector at all";
 
     // Still the same object, and still a usable protoST class: the name protoST
     // stamps on every class (`__class_name__`, Bootstrap.cpp) reads back.
