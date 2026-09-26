@@ -25,7 +25,16 @@
 
 namespace proto {
 class ProtoContext;
+class ProtoObject;
 class ProtoString;
+class ParentLink;
+class ProtoList;
+class ProtoSparseList;
+// The same declaration protoCore.h makes. Repeated rather than included so this
+// header keeps its one dependency (Opcodes.h); a mismatch would be a compile
+// error at every call site, not a silent one.
+typedef const ProtoObject* (*ProtoMethod)(ProtoContext*, const ProtoObject*, const ParentLink*,
+                                          const ProtoList*, const ProtoSparseList*);
 }
 
 namespace protoScala {
@@ -194,6 +203,22 @@ public:
     // the trailing parameters that carry a default.
     int minArity() const { return minArity_; }
 
+    // --- A TRANSPILED block (Phase 7) --------------------------------------
+    // A module produced by `protoscalac` holds no code words: its body is a
+    // `proto::ProtoMethod` that `gen::linkModule` installs here, and
+    // `ExecutionEngine::execute` calls it instead of running the (empty) code.
+    //
+    // The point of putting it HERE rather than inventing a second callable shape
+    // is that the metadata every caller already reads -- arity(), isMethod(),
+    // isParamless(), captureCount(), paramNames() -- stays exactly where the
+    // nineteen `compiledModuleOf` call sites look for it. A transpiled function is
+    // then indistinguishable from an interpreted one to `Try.apply`, to a Map's
+    // arity-deciding `map`, to a by-name FORCE_THUNK and to eta-expansion, all of
+    // which read a callable's module and would otherwise get a wrong answer with
+    // no error (see docs/DECISIONS-LOG.md, Phase 7 T0-13).
+    proto::ProtoMethod nativeEntry() const { return nativeEntry_; }
+    void setNativeEntry(proto::ProtoMethod fn) { nativeEntry_ = fn; }
+
     void addCapture(int parentSlot, int localSlot) { captures_.push_back({parentSlot, localSlot}); }
     const std::vector<CaptureSpec>& captureSpecs() const { return captures_; }
     int captureCount() const { return static_cast<int>(captures_.size()); }
@@ -210,6 +235,7 @@ public:
     std::string disassemble() const;
 
 private:
+    proto::ProtoMethod nativeEntry_ = nullptr;   // Phase 7: a transpiled block
     std::vector<Instr> code_;
     std::vector<int> lines_;  // one entry per code word
     std::vector<Const> consts_;

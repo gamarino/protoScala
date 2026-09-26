@@ -24,14 +24,17 @@
 #include "runtime/GeneratedModuleEntry.h"
 #include "runtime/OpcodeOps.h"
 #include "runtime/Runtime.h"
+#include "runtime/StackGuard.h"
 #include "runtime/Values.h"
 #include "umd/ForeignBoundary.h"
 
 #include <map>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace protoScala::gen {
 namespace {
@@ -68,6 +71,16 @@ std::string_view svalOf(const ConstRec& c) {
 // space's names (the same reason BytecodeModule carries that note).
 std::mutex g_linkMutex;
 std::map<const BlockRec* const*, proto::ProtoSpace*> g_linked;
+// One shim BytecodeModule per generated block, owned for the life of the process
+// exactly as a Session owns an interpreted module. A shim holds NO code words: its
+// body is the block's proto::ProtoMethod, installed with setNativeEntry, and
+// ExecutionEngine::execute calls that instead of running bytecode.
+//
+// This is what makes a transpiled function indistinguishable from an interpreted
+// one to every caller that reads a callable's metadata -- Try.apply, a Map's
+// arity-deciding map, a by-name FORCE_THUNK, eta-expansion -- because the metadata
+// is in the place all nineteen of them already look.
+std::vector<std::unique_ptr<BytecodeModule>> g_shims;
 
 // The context a module entry point runs in, installed by ModuleEntryGuard. See
 // src/runtime/GeneratedModuleEntry.h for why the handover is a thread-local and
@@ -105,6 +118,26 @@ void linkModule(proto::ProtoContext* ctx, const BlockRec* const* blocks, std::si
             return;  // idempotent
         }
         g_linked.emplace(blocks, ctx->space);
+    }
+    // The shims first, so a MAKE_FN in the module body already has one to point at.
+    {
+        std::lock_guard<std::mutex> g(g_linkMutex);
+        for (std::size_t b = 0; b < n; ++b) {
+            const BlockRec& blk = *blocks[b];
+            auto shim = std::make_unique<BytecodeModule>();
+            shim->setName(blk.name);
+            shim->setArity(static_cast<int>(blk.arity));
+            shim->setLocalCount(static_cast<int>(blk.localCount));
+            shim->setMaxStack(static_cast<int>(blk.maxStack));
+            shim->setVariadic(blk.variadic);
+            shim->setMethod(blk.method);
+            shim->setParamless(blk.paramless);
+            for (std::uint32_t k = 0; k < blk.captureCount; ++k)
+                shim->addCapture(0, blk.captureSlots[k]);
+            shim->setNativeEntry(blk.entry);
+            *blk.handle = shim.get();
+            g_shims.push_back(std::move(shim));
+        }
     }
     for (std::size_t b = 0; b < n; ++b) {
         const BlockRec& blk = *blocks[b];
@@ -206,6 +239,11 @@ int runMain(proto::ProtoContext* ctx, const char* mainKey, bool takesArgs, int a
 Frame::Frame(proto::ProtoContext* parent, const BlockRec& blk, const proto::ProtoObject* self,
              const proto::ProtoList* args, const proto::ProtoSparseList* kwargs)
     : frame_(parent->space, parent) {
+    // The same guard ExecutionEngine::execute opens with, and for the same
+    // reason: deep recursion must raise StackOverflowError rather than run off the
+    // native stack. Without it a transpiled recursive function segfaults, which is
+    // what tests/conformance/06-recursion/stack-overflow.scala measured.
+    checkNativeStack();
     const unsigned arity = blk.arity;
     const unsigned fixed = blk.variadic ? arity - 1 : arity;
     const unsigned given = args ? static_cast<unsigned>(args->getSize(&frame_)) : 0u;
@@ -235,8 +273,38 @@ Frame::Frame(proto::ProtoContext* parent, const BlockRec& blk, const proto::Prot
     if (selfSlots) slots_[0] = self;
     for (unsigned k = selfSlots; k < positional; ++k)
         slots_[k] = args->getAt(&frame_, static_cast<int>(k - selfSlots));
-    if (blk.variadic)
-        slots_[fixed] = frame_.newList(argc - fixed, slots_ + fixed)->asObject(&frame_);
+    if (blk.variadic) {
+        // The tail, gathered from the argument LIST rather than from the slots: a
+        // native block receives a ProtoList, not the C array execute() has, so the
+        // trailing values were never written into slots in the first place. They go
+        // through a child context's traced locals, because `newList` wants a
+        // contiguous run and a C++ array of ProtoObject* across an allocation is
+        // exactly what P1 forbids.
+        const unsigned first = fixed - selfSlots;
+        const unsigned count = given > first ? given - first : 0u;
+        proto::ProtoContext tail(frame_.space, &frame_);
+        tail.resizeAutomaticLocals(count ? count : 1u);
+        const proto::ProtoObject** t = tail.getAutomaticLocals();
+        for (unsigned k = 0; k < count; ++k)
+            t[k] = args->getAt(&tail, static_cast<int>(first + k));
+        slots_[fixed] = tail.newList(count, t)->asObject(&tail);
+    }
+    // The capture slots, in the order MAKE_FN pushed them, bound AFTER the
+    // positional arguments and the variadic tail, exactly as
+    // ExecutionEngine::execute binds them. For a block that is not a method,
+    // `self` carries the closure's captures list (see the native-entry branch of
+    // execute); a method never has captures, and a module that needed them
+    // without being given any fails loudly rather than filling the slots with
+    // nulls, which would corrupt the frame silently.
+    if (blk.captureCount > 0) {
+        if (blk.method || !self || self == PROTO_NONE)
+            throw std::logic_error(std::string(blk.name) + " needs " +
+                                   std::to_string(blk.captureCount) +
+                                   " captured value(s) but was called without any");
+        const proto::ProtoList* caps = self->asList(&frame_);
+        for (std::uint32_t k = 0; k < blk.captureCount; ++k)
+            slots_[blk.captureSlots[k]] = caps->getAt(&frame_, static_cast<int>(k));
+    }
 }
 
 Frame::~Frame() = default;
@@ -338,19 +406,27 @@ const proto::ProtoObject* forceThunk(proto::ProtoContext* ctx, const proto::Prot
 const proto::ProtoObject* makeFn(proto::ProtoContext* ctx, const BlockRec& enclosing,
                                  std::size_t blockIndex, const proto::ProtoObject** captures,
                                  unsigned captureCount) {
-    (void)captures;
-    if (captureCount > 0)
-        throw std::logic_error(
-            "makeFn: a transpiled closure that captures is not implemented. The callable shape a "
-            "capturing transpiled function must present to ExecutionEngine::callMember is an open "
-            "design question (see docs/DECISIONS-LOG.md, Phase 7 T0-13); protoscalac refuses such "
-            "a unit at transpile time rather than emitting a call that would lose its captures.");
-    // A captureless, non-method block is a plain proto::ProtoMethod object. Every
-    // existing engine path already handles one: `invoke` calls it through
-    // callNative, `callMember` calls it with the receiver as `self` (which a
-    // non-method block ignores), and a foreign caller reaches it with
-    // `asMethod`, which is the capability this phase adds.
-    return ctx->fromMethod(nullptr, enclosing.blocks[blockIndex]);
+    // The shim's address travels in `__code__` as a SmallInteger, exactly as an
+    // interpreted closure's BytecodeModule address does, so the function object a
+    // transpiled MAKE_FN builds is INDISTINGUISHABLE from an interpreted one. That
+    // is what keeps `Try.apply`, a Map's arity-deciding `map`, a by-name
+    // FORCE_THUNK and eta-expansion correct: each reads the callable's module, and
+    // each now finds a module carrying the right metadata.
+    const RuntimeLayout& L = layoutOf("makeFn");
+    if (!enclosing.blocks || blockIndex >= enclosing.blockCount)
+        throw std::logic_error("makeFn: block index out of range in " +
+                               std::string(enclosing.name ? enclosing.name : "<unnamed>"));
+    const BlockRec& sub = *enclosing.blocks[blockIndex];
+    // The handle is installed by linkModule. Checked before dereferencing,
+    // because a null handle means the module was never linked -- a generator or
+    // host defect -- and D74 keeps a defect uncatchable rather than a segfault.
+    const auto* shim = sub.handle ? static_cast<const BytecodeModule*>(*sub.handle) : nullptr;
+    if (!shim)
+        throw std::logic_error("makeFn: the module was not linked before a closure was built");
+    const proto::ProtoObject* fn = ops::makeFunctionObject(
+        ctx, L, static_cast<unsigned>(shim->arity()), L.codeKey,
+        proto::makeSmallInt(reinterpret_cast<std::intptr_t>(shim)), captures, captureCount);
+    return fn;
 }
 
 const proto::ProtoObject* call(proto::ProtoContext* ctx, const proto::ProtoObject* callee,

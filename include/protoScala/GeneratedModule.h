@@ -41,6 +41,16 @@ namespace protoScala::gen {
 /** Bumped only when this header changes incompatibly; equals PROTOSCALA_ABI_SOVERSION. */
 inline constexpr std::uint32_t kGeneratedModuleABI = 1;
 
+/**
+ * The ABI the LOADED library implements, which is not the same question as
+ * `kGeneratedModuleABI`: that constant is baked into whatever compiled against
+ * this header, so comparing it with itself proves nothing. A module, or a host
+ * loading one, compares `generatedModuleAbi()` with its own
+ * `kGeneratedModuleABI` and refuses a mismatch with a version message rather
+ * than an undefined symbol.
+ */
+std::uint32_t generatedModuleAbi();
+
 // --- static tables the generated file defines ------------------------------
 
 /**
@@ -90,8 +100,26 @@ struct BlockRec {
     /** One interned symbol per `strings` entry, so a Names / ClassSpec-member /
      *  KwSendSite-keyword range resolves as `stringSymbols[namesFirst + k]`. */
     const proto::ProtoString** stringSymbols;
-    /** Nested blocks, indexed by the operand MAKE_FN carries. */
-    const proto::ProtoMethod* blocks; std::size_t blockCount;
+    /**
+     * Nested blocks, indexed by the operand MAKE_FN carries. Records rather than
+     * bare thunks, because MAKE_FN needs the child's `handle` as well as its
+     * `entry`: the function object it builds carries the handle, which is what
+     * makes it indistinguishable from an interpreted closure.
+     */
+    const BlockRec* const* blocks; std::size_t blockCount;
+    /**
+     * The local slot each captured value is written into on entry, in the order
+     * MAKE_FN pushed them. `Frame` reads them out of the closure object.
+     */
+    const int* captureSlots;
+    /**
+     * Filled once by `linkModule` with an opaque handle to this block, which the
+     * runtime uses as the block's identity: a transpiled function object carries
+     * it where an interpreted one carries its bytecode module, so that every
+     * caller that reads a callable's arity, method-ness or paramless-ness gets the
+     * right answer without knowing which kind it holds.
+     */
+    void** handle;
 };
 
 // --- module lifecycle ------------------------------------------------------

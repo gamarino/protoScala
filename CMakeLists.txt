@@ -202,7 +202,7 @@ else()
                    "from ${PROTOCORE_LIB_DIR}")
 endif()
 
-include_directories(${PROTOCORE_INCLUDE_DIRS} src ${CMAKE_CURRENT_BINARY_DIR}/generated)
+include_directories(${PROTOCORE_INCLUDE_DIRS} src include ${CMAKE_CURRENT_BINARY_DIR}/generated)
 
 # --- The published ABI of libprotoScala.so (Phase 7 D3) -------------------------
 # One shared library, one installed header. PROTOSCALA_ABI_SOVERSION moves when
@@ -329,6 +329,7 @@ add_library(protoscala_runtime OBJECT
     src/runtime/PreludeImage.cpp
     src/umd/ScalaModuleProvider.cpp
     src/umd/ProviderPlugins.cpp
+    src/runtime/GeneratedSupport.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/generated/PreludeSource.cpp
 )
 target_link_libraries(protoscala_runtime PUBLIC protoscala_compiler protoscala_support
@@ -392,7 +393,7 @@ set_property(TARGET protoscala_repl PROPERTY POSITION_INDEPENDENT_CODE ON)
 # leave the ABI as bare C++ mangling with no version marker, loadable only by the
 # `protoscala` binary.
 add_library(protoScala SHARED
-    src/runtime/GeneratedSupport.cpp
+    src/runtime/AbiVersion.cpp
 )
 target_link_libraries(protoScala
     PRIVATE protoscala_repl protoscala_runtime protoscala_compiler
@@ -415,6 +416,39 @@ add_executable(protoscala
 )
 target_link_libraries(protoscala PRIVATE protoScala)
 target_compile_options(protoscala PRIVATE -Wall -Wextra -Wpedantic)
+
+# --- protoscalac: the transpiler (Phase 7) --------------------------------------
+# It links the shared library, creates a Session (D7) and therefore a ProtoSpace,
+# which is the one way it differs from protoscala-precompile. Both the build
+# tree's toolchain directories and the installation's are baked in, and the
+# executable decides between them by comparing its own directory with
+# PROTOSCALAC_BUILD_BINDIR, so a relocated prefix keeps working.
+list(JOIN PROTOCORE_INCLUDE_DIRS ":" PROTOSCALAC_PROTOCORE_INCLUDES)
+set(PROTOSCALAC_BUILD_INCLUDE_DIRS
+    "${CMAKE_CURRENT_SOURCE_DIR}/include:${PROTOSCALAC_PROTOCORE_INCLUDES}")
+if(DEFINED PROTOCORE_LIB_DIR)
+    set(PROTOSCALAC_BUILD_LIBRARY_DIRS "${CMAKE_BINARY_DIR}:${PROTOCORE_LIB_DIR}")
+else()
+    set(PROTOSCALAC_BUILD_LIBRARY_DIRS "${CMAKE_BINARY_DIR}")
+endif()
+set(PROTOSCALAC_INSTALL_INCLUDE_DIRS "../${CMAKE_INSTALL_INCLUDEDIR}")
+set(PROTOSCALAC_INSTALL_LIBRARY_DIRS "../${CMAKE_INSTALL_LIBDIR}")
+configure_file(src/compiler/protoscalac_paths.h.in generated/protoscalac_paths.h @ONLY)
+
+add_executable(protoscalac
+    src/compiler/TranspilerMain.cpp
+    src/compiler/CppEmitter.cpp
+)
+target_link_libraries(protoscalac PRIVATE protoScala)
+target_include_directories(protoscalac PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated")
+target_compile_options(protoscalac PRIVATE -Wall -Wextra -Wpedantic)
+if(UNIX AND NOT APPLE)
+    set_target_properties(protoscalac PROPERTIES
+        INSTALL_RPATH "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
+elseif(APPLE)
+    set_target_properties(protoscalac PROPERTIES
+        INSTALL_RPATH "@executable_path/../${CMAKE_INSTALL_LIBDIR}")
+endif()
 
 # --- Tests ----------------------------------------------------------------------
 enable_testing()
@@ -440,7 +474,7 @@ if(UNIX)
     endif()
 endif()
 
-install(TARGETS protoscala
+install(TARGETS protoscala protoscalac
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     COMPONENT protoScala)
 # Phase 7 D3: the library and its ONE header are what a module author needs.

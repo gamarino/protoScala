@@ -682,6 +682,31 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                                                    const proto::ProtoObject* captures,
                                                    const proto::ProtoSparseList* keywords) {
     checkNativeStack();
+    // A TRANSPILED block (Phase 7): the body is a proto::ProtoMethod and there are
+    // no code words to run. Everything above this line and below it is unchanged,
+    // and so is every caller: a transpiled module carries the same metadata an
+    // interpreted one does, so `compiledModuleOf` and its nineteen readers cannot
+    // tell the two apart -- which is the whole reason the entry lives on the module
+    // rather than in a second callable shape.
+    //
+    // `self`, for a block that is NOT a method, carries the captures: the generated
+    // frame reads its capture slots from it. For a method, slot 0 is the receiver,
+    // exactly as it is here, and a method never has captures (callMember passes
+    // none, and a module that needs them fails loudly below).
+    if (const proto::ProtoMethod entry = mod.nativeEntry()) {
+        const bool method = mod.isMethod();
+        const proto::ProtoObject* self = method ? (argc ? args[0] : PROTO_NONE) : captures;
+        const unsigned skip = method ? 1u : 0u;
+        proto::ProtoContext scope(parent->space, parent);
+        const proto::ProtoList* positional =
+            scope.newList(argc > skip ? argc - skip : 0u, args + skip);
+        scope.returnValue = positional->asObject(&scope);
+        NativeDepthGuard depth;
+        const proto::ProtoObject* r = entry(&scope, self, nullptr, positional, keywords);
+        if (!r) r = PROTO_NONE;
+        scope.returnValue = r;
+        return r;
+    }
     const unsigned arity = static_cast<unsigned>(mod.arity());
     const unsigned fixed = mod.isVariadic() ? arity - 1 : arity;
     // A call that passes fewer positional arguments than the callee declares is

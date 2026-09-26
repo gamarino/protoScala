@@ -4,6 +4,7 @@
 #include "frontend/Parser.h"
 #include "runtime/ActorScheduler.h"
 #include "runtime/Errors.h"
+#include "runtime/GeneratedModuleEntry.h"
 #include "runtime/Prelude.h"
 #include "runtime/Primitives.h"
 #include "runtime/Values.h"
@@ -13,6 +14,8 @@
 #include "umd/ScalaModuleProvider.h"
 
 #include <algorithm>
+#include <dlfcn.h>
+
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -232,6 +235,61 @@ std::string Session::showThrown(proto::ProtoContext* ctx, const proto::ProtoObje
     } catch (...) {
         return "<exception whose toString failed>";
     }
+}
+
+int Session::runModule(const std::string& soPath, const std::vector<std::string>& args) {
+    // The driver of a transpiled module (Phase 7 Task 10 Step 5). It opens the
+    // two guards a generated module needs and nothing else:
+    //
+    //  - ActiveCallGuard, because every gen:: operation reaches the engine and
+    //    the layout the way every native does, through activeCallContext();
+    //  - ModuleEntryGuard, because proto_module_init takes no arguments -- that
+    //    is the contract a hand-written C++ module obeys -- so the context it
+    //    allocates in is handed over, not passed.
+    void* handle = dlopen(soPath.c_str(), RTLD_NOW | RTLD_GLOBAL);
+    if (!handle) {
+        std::fprintf(stderr, "protoscala: cannot load '%s': %s\n", soPath.c_str(), dlerror());
+        return 1;
+    }
+    using InitFn = void* (*)();
+    using MainFn = int (*)(int, char**);
+    auto init = reinterpret_cast<InitFn>(dlsym(handle, "proto_module_init"));
+    if (!init) {
+        std::fprintf(stderr, "protoscala: not a protoScala module: proto_module_init not found "
+                             "in '%s'\n", soPath.c_str());
+        return 1;
+    }
+    auto mainFn = reinterpret_cast<MainFn>(dlsym(handle, "proto_module_main"));
+
+    proto::ProtoContext ctx(&space_, runtime_.rootContext());
+    ExecutionEngine::ActiveCallGuard active(&engine_, &runtime_.layout());
+    int rc = 0;
+    try {
+        {
+            gen::ModuleEntryGuard entry(&ctx);
+            const proto::ProtoObject* mod = static_cast<const proto::ProtoObject*>(init());
+            ctx.returnValue = mod;   // rooted for the rest of this context
+        }
+        if (mainFn) {
+            gen::ModuleEntryGuard entry(&ctx);
+            std::vector<char*> argv;
+            std::vector<std::string> owned = args;
+            argv.reserve(owned.size());
+            for (std::string& a : owned) argv.push_back(a.data());
+            rc = mainFn(static_cast<int>(argv.size()), argv.empty() ? nullptr : argv.data());
+        }
+    } catch (const ScalaThrow& t) {
+        std::fflush(stdout);
+        std::fprintf(stderr, "%s:%d: error: %s\n", soPath.c_str(), t.line,
+                     showThrown(&ctx, t.value).c_str());
+        return 1;
+    } catch (const ScalaError& e) {
+        std::fflush(stdout);
+        std::fprintf(stderr, "%s:%d: error: %s\n", soPath.c_str(), e.line, e.what());
+        return 1;
+    }
+    std::fflush(stdout);
+    return rc;
 }
 
 int Session::runScript(const std::string& path, const std::vector<std::string>& args) {

@@ -177,6 +177,8 @@ TEST_F(Facade, LinkModuleInternsOnceAndRefusesASecondSpace) {
         {5, 0, 0.0, 10, 0, 0, false, "alpha", 5, nullptr, 0, 0, 0, 0},
         {5, 0, 0.0, 10, 0, 0, false, "verylongattributename", 21, "Box::alpha", 0, 0, 0, 0},
     };
+    static const int captureSlots[1] = {0};
+    static void* handle = nullptr;
     static gen::BlockRec rec{};
     rec.name = "blk0";
     rec.consts = consts;
@@ -186,6 +188,9 @@ TEST_F(Facade, LinkModuleInternsOnceAndRefusesASecondSpace) {
     rec.symbols = symbols;
     rec.keySymbols = keySymbols;
     rec.stringSymbols = stringSymbols;
+    rec.captureSlots = captureSlots;
+    rec.handle = &handle;
+    rec.entry = &twoArgBody;
     static const gen::BlockRec* const blocks[] = {&rec};
 
     gen::linkModule(c(), blocks, 1);
@@ -201,6 +206,12 @@ TEST_F(Facade, LinkModuleInternsOnceAndRefusesASecondSpace) {
     EXPECT_EQ(keySymbols[1], proto::ProtoString::createSymbol(c(), "Box::alpha"));
     EXPECT_EQ(keySymbols[0], nullptr);          // this constant carries no key
     EXPECT_EQ(stringSymbols[1], proto::ProtoString::createSymbol(c(), "verylongattributename"));
+
+    // linkModule also installs the block's handle: a transpiled function object
+    // carries it where an interpreted one carries its bytecode module, which is
+    // what makes the two indistinguishable to every caller that reads a
+    // callable's arity or method-ness.
+    EXPECT_NE(handle, nullptr);
 
     // Idempotent: a second call in the same space is a no-op, not a re-intern.
     gen::linkModule(c(), blocks, 1);
@@ -230,9 +241,14 @@ TEST_F(Facade, TheUnimplementedOperationsRefuseLoudly) {
     EXPECT_THROW(gen::sendSuper(c(), blk, 0, base), std::logic_error);
     EXPECT_THROW(gen::sendKw(c(), blk, 0, base), std::logic_error);
     EXPECT_THROW(gen::callKw(c(), blk, 0, base), std::logic_error);
-    EXPECT_THROW(gen::importModule(c(), "", "util.Strings", "/tmp"), std::logic_error);
-    // A capturing closure is the open design question T0-13, and it refuses with
-    // a message that says so rather than losing the captures silently.
+    EXPECT_THROW(gen::importModule(c(), "", "util.Strings", "/var/empty"), std::logic_error);
+    // makeFn on an UNLINKED module is a generator defect, not a Scala error: the
+    // handle a function object must carry is installed by linkModule, so building
+    // a closure before linking would silently produce an uncallable object.
+    static const gen::BlockRec child{};
+    static const gen::BlockRec* const kids[] = {&child};
+    blk.blocks = kids;
+    blk.blockCount = 1;
     const proto::ProtoObject* caps[1] = {PROTO_NONE};
     EXPECT_THROW(gen::makeFn(c(), blk, 0, caps, 1), std::logic_error);
 }

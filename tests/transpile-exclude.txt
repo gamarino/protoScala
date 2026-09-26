@@ -1,0 +1,535 @@
+# tests/transpile-exclude.txt — the fixtures the differential harness does NOT
+# run transpiled, one per line, with a reason code and a reason.
+#
+#   <relative fixture path>  <reason-code>  <reason>
+#
+# The list is checked in BOTH directions by tests/conformance/run-transpiled.sh:
+# a fixture here that protoscalac refuses is a pass with the reason printed, and a
+# fixture here that transpiles, compiles and RUNS correctly is a FAIL with the
+# message to remove it. That is what keeps the list from rotting, and it is the
+# same discipline the XFAIL directive already uses.
+#
+# Generated from a measured sweep of every registered fixture, not written by hand:
+# every entry is a fixture protoscalac REFUSES today, with the code saying why.
+# Nothing is on this list because it produced a WRONG ANSWER -- a wrong answer is a
+# generator defect, and §D5 requires a refusal at transpile time instead. Each of
+# the six codes below was added because a fixture produced one.
+#
+# Counts by code:
+#   D113    26
+#   D118   304
+#   D120    64
+#   D121    18
+#   D123    87
+#
+#   D113  await: cooperative suspension snapshots a bytecode frame, and a
+#         transpiled frame has no ip to record. Detected by SEND-site name, so a
+#         user method named `await` is refused too -- the safe direction.
+#   D118  classes, traits and objects: MAKE_CLASS needs the ClassSpec rebuilt
+#         from the static tables.
+#   D120  try / catch / finally: the generated frame has no retry loop yet.
+#   D121  named arguments and defaults: both are bound by the callee's prologue,
+#         which a transpiled frame does not run.
+#   D122  super sends: the search needs the defining template's key.
+#   D123  imports: resolved at transpile time by loading (D90) and not
+#         re-performed at load time, so the imported globals would be unbound.
+#
+02-expressions/double-widening-braces.scala                            D118   classes, traits and objects are not transpiled in the first cut
+02-expressions/double-widening-remainder-braces.scala                  D118   classes, traits and objects are not transpiled in the first cut
+02-expressions/double-widening-remainder.scala                         D118   classes, traits and objects are not transpiled in the first cut
+02-expressions/double-widening.scala                                   D118   classes, traits and objects are not transpiled in the first cut
+03-definitions/ctor-param-lists-three.scala                            D118   classes, traits and objects are not transpiled in the first cut
+03-definitions/ctor-param-lists.scala                                  D118   classes, traits and objects are not transpiled in the first cut
+03-definitions/nested-case-class-in-object.scala                       D118   classes, traits and objects are not transpiled in the first cut
+03-definitions/nested-class-in-object-braces.scala                     D118   classes, traits and objects are not transpiled in the first cut
+03-definitions/nested-class-in-object.scala                            D118   classes, traits and objects are not transpiled in the first cut
+03-definitions/nested-object-in-object.scala                           D118   classes, traits and objects are not transpiled in the first cut
+03-definitions/nested-sibling-resolves-unqualified.scala               D118   classes, traits and objects are not transpiled in the first cut
+03-definitions/nested-trait-and-match.scala                            D118   classes, traits and objects are not transpiled in the first cut
+05-functions/by-name-constructor-parameter.scala                       D118   classes, traits and objects are not transpiled in the first cut
+05-functions/by-name-on-an-object-method.scala                         D118   classes, traits and objects are not transpiled in the first cut
+05-functions/by-name-through-a-dynamic-send-is-eager.scala             D118   classes, traits and objects are not transpiled in the first cut
+07-classes/abstract-def-implemented-braces.scala                       D118   classes, traits and objects are not transpiled in the first cut
+07-classes/abstract-def-implemented.scala                              D118   classes, traits and objects are not transpiled in the first cut
+07-classes/abstract-var-implemented-braces.scala                       D118   classes, traits and objects are not transpiled in the first cut
+07-classes/abstract-var-implemented.scala                              D118   classes, traits and objects are not transpiled in the first cut
+07-classes/aux-constructor-braces.scala                                D118   classes, traits and objects are not transpiled in the first cut
+07-classes/aux-constructor.scala                                       D118   classes, traits and objects are not transpiled in the first cut
+07-classes/class-basics-braces.scala                                   D118   classes, traits and objects are not transpiled in the first cut
+07-classes/class-basics-indent.scala                                   D118   classes, traits and objects are not transpiled in the first cut
+07-classes/class-private-companion-access-braces.scala                 D118   classes, traits and objects are not transpiled in the first cut
+07-classes/class-private-companion-access.scala                        D118   classes, traits and objects are not transpiled in the first cut
+07-classes/class-private-member-braces.scala                           D118   classes, traits and objects are not transpiled in the first cut
+07-classes/class-private-member.scala                                  D118   classes, traits and objects are not transpiled in the first cut
+07-classes/class-reassign-val-braces.scala                             D118   classes, traits and objects are not transpiled in the first cut
+07-classes/class-reassign-val.scala                                    D118   classes, traits and objects are not transpiled in the first cut
+07-classes/class-var-field-braces.scala                                D118   classes, traits and objects are not transpiled in the first cut
+07-classes/class-var-field.scala                                       D118   classes, traits and objects are not transpiled in the first cut
+07-classes/companion-apply-braces.scala                                D118   classes, traits and objects are not transpiled in the first cut
+07-classes/companion-apply.scala                                       D118   classes, traits and objects are not transpiled in the first cut
+07-classes/ctor-param-fields-before-super-braces.scala                 D118   classes, traits and objects are not transpiled in the first cut
+07-classes/ctor-param-fields-before-super.scala                        D118   classes, traits and objects are not transpiled in the first cut
+07-classes/default-tostring-braces.scala                               D118   classes, traits and objects are not transpiled in the first cut
+07-classes/default-tostring.scala                                      D118   classes, traits and objects are not transpiled in the first cut
+07-classes/explicit-apply-braces.scala                                 D118   classes, traits and objects are not transpiled in the first cut
+07-classes/explicit-apply.scala                                        D118   classes, traits and objects are not transpiled in the first cut
+07-classes/lazy-val-member-braces.scala                                D118   classes, traits and objects are not transpiled in the first cut
+07-classes/lazy-val-member.scala                                       D118   classes, traits and objects are not transpiled in the first cut
+07-classes/mixin-trait-superclass-braces.scala                         D118   classes, traits and objects are not transpiled in the first cut
+07-classes/mixin-trait-superclass.scala                                D118   classes, traits and objects are not transpiled in the first cut
+07-classes/object-singleton-braces.scala                               D118   classes, traits and objects are not transpiled in the first cut
+07-classes/object-singleton-indent.scala                               D118   classes, traits and objects are not transpiled in the first cut
+07-classes/override-val-member-braces.scala                            D118   classes, traits and objects are not transpiled in the first cut
+07-classes/override-val-member.scala                                   D118   classes, traits and objects are not transpiled in the first cut
+07-classes/override-val-over-ancestor-body-val-braces.scala            D118   classes, traits and objects are not transpiled in the first cut
+07-classes/override-val-over-ancestor-body-val.scala                   D118   classes, traits and objects are not transpiled in the first cut
+07-classes/override-val-over-def-braces.scala                          D118   classes, traits and objects are not transpiled in the first cut
+07-classes/override-val-over-def.scala                                 D118   classes, traits and objects are not transpiled in the first cut
+07-classes/override-val-parameter-braces.scala                         D118   classes, traits and objects are not transpiled in the first cut
+07-classes/override-val-parameter-seen-by-super-braces.scala           D118   classes, traits and objects are not transpiled in the first cut
+07-classes/override-val-parameter-seen-by-super.scala                  D118   classes, traits and objects are not transpiled in the first cut
+07-classes/override-val-parameter.scala                                D118   classes, traits and objects are not transpiled in the first cut
+07-classes/param-shadows-inherited-member-braces.scala                 D118   classes, traits and objects are not transpiled in the first cut
+07-classes/param-shadows-inherited-member.scala                        D118   classes, traits and objects are not transpiled in the first cut
+07-classes/paramless-def-applied-braces.scala                          D118   classes, traits and objects are not transpiled in the first cut
+07-classes/paramless-def-applied.scala                                 D118   classes, traits and objects are not transpiled in the first cut
+07-classes/paramless-def-returning-function-braces.scala               D118   classes, traits and objects are not transpiled in the first cut
+07-classes/paramless-def-returning-function.scala                      D118   classes, traits and objects are not transpiled in the first cut
+07-classes/private-foreign-receiver-braces.scala                       D118   classes, traits and objects are not transpiled in the first cut
+07-classes/private-foreign-receiver.scala                              D118   classes, traits and objects are not transpiled in the first cut
+07-classes/private-member-null-receiver-braces.scala                   D118   classes, traits and objects are not transpiled in the first cut
+07-classes/private-member-null-receiver.scala                          D118   classes, traits and objects are not transpiled in the first cut
+07-classes/stackable-traits-braces.scala                               D118   classes, traits and objects are not transpiled in the first cut
+07-classes/stackable-traits.scala                                      D118   classes, traits and objects are not transpiled in the first cut
+07-classes/this-and-self-alias-braces.scala                            D118   classes, traits and objects are not transpiled in the first cut
+07-classes/this-and-self-alias.scala                                   D118   classes, traits and objects are not transpiled in the first cut
+07-classes/this-escapes-constructor-braces.scala                       D118   classes, traits and objects are not transpiled in the first cut
+07-classes/this-escapes-constructor.scala                              D118   classes, traits and objects are not transpiled in the first cut
+07-classes/this-identity-in-constructor-braces.scala                   D118   classes, traits and objects are not transpiled in the first cut
+07-classes/this-identity-in-constructor.scala                          D118   classes, traits and objects are not transpiled in the first cut
+07-classes/trait-abstract-members-braces.scala                         D118   classes, traits and objects are not transpiled in the first cut
+07-classes/trait-abstract-members.scala                                D118   classes, traits and objects are not transpiled in the first cut
+07-classes/trait-init-order-braces.scala                               D118   classes, traits and objects are not transpiled in the first cut
+07-classes/trait-init-order.scala                                      D118   classes, traits and objects are not transpiled in the first cut
+07-classes/trait-linearization-braces.scala                            D118   classes, traits and objects are not transpiled in the first cut
+07-classes/trait-linearization-indent.scala                            D118   classes, traits and objects are not transpiled in the first cut
+07-classes/trait-parameters-braces.scala                               D118   classes, traits and objects are not transpiled in the first cut
+07-classes/trait-parameters.scala                                      D118   classes, traits and objects are not transpiled in the first cut
+07-classes/varargs-constructor-braces.scala                            D118   classes, traits and objects are not transpiled in the first cut
+07-classes/varargs-constructor.scala                                   D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/can-equal-override-braces.scala                        D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/can-equal-override.scala                               D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/can-equal-subclass-braces.scala                        D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/can-equal-subclass.scala                               D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/case-class-basics-braces.scala                         D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/case-class-basics-indent.scala                         D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/case-class-hashcodes-braces.scala                      D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/case-class-hashcodes.scala                             D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/case-class-special-values-braces.scala                 D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/case-class-special-values.scala                        D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/case-class-var-field-braces.scala                      D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/case-class-var-field.scala                             D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/case-class-varargs-braces.scala                        D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/case-class-varargs.scala                               D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/case-object-braces.scala                               D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/case-object.scala                                      D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/companion-user-apply-braces.scala                      D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/companion-user-apply.scala                             D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/copy-parameter-twice.scala                             D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/copy-positional-and-named-braces.scala                 D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/copy-positional-and-named.scala                        D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/copy-unknown-name.scala                                D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/copy-varargs-rejected.scala                            D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/equality-non-case-class-braces.scala                   D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/equality-non-case-class.scala                          D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/inherited-tostring-wins-braces.scala                   D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/inherited-tostring-wins.scala                          D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/nested-equality-braces.scala                           D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/nested-equality.scala                                  D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/option-basics-braces.scala                             D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/option-basics.scala                                    D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/product-element-out-of-range.scala                     D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/product-members-braces.scala                           D118   classes, traits and objects are not transpiled in the first cut
+08-case-classes/product-members.scala                                  D118   classes, traits and objects are not transpiled in the first cut
+09-apply/apply-on-objects-braces.scala                                 D118   classes, traits and objects are not transpiled in the first cut
+09-apply/apply-on-objects.scala                                        D118   classes, traits and objects are not transpiled in the first cut
+09-apply/function-valued-fields-braces.scala                           D118   classes, traits and objects are not transpiled in the first cut
+09-apply/function-valued-fields.scala                                  D118   classes, traits and objects are not transpiled in the first cut
+09-apply/method-values-braces.scala                                    D118   classes, traits and objects are not transpiled in the first cut
+09-apply/method-values.scala                                           D118   classes, traits and objects are not transpiled in the first cut
+09-apply/setters-from-outside-braces.scala                             D118   classes, traits and objects are not transpiled in the first cut
+09-apply/setters-from-outside.scala                                    D118   classes, traits and objects are not transpiled in the first cut
+09-apply/update-method-braces.scala                                    D118   classes, traits and objects are not transpiled in the first cut
+09-apply/update-method.scala                                           D118   classes, traits and objects are not transpiled in the first cut
+10-lists/flatmap-option-braces.scala                                   D118   classes, traits and objects are not transpiled in the first cut
+10-lists/flatmap-option.scala                                          D118   classes, traits and objects are not transpiled in the first cut
+10-lists/list-of-case-classes-braces.scala                             D118   classes, traits and objects are not transpiled in the first cut
+10-lists/list-of-case-classes.scala                                    D118   classes, traits and objects are not transpiled in the first cut
+11-pattern-matching/alternatives-and-binders-braces.scala              D118   classes, traits and objects are not transpiled in the first cut
+11-pattern-matching/alternatives-and-binders.scala                     D118   classes, traits and objects are not transpiled in the first cut
+11-pattern-matching/case-class-extraction-braces.scala                 D118   classes, traits and objects are not transpiled in the first cut
+11-pattern-matching/case-class-extraction.scala                        D118   classes, traits and objects are not transpiled in the first cut
+11-pattern-matching/custom-extractors-braces.scala                     D118   classes, traits and objects are not transpiled in the first cut
+11-pattern-matching/custom-extractors.scala                            D118   classes, traits and objects are not transpiled in the first cut
+11-pattern-matching/deep-hierarchy-membership-braces.scala             D118   classes, traits and objects are not transpiled in the first cut
+11-pattern-matching/deep-hierarchy-membership.scala                    D118   classes, traits and objects are not transpiled in the first cut
+11-pattern-matching/is-instance-of-braces.scala                        D118   classes, traits and objects are not transpiled in the first cut
+11-pattern-matching/is-instance-of.scala                               D118   classes, traits and objects are not transpiled in the first cut
+11-pattern-matching/match-error-case-class-braces.scala                D118   classes, traits and objects are not transpiled in the first cut
+11-pattern-matching/match-error-case-class.scala                       D118   classes, traits and objects are not transpiled in the first cut
+11-pattern-matching/sealed-adt-braces.scala                            D118   classes, traits and objects are not transpiled in the first cut
+11-pattern-matching/sealed-adt.scala                                   D118   classes, traits and objects are not transpiled in the first cut
+11-pattern-matching/typed-patterns-braces.scala                        D118   classes, traits and objects are not transpiled in the first cut
+11-pattern-matching/typed-patterns.scala                               D118   classes, traits and objects are not transpiled in the first cut
+11-pattern-matching/val-patterns-braces.scala                          D118   classes, traits and objects are not transpiled in the first cut
+11-pattern-matching/val-patterns.scala                                 D118   classes, traits and objects are not transpiled in the first cut
+12-for-comprehensions/case-generator-filters-braces.scala              D118   classes, traits and objects are not transpiled in the first cut
+12-for-comprehensions/case-generator-filters.scala                     D118   classes, traits and objects are not transpiled in the first cut
+12-for-comprehensions/generator-without-case-filters-braces.scala      D118   classes, traits and objects are not transpiled in the first cut
+12-for-comprehensions/generator-without-case-filters.scala             D118   classes, traits and objects are not transpiled in the first cut
+12-for-comprehensions/list-and-option-braces.scala                     D118   classes, traits and objects are not transpiled in the first cut
+12-for-comprehensions/list-and-option.scala                            D118   classes, traits and objects are not transpiled in the first cut
+12-for-comprehensions/over-option-braces.scala                         D118   classes, traits and objects are not transpiled in the first cut
+12-for-comprehensions/over-option.scala                                D118   classes, traits and objects are not transpiled in the first cut
+12-for-comprehensions/over-user-class-braces.scala                     D118   classes, traits and objects are not transpiled in the first cut
+12-for-comprehensions/over-user-class.scala                            D118   classes, traits and objects are not transpiled in the first cut
+12-for-comprehensions/pattern-generators-braces.scala                  D118   classes, traits and objects are not transpiled in the first cut
+12-for-comprehensions/pattern-generators.scala                         D118   classes, traits and objects are not transpiled in the first cut
+13-actors/ask-with-no-reply.scala                                      D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+13-actors/await-deep-chain.scala                                       D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+13-actors/await-in-a-loop.scala                                        D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+13-actors/await-one-worker-braces.scala                                D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+13-actors/await-one-worker.scala                                       D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+13-actors/await-refused-inside-map.scala                               D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+13-actors/case-class-messages-braces.scala                             D118   classes, traits and objects are not transpiled in the first cut
+13-actors/case-class-messages.scala                                    D118   classes, traits and objects are not transpiled in the first cut
+13-actors/handler-returns-state-only.scala                             D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+13-actors/handler-state-is-a-pair.scala                                D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+13-actors/many-actors.scala                                            D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+13-actors/priority-accepts-a-plain-int.scala                           D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+14-futures/ask-and-await.scala                                         D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+14-futures/ask-is-ordered-behind-sends.scala                           D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+14-futures/await-a-failed-future.scala                                 D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+14-futures/failed-ask-carries-the-exception.scala                      D118   classes, traits and objects are not transpiled in the first cut
+14-futures/failed-future-combinators-carry-the-exception.scala         D118   classes, traits and objects are not transpiled in the first cut
+14-futures/future-apply.scala                                          D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+14-futures/future-block-body.scala                                     D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+14-futures/map-and-flatmap.scala                                       D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+14-futures/map-on-a-completed-future.scala                             D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+14-futures/recover.scala                                               D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+14-futures/threads-send-concurrently.scala                             D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+14-futures/try-matches-scalac.scala                                    D118   classes, traits and objects are not transpiled in the first cut
+16-strings/interpolation-calls-tostring.scala                          D118   classes, traits and objects are not transpiled in the first cut
+16-strings/interpolation-unknown.scala                                 D118   classes, traits and objects are not transpiled in the first cut
+17-collections/list-sorted-needs-comparable.scala                      D118   classes, traits and objects are not transpiled in the first cut
+17-collections/list-sorting-is-stable.scala                            D118   classes, traits and objects are not transpiled in the first cut
+18-maps-and-sets/map-case-class-keys-braces.scala                      D118   classes, traits and objects are not transpiled in the first cut
+18-maps-and-sets/map-case-class-keys.scala                             D118   classes, traits and objects are not transpiled in the first cut
+18-maps-and-sets/map-classification-round-trip.scala                   D118   classes, traits and objects are not transpiled in the first cut
+18-maps-and-sets/map-enum-case-keys.scala                              D118   classes, traits and objects are not transpiled in the first cut
+18-maps-and-sets/map-equals-without-hashcode-misses.scala              D118   classes, traits and objects are not transpiled in the first cut
+18-maps-and-sets/map-identity-keys-are-distinct.scala                  D118   classes, traits and objects are not transpiled in the first cut
+18-maps-and-sets/map-overriding-equals-switches-the-classification.scala D118   classes, traits and objects are not transpiled in the first cut
+18-maps-and-sets/map-parameterised-enum-case-keys.scala                D118   classes, traits and objects are not transpiled in the first cut
+18-maps-and-sets/map-value-keys-are-structural.scala                   D118   classes, traits and objects are not transpiled in the first cut
+18-maps-and-sets/set-classification-mirrors-map.scala                  D118   classes, traits and objects are not transpiled in the first cut
+19-either-try/either-basics.scala                                      D118   classes, traits and objects are not transpiled in the first cut
+19-either-try/either-fold-and-swap.scala                               D118   classes, traits and objects are not transpiled in the first cut
+19-either-try/either-for-comprehension-braces.scala                    D118   classes, traits and objects are not transpiled in the first cut
+19-either-try/either-for-comprehension.scala                           D118   classes, traits and objects are not transpiled in the first cut
+19-either-try/either-has-no-withfilter.scala                           D118   classes, traits and objects are not transpiled in the first cut
+19-either-try/option-extras.scala                                      D118   classes, traits and objects are not transpiled in the first cut
+19-either-try/option-fold-and-toright.scala                            D118   classes, traits and objects are not transpiled in the first cut
+20-exceptions/actor-survives-a-handler-exception.scala                 D118   classes, traits and objects are not transpiled in the first cut
+20-exceptions/await-a-failed-future-inside-try.scala                   D118   classes, traits and objects are not transpiled in the first cut
+20-exceptions/await-a-failed-future-runs-the-finally.scala             D118   classes, traits and objects are not transpiled in the first cut
+20-exceptions/await-inside-catch.scala                                 D120   the generated frame has no retry loop yet
+20-exceptions/await-inside-finally.scala                               D120   the generated frame has no retry loop yet
+20-exceptions/await-inside-try.scala                                   D120   the generated frame has no retry loop yet
+20-exceptions/byname-thunk-throws-at-the-use-site.scala                D120   the generated frame has no retry loop yet
+20-exceptions/byname-unresolved-call-site-is-eager.scala               D118   classes, traits and objects are not transpiled in the first cut
+20-exceptions/catch-a-function-value.scala                             D118   classes, traits and objects are not transpiled in the first cut
+20-exceptions/catch-by-type-braces.scala                               D120   the generated frame has no retry loop yet
+20-exceptions/catch-by-type.scala                                      D120   the generated frame has no retry loop yet
+20-exceptions/catch-does-not-match-propagates.scala                    D120   the generated frame has no retry loop yet
+20-exceptions/catch-in-a-loop-braces.scala                             D120   the generated frame has no retry loop yet
+20-exceptions/catch-in-a-loop.scala                                    D120   the generated frame has no retry loop yet
+20-exceptions/catch-is-a-pattern-match-braces.scala                    D118   classes, traits and objects are not transpiled in the first cut
+20-exceptions/catch-is-a-pattern-match.scala                           D118   classes, traits and objects are not transpiled in the first cut
+20-exceptions/catch-payload-survives-a-concurrent-collector.scala      D118   classes, traits and objects are not transpiled in the first cut
+20-exceptions/catch-payload-survives-unwinding.scala                   D118   classes, traits and objects are not transpiled in the first cut
+20-exceptions/error-is-not-an-exception.scala                          D120   the generated frame has no retry loop yet
+20-exceptions/finally-does-not-run-on-suspension.scala                 D120   the generated frame has no retry loop yet
+20-exceptions/finally-in-a-loop.scala                                  D120   the generated frame has no retry loop yet
+20-exceptions/finally-nested-order-braces.scala                        D120   the generated frame has no retry loop yet
+20-exceptions/finally-nested-order.scala                               D120   the generated frame has no retry loop yet
+20-exceptions/finally-runs-after-catch-braces.scala                    D120   the generated frame has no retry loop yet
+20-exceptions/finally-runs-after-catch.scala                           D120   the generated frame has no retry loop yet
+20-exceptions/finally-runs-on-failure-braces.scala                     D120   the generated frame has no retry loop yet
+20-exceptions/finally-runs-on-failure.scala                            D120   the generated frame has no retry loop yet
+20-exceptions/finally-runs-on-return-braces.scala                      D120   the generated frame has no retry loop yet
+20-exceptions/finally-runs-on-return.scala                             D120   the generated frame has no retry loop yet
+20-exceptions/finally-runs-on-success-braces.scala                     D120   the generated frame has no retry loop yet
+20-exceptions/finally-runs-on-success.scala                            D120   the generated frame has no retry loop yet
+20-exceptions/finally-runs-when-catch-does-not-match.scala             D120   the generated frame has no retry loop yet
+20-exceptions/finally-that-throws-replaces.scala                       D120   the generated frame has no retry loop yet
+20-exceptions/finally-throws-on-return.scala                           D120   the generated frame has no retry loop yet
+20-exceptions/finally-value-is-discarded.scala                         D120   the generated frame has no retry loop yet
+20-exceptions/hierarchy-ancestors.scala                                D118   classes, traits and objects are not transpiled in the first cut
+20-exceptions/native-arithmetic.scala                                  D120   the generated frame has no retry loop yet
+20-exceptions/native-class-cast.scala                                  D120   the generated frame has no retry loop yet
+20-exceptions/native-index.scala                                       D120   the generated frame has no retry loop yet
+20-exceptions/native-match-error.scala                                 D120   the generated frame has no retry loop yet
+20-exceptions/native-no-such-element.scala                             D120   the generated frame has no retry loop yet
+20-exceptions/native-no-such-method.scala                              D120   the generated frame has no retry loop yet
+20-exceptions/native-number-format.scala                               D120   the generated frame has no retry loop yet
+20-exceptions/native-stack-overflow-is-catchable.scala                 D120   the generated frame has no retry loop yet
+20-exceptions/nested-try-braces.scala                                  D120   the generated frame has no retry loop yet
+20-exceptions/nested-try.scala                                         D120   the generated frame has no retry loop yet
+20-exceptions/rethrow-from-a-handler.scala                             D118   classes, traits and objects are not transpiled in the first cut
+20-exceptions/thread-body-throws.scala                                 D118   classes, traits and objects are not transpiled in the first cut
+20-exceptions/throw-and-catch-braces.scala                             D120   the generated frame has no retry loop yet
+20-exceptions/throw-and-catch.scala                                    D120   the generated frame has no retry loop yet
+20-exceptions/try-is-an-expression.scala                               D120   the generated frame has no retry loop yet
+20-exceptions/unknown-native-class-falls-back.scala                    D120   the generated frame has no retry loop yet
+20-exceptions/user-defined-exception.scala                             D118   classes, traits and objects are not transpiled in the first cut
+21-enums/enum-adt-ordinals-count-every-case.scala                      D118   classes, traits and objects are not transpiled in the first cut
+21-enums/enum-adt.scala                                                D118   classes, traits and objects are not transpiled in the first cut
+21-enums/enum-derives-is-ignored.scala                                 D118   classes, traits and objects are not transpiled in the first cut
+21-enums/enum-in-its-own-body-is-unqualified.scala                     D118   classes, traits and objects are not transpiled in the first cut
+21-enums/enum-is-sealed-and-an-enum.scala                              D118   classes, traits and objects are not transpiled in the first cut
+21-enums/enum-match.scala                                              D118   classes, traits and objects are not transpiled in the first cut
+21-enums/enum-named-enum-braces.scala                                  D118   classes, traits and objects are not transpiled in the first cut
+21-enums/enum-named-enum.scala                                         D118   classes, traits and objects are not transpiled in the first cut
+21-enums/enum-nested-in-an-object-braces.scala                         D118   classes, traits and objects are not transpiled in the first cut
+21-enums/enum-nested-in-an-object-from-outside.scala                   D118   classes, traits and objects are not transpiled in the first cut
+21-enums/enum-nested-in-an-object.scala                                D118   classes, traits and objects are not transpiled in the first cut
+21-enums/enum-simple-braces.scala                                      D118   classes, traits and objects are not transpiled in the first cut
+21-enums/enum-simple.scala                                             D118   classes, traits and objects are not transpiled in the first cut
+21-enums/enum-valueof-and-fromordinal.scala                            D118   classes, traits and objects are not transpiled in the first cut
+21-enums/enum-valueof-message-matches-scalac.scala                     D118   classes, traits and objects are not transpiled in the first cut
+21-enums/enum-values-contents.scala                                    D118   classes, traits and objects are not transpiled in the first cut
+21-enums/enum-with-hand-written-companion-braces.scala                 D118   classes, traits and objects are not transpiled in the first cut
+21-enums/enum-with-hand-written-companion.scala                        D118   classes, traits and objects are not transpiled in the first cut
+21-enums/enum-with-methods.scala                                       D118   classes, traits and objects are not transpiled in the first cut
+21-enums/enum-with-parameters.scala                                    D118   classes, traits and objects are not transpiled in the first cut
+21-enums/sealed-trait-exhaustiveness-is-not-checked.scala              D118   classes, traits and objects are not transpiled in the first cut
+22-super-and-extensions/extension-custom-interpolator.scala            D118   classes, traits and objects are not transpiled in the first cut
+22-super-and-extensions/extension-on-a-class.scala                     D118   classes, traits and objects are not transpiled in the first cut
+22-super-and-extensions/super-plain-still-works.scala                  D118   classes, traits and objects are not transpiled in the first cut
+22-super-and-extensions/super-qualified-braces.scala                   D118   classes, traits and objects are not transpiled in the first cut
+22-super-and-extensions/super-qualified-direct-parent.scala            D118   classes, traits and objects are not transpiled in the first cut
+22-super-and-extensions/super-qualified-finds-an-inherited-member.scala D118   classes, traits and objects are not transpiled in the first cut
+22-super-and-extensions/super-qualified-unrelated-type.scala           D118   classes, traits and objects are not transpiled in the first cut
+22-super-and-extensions/super-qualified-with-arguments.scala           D118   classes, traits and objects are not transpiled in the first cut
+22-super-and-extensions/super-qualified.scala                          D118   classes, traits and objects are not transpiled in the first cut
+23-named-arguments/default-reads-an-earlier-parameter-curried.scala    D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
+23-named-arguments/default-reads-an-earlier-parameter.scala            D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
+23-named-arguments/default-reads-an-enclosing-local.scala              D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
+23-named-arguments/defaults-on-a-def.scala                             D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
+23-named-arguments/duplicate-name.scala                                D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
+23-named-arguments/foreign-keyword-value-is-not-lost.scala             D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
+23-named-arguments/foreign-keywords-arrive.scala                       D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
+23-named-arguments/foreign-keywords-only.scala                         D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
+23-named-arguments/foreign-python-keyword.scala                        D123   an import is resolved at transpile time and is not re-performed at load time
+23-named-arguments/foreign-python-open-encoding.scala                  D123   an import is resolved at transpile time and is not re-performed at load time
+23-named-arguments/missing-argument.scala                              D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
+23-named-arguments/named-argument-really-binds.scala                   D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
+23-named-arguments/named-argument-with-a-long-name-binds.scala         D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
+23-named-arguments/named-evaluation-order.scala                        D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
+23-named-arguments/named-on-a-case-class-apply.scala                   D118   classes, traits and objects are not transpiled in the first cut
+23-named-arguments/named-on-a-constructor.scala                        D118   classes, traits and objects are not transpiled in the first cut
+23-named-arguments/named-on-a-def.scala                                D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
+23-named-arguments/named-on-a-function-value.scala                     D118   classes, traits and objects are not transpiled in the first cut
+23-named-arguments/named-on-a-method-of-this.scala                     D118   classes, traits and objects are not transpiled in the first cut
+23-named-arguments/named-on-a-method.scala                             D118   classes, traits and objects are not transpiled in the first cut
+23-named-arguments/unknown-name.scala                                  D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
+24-modules/a-miss-falls-through-the-chain.scala                        D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/a-module-can-define-an-enum.scala                           D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/an-extension-in-a-module-is-global.scala                    D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/an-extension-is-not-installed-until-its-module-loads.scala  D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/an-extension-leaks-into-another-module.scala                D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/an-imported-enum-is-usable-as-a-type.scala                  D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/import-a-bare-name-is-a-module.scala                        D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/import-a-case-class-pattern.scala                           D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/import-a-case-class.scala                                   D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/import-a-cycle.scala                                        D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/import-a-member-arrow-rename.scala                          D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/import-a-member-renamed.scala                               D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/import-a-member.scala                                       D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/import-a-missing-member.scala                               D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/import-a-missing-module.scala                               D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/import-a-module-with-a-parse-error.scala                    D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/import-a-module.scala                                       D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/import-a-qualified-type.scala                               D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/import-a-type-test.scala                                    D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/import-a-wildcard.scala                                     D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/import-an-imported-type-with-new.scala                      D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/import-bare-given-is-ignored.scala                          D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/import-given-is-ignored.scala                               D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/import-inside-a-block.scala                                 D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/import-underscore-wildcard.scala                            D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/import-with-an-alias.scala                                  D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/module-runs-at-import.scala                                 D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/module-runs-once-through-two-paths.scala                    D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/module-runs-once.scala                                      D123   an import is resolved at transpile time and is not re-performed at load time
+24-modules/module-with-a-main.scala                                    D123   an import is resolved at transpile time and is not re-performed at load time
+25-interop/a-bare-prefix-is-a-module-name.scala                        D123   an import is resolved at transpile time and is not re-performed at load time
+25-interop/a-prefix-is-not-a-namespace-error.scala                     D123   an import is resolved at transpile time and is not re-performed at load time
+25-interop/a-prefix-is-not-a-namespace.scala                           D123   an import is resolved at transpile time and is not re-performed at load time
+25-interop/a-provider-failure-is-catchable.scala                       D123   an import is resolved at transpile time and is not re-performed at load time
+25-interop/a-provider-failure-that-is-not-an-exception-is-catchable.scala D123   an import is resolved at transpile time and is not re-performed at load time
+25-interop/a-two-segment-prefix-path.scala                             D123   an import is resolved at transpile time and is not re-performed at load time
+25-interop/no-clj-provider.scala                                       D123   an import is resolved at transpile time and is not re-performed at load time
+25-interop/no-js-provider.scala                                        D123   an import is resolved at transpile time and is not re-performed at load time
+25-interop/no-py-provider.scala                                        D123   an import is resolved at transpile time and is not re-performed at load time
+25-interop/no-st-provider.scala                                        D123   an import is resolved at transpile time and is not re-performed at load time
+25-interop/stand-in-provider-a-null-member-is-not-absent.scala         D123   an import is resolved at transpile time and is not re-performed at load time
+25-interop/stand-in-provider-has-no-types.scala                        D123   an import is resolved at transpile time and is not re-performed at load time
+25-interop/stand-in-provider-keyword.scala                             D123   an import is resolved at transpile time and is not re-performed at load time
+25-interop/stand-in-provider-long-keyword.scala                        D123   an import is resolved at transpile time and is not re-performed at load time
+25-interop/stand-in-provider-member-import.scala                       D123   an import is resolved at transpile time and is not re-performed at load time
+25-interop/stand-in-provider-routes.scala                              D123   an import is resolved at transpile time and is not re-performed at load time
+25-interop/stand-in-provider-unknown-member.scala                      D123   an import is resolved at transpile time and is not re-performed at load time
+25-interop/stand-in-provider-unknown-module.scala                      D123   an import is resolved at transpile time and is not re-performed at load time
+25-interop/stand-in-provider-wildcard-refused.scala                    D123   an import is resolved at transpile time and is not re-performed at load time
+26-file-io/a-closed-source-cannot-be-read.scala                        D120   the generated frame has no retry loop yet
+26-file-io/a-large-file-round-trips.scala                              D118   classes, traits and objects are not transpiled in the first cut
+26-file-io/a-nul-in-a-path-is-refused.scala                            D118   classes, traits and objects are not transpiled in the first cut
+26-file-io/an-unsupported-encoding-is-refused.scala                    D120   the generated frame has no retry loop yet
+26-file-io/append-adds-to-the-end.scala                                D118   classes, traits and objects are not transpiled in the first cut
+26-file-io/delete-refuses-a-directory.scala                            D118   classes, traits and objects are not transpiled in the first cut
+26-file-io/delete-reports-a-missing-file.scala                         D118   classes, traits and objects are not transpiled in the first cut
+26-file-io/every-read-failure-is-an-ioexception.scala                  D120   the generated frame has no retry loop yet
+26-file-io/exists-and-delete.scala                                     D118   classes, traits and objects are not transpiled in the first cut
+26-file-io/round-trip-utf8.scala                                       D118   classes, traits and objects are not transpiled in the first cut
+26-file-io/strict-utf8-rejects-every-malformed-form.scala              D120   the generated frame has no retry loop yet
+26-file-io/write-replaces-the-contents.scala                           D118   classes, traits and objects are not transpiled in the first cut
+26-file-io/write-then-read.scala                                       D118   classes, traits and objects are not transpiled in the first cut
+26-file-io/write-to-a-directory-fails.scala                            D118   classes, traits and objects are not transpiled in the first cut
+26-file-io/write-to-a-missing-directory-fails.scala                    D118   classes, traits and objects are not transpiled in the first cut
+27-predef/a-satisfied-assertion-does-not-evaluate-its-message.scala    D120   the generated frame has no retry loop yet
+27-predef/an-app-object-is-the-program.scala                           D118   classes, traits and objects are not transpiled in the first cut
+27-predef/an-app-object-runs-after-the-top-level.scala                 D118   classes, traits and objects are not transpiled in the first cut
+27-predef/an-app-trait-is-inherited-transitively.scala                 D118   classes, traits and objects are not transpiled in the first cut
+27-predef/an-assertion-error-is-not-an-exception.scala                 D120   the generated frame has no retry loop yet
+27-predef/an-unimplemented-method-raises.scala                         D120   the generated frame has no retry loop yet
+27-predef/assert-reports-a-null-message-as-null.scala                  D120   the generated frame has no retry loop yet
+27-predef/assert-with-a-message.scala                                  D120   the generated frame has no retry loop yet
+27-predef/assert-without-a-message.scala                               D120   the generated frame has no retry loop yet
+27-predef/assume-fails-as-an-assertion.scala                           D120   the generated frame has no retry loop yet
+27-predef/require-with-a-message.scala                                 D120   the generated frame has no retry loop yet
+27-predef/require-without-a-message.scala                              D120   the generated frame has no retry loop yet
+28-member-imports/a-clash-with-a-local-definition-is-refused.scala     D123   an import is resolved at transpile time and is not re-performed at load time
+28-member-imports/a-companion-object-as-a-prefix.scala                 D123   an import is resolved at transpile time and is not re-performed at load time
+28-member-imports/a-module-import-still-loads-a-module.scala           D123   an import is resolved at transpile time and is not re-performed at load time
+28-member-imports/a-named-selector-binds-nothing-else.scala            D123   an import is resolved at transpile time and is not re-performed at load time
+28-member-imports/a-named-selector-import.scala                        D123   an import is resolved at transpile time and is not re-performed at load time
+28-member-imports/a-nested-object-is-bound-under-its-simple-name.scala D123   an import is resolved at transpile time and is not re-performed at load time
+28-member-imports/a-nested-object-is-the-longest-prefix.scala          D123   an import is resolved at transpile time and is not re-performed at load time
+28-member-imports/a-renaming-import.scala                              D123   an import is resolved at transpile time and is not re-performed at load time
+28-member-imports/a-val-is-not-an-importable-prefix.scala              D123   an import is resolved at transpile time and is not re-performed at load time
+28-member-imports/an-enum-and-import-color-star.scala                  D123   an import is resolved at transpile time and is not re-performed at load time
+28-member-imports/an-import-does-not-beat-a-local.scala                D123   an import is resolved at transpile time and is not re-performed at load time
+28-member-imports/an-imported-enum-case-is-a-pattern.scala             D123   an import is resolved at transpile time and is not re-performed at load time
+28-member-imports/an-imported-nested-case-class-is-a-pattern.scala     D123   an import is resolved at transpile time and is not re-performed at load time
+28-member-imports/an-imported-nested-object-is-an-extractor.scala      D123   an import is resolved at transpile time and is not re-performed at load time
+28-member-imports/an-in-scope-name-wins-over-a-module.scala            D123   an import is resolved at transpile time and is not re-performed at load time
+28-member-imports/an-object-wildcard-import.scala                      D123   an import is resolved at transpile time and is not re-performed at load time
+28-member-imports/an-unknown-prefix-still-says-import-error.scala      D123   an import is resolved at transpile time and is not re-performed at load time
+29-type-aliases/abstract-and-member-aliases-braces.scala               D118   classes, traits and objects are not transpiled in the first cut
+29-type-aliases/abstract-and-member-aliases.scala                      D118   classes, traits and objects are not transpiled in the first cut
+29-type-aliases/alias-of-a-class-is-usable-braces.scala                D118   classes, traits and objects are not transpiled in the first cut
+29-type-aliases/alias-of-a-class-is-usable.scala                       D118   classes, traits and objects are not transpiled in the first cut
+tutorial/00-readme-10min-pyjs-actors.scala                             D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+tutorial/00-readme-10min-pyjs-files.scala                              D120   the generated frame has no retry loop yet
+tutorial/00-readme-10min-pyjs-match.scala                              D118   classes, traits and objects are not transpiled in the first cut
+tutorial/00-readme-10min-scala-unqualified-exceptions.scala            D118   classes, traits and objects are not transpiled in the first cut
+tutorial/00-readme-a-module-and-its-type.scala                         D123   an import is resolved at transpile time and is not re-performed at load time
+tutorial/00-readme-flavour.scala                                       D118   classes, traits and objects are not transpiled in the first cut
+tutorial/00-readme-member-import.scala                                 D123   an import is resolved at transpile time and is not re-performed at load time
+tutorial/00-readme-no-py-provider.scala                                D123   an import is resolved at transpile time and is not re-performed at load time
+tutorial/01-introduction-hello-app.scala                               D118   classes, traits and objects are not transpiled in the first cut
+tutorial/02-python-js-classes.scala                                    D118   classes, traits and objects are not transpiled in the first cut
+tutorial/02-python-js-enums.scala                                      D118   classes, traits and objects are not transpiled in the first cut
+tutorial/02-python-js-exceptions.scala                                 D120   the generated frame has no retry loop yet
+tutorial/02-python-js-keyword-arguments.scala                          D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
+tutorial/02-python-js-match.scala                                      D118   classes, traits and objects are not transpiled in the first cut
+tutorial/02-python-js-modules-a-type.scala                             D123   an import is resolved at transpile time and is not re-performed at load time
+tutorial/02-python-js-modules-from-import.scala                        D123   an import is resolved at transpile time and is not re-performed at load time
+tutorial/02-python-js-modules-import.scala                             D123   an import is resolved at transpile time and is not re-performed at load time
+tutorial/03-scala-dev-d28-construction.scala                           D118   classes, traits and objects are not transpiled in the first cut
+tutorial/03-scala-dev-d30-uninitialised-field.scala                    D118   classes, traits and objects are not transpiled in the first cut
+tutorial/03-scala-dev-d33-getorelse-eager.scala                        D118   classes, traits and objects are not transpiled in the first cut
+tutorial/05-functions-default-reads-an-earlier-parameter.scala         D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
+tutorial/05-functions-named-argument-errors.scala                      D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
+tutorial/05-functions-named-arguments.scala                            D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
+tutorial/06-classes-abstract.scala                                     D118   classes, traits and objects are not transpiled in the first cut
+tutorial/06-classes-apply.scala                                        D118   classes, traits and objects are not transpiled in the first cut
+tutorial/06-classes-counter.scala                                      D118   classes, traits and objects are not transpiled in the first cut
+tutorial/06-classes-ctor-parameter-lists.scala                         D118   classes, traits and objects are not transpiled in the first cut
+tutorial/06-classes-extension-methods.scala                            D118   classes, traits and objects are not transpiled in the first cut
+tutorial/06-classes-objects.scala                                      D118   classes, traits and objects are not transpiled in the first cut
+tutorial/06-classes-point.scala                                        D118   classes, traits and objects are not transpiled in the first cut
+tutorial/06-classes-private.scala                                      D118   classes, traits and objects are not transpiled in the first cut
+tutorial/06-classes-super-qualified.scala                              D118   classes, traits and objects are not transpiled in the first cut
+tutorial/06-classes-templates-in-an-object.scala                       D118   classes, traits and objects are not transpiled in the first cut
+tutorial/06-classes-traits.scala                                       D118   classes, traits and objects are not transpiled in the first cut
+tutorial/06-type-aliases.scala                                         D118   classes, traits and objects are not transpiled in the first cut
+tutorial/07-case-adt.scala                                             D118   classes, traits and objects are not transpiled in the first cut
+tutorial/07-case-basics.scala                                          D118   classes, traits and objects are not transpiled in the first cut
+tutorial/07-case-extractors.scala                                      D118   classes, traits and objects are not transpiled in the first cut
+tutorial/07-case-option.scala                                          D118   classes, traits and objects are not transpiled in the first cut
+tutorial/08-collections-either-has-no-withfilter.scala                 D118   classes, traits and objects are not transpiled in the first cut
+tutorial/08-collections-either.scala                                   D118   classes, traits and objects are not transpiled in the first cut
+tutorial/08-collections-equals-without-hashcode.scala                  D118   classes, traits and objects are not transpiled in the first cut
+tutorial/08-collections-option-as-a-collection.scala                   D118   classes, traits and objects are not transpiled in the first cut
+tutorial/08-collections-option-in-a-for.scala                          D118   classes, traits and objects are not transpiled in the first cut
+tutorial/08-collections-sorted-needs-comparable.scala                  D118   classes, traits and objects are not transpiled in the first cut
+tutorial/09-for-option.scala                                           D118   classes, traits and objects are not transpiled in the first cut
+tutorial/09-for-patterns.scala                                         D118   classes, traits and objects are not transpiled in the first cut
+tutorial/10-strings-custom-interpolator.scala                          D118   classes, traits and objects are not transpiled in the first cut
+tutorial/10-strings-s-expressions.scala                                D118   classes, traits and objects are not transpiled in the first cut
+tutorial/10-strings-unknown-interpolator.scala                         D118   classes, traits and objects are not transpiled in the first cut
+tutorial/11-exceptions-assertions.scala                                D120   the generated frame has no retry loop yet
+tutorial/11-exceptions-await-a-failed-future.scala                     D118   classes, traits and objects are not transpiled in the first cut
+tutorial/11-exceptions-catch-is-a-pattern-match.scala                  D118   classes, traits and objects are not transpiled in the first cut
+tutorial/11-exceptions-error-is-not-an-exception.scala                 D120   the generated frame has no retry loop yet
+tutorial/11-exceptions-finally.scala                                   D120   the generated frame has no retry loop yet
+tutorial/11-exceptions-from-the-runtime.scala                          D120   the generated frame has no retry loop yet
+tutorial/11-exceptions-hierarchy.scala                                 D118   classes, traits and objects are not transpiled in the first cut
+tutorial/11-exceptions-in-an-actor.scala                               D118   classes, traits and objects are not transpiled in the first cut
+tutorial/11-exceptions-throw-and-catch.scala                           D120   the generated frame has no retry loop yet
+tutorial/11-exceptions-try-is-an-expression.scala                      D120   the generated frame has no retry loop yet
+tutorial/11-exceptions-user-defined.scala                              D118   classes, traits and objects are not transpiled in the first cut
+tutorial/12-enums-as-an-adt.scala                                      D118   classes, traits and objects are not transpiled in the first cut
+tutorial/12-enums-exhaustiveness-is-not-checked.scala                  D118   classes, traits and objects are not transpiled in the first cut
+tutorial/12-enums-match.scala                                          D118   classes, traits and objects are not transpiled in the first cut
+tutorial/12-enums-sealed-trait.scala                                   D118   classes, traits and objects are not transpiled in the first cut
+tutorial/12-enums-simple.scala                                         D118   classes, traits and objects are not transpiled in the first cut
+tutorial/12-enums-values-and-lookup.scala                              D118   classes, traits and objects are not transpiled in the first cut
+tutorial/12-enums-with-methods.scala                                   D118   classes, traits and objects are not transpiled in the first cut
+tutorial/12-enums-with-parameters.scala                                D118   classes, traits and objects are not transpiled in the first cut
+tutorial/13-actors-await.scala                                         D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+tutorial/13-actors-catch-a-failed-await.scala                          D118   classes, traits and objects are not transpiled in the first cut
+tutorial/13-actors-priority.scala                                      D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+tutorial/13-actors-stats.scala                                         D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+tutorial/13-actors-tell-and-ask.scala                                  D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+tutorial/13-futures-combinators.scala                                  D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+tutorial/13-threads-and-time.scala                                     D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+tutorial/15-modules-a-cycle.scala                                      D123   an import is resolved at transpile time and is not re-performed at load time
+tutorial/15-modules-a-missing-member.scala                             D123   an import is resolved at transpile time and is not re-performed at load time
+tutorial/15-modules-a-missing-module.scala                             D123   an import is resolved at transpile time and is not re-performed at load time
+tutorial/15-modules-an-imported-type-is-a-type.scala                   D123   an import is resolved at transpile time and is not re-performed at load time
+tutorial/15-modules-import-a-module.scala                              D123   an import is resolved at transpile time and is not re-performed at load time
+tutorial/15-modules-import-a-type.scala                                D123   an import is resolved at transpile time and is not re-performed at load time
+tutorial/15-modules-import-a-wildcard.scala                            D123   an import is resolved at transpile time and is not re-performed at load time
+tutorial/15-modules-import-selectors.scala                             D123   an import is resolved at transpile time and is not re-performed at load time
+tutorial/15-modules-import-underscore-wildcard.scala                   D123   an import is resolved at transpile time and is not re-performed at load time
+tutorial/15-modules-import-with-an-alias.scala                         D123   an import is resolved at transpile time and is not re-performed at load time
+tutorial/15-modules-member-import.scala                                D123   an import is resolved at transpile time and is not re-performed at load time
+tutorial/15-modules-no-py-provider.scala                               D123   an import is resolved at transpile time and is not re-performed at load time
+tutorial/15-modules-runs-at-import.scala                               D123   an import is resolved at transpile time and is not re-performed at load time
+tutorial/16-files-a-closed-source.scala                                D120   the generated frame has no retry loop yet
+tutorial/16-files-missing-file.scala                                   D120   the generated frame has no retry loop yet
+tutorial/16-files-one-catch-for-every-failure.scala                    D120   the generated frame has no retry loop yet

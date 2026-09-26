@@ -27,6 +27,16 @@ foreach(cli_test disassemble gc-pressure actor-bench-smoke package)
                 "${CMAKE_CURRENT_SOURCE_DIR}")
 endforeach()
 
+# The transpiler's CLI checks take the tests directory, protoscalac and a private
+# scratch directory in the build tree -- never /tmp, and never the source tree.
+foreach(cli_test transpiler-cli transpiler-refusals run-module)
+    add_test(NAME cli/${cli_test}
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/cli/${cli_test}.sh" "$<TARGET_FILE:protoscala>"
+                "${CMAKE_CURRENT_SOURCE_DIR}" "$<TARGET_FILE:protoscalac>"
+                "${CMAKE_CURRENT_BINARY_DIR}/cli-scratch/${cli_test}")
+    set_tests_properties(cli/${cli_test} PROPERTIES TIMEOUT 600)
+endforeach()
+
 set_tests_properties(cli/actors-shutdown cli/actors-stress PROPERTIES TIMEOUT 600)
 # `actors-stress` deliberately builds the largest live set in the tree: 8
 # threads queue 200000 messages into ONE actor's mailbox, and the run is timed
@@ -149,6 +159,69 @@ foreach(conf_file ${PROTOSCALA_CONFORMANCE_FILES})
         endif()
     endif()
 endforeach()
+
+# --- The differential transpiler harness (Phase 7 Task 11) ----------------------
+# One `transpiled/<fixture>` case per registered conformance fixture: transpile it
+# with protoscalac, compile the generated C++ with the generated Makefile, load the
+# .so with `protoscala --run-module`, and judge the result against the fixture's
+# OWN first-line directive. The directive parser is copied verbatim from run.sh, so
+# the two harnesses cannot disagree about what a fixture asks for.
+#
+# It is a build option rather than unconditional because each case runs a C++
+# compiler: the whole set takes about 2 min 45 s at -j3 on the reference machine,
+# which is fine on its own and is more than the rest of the suite costs together.
+# ON by default anyway, because a differential harness nobody runs is a harness
+# that rots -- which is precisely what its three anti-rot guards exist to prevent.
+option(PROTOSCALA_TRANSPILED_TESTS
+    "Register one transpiled/<fixture> case per conformance fixture (needs g++ and make)" ON)
+
+if(PROTOSCALA_TRANSPILED_TESTS)
+    set(PROTOSCALA_TRANSPILE_EXCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/transpile-exclude.txt")
+    foreach(conf_file ${PROTOSCALA_CONFORMANCE_FILES})
+        if(conf_file MATCHES "(^|/)_")
+            continue()
+        endif()
+        string(REPLACE "/" "_" conf_slug "${conf_file}")
+        add_test(NAME "transpiled/${conf_file}"
+            COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/conformance/run-transpiled.sh"
+                    "$<TARGET_FILE:protoscala>"
+                    "$<TARGET_FILE:protoscalac>"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/conformance/${conf_file}"
+                    "${PROTOSCALA_TRANSPILE_EXCLUDE}"
+                    "${CMAKE_CURRENT_BINARY_DIR}/transpiled/${conf_slug}")
+        # Each case runs a C++ compiler, so it needs more than the default deadline.
+        set_tests_properties("transpiled/${conf_file}" PROPERTIES TIMEOUT 300)
+        # The same environment its interpreted twin runs under, so a fixture that
+        # reads a file or imports a module sees what it saw before. The blocks
+        # mirror the ones above; a fixture whose environment differed between the
+        # two paths would be comparing two different programs.
+        if(conf_file MATCHES "^26-file-io/")
+            set_tests_properties("transpiled/${conf_file}" PROPERTIES
+                ENVIRONMENT "PROTOSCALA_TEST_TMP=${PROTOSCALA_FILE_IO_SCRATCH}")
+        elseif(conf_file MATCHES "^tutorial/00-readme-a-module")
+            set_tests_properties("transpiled/${conf_file}" PROPERTIES ENVIRONMENT
+                "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/tutorial/_readme")
+        elseif(conf_file MATCHES "^24-modules/")
+            set_tests_properties("transpiled/${conf_file}" PROPERTIES ENVIRONMENT
+                "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/24-modules/_modules")
+        elseif(conf_file MATCHES "^28-member-imports/")
+            set_tests_properties("transpiled/${conf_file}" PROPERTIES ENVIRONMENT
+                "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/28-member-imports/_modules")
+        elseif(conf_file MATCHES "^tutorial/(16-|00-readme-10min-(scala|pyjs)-files)")
+            get_filename_component(file_io_stem "${conf_file}" NAME_WE)
+            set(file_io_cwd "${PROTOSCALA_FILE_IO_SCRATCH}/transpiled-${file_io_stem}")
+            file(MAKE_DIRECTORY "${file_io_cwd}")
+            set_tests_properties("transpiled/${conf_file}" PROPERTIES ENVIRONMENT
+                "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/tutorial/_modules;PROTOSCALA_RUN_CWD=${file_io_cwd}")
+        elseif(conf_file MATCHES "^tutorial/")
+            set_tests_properties("transpiled/${conf_file}" PROPERTIES ENVIRONMENT
+                "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/tutorial/_modules")
+        elseif(conf_file MATCHES "^25-interop/")
+            set_tests_properties("transpiled/${conf_file}" PROPERTIES ENVIRONMENT
+                "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/25-interop/_modules")
+        endif()
+    endforeach()
+endif()
 
 # --- Benchmark smoke checks -----------------------------------------------------
 # Each benchmarks/comparable/*.scala runs once and must print the result stated

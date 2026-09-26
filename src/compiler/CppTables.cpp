@@ -156,13 +156,23 @@ void emitBlockRec(std::ostream& o, const FlatBlock& blk, std::size_t index,
                   const std::vector<std::size_t>& childIndices, std::size_t stringCount) {
     const BytecodeModule& m = *blk.mod;
     const std::string n = blk.cppName;
-    o << "static const proto::ProtoMethod " << n << "_blocks[] = {";
+    o << "static const protoScala::gen::BlockRec* const " << n << "_blocks[] = {";
     if (childIndices.empty()) {
         o << " nullptr ";
     } else {
-        for (std::size_t c : childIndices) o << " &blk" << c << ',';
+        for (std::size_t c : childIndices) o << " &blk" << c << "_rec,";
     }
     o << "};\n";
+    o << "static const int " << n << "_captureSlots[] = {";
+    if (m.captureSpecs().empty()) {
+        o << " 0 ";
+    } else {
+        for (const BytecodeModule::CaptureSpec& c : m.captureSpecs()) o << ' ' << c.localSlot << ',';
+    }
+    o << "};\n";
+    // Filled once per process by gen::linkModule; the runtime uses it as this
+    // block's identity.
+    o << "static void* " << n << "_handle = nullptr;\n";
     o << "static const protoScala::gen::BlockRec " << n << "_rec = {\n"
       << "    .name = " << quoted(m.name()) << ",\n"
       << "    .arity = " << m.arity() << "u, .localCount = " << m.localCount()
@@ -178,6 +188,8 @@ void emitBlockRec(std::ostream& o, const FlatBlock& blk, std::size_t index,
       << "    .keySymbols = " << n << "_keySymbols,\n"
       << "    .stringSymbols = " << n << "_stringSymbols,\n"
       << "    .blocks = " << n << "_blocks, .blockCount = " << childIndices.size() << ",\n"
+      << "    .captureSlots = " << n << "_captureSlots,\n"
+      << "    .handle = &" << n << "_handle,\n"
       << "};\n";
     (void)index;
 }

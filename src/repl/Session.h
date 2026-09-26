@@ -59,6 +59,11 @@ public:
     // an import is resolved by loading (D90), this RUNS the top level of every
     // module the file imports (D95).
     int disassemble(const std::string& path);
+    // --run-module: loads a COMPILED module (.so) and runs it as a program --
+    // proto_module_init, then proto_module_main when it exports one (Phase 7
+    // D8). Returns the process exit code. Without proto_module_main it returns 0
+    // and prints nothing: a module has no output of its own.
+    int runModule(const std::string& soPath, const std::vector<std::string>& args);
 
     // --- ModuleLoader (compiler side; no ProtoObject* crosses it) ----------
     const ModuleExports& load(const std::string& providerSpec, const std::string& logicalPath,
@@ -79,6 +84,18 @@ public:
     // The space this session owns, for the UMD tests: the provider resolves its
     // host through it, so a test has to be able to name it.
     proto::ProtoSpace& space() { return space_; }
+    // The table a unit is compiled against, after the prelude. `protoscalac` is
+    // the second consumer of a Session (Phase 7 D7): it needs the same table the
+    // interpreter would compile against, so that an import resolves identically
+    // and a transpiled unit binds the same globals.
+    GlobalTable& globals() { return globals_; }
+    // The prelude-only copy a MODULE is compiled against, which shares the key
+    // counters (A0-16). A transpiled module must use this one for the same reason
+    // an interpreted one does: it sees the prelude and nothing of any importer.
+    GlobalTable& moduleGlobals() { return preludeGlobals_; }
+    // The loader a unit's imports resolve through. D90 resolves an import by
+    // LOADING, which is why protoscalac owns a Session at all.
+    ModuleLoader& moduleLoader() { return *this; }
 
 private:
     proto::ProtoSpace space_;  // first member: destroyed last

@@ -56,6 +56,9 @@ void printHelp() {
         "  --version            Print version and exit.\n"
         "  --help, -h           Print this help and exit.\n"
         "  --disassemble FILE   Print the compiled bytecode of FILE and exit.\n"
+        "  --run-module FILE.so [args...]\n"
+        "                       Load a compiled module and run it: proto_module_init,\n"
+        "                       then proto_module_main when it exports one.\n"
         "\n"
         "With a script: runs its top-level statements, then its @main method\n"
         "(arguments after the script are passed to @main).\n"
@@ -66,13 +69,15 @@ struct ScriptJob {
     std::string path;
     std::vector<std::string> args;
     bool disassemble = false;
+    bool runModule = false;
 };
 
 int runJob(void* p) {
     auto* job = static_cast<ScriptJob*>(p);
     protoScala::Session session;
-    return job->disassemble ? session.disassemble(job->path)
-                            : session.runScript(job->path, job->args);
+    if (job->disassemble) return session.disassemble(job->path);
+    if (job->runModule) return session.runModule(job->path, job->args);
+    return session.runScript(job->path, job->args);
 }
 
 } // namespace
@@ -92,6 +97,16 @@ int main(int argc, char** argv) {
                 }
                 job.path = argv[2];
                 job.disassemble = true;
+                return protoScala::runOnEvaluatorThread(&runJob, &job);
+            }
+            if (a == "--run-module") {
+                if (argc < 3) {
+                    std::fprintf(stderr, "protoscala: --run-module takes a .so path\n");
+                    return 2;
+                }
+                job.path = argv[2];
+                job.args.assign(argv + 3, argv + argc);
+                job.runModule = true;
                 return protoScala::runOnEvaluatorThread(&runJob, &job);
             }
             if (!a.empty() && a[0] == '-') {
