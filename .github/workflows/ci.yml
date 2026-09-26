@@ -1,0 +1,217 @@
+name: CI
+
+# protoScala had no continuous integration until this file existed: the
+# 1344-case figure in README.md was produced by one person running one command
+# once.  This workflow builds protoCore, protoST and protoScala from clean and
+# runs the whole ctest suite on every push and pull request.
+#
+# HOW protoCore IS OBTAINED: checked out as a SIBLING directory and built into
+# ../protoCore/build_release, the first path protoScala's developer fallback
+# searches (CMakeLists.txt, decision D-I1).  No `cmake --install` is involved.
+# The installed-package mode exists to check version and ABI against a prefix
+# that may be stale; on a runner nothing is stale, because every tree in the job
+# is built from source in that job -- so the hazard that mode protects against
+# cannot arise here, and the configuration CI runs is the one contributors run.
+# protoCore's CONFORMANCE library is built too: without it protoScala's sixteen
+# embedder-conformance tests are silently not registered at all.
+#
+# WHY protoST IS ALSO CHECKED OUT: umd/protost-interop links protoST into a test
+# executable and is the only place `import st.<module>` is tested (docs/STATUS.md
+# R5, docs/INTEROP.md section 6).  It is found only at ../protoST/build_release,
+# and when protoST is absent it is not registered -- the suite would report 1343
+# tests, 0 failed, and nothing would say a test had gone missing.  A silently
+# absent test is exactly the failure mode this repository's field notes are
+# about, so CI builds protoST rather than accepting the smaller number.
+#
+# WHICH REFS: pinned for push and pull_request, `master`/`main` for the nightly
+# schedule.  A pinned ref makes a red pull request unambiguous -- the pull
+# request is the only thing that changed.  Tracking the tips catches integration
+# breaks, which is worth having, but a red build would then have three possible
+# authors; the schedule keeps that signal separate, and the summary records the
+# commits actually used.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # 04:47 UTC daily: the integration run against the siblings' tips.
+    - cron: '47 4 * * *'
+  workflow_dispatch:
+
+# The workflow reads source and runs tests; it needs nothing else.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PROTOCORE_REPO: numaes/protoCore
+  PROTOST_REPO: gamarino/protoST
+  # protoCore 2.5.0, SOVERSION 3 (master, 2026-09-25).  Bump deliberately.
+  PROTOCORE_REF: ${{ github.event_name == 'schedule' && 'master' || 'df8406a3f44f2a7c8505251bf6887e0ad6e60809' }}
+  # protoST at the commit protoScala's interop test was last verified against.
+  PROTOST_REF: ${{ github.event_name == 'schedule' && 'main' || 'afe0263d69ca1d6ef0555eeaba5502f9057f33c5' }}
+  # The only ctest cases in this suite whose verdict is a clock.  For the two
+  # deadlocking ones the TIMEOUT *is* the verdict (tests/unit/CMakeLists.txt),
+  # and embedder-conformance/isolate.heap.ceiling_progress is documented as
+  # failing about 2 runs in 10 even on an idle machine, with a diagnosed cause
+  # in protoCore's ProtoMPSCQueue::takeAll (docs/DECISIONS-LOG.md, 2026-09-25).
+  # They run in the `conformance-isolate` job below, which never gates.
+  CLOCK_DEPENDENT_TESTS: '^embedder-conformance/isolate\.'
+
+jobs:
+  test:
+    name: Build and test suite
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out protoScala
+        uses: actions/checkout@v4
+        with:
+          path: protoScala
+
+      - name: Check out protoCore as a sibling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PROTOCORE_REPO }}
+          ref: ${{ env.PROTOCORE_REF }}
+          path: protoCore
+
+      - name: Check out protoST as a sibling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PROTOST_REPO }}
+          ref: ${{ env.PROTOST_REF }}
+          path: protoST
+
+      - name: Record what is being built
+        run: |
+          cmake --version | head -1
+          g++ --version | head -1
+          {
+            echo "protoScala at \`$(git -C protoScala rev-parse HEAD)\`"
+            echo "protoCore ref \`$PROTOCORE_REF\` at \`$(git -C protoCore rev-parse HEAD)\`"
+            echo "protoST ref \`$PROTOST_REF\` at \`$(git -C protoST rev-parse HEAD)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install libreadline
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libreadline-dev
+
+      - name: Build protoCore
+        # The conformance archive is not optional here: protoScala's sixteen
+        # embedder-conformance tests disappear without it, silently.
+        run: |
+          cmake -S protoCore -B protoCore/build_release -DCMAKE_BUILD_TYPE=Release
+          cmake --build protoCore/build_release --target protoCore protoCoreConformance --parallel "$(nproc)"
+
+      - name: Build protoST's libraries
+        # Only the two static libraries the interop test links; protoST's own
+        # binary and suite are protoST's CI's job.
+        run: |
+          cmake -S protoST -B protoST/build_release -DCMAKE_BUILD_TYPE=Release
+          cmake --build protoST/build_release --target protost_runtime protost_frontend --parallel "$(nproc)"
+
+      - name: Configure protoScala
+        working-directory: protoScala
+        run: cmake -B build_release -S .
+
+      - name: Confirm the optional test groups were registered
+        # These two groups are wired with `if(TARGET ...)` / `find_library` and
+        # vanish without a word when a sibling is missing.  Fail here, loudly,
+        # rather than let the suite report a smaller total as success.
+        working-directory: protoScala
+        run: |
+          grep -q 'PROTOST_RUNTIME_LIBRARY:FILEPATH=.*protost_runtime' build_release/CMakeCache.txt \
+            || { echo "protoST was not found: umd/protost-interop would be missing"; exit 1; }
+          grep -q 'PROTOCORE_CONFORMANCE_LIBRARY:FILEPATH=.*protoCoreConformance' build_release/CMakeCache.txt \
+            || { echo "protoCore's conformance archive was not found: the embedder suite would be missing"; exit 1; }
+
+      - name: Build protoScala
+        working-directory: protoScala
+        run: cmake --build build_release --parallel "$(nproc)"
+
+      - name: Report the registered test count
+        # Printed, never asserted.  This family's counts moved four times in
+        # three days; a hard-coded total turns every new test into a red build.
+        working-directory: protoScala
+        run: |
+          COUNT=$(ctest --test-dir build_release -N | tail -1)
+          echo "$COUNT"
+          echo "protoScala ctest: $COUNT" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Test suite
+        # stdin at EOF: a test that reads standard input hangs for the whole job
+        # timeout and reports nothing (protoST bug S18 is exactly that).
+        # -j2 rather than -j$(nproc): the actor, GC-pressure and stress cases
+        # spawn their own threads, and saturating a 4-vCPU runner with ctest
+        # workers is the load this family has already been burned by.
+        working-directory: protoScala
+        run: ctest --test-dir build_release -j2 --output-on-failure -E "$CLOCK_DEPENDENT_TESTS" < /dev/null
+
+      - name: Static conformance ratchet
+        # The static half of the embedder conformance suite: a delta gate, not a
+        # count gate.  An unjustified finding exits 1, a justification whose site
+        # is gone exits 2.  Measured green on this tree before this workflow was
+        # added.  The twelve RUNTIME cases need no job of their own -- they run
+        # inside the ctest suite above, as embedder-conformance/*.
+        working-directory: protoScala
+        run: python3 ../protoCore/scripts/conformance/check_static.py --repo .
+
+  conformance-isolate:
+    name: Conformance isolate cases (informational, never gates)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    # A failure here does not fail the run.  These three cases are kept RUNNING
+    # rather than deleted, because a disabled suite proves nothing -- but their
+    # verdict is a timeout, so on a shared runner it is partly the machine's.
+    continue-on-error: true
+    steps:
+      - name: Check out protoScala
+        uses: actions/checkout@v4
+        with:
+          path: protoScala
+
+      - name: Check out protoCore as a sibling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PROTOCORE_REPO }}
+          ref: ${{ env.PROTOCORE_REF }}
+          path: protoCore
+
+      - name: Install libreadline
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libreadline-dev
+
+      - name: Build protoCore
+        run: |
+          cmake -S protoCore -B protoCore/build_release -DCMAKE_BUILD_TYPE=Release
+          cmake --build protoCore/build_release --target protoCore protoCoreConformance --parallel "$(nproc)"
+
+      - name: Build protoScala
+        working-directory: protoScala
+        # Interop is off in this job: it needs no protoST, and the three cases
+        # below do not touch it.  Passing it explicitly rather than relying on
+        # protoST's absence keeps the intent in the log.
+        run: |
+          cmake -B build_release -S . -DPROTOSCALA_PROTOST_INTEROP=OFF
+          cmake --build build_release --parallel "$(nproc)"
+
+      - name: The three isolate cases, serially
+        working-directory: protoScala
+        run: |
+          set +e
+          ctest --test-dir build_release --output-on-failure -R "$CLOCK_DEPENDENT_TESTS" < /dev/null
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -eq 0 ]; then
+            echo "Conformance isolate cases: all passed" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Conformance isolate cases: FAILED (informational; heap.ceiling_progress is a known ~2-in-10 flake, docs/DECISIONS-LOG.md 2026-09-25)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$STATUS"
