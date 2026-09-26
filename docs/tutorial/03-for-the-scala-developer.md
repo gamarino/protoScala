@@ -494,11 +494,13 @@ without a plan question of their own:
   local function — and are bound in the callee (D81, D88, D89; chapter 5 §5.10).
 - **D35** — a refutable pattern in a `for` generator is accepted **without**
   Scala 3.9's `case` keyword and filters, as in Scala 2 (scalac rejects it and
-  asks for `case`).
-- **D36** — writing `case` in front of an irrefutable pattern emits no filter,
-  since the pattern cannot fail, and `for (x <- xs; y = e)` compiles to two
-  `map`s where dotty fuses them into one. Both give exactly the values Scala
-  gives; only the number of intermediate traversals differs.
+  asks for `case`). *With* `case` the generator filters exactly as Scala 3 does,
+  whatever the pattern. The one gap is the no-`case` form of a **tuple**
+  pattern, which trusts every element to be a pair — `for ((a, b) <- List(1,
+  (1, 2)))` raises `MatchError` on the `1`, where scalac rejects the program.
+- **D36** — `for (x <- xs; y = e)` compiles to two `map`s where dotty fuses
+  them into one. It gives exactly the values Scala gives; only the number of
+  intermediate traversals differs.
 - **D37** — an **intersection type cannot be tested at run time**:
   `case v: (A & B)` and `x.isInstanceOf[A & B]` are rejected at compile time
   with `this type cannot be tested at run time`, where scalac accepts them and

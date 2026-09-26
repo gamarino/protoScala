@@ -146,16 +146,20 @@ Three features, one line each:
   dropped.
 - **`case` in front of a pattern.** `case Some(v) <- xs` says the pattern may
   fail, and elements that do not match are **filtered out** rather than
-  raising a `MatchError`. Three elements go in, two come out.
+  raising a `MatchError`. Three elements go in, two come out. `case` filters
+  whatever the pattern is: `for (case (a, b) <- List(1, (1, 2), 4, (3, 1)))`
+  keeps the two pairs and discards the two integers.
 - **A value definition.** `y = x * 2` binds an intermediate inside the
   comprehension, and a guard after it can use it. It is not a generator: there
   is no `<-`, and it does not iterate.
 
 > protoScala also accepts a refutable pattern **without** the `case` keyword —
 > `for (Some(v) <- xs)` — and filters, which is what Scala 2 did; Scala 3.9
-> requires `case` there. Conversely, writing `case` in front of an irrefutable
-> pattern costs nothing here, because no filter is emitted for a pattern that
-> cannot fail. Both are recorded as deviations in
+> requires `case` there. The one pattern the no-`case` form does **not** filter
+> is a tuple pattern: with no static types, `(s, n) <- pairs` trusts every
+> element to be a pair, so `for ((a, b) <- List(1, (1, 2)))` raises a
+> `MatchError` on the `1`. scalac rejects that program outright, so there is no
+> answer to diverge from — write `case` and it filters. Recorded as D35 in
 > [chapter 3](03-for-the-scala-developer.md) and STATUS.md.
 
 ## 9.5 Beyond lists

@@ -790,7 +790,9 @@ private:
             switch (en.kind) {
                 case Enumerator::Kind::Generator: {
                     Generator g{std::move(en.pattern), std::move(en.expr), en.pos};
-                    if (!irrefutable(*g.pattern))
+                    // Scala 3: `case p <- xs` always filters. Without `case`,
+                    // only a refutable pattern does (D35, D36).
+                    if (en.hasCase || !irrefutable(*g.pattern))
                         g.source = call(en.pos, std::move(g.source), "withFilter",
                                         matchesLambda(*g.pattern, en.pos));
                     gens.push_back(std::move(g));

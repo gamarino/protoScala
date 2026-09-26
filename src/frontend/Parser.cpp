@@ -2234,7 +2234,7 @@ void Parser::parseEnumerators(For& f, TokenKind terminator) {
 Enumerator Parser::parseGeneratorOrValue() {
     Enumerator en;
     en.pos = peek().pos;
-    if (at(TokenKind::KwCase)) advance();
+    if (at(TokenKind::KwCase)) { advance(); en.hasCase = true; }
     en.pattern = parsePattern1();
     if (at(TokenKind::LeftArrow)) {
         advance();

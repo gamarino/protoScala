@@ -352,6 +352,12 @@ struct Enumerator {
     PatternPtr pattern;   // null for a guard
     NodePtr expr;
     SourcePos pos;
+    // Scala 3's `case` keyword on a generator (`for (case p <- xs)`) asks for
+    // the non-matching elements to be discarded. It is the only signal a
+    // dialect without static types has, so the desugarer needs to see it:
+    // `case (a, b) <- xs` must filter even though a tuple pattern is otherwise
+    // trusted to match (D35).
+    bool hasCase = false;
 };
 
 struct For : Node {
