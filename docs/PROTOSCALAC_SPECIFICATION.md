@@ -374,6 +374,18 @@ is judged against the directive. That is what keeps the 158 `EXPECT-ERROR` fixtu
 inside the coverage instead of excluding them: a compile-error fixture is the one
 place the two paths are guaranteed to share an implementation.
 
+The **benchmark workloads** are covered too, by the same rule: twelve
+`benchmarks-transpiled/<workload>` cases run each `benchmarks/comparable/*.scala`
+through the pipeline and verify the result its `// EXPECT:` line states. Ten transpile;
+`attr_lookup` and `object_tree` are refused (D118 — both declare a class) and are on the
+exclusion list, so the bidirectional guard will fail them the day classes are
+transpiled. **No timing is asserted in any gate**: the host is not reliably quiet and a
+timing assertion in a gate is a false failure waiting to happen. The comparison lives in
+`benchmarks/run_transpiled_benchmarks.py`, whose finding is that the transpiled path is
+**slower** — geomean 1.244×, up to 2.57× on a call-bound workload — because a
+`proto::ProtoMethod` takes a `ProtoList`, so `execute`'s native-entry branch allocates
+one per call.
+
 **The corpus differential** (`.agent_scratch/phase7-transpiler/corpus/`) runs the
 Scala 3 `tests/run` corpus down both paths. The rule is *not* "does protoScala agree
 with Scala"; it is **every corpus test the interpreter passes must also pass

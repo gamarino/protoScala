@@ -17,7 +17,7 @@
 #
 # Counts by code:
 #   D113    27
-#   D118   305
+#   D118   307
 #   D120    64
 #   D121    18
 #   D123    87
@@ -33,6 +33,12 @@
 #   D122  super sends: the search needs the defining template's key.
 #   D123  imports: resolved at transpile time by loading (D90) and not
 #         re-performed at load time, so the imported globals would be unbound.
+#
+# The last two entries by name are BENCHMARK workloads, not conformance
+# fixtures: benchmarks/comparable/{attr_lookup,object_tree}.scala, matched by
+# basename. Both declare a class, so the transpiled benchmark cases treat their
+# refusal as a pass with a reason -- and the harness's bidirectional check will
+# fail them the day classes are transpiled.
 #
 02-expressions/double-widening-braces.scala                            D118   classes, traits and objects are not transpiled in the first cut
 02-expressions/double-widening-remainder-braces.scala                  D118   classes, traits and objects are not transpiled in the first cut
@@ -442,6 +448,8 @@
 29-type-aliases/abstract-and-member-aliases.scala                      D118   classes, traits and objects are not transpiled in the first cut
 29-type-aliases/alias-of-a-class-is-usable-braces.scala                D118   classes, traits and objects are not transpiled in the first cut
 29-type-aliases/alias-of-a-class-is-usable.scala                       D118   classes, traits and objects are not transpiled in the first cut
+attr_lookup.scala                                                      D118   classes, traits and objects are not transpiled in the first cut
+object_tree.scala                                                      D118   classes, traits and objects are not transpiled in the first cut
 tutorial/00-readme-10min-pyjs-actors.scala                             D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
 tutorial/00-readme-10min-pyjs-files.scala                              D120   the generated frame has no retry loop yet
 tutorial/00-readme-10min-pyjs-match.scala                              D118   classes, traits and objects are not transpiled in the first cut

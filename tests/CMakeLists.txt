@@ -240,6 +240,38 @@ foreach(bench_file ${PROTOSCALA_BENCHMARK_FILES})
                 "${CMAKE_SOURCE_DIR}/benchmarks/comparable/${bench_file}")
 endforeach()
 
+# --- Transpiled benchmark smoke checks (Phase 7) --------------------------------
+# The same `// EXPECT:` discipline the interpreted benchmark cases use, on the
+# transpiled path: each workload transpiles, compiles, loads and must print the
+# result its first line states. Timings are NOT checked here -- the host is not
+# quiet and a timing assertion in a gate would be a false failure waiting to
+# happen; `benchmarks/run_transpiled_benchmarks.py` is where the comparison lives.
+#
+# Two workloads have no transpiled twin (`attr_lookup`, `object_tree`: both declare
+# a class, D118) and are on tests/transpile-exclude.txt, so the harness's
+# bidirectional check reports them the day classes are transpiled.
+if(PROTOSCALA_TRANSPILED_TESTS)
+    foreach(bench_file ${PROTOSCALA_BENCHMARK_FILES})
+        string(REPLACE "/" "_" bench_slug "${bench_file}")
+        add_test(NAME "benchmarks-transpiled/${bench_file}"
+            COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/conformance/run-transpiled.sh"
+                    "$<TARGET_FILE:protoscala>"
+                    "$<TARGET_FILE:protoscalac>"
+                    "${CMAKE_SOURCE_DIR}/benchmarks/comparable/${bench_file}"
+                    "${PROTOSCALA_TRANSPILE_EXCLUDE}"
+                    "${CMAKE_CURRENT_BINARY_DIR}/transpiled-bench/${bench_slug}")
+        set_tests_properties("benchmarks-transpiled/${bench_file}" PROPERTIES TIMEOUT 600)
+    endforeach()
+    # The three workloads whose live set does not fit the ambient sweep ceiling pin
+    # their own here too, for the same reason the interpreted cases do.
+    foreach(pinned object_tree.scala map_build.scala list_ops.scala)
+        if(EXISTS "${CMAKE_SOURCE_DIR}/benchmarks/comparable/${pinned}")
+            set_tests_properties("benchmarks-transpiled/${pinned}" PROPERTIES
+                ENVIRONMENT "PROTOCORE_HEAP_LIMIT_CELLS=2000000")
+        endif()
+    endforeach()
+endif()
+
 # --- Phase 5 concurrency fixtures -----------------------------------------------
 # Every fixture that waits for an actor spins on the main thread, which has no
 # deadline of its own: a scheduling bug must fail the suite instead of stalling
