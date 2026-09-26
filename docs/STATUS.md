@@ -1634,6 +1634,18 @@ method, counts by site and the protoCore/protoScala separation are in
   `Thread.start` now refuses with `IllegalStateException` if there is no active
   runtime to hand over, instead of publishing a null blueprint.
 
+  **How many reports, and how many races — the two are not the same number.**
+  Across all five TSan logs there are **5** reports whose site is under
+  `protoScala/src`, and they are **2** distinct races. Four of the five are the
+  *same* `g_threadBlueprint` global, summarised at `ActorPrimitives.cpp:431` (the
+  write) twice in the stress log and at `ActorPrimitives.cpp:407` (the read) twice
+  in the plain-threads control run — TSan names whichever access it attributes, which
+  differs by run, and each report's own `Location is global … g_threadBlueprint of
+  size 16` line is what settles it. **So the fix below covers all four**, and the
+  six `tsan_case_*` logs contain none. The fifth is the scheduler's, below. Earlier
+  records in this file said "3 reports": that was the stress log alone and did not
+  say so.
+
   **Evidence (the differential is the proof; no fixture can produce this).**
   Under `-DPROTOSCALA_SANITIZER=thread` against an instrumented protoCore, on
   the 8 × 25,000-send stress case: **before**, `SUMMARY: ThreadSanitizer: data
@@ -1656,14 +1668,58 @@ method, counts by site and the protoCore/protoScala separation are in
   heap block, which is `ActorState` (`pendingIdx[band]`), between two worker
   threads. It was missed because the earlier pass grepped the reports for
   `Mailbox` and `ReadyStack` and read the scheduler frames as callers only.
-  It appeared **once in one run and in none of the three post-fix runs**, so it
-  is reported as an undiagnosed finding, not as a characterised bug: whether the
-  claim/`sched` protocol is missing an edge or TSan cannot follow the handoff
-  through `ReadyStack`'s CAS is **not established here**. It is out of the
-  `Thread.start` fix's scope and is not claimed fixed. `Mailbox` and `ReadyStack`
-  are named as race sites by no report, before or after. The 8 × 25,000-send
-  stress case printed `200000` exactly in all four runs, so the single-method
-  invariant held each time.
+  It appeared **once in one run and in none of the three post-fix runs**, and was
+  first recorded as undiagnosed. **It has since been diagnosed, by reading, and it
+  is a real defect.** It is out of the `Thread.start` fix's scope and is **not
+  fixed**; the fix is planned and the order of work is recorded in
+  `../.agent_scratch/pendingidx/fix-plan.md`. `Mailbox` and `ReadyStack` are named
+  as race sites by no report, before or after. The 8 × 25,000-send stress case
+  printed `200000` exactly in all four runs, so the single-method invariant held
+  each time — and that is the point:
+
+  **The single-method invariant holds; the guarantee that breaks is narrower.** No
+  two workers can be inside a handler, `deliver` or `nextMessage` for one actor:
+  ownership *is* popping the `ActorState*` off a ready stack, and every push is
+  made by a thread that has just moved `sched` into 1 by a single CAS (`send`,
+  `resume` ×2, `finishTurn` ×2) or that still holds the claim. protoClojure's
+  session-19 hole — per-message clearing of the claim — is **absent**: `finishTurn`
+  runs once per turn and nothing in the 8-message loop touches `sched`.
+
+  **What breaks is that `finishTurn` reads shared per-actor state AFTER
+  deliberately releasing ownership.** Its non-suspended path CASes `sched` 1→0 and
+  *then* calls `hasWork` and `highestPendingBand`, both of which read
+  `ActorState::pendingIdx[b]` and walk the actor's `__pend<b>__` list. From the
+  instant of that store any thread may claim the actor, so the new owner's
+  `nextMessage` is concurrently writing `pendingIdx[band]` and `setAttribute`-ing
+  `pendingKey[band]`. There is no exclusion at that site **by construction**, and
+  the comment there reasons only about *senders* — never about the new owner being a
+  second worker. TSan is right, not confused.
+
+  **Two halves, and only one is benign.** The cursor half is argued harmless: a
+  stale read implies a concurrent claimer, so the gating CAS 0→1 discards the answer
+  and the worst case is one empty turn; no message is lost or duplicated on a
+  machine with atomic aligned 4-byte loads. **The heap half is not benign and
+  reading cannot settle it**: `hasWork` holds the `__pend<b>__` list in a bare C++
+  local across `asList(ctx)->getSize(ctx)` while the new owner replaces that
+  attribute, which leaves the list reachable from nothing — no attribute, no root,
+  no automatic local. `Mailbox.cpp:50-54` documents exactly that shape as a crash
+  under a small heap. It is the same class as the three "held a `ProtoObject*`
+  across an allocation" bugs this project has already fixed, with a second thread
+  supplying the unreachability instead of a CAS loop.
+
+  **Why it exists, precisely:** the post-release re-check was inherited from
+  protoClojure, whose version reads **only** `ProtoMPSCQueue::isEmpty` — which
+  protoCore documents as callable from any thread — and whose `ActorState` holds no
+  cursor at all, because a protoClojure turn drains its whole `takeAll`. A0-10's
+  batch of 8 made the remainder persist across turns, in `pendingIdx` and in
+  `__pend<n>__`, and the re-check was not revisited. Neither of the eight Phase-5
+  deviations (D43, D45–D49, D51, D53) says which thread may read that cursor.
+
+  **The fix is to decide before releasing**, not to make `pendingIdx` atomic:
+  evaluate the work question once under the claim and, when there is work, hand the
+  actor back with `sched` still at 1 — which the `s == 2` branch already does — so
+  nothing outside the atomic is read after the release. Making the cursor atomic
+  would silence the line TSan reported and leave **both** real hazards in place.
 - **protoCore's population is pre-existing and not actor-specific**: a control
   run of 8 plain `Thread.start` threads touching no actor still reports 13
   protoCore races, concentrated in `core/SparseListAlgorithms.h`'s

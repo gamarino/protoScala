@@ -320,6 +320,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   runs, out of 727, 770 and 805 — every remaining report has a protoCore site —
   and all four runs printed `200000`.
 
+  *Correction, later the same day:* those three are the **stress log alone**, which
+  that sentence did not say. Across all five logs there are **5** protoScala-sited
+  reports and **2** distinct races: the plain-threads control run reports the same
+  `g_threadBlueprint` global twice more, summarised at `ActorPrimitives.cpp:407`
+  (the read side) rather than `:431` (the write side), which each report's own
+  `Location is global … g_threadBlueprint of size 16` line settles. **The fix covers
+  all four.** The control run was not repeated after the fix, so its zero is
+  reasoned from the mechanism being gone rather than measured — stated rather than
+  claimed.
+
   Two records corrected while doing it: the earlier claim that exactly **one**
   race named a protoScala site, and the claim that the actor scheduler produced
   no race of its own. Both were wrong; the missed report is

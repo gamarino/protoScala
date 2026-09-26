@@ -337,6 +337,16 @@ Two corrections to the paragraphs immediately above, both against the same logs.
 | after, run 2 | **0** | 770 | `200000` |
 | after, run 3 | **0** | 805 | `200000` |
 
+**The "3" is this log only, and the total across the logs is 5 reports but still 2
+races.** `tsan_nothreadactor.1253956`, the plain-threads control run, reports the
+same `g_threadBlueprint` global twice more — summarised at `ActorPrimitives.cpp:407`,
+the read side, where this log summarises `:431`, the write side; each report's own
+`Location is global … g_threadBlueprint of size 16` line is what identifies them. The
+six `tsan_case_*.log` files contain no protoScala-sited report at all. So the fix
+covers four of the five, and the fifth is `ActorScheduler.cpp:227`, now diagnosed
+(see `docs/STATUS.md` and `.agent_scratch/pendingidx/`). The control run was **not**
+repeated after the fix.
+
 Every remaining report in all three post-fix runs has a protoCore site. The
 totals move between runs because the protoCore population is workload- and
 interleaving-dependent; the figure that carries the claim is the protoScala
