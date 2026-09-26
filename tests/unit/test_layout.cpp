@@ -131,6 +131,37 @@ TEST(Layout, LeadingInfixOperatorContinuesTheLine) {
     EXPECT_EQ(lay("a\n-b"), "Identifier Newline Identifier Identifier EOF");
 }
 
+// A blank line ends the expression, so the leading operator opens a statement
+// (dotty `Scanners.pastBlankLine`). Verified against scalac 3.9, which prints 1
+// for `val x = 1` / blank / `+ a * 6` / `println(x)` and 31 without the blank.
+TEST(Layout, BlankLineEndsALeadingInfixContinuation) {
+    EXPECT_EQ(lay("val x = a\n\n+ b"),
+              "KwVal Identifier Equals Identifier Newline Identifier Identifier EOF");
+    // Two blank lines, and a blank line made of spaces, count the same.
+    EXPECT_EQ(lay("val x = a\n\n\n+ b"),
+              "KwVal Identifier Equals Identifier Newline Identifier Identifier EOF");
+    EXPECT_EQ(lay("val x = a\n   \n+ b"),
+              "KwVal Identifier Equals Identifier Newline Identifier Identifier EOF");
+    // A comment-only line is not a blank line: the continuation stands.
+    EXPECT_EQ(lay("val x = a\n// note\n+ b"),
+              "KwVal Identifier Equals Identifier Identifier Identifier EOF");
+    EXPECT_EQ(lay("val x = a\n/* note */\n+ b"),
+              "KwVal Identifier Equals Identifier Identifier Identifier EOF");
+}
+
+// dotty chooses the separator before it looks at the indentation width, so a
+// blank line ends the statement however deeply the next line is indented.
+TEST(Layout, BlankLineEndsADeeperContinuation) {
+    EXPECT_EQ(lay("val x = a\n\n  + b"),
+              "KwVal Identifier Equals Identifier Newline Identifier Identifier EOF");
+    // Without the blank line the deeper line is an ordinary continuation.
+    EXPECT_EQ(lay("val x = a\n  + b"),
+              "KwVal Identifier Equals Identifier Identifier Identifier EOF");
+    // A token that cannot begin a statement still continues, blank line or not.
+    EXPECT_EQ(lay("val x = a\n\n  .b"),
+              "KwVal Identifier Equals Identifier Dot Identifier EOF");
+}
+
 TEST(Layout, EndMarkers) {
     EXPECT_EQ(lay("if c then\n  a\nend if\nb"),
               "KwIf Identifier KwThen Indent Identifier Outdent Newline EndMarker Newline "

@@ -319,14 +319,33 @@ private:
         if (w == regions_.back().width && canEndStatement(prevKind_) &&
             canBeginStatement(t.kind) && !isLeadingInfix(i))
             synth(TokenKind::Newline, t);
-        // w > width after a non-opener: a continuation line, nothing inserted.
+        // w > width after a non-opener: a continuation line, nothing inserted
+        // -- except across a blank line. dotty decides the separator before it
+        // looks at the indentation width at all, so a blank line ends the
+        // statement however deeply the next line is indented
+        // (`Scanners.handleNewLine`). Verified against scalac 3.9: `val x = 1`,
+        // a blank line, then a more-indented `+ a * 6` prints 1, and the same
+        // shape after a trailing `+` is an error, not a continuation. A token
+        // that cannot begin a statement -- `.map(...)` on its own line -- is
+        // unaffected, as it is in dotty.
+        else if (w > regions_.back().width && t.pastBlankLine &&
+                 canEndStatement(prevKind_) && canBeginStatement(t.kind))
+            synth(TokenKind::Newline, t);
     }
 
     // Scala 3 leading infix operator: an operator identifier followed by a
-    // blank and an operand on the same line.
+    // blank and an operand on the same line, and *not* preceded by a blank
+    // line. dotty requires all three (`Scanners.isLeadingInfixOperator`, which
+    // is gated on `!pastBlankLine`): a blank line ends the expression, so the
+    // operator opens a new statement instead of continuing the previous one.
+    // Verified against scalac 3.9: with the blank line, `val x = 1` / blank /
+    // `+ a * 6` / `println(x)` prints 1; without it, 31. A dedented
+    // continuation line still continues (scalac only warns), and a
+    // comment-only line is not a blank line, so both keep continuing.
     bool isLeadingInfix(std::size_t i) const {
         const Token& t = raw_[i];
         if (t.kind != TokenKind::Identifier || !t.isOperator || t.backquoted) return false;
+        if (t.pastBlankLine) return false;
         const Token& n = raw_[i + 1];
         if (n.kind == TokenKind::EndOfFile || n.firstOnLine) return false;
         if (n.pos.column <= t.end.column) return false;  // no blank after the operator

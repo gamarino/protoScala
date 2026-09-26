@@ -24,6 +24,13 @@
 - Comments: `//` line, `/* ... */` block, **nested**.
 - **Significant indentation** (Scala 3 offside rule) and braces, mixable as in
   Scala 3; optional `end` markers (`end if`, `end match`, `end MyClass`, ...).
+- **Leading infix operator:** a line starting with an operator identifier, a
+  blank and an operand continues the previous expression -- `val total = 1` then
+  `+ 2` is `3`. A **blank line** ends the expression first, whatever the
+  indentation of the operator line, so `val x = 1`, a blank line, `+ a * 6`
+  leaves `x` at `1` and makes `+ a * 6` a statement of its own. Only whitespace
+  makes a line blank; a comment-only line still continues the expression. This
+  is Scala 3's rule exactly.
 
 ## 2. Expressions and definitions
 

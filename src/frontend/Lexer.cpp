@@ -248,7 +248,24 @@ Token Lexer::make(TokenKind k, SourcePos start, std::string text) {
     t.end = SourcePos{line_, column_};
     t.lineIndent = lineIndent_[start.line - 1];
     t.firstOnLine = (start.line != lastTokenLine_);
+    t.pastBlankLine = pastBlankLine_;
     return t;
+}
+
+// From one past the previous token to `to`: a newline that is reached with
+// only whitespace seen since the previous newline is a blank line.
+bool Lexer::pastBlankLine(std::size_t to) const {
+    bool blank = false;
+    for (std::size_t i = lastTokenEnd_; i < to && i < source_.size(); ++i) {
+        const unsigned char c = static_cast<unsigned char>(source_[i]);
+        if (c == '\n') {
+            if (blank) return true;
+            blank = true;
+        } else if (c != '\r' && c != '\f') {
+            blank = blank && c <= ' ';
+        }
+    }
+    return false;
 }
 
 Token Lexer::error(const std::string& msg, SourcePos at, bool atEof) {
@@ -269,6 +286,7 @@ Token Lexer::next() {
     if (done_) { Token t; t.kind = TokenKind::EndOfFile; t.pos = {line_, column_}; return t; }
     Token trivia = skipTrivia();
     if (trivia.kind == TokenKind::Error) { done_ = true; return trivia; }
+    pastBlankLine_ = pastBlankLine(pos_);
     SourcePos start{line_, column_};
     if (eof()) {
         done_ = true;
@@ -310,6 +328,7 @@ Token Lexer::next() {
     }
     if (t.kind == TokenKind::Error) done_ = true;
     lastTokenLine_ = start.line;
+    lastTokenEnd_ = pos_;
     return t;
 }
 

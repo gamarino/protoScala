@@ -30,6 +30,8 @@ private:
     int line_ = 1;
     int column_ = 1;
     int lastTokenLine_ = 0;          // line of the previous token (0: none yet)
+    std::size_t lastTokenEnd_ = 0;   // byte offset one past the previous token
+    bool pastBlankLine_ = false;     // set by next() for the token being made
     bool done_ = false;
     std::vector<int> lineIndent_;    // leading-blank width per line (index line-1)
     std::vector<bool> lineHasTab_;   // leading blanks of that line contain a tab
@@ -47,6 +49,10 @@ private:
     // Skips blanks and comments. Returns an Error token for an unterminated
     // block comment, else a token with kind EndOfFile meaning "nothing to report".
     Token skipTrivia();
+    // dotty Scanners.pastBlankLine: true when the bytes between the previous
+    // token and `to` hold a line of nothing but whitespace. Whitespace-only is
+    // what counts, so a `//` or `/* */` comment on its own line is not blank.
+    bool pastBlankLine(std::size_t to) const;
 
     Token make(TokenKind k, SourcePos start, std::string text);
     Token error(const std::string& msg, SourcePos at, bool atEof = false);

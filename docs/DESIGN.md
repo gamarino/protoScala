@@ -139,6 +139,11 @@ tree `../protoCore/build_release` (same logic as protoClojure and protoST).
   bodies; closed by dedent or `end` markers). Inside `(...)` and `[...]` no
   indentation tokens are inserted. Braces and indentation may be mixed exactly
   as Scala 3 allows.
+- **Leading infix operators:** a line that begins with an operator identifier
+  followed by a blank and an operand continues the previous expression, as
+  Scala 3 allows -- unless a **blank line** separates the two, which ends the
+  statement whatever the indentation (dotty's `pastBlankLine` gate). Only
+  whitespace makes a line blank: a comment-only line still continues.
 - Unit tests pin every region rule with token-stream fixtures before the
   parser consumes them.
 

@@ -58,6 +58,12 @@ struct Token {
     SourcePos end;             // one past the last character
     int  lineIndent = 0;       // width of the leading blanks of the line `pos` is on
     bool firstOnLine = false;  // only blanks and comments precede it on its line
+    // A line holding nothing but whitespace lies between this token and the
+    // previous one. Scala 3's leading-infix rule needs it: a blank line ends
+    // the expression, so the operator that starts the next line starts a new
+    // statement (dotty `Scanners.pastBlankLine`). A comment-only line is *not*
+    // blank, exactly as in dotty.
+    bool pastBlankLine = false;
     bool backquoted = false;
     bool isOperator = false;   // Identifier made only of operator characters
     bool errorAtEof = false;   // Error: the input ended inside a construct

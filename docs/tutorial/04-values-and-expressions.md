@@ -73,6 +73,22 @@ letters (`max`, `min`); `|`; `^`; `&`; `=` and `!`; `<` and `>`; `:`; `+` and
 `a < b && c < d` needs no parentheses. Operators ending in `:` are
 right-associative.
 
+An expression may be continued on the next line by starting that line with the
+operator, which is how a long arithmetic or string expression is usually laid
+out:
+
+```scala
+val total = 1
+  + 2
+  + 3
+```
+
+One thing to watch: a **blank line** ends the expression. Insert one before the
+`+ 2` and `total` is `1`, with `+ 2` becoming a statement of its own -- the same
+as in Scala 3, and the reason a stray blank line inside a long expression
+changes the answer rather than failing. A comment on its own line is harmless:
+only whitespace makes a line blank.
+
 ## 4.4 Strings and characters
 
 Fixture: [`tests/conformance/tutorial/04-values-strings.scala`](../../tests/conformance/tutorial/04-values-strings.scala)
