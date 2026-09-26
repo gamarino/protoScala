@@ -979,6 +979,86 @@ with its date and its instrument.
 | D111 | **Top-level `def` overloads dispatch on the number of parameters, not on their types.** They used to dispatch on nothing: the second definition of a name silently replaced the first, and `f(1)` on `def f(x: Int)` / `def f(x: Int, y: Int)` raised `IllegalArgumentException: wrong number of arguments`. Arity is the part of a Scala signature that survives erasure, so an alternative is chosen by argument count, and the four things that stop a count from identifying an alternative are refused with a diagnostic instead of guessed at: two alternatives of the **same arity** (`def f(x: Int)` and `def f(x: String)`, which scalac accepts), a **default parameter value** (which scalac also accepts, resolving by type), a **repeated** parameter, several **parameter lists**, and a **by-name** parameter, whose thunking mask the call site looks up by name before it knows which alternative it wants. A bare overloaded `f` used as a function value eta-expands the **first** alternative, where Scala asks for an expected type. Methods in a template are unchanged: a second definition of a name there is still an error (D31). Fixtures: `tests/conformance/05-functions/top-level-overloads.scala` and the three diagnostics beside it | Track S | later |
 | D112 | **A shift count is not masked to the operand's width, because there is no width to mask to.** Scala masks it to 5 bits for an `Int` and 6 for a `Long`, so `0x01030507 << 36` is `271601776`, `1 << 33` is `2`, `1L << 65` is `2` and `256 >> 33` is `128`. protoScala's integers are of arbitrary precision (D1, permanent): `<<` is an exact multiplication by a power of two and `>>` an exact arithmetic shift, so the same four expressions are `1166520745455517696`, `8589934592`, `36893488147419103232` and `0`. **This is the one row in this table that is not a shortfall but an ambiguity.** The mask width *is* the operand width, so with no width there is no mask: masking to 5 bits would give Scala's answer for `1 << 33` and the wrong one for `1L << 65`; masking to 6 would do the reverse; and the `L` suffix, which is the only syntax that distinguishes them, is accepted and ignored (D1) and could in any case say nothing about `val n = 1; n << 33`. Picking either width would replace one divergence with a less predictable one, so neither was picked. Fixture: `tests/conformance/15-integers/shift-counts-are-not-masked.scala` | Track S | (perm, with D1) |
 
+### Phase 7 deviations — the transpiler, recorded 2026-09-26, pending review
+
+`protoscalac` turns protoScala source into C++ that calls the runtime directly, and
+the C++ is built into a `.so` that `protoscala --run-module` loads. The rows below are
+what the **first cut** does not do, and every one of them is a **refusal at transpile
+time with a named message and a source position** — never a mistranslation. The
+emitter walks the whole unit before writing anything, so a refused unit leaves no
+`.cpp` behind.
+
+Two things about the numbering. The Phase 7 plan reserved D103–D107; Tracks F, X and S
+consumed D103–D112 before the phase was executed, so the plan's five deviations are
+**D113–D117** here. And six of the rows below (D118–D123) are **not in the plan at
+all**: each was added because the differential harness produced a wrong answer, and
+the two the plan could not have predicted are **D121** (a default value is bound by
+the callee's prologue, which a transpiled frame does not run, so the callee silently
+saw an unbound parameter) and **D123** (an import is resolved at transpile time and
+leaves no trace in the emitted code, so the generated module pushed globals nothing
+had filled).
+
+| id | Deviation | Plan | Revisit |
+|---|---|---|---|
+| D113 | **`await` is refused inside a transpiled module.** Cooperative suspension snapshots a *bytecode* frame (`__mod__`, `__ip__`, `__fbase__`, `__fslots__`) and `nativeReentryDepth()` already refuses to suspend above depth 1 (D43); a transpiled frame has no `ip` and its C++ frame cannot be rebuilt, so mistranslating would produce a hang or a lost continuation. Detection is by **send-site name**, so a user method named `await` is refused too — an over-approximation in the safe direction. Making it work needs each block emitted as a state machine with an explicit program counter and every live slot in the frame, which is the shape `protopyc` uses for Python generators | Phase 7 | later |
+| D114 | **A transpiled program's `StackOverflowError` fires at a different recursion depth than the interpreter's**, because the native frame differs. The class and the message are unchanged; only the depth is, and no fixture asserts a depth. (Before `gen::Frame` opened with `checkNativeStack()` it did not raise at all: it **segfaulted**, which the differential harness found) | Phase 7 | (perm) |
+| D115 | **`protoscalac` compiles files, not REPL input.** There is no transpiled REPL and no `res0` echo; `UnitMode::Repl` is not offered. The REPL keeps the interpreter | Phase 7 | (perm) |
+| D116 | **One `.so` loaded through two runtimes' compiled providers is two modules in one process**, because P3's identity is provider **GUID** + logical path + version. Two module objects, two top-level runs. Recorded so that nobody reads "one artefact, three toolchains" as "one instance" | Phase 7 | (perm) |
+| D117 | **A transpiled module's version comes from `protoscalac --module-version`, not from the source.** protoScala has no module manifest and this phase did not invent one. Without the option the version is the **empty string**, which P3 fixed as the permanent, first-class "declares no version" value — not a wildcard. `"0.0.0"`, `"unversioned"` and `"latest"` are all unsafe reservations, because each is a value a real module could one day declare | Phase 7 | later |
+| D118 | **Classes, traits, objects, case classes and enums are refused.** `MAKE_CLASS`, `NEW`, `NEW_SPREAD`, `INVOKE_INIT`, `STORE_FIELD`, `STORE_FIELD_IF_NEW` and `SET_FIELD` need the `ClassSpec` rebuilt from the static tables, which this cut does not do. **This is the one that matters**: it accounts for 305 of the 500 excluded fixtures and for 179 of the 186 refusals among the corpus tests the interpreter passes, because a Scala 3 `tests/run` test *is* `object X { def main … }` | Phase 7 | next |
+| D119 | *(withdrawn before it shipped)* A capturing closure was going to be refused, because the callable shape it must present looked like an open question. It is not: a transpiled block **is** a `BytecodeModule` with no code and a `nativeEntry`, so a transpiled closure and an interpreted one are the same object shape, captures included. The id is left in place rather than reused, so the exclusion list's history reads straight | Phase 7 | (closed) |
+| D120 | **`try` / `catch` / `finally` is refused.** The generated frame has no retry loop. When one is written, the `switch` that reaches the labels must be **inside** the `try` — C++ forbids jumping *into* a try block and permits jumping within one — and the frame must be able to catch a **second** exception, raised by its own handler body, by a non-matching cascade's `RETHROW` or by a `finally`. Entering the handler from inside the catch abandons the loop and the frame's table is never consulted again: measured, that turns **11** fixtures red | Phase 7 | next |
+| D121 | **A named argument and a default parameter value are refused.** Both are bound by the **callee's** prologue (`bindKeywordsAndDefaults`), which a transpiled frame does not run, so a transpiled callee would silently see an unbound parameter. Found by the differential harness, not predicted by the plan | Phase 7 | later |
+| D122 | **`super` and `super[T].m` are refused.** The super-site search needs the defining template's key, which this cut does not carry into the static tables | Phase 7 | later |
+| D123 | **`import` is refused.** An import is resolved at transpile time by *loading* (D90) and leaves no trace in the emitted code — the imported names become ordinary global keys — so a generated module would push globals nothing had filled. Re-performing the import at load time is what `gen::importModule` is for and it is not implemented. The check is on the **source**, an over-approximation: a line beginning with `import` inside a triple-quoted string is refused too. Found by the differential harness | Phase 7 | next |
+
+**What the transpiler does NOT deviate on, and why that is worth a sentence.** There
+is **one** implementation of every opcode (`src/runtime/OpcodeOps.h`), called by both
+the interpreter and the generated code, so the transpiler cannot drift from the
+interpreter: there is nothing to drift from. The exception-boundary template appears at
+exactly two places, both inside `libprotoScala.so`, and the emitter writes no `catch`
+at all — a generator bug cannot drop the `std::logic_error` clause and retire D74 in a
+file no human wrote. Full specification: [`PROTOSCALAC_SPECIFICATION.md`](PROTOSCALAC_SPECIFICATION.md).
+
+### Phase 7 — what the two differentials measured
+
+**The fixture differential**, one CTest case per registered fixture, transpile →
+`make` → `--run-module`, judged against the fixture's own directive:
+
+| | count |
+|---|---:|
+| registered fixtures | **921** |
+| pass | **921** |
+| fail | **0** |
+| — of which transpiled, compiled and **ran** | **360** |
+| — of which correctly rejected at compile time (an `EXPECT-ERROR` fixture) | **61** |
+| excluded, each a refusal with a reason code | **500** |
+
+Exclusions by code: D118 **305**, D123 **87**, D120 **64**, D113 **26**, D121 **18**.
+`tests/transpile-exclude.txt` carries one line per fixture with its code, and the
+harness checks the list in **both** directions: a listed fixture that transpiles,
+compiles and runs correctly is a **FAIL** naming itself.
+
+**The corpus differential** — added because the fixture differential proves the
+transpiler agrees with the **interpreter**, not with Scala, and the interpreter agrees
+with Scala on about a third of the in-scope corpus. The rule measured is *every corpus
+test the interpreter passes must also pass transpiled*. Over the 601 in-scope
+(bucket 3) tests of the Scala 3 `tests/run` corpus:
+
+| | count |
+|---|---:|
+| interpreter passes | **191** (31.8 %) |
+| of those, transpiled **pass** | **5** (one of them checkfile-verified) |
+| of those, **refused** | **186** — D118 179, D123 6, D120 1 |
+| of those, **diverged** | **0** |
+| reverse (interpreter fails, transpiled passes) | **0** |
+
+**Zero divergences, and almost no coverage.** The rule is satisfied *vacuously*: the
+corpus is made of the one thing the first cut refuses. That is the finding the fixture
+harness could not have produced, and it says plainly that **the 360 is what our
+fixtures are made of, not a third of Scala**. Operands and the three shim
+configurations: `.agent_scratch/phase7-transpiler/corpus-differential.md`.
+
 ## Known issues / platform dependencies
 
 See DESIGN §11 for the full table. Unchanged this phase: R2, R4, R8. **R5 was

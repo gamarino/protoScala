@@ -47,8 +47,8 @@ Both moved on 2026-09-26, and neither closed:
 
 They stay visible as known gaps.
 
-Two items remain **open for the maintainer** — see "Still open" at the end of
-this file.
+Two items remain **open for the maintainer** from 2026-09-23, and five more from the
+Phase 7 first cut — see the two "Still open" sections at the end of this file.
 
 | Date | Decision | Taken by | Where |
 |---|---|---|---|
@@ -674,3 +674,16 @@ reversing each is different.
 | 2026-09-26 | **The differential harness distinguishes a REFUSAL from a compile error, and judges the second against the fixture's directive.** 158 fixtures are `EXPECT-ERROR`, and for them protoscalac's own diagnostic — produced by the interpreter's own front end — IS the expected output. Without the distinction those 158 would all have read as refusals and been excluded, which would have removed the highest-value part of the coverage: a compile-error fixture is the one place the two paths are guaranteed to share an implementation. A refusal is recognised by its message (`not supported by protoscalac`), so a refusal can never be mistaken for a program error | [agent, pending review] | `tests/conformance/run-transpiled.sh` |
 | 2026-09-26 | **The differential cases are registered unconditionally (behind an ON-by-default option), not put behind a manual step.** Each runs a C++ compiler, and the whole set costs about 2 min 45 s at -j3 against 52 s for the rest of the suite. A differential harness nobody runs is a harness that rots, which is exactly what its three anti-rot guards exist to prevent, so the cost is paid. `-DPROTOSCALA_TRANSPILED_TESTS=OFF` exists for a host with no `g++` | [agent, pending review] | `tests/CMakeLists.txt` |
 | 2026-09-26 | **`Frame` opens with `checkNativeStack()`, as `execute` does.** Without it a transpiled recursive function ran off the native stack: `06-recursion/stack-overflow.scala` **segfaulted** instead of raising `StackOverflowError`. Found by the differential harness. The depth at which it fires still differs from the interpreter's, because the native frame differs — which is what D114 records — but the class is now raised rather than the process dying | [agent, pending review] | `src/runtime/GeneratedSupport.cpp` |
+
+### Still open for the maintainer after the Phase 7 first cut (2026-09-26)
+
+These are **questions**, not agent decisions, and none of them is settled by the
+work above. They are recorded so they cannot be mistaken for approvals.
+
+| Question | Why it is open |
+|---|---|
+| Is a first cut that refuses **classes** worth shipping at all, or does D118 land first? | The measurement says D118 is not one gap among six: it is 305 of the 500 excluded fixtures and **179 of the 186** corpus refusals among the tests the interpreter passes. A Scala 3 `tests/run` test *is* `object X { def main … }`. So a transpiler without classes runs almost nothing a Scala programmer would recognise, and the 360 green fixtures measure what our fixtures are made of rather than what Scala is. Shipping it as an announced capability would invite exactly that misreading; keeping it as an unannounced tool would not |
+| Is **T0-14** — a transpiled block IS a `BytecodeModule` with no code and a `nativeEntry` — the shape the maintainer wants? | It is the shape that made the first cut correct, and it is one field plus one branch. It also means a `BytecodeModule` can now be an object with no bytecode in it, which is a small widening of what that class means. The alternative costs a branch at each of nineteen `compiledModuleOf` readers |
+| Should the **921 differential cases** stay in the default `ctest` run? | They cost about 2 min 45 s at `-j3` against 52 s for the rest of the suite, and each one runs a C++ compiler. ON by default is the agent's call (a harness nobody runs rots); the trade is a suite that is four times slower for everybody, including CI |
+| Does the cold-start done-when stay as **"`cold-start.sh` exits 0"**, harness overhead included? | Measured: the harness's own floor is ~5 ms, so roughly 21.4 ms of the 26.38 ms median is protoScala. Redefining the done-when net of that overhead would make the budget met with margin. It is stated and **not** deducted, because redefining a done-when is not a measurement's decision |
+| What closes the **cross-runtime-call** claim? | The artefact exists and the argument is sound — a transpiled function is a `proto::ProtoMethod`, which protoScala bytecode is not — but the test that would prove it (a caller including `protoCore.h` only, naming no protoScala symbol, calling through `asMethod`) is **not written**. Until it is, `docs/INTEROP.md` §8 is a claim. The cross-*space* case is separately open, and is R5's |

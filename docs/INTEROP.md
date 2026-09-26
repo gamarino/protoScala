@@ -126,6 +126,17 @@ The registration call is wrapped in the boundary shape of §6, because a plug-in
 runs foreign code and a C++ exception escaping `dlopen`'d code into this frame
 would cross an ABI this binary did not compile.
 
+### 3.x Compiled modules (Phase 7)
+
+`protoscalac` produces a `.so` that defines `proto_module_init`, which is the same
+artefact a hand-written C++ UMD module and `protopyc` produce. The **producing
+language is an implementation detail of the module**.
+
+Status, precisely: the artefact is produced and `protoscala --run-module` loads and
+runs it. The provider that would make it an `import` target — alias `compiled`, GUID
+`protoScala-compiled-v1` — is **specified and not built**, so a compiled module cannot
+yet be imported. See `docs/PROTOSCALAC_SPECIFICATION.md` §2.
+
 ## 4. Calling convention
 
 A foreign value is an ordinary `ProtoObject`. `np.sqrt(2.0)` compiles to
@@ -371,3 +382,35 @@ So (1) and (4) are facts about protoPython's contents and (2)–(3) are its
 ownership model, which is what DESIGN R5 asks the maintainer about. Making a `py`
 provider serve a foreign caller is a change to `PythonEnvironment`, not a
 provider-local change, and it is not protoScala's to make.
+
+
+## 8. What a transpiled function adds (Phase 7)
+
+Track Y proved two things, and the second is what Phase 7 answers. Values cross a
+runtime boundary **without copying** — one cell, two `ProtoSpace`s, the same address
+and the same `getHash` printed from both sides — and a foreign runtime **cannot call**
+a protoST method, because a protoST method is `__bc_ptr__` plus protoST's own engine
+rather than a `proto::ProtoMethod`. protoScala had exactly the same shape: a compiled
+function is an object carrying a bytecode-module address, and only
+`ExecutionEngine::execute` can run it.
+
+**A transpiled module's functions are `proto::ProtoMethod`s**, reached through
+`ProtoObject::asMethod`, so any runtime that holds the object can call it with no
+knowledge of protoScala. Two limits, stated so nobody infers more:
+
+- **Within one `ProtoSpace`.** A `proto::ProtoMethod` is a raw code pointer; the
+  arguments and the result are cells, and cells belong to the space that allocated
+  them. A caller in another space can hold the method object (Track Y's no-copy
+  property) and can call it, but the call allocates in the *caller's* context and the
+  body reads protoScala's `RuntimeLayout`, which is per-space. A cross-**space** call
+  therefore needs the module's host runtime to be reachable from that space, which is
+  R5's open question and is **not** resolved.
+- **Without protoScala's front end, not without protoScala's runtime.** `ldd
+  module.so` names `libprotoScala.so.1`, and that is the honest statement of the cost:
+  the module brings a runtime, and therefore one `ProtoSpace` term in protoCore's
+  process sizing rule.
+
+**Demonstrated?** Not yet. The argument above is sound and the artefact exists, but the
+test that would prove it — a caller that includes `protoCore.h` only, names no
+protoScala symbol, and calls the exported function through `asMethod` — is **not
+built**. Until it is, this section is a claim, not a result.

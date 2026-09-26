@@ -845,6 +845,43 @@ ctest --test-dir build_release
 ./build_release/protoscala --version
 ```
 
+## Producing a UMD module — in C++, in Python or in Scala
+
+A protoCore UMD module is a shared library that defines `proto_module_init`. Three
+toolchains now produce one: a hand-written C++ file, `protopyc` from Python, and
+`protoscalac` from Scala. **The producing language is an implementation detail of the
+module**: one `.so`, one `dlopen`, one init symbol, one entry in the provider registry.
+
+```bash
+build_release/protoscalac hello.scala --build-so   # -> module.so
+build_release/protoscala --run-module ./module.so
+ldd ./module.so | grep proto        # libprotoScala.so.1, libprotoCore.so.3
+```
+
+What that buys, and it is not speed: a transpiled module's functions are
+`proto::ProtoMethod`s, and a `proto::ProtoMethod` is callable by any runtime in the
+family. protoScala **bytecode** is not — a foreign runtime can hold a bytecode-backed
+function object (values cross a runtime boundary with no copy) and still cannot call
+it. The generated C++ calls the runtime dynamically, exactly as `protopyc`'s does, so
+arithmetic is not faster and a send costs what it cost.
+
+`protoscalac` is a **first cut**: it refuses classes, `import`, `try`/`catch`,
+`await`, named arguments and `super`, each at transpile time with a named message and
+a source position, and never mistranslates. What it refuses, why, and the two
+differentials that measure it are in
+[docs/PROTOSCALAC_SPECIFICATION.md](docs/PROTOSCALAC_SPECIFICATION.md).
+
+**And it is measurably not a speed-up.** The same source down both paths, interleaved
+in one window: a geomean of **1.244× slower** transpiled over ten workloads, **2.57×**
+at worst on `fib30`, and **indistinguishable** (geomean 0.985) on the six that are not
+call-bound. A null program is 22.29 ms interpreted against 22.40 ms transpiled, so
+removing the front end buys nothing measurable either. The cost is the calling
+convention — a `proto::ProtoMethod` takes a `ProtoList`, so a transpiled call
+allocates one and opens a second context — and it is paid *for* the cross-runtime
+callability. The useful conclusion is where the cost is **not**: optimisation effort
+belongs in the object model, not in the interpreter's dispatch loop.
+[Report](benchmarks/reports/2026-09-26-interpreted-vs-transpiled.md).
+
 ## Usage
 
 ```bash
@@ -866,6 +903,7 @@ protoscala
 - [docs/tutorial/15-modules-and-polyglot-interop.md](docs/tutorial/15-modules-and-polyglot-interop.md) — modules and polyglot interop, chapter by chapter
 - [docs/tutorial/worked-example.md](docs/tutorial/worked-example.md) — the worked example, where the pieces are shown working together
 - [docs/INTEROP.md](docs/INTEROP.md) — UMD polyglot interop: what routes where, and what is reachable today
+- [docs/PROTOSCALAC_SPECIFICATION.md](docs/PROTOSCALAC_SPECIFICATION.md) — `protoscalac`, the protoScala-to-C++ transpiler: command line, generated code, what it refuses and why
 - [docs/platform/](docs/platform/) — protoCore extensions specified by this project
 - [docs/plans/](docs/plans/) — task-level implementation plans
 

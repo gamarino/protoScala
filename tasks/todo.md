@@ -84,3 +84,85 @@ of the eight pushes. (Both totals are against protoCore 2.4.0. Re-measured from
 clean against protoCore 2.5.0 on 2026-09-25 the suite is **1344**, 0 failed, 7
 skipped: the whole of the step is protoCore adding one conformance rule,
 `mutable.graph_cycles`, which this suite is parameterised over.)
+
+---
+
+# Phase 7 — the C++ transpiler (2026-09-26)
+
+Plan: `docs/plans/2026-09-25-phase-7-transpiler.md` (Task 0 plus 17 tasks).
+Scratch, baselines and measurements: `../.agent_scratch/phase7-transpiler/`.
+
+## Done
+
+- [x] **Task 0** — all twelve decisions taken on the agent's authority and recorded
+      in `docs/DECISIONS-LOG.md` as `[agent, pending review]`, each with its argument
+      and the cost of reversing it. Four more decisions the plan did not anticipate
+      are recorded beside them (T0-13, T0-14 and two mechanical consequences of D3).
+- [x] **Task 1** — gate, baselines, and three of the plan's numbers corrected from
+      the tree: the deviation floor is **D113** (not D103), **60** opcodes are defined
+      (not 54) with 82 as the object-model band's lowest free value (not 81), and the
+      registered conformance suite is **919** fixtures (not 841). Task 1 Step 5's
+      verbatim paragraph was deliberately not copied, because it asserts a cold-start
+      budget that had been refuted hours earlier.
+- [x] **Task 2** — `libprotoScala.so` with `SOVERSION 1` and exactly one installed
+      header; CMake package; 9 unit cases through the shared library alone.
+- [x] **Task 3** — `src/runtime/OpcodeOps.h`: one opcode implementation, two
+      consumers. Cycle gate measured interleaved (no regression; a win reported, not
+      claimed). 17 unit cases, 16 of them shown red by one of 17 named mutations.
+- [x] **Task 4** — `protoscalac`: command line, toolchain resolution for both trees,
+      generated `Makefile`, exit statuses, CLI test.
+- [x] **Task 5** — `src/compiler/CppTables.{h,cpp}`: one escaper, one exact-double
+      literal, one flattening, shared with the prelude image. Evidence: the generated
+      `PreludeImage.cpp` is byte-identical after the move.
+- [x] **Task 6, Task 7 in part** — the frame, the slot layout, the straight-line
+      opcodes, calls, sends, closures, pattern matching, `TupleN`.
+- [x] **Task 10 Step 5** — `protoscala --run-module`.
+- [x] **Task 11** — the differential harness, its three anti-rot guards, the
+      exclusion list generated from a measured sweep, and 919 CTest cases.
+- [x] **Task 12 in part** — the emitter mutation matrix.
+- [x] **Task 13 in part** — `check()` walks first and emits nothing;
+      `--report-purity`; the refusals CLI test.
+- [x] **Task 16** — `docs/PROTOSCALAC_SPECIFICATION.md`.
+- [x] **Task 17 in part** — STATUS deviations D113–D123, ROADMAP, CHANGELOG,
+      README, LANGUAGE, INTEROP, DESIGN cross-references, tutorial chapter 17 with
+      two fixtures.
+- [x] **Added beyond the plan** — the **corpus** differential, on the rule the
+      maintainer substituted for the plan's own.
+
+## Not done, in the order they should be taken
+
+- [ ] **Classes, traits and objects (D118).** 305 of the 500 excluded fixtures and
+      179 of the 186 corpus refusals. Nothing else moves the corpus number by more
+      than a handful, so this is not one item among several: it is the item.
+- [ ] **Task 8 — the frame's retry loop (D120).** `try`/`catch`/`finally`. The
+      `switch` must be inside the `try`, and the frame must be able to catch a
+      second exception; getting that wrong was measured at 11 red fixtures.
+- [ ] **Task 9 Step 4 — load-time import resolution (D123).**
+- [ ] **Task 9 Step 2 — `emitExports`**, so a compiled module keeps early type
+      binding instead of degrading to a foreign module.
+- [ ] **Task 10 Steps 1–4, 6 — `CompiledModuleProvider`** and the
+      **cross-runtime-call demonstration**. The second is the phase's headline
+      capability: argued, artefact in hand, **not demonstrated**.
+- [ ] **Task 14 — packaging verified end to end in a scratch prefix** with
+      `env -u LD_LIBRARY_PATH`.
+- [ ] **Task 15 — measurement.** Start-up (criterion: no regression), load time,
+      throughput with the expectation written first, and the compile-cost table that
+      justifies `-O2` or overturns it.
+- [ ] **Version.** Deliberately **not** bumped to 0.7.0: the phase has not shipped.
+
+## Review
+
+What went right: consuming bytecode meant the whole front end was reused unchanged,
+so no Scala semantics was reimplemented anywhere; and building the differential
+before trusting the design is what caught four silent wrong answers.
+
+What the plan got wrong, and it is worth recording: its `gen::makeFn` design cannot
+work, because `compiledModuleOf` reads `__code__` as a `BytecodeModule*` and
+nineteen sites depend on that. The answer turned out to be smaller than either
+option the plan considered — a transpiled block simply **is** a `BytecodeModule`,
+one with no code and a native entry — and it needed one field and one branch.
+
+What I would do differently: measure the corpus differential **first**. It says in
+one table that the fixture corpus is not shaped like real Scala, and it would have
+put classes at the top of the task list on day one instead of after the emitter was
+written.

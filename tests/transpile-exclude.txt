@@ -17,7 +17,7 @@
 #
 # Counts by code:
 #   D113    26
-#   D118   304
+#   D118   305
 #   D120    64
 #   D121    18
 #   D123    87
@@ -533,3 +533,4 @@ tutorial/15-modules-runs-at-import.scala                               D123   an
 tutorial/16-files-a-closed-source.scala                                D120   the generated frame has no retry loop yet
 tutorial/16-files-missing-file.scala                                   D120   the generated frame has no retry loop yet
 tutorial/16-files-one-catch-for-every-failure.scala                    D120   the generated frame has no retry loop yet
+tutorial/17-compiled-a-class-is-refused.scala                          D118   classes, traits and objects are not transpiled in the first cut

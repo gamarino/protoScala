@@ -623,3 +623,33 @@ and an unqualified-`enum`-case divergence; the rulings of 2026-09-23, the arriva
 of by-name parameters and Phase 4's choice to follow Scala each removed one. Ids
 are stable references, so the gaps are left open rather than closed by
 renumbering.
+
+
+## Compiled modules (`protoscalac`)
+
+A `.scala` file can be turned into a shared library that protoCore loads as a UMD
+module: `protoscalac foo.scala --build-so` writes `module.so`, and
+`protoscala --run-module ./module.so` runs it. The generated C++ calls the runtime
+dynamically, so **nothing about the language changes** — the same prelude, the same
+numeric semantics, the same sends — and one implementation of every opcode serves both
+paths.
+
+What changes is what the **first cut accepts**. It refuses, at transpile time, with a
+named message and a source position, and never mistranslates:
+
+| code | refused |
+|---|---|
+| **D113** | `await` inside a transpiled module (detected by send-site name, so a user method called `await` is refused too) |
+| **D115** | REPL input: `protoscalac` compiles files |
+| **D118** | classes, traits, objects, case classes, enums |
+| **D120** | `try` / `catch` / `finally` |
+| **D121** | named arguments and default parameter values |
+| **D122** | `super` and `super[T].m` |
+| **D123** | `import` |
+
+**D114** is a difference rather than a refusal: a transpiled program's
+`StackOverflowError` fires at a different recursion depth, because the native frame
+differs. The class and the message are unchanged.
+
+Full detail, including what the two differential harnesses measured:
+[`PROTOSCALAC_SPECIFICATION.md`](PROTOSCALAC_SPECIFICATION.md).

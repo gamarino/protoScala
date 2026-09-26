@@ -269,6 +269,50 @@ Four things Phase 4 left for this phase to finish:
   and run at every start-up with nothing cached. Module loading arrives in this
   phase, which is where a serialised prelude belongs.
 
+## Phase 7 — The C++ transpiler ⚠️ **first cut only** (2026-09-26, version NOT bumped)
+
+**Goal.** `protoscalac`, a transpiler that turns protoScala source into C++ which
+calls protoScala's runtime and protoCore directly, compiled into a shared library
+that loads as a UMD module — the same artefact `protopyc` produces for Python and
+the same artefact a hand-written C++ UMD module is. What it adds to the family is
+not speed and not start-up: **a protoScala function becomes a `proto::ProtoMethod`**,
+and a `proto::ProtoMethod` is callable by any runtime in the family, which protoScala
+bytecode is not.
+
+**Done when — and where the first cut stands against it:**
+
+| criterion | status |
+|---|---|
+| `protoscalac` emits C++ that builds to a `.so` | ✅ |
+| the `.so` loads and runs | ✅ via `protoscala --run-module` |
+| `CompiledModuleProvider` loads it as an importable module | ❌ **not built** |
+| the differential harness runs the fixture corpus green | ✅ 921 pass, 0 fail (360 ran, 61 rejected at compile time, 500 refused) |
+| every differential case red under a named mutation | ⚠️ partial — the emitter matrix is measured, and four of the plan's twelve mutations cannot be applied because the code they mutate does not exist in this cut |
+| the cross-runtime-call test passes while naming no protoScala symbol | ❌ **not built** — the phase's headline capability is argued, not yet demonstrated |
+| start-up shows no regression | ❌ **not measured** |
+| `PROTOSCALAC_SPECIFICATION.md` exists | ✅ |
+
+**Added beyond the plan, because the maintainer changed the verification
+requirement:** a **corpus** differential over the Scala 3 `tests/run` corpus, on the
+rule *every corpus test the interpreter passes must also pass transpiled*. Result:
+**0 divergences and almost no coverage** — of the 191 in-scope tests the interpreter
+passes, the transpiler refuses 186 and runs 5. The corpus is made of
+`object X { def main … }`, and a class is what the first cut refuses. That measurement
+is why the fixture differential's 360 must not be read as language coverage.
+
+**What it deliberately did not do.** `await` in transpiled code (D113), the REPL
+(D115), `--pure` emission (§D2), and a cross-**space** call (R5's open question:
+a `proto::ProtoMethod` is a raw code pointer, the arguments and result are cells, and
+cells belong to the space that allocated them).
+
+**What it did not get to, and is the next work, in order.** Classes, traits and
+objects (**D118** — 305 of the 500 excluded fixtures and 179 of the 186 corpus
+refusals; nothing else on the list moves the corpus number by more than a handful);
+the frame's retry loop, i.e. `try`/`catch`/`finally` (**D120**); load-time import
+resolution (**D123**); `CompiledModuleProvider` and the `ExportsRec` tables that keep
+early type binding; the cross-runtime-call demonstration; packaging verification in a
+scratch prefix; and the measurement task.
+
 ## Documentation track (every phase)
 
 **Goal:** documentation and a dual-audience tutorial ([TUTORIAL.md](TUTORIAL.md))

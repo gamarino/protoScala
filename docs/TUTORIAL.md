@@ -106,6 +106,7 @@ early: reading a file is `scala.io.Source` and behaves like it, writing is not a
 | 14 | [The REPL and tooling](tutorial/14-repl-and-tooling.md) | The REPL, multi-line input, commands, classes at the prompt, running scripts, error messages, `--disassemble`. |
 | 15 | [Modules and polyglot interop](tutorial/15-modules-and-polyglot-interop.md) | The member import you already know, a module is a file, the five import forms, where modules are found, importing a type, the four polyglot prefixes and what each needs, named arguments across the boundary, and what each failed import prints. |
 | 16 | [Reading and writing files](tutorial/16-reading-and-writing-files.md) | `Source.fromFile`, `getLines()` and `mkString`, how lines are counted, the `FileIO` writing surface, every failure and the class it raises, and the two deliberate divergences from Scala's `Source`. |
+| 17 | [Compiled modules](tutorial/17-compiled-modules.md) | `protoscalac`, the three toolchains that produce one artefact, what the generated C++ does and does not do, `--report-purity`, and what the first cut refuses and why a refusal is the good news. |
 | — | [**Worked example**](tutorial/worked-example.md) | One complete program, `examples/log-report/`, rather than one feature at a time: three files and two imports, an `enum` with methods, case classes and pattern matching, `Try` and a `catch` for a malformed line, `Map` aggregation, `for … yield`, interpolation, and actors fanned out with `?` and folded back with `await`. |
 
 ## Running the examples

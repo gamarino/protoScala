@@ -112,6 +112,18 @@ source ──► Lexer ──► Parser ──► AST ──► Desugar ──�
 
 The pipeline mirrors protoClojure and protoST so lessons transfer directly.
 
+Since Phase 7 the `BytecodeModule` has a **second back end**: `protoscalac` walks the
+same tree and emits C++ that calls the runtime directly, instead of running it
+(`docs/PROTOSCALAC_SPECIFICATION.md`).
+
+```
+                                              BytecodeModule ──► ExecutionEngine   (interpret)
+                                                    └────────────► CppEmitter ──► C++ ──► module.so
+```
+
+Both back ends call **one** implementation of every opcode
+(`src/runtime/OpcodeOps.h`), so the second cannot drift from the first.
+
 ### 3.1 Repository layout
 
 ```
@@ -229,6 +241,14 @@ Performed on the AST before code generation:
   each `execute()` compares against a thread-local limit and raises
   `StackOverflowError` instead of crashing; the evaluator runs on a dedicated
   large-stack thread; large buffers live in `[[gnu::noinline]]` helpers.
+- **One opcode implementation, two consumers** (Phase 7). Every opcode body lives
+  once, in `src/runtime/OpcodeOps.h`, and both `runLoop` and the C++ `protoscalac`
+  emits call it. A second implementation inside the emitter would be a defect
+  regardless of whether it were correct, which is why the emitter has none.
+  A **transpiled block is itself a `BytecodeModule`** — one with no code words, whose
+  `nativeEntry()` is a `proto::ProtoMethod` that `execute()` calls instead of running
+  bytecode — so every caller that reads a callable's arity, method-ness or
+  paramless-ness gets the right answer without knowing which kind it holds.
 - **Dispatch:** `switch` loop first; threaded-goto only if a measured profile
   justifies it (protoST measured the loop at 0.73 % of CPU after threading —
   representation and allocation dominate).

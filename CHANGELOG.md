@@ -8,6 +8,76 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`protoscalac`, a transpiler from protoScala to C++, and `libprotoScala.so` for
+  it to link against (Phase 7, first cut — NOT the whole phase; see *Known
+  limitations* below).** `protoscalac foo.scala --build-so` runs protoScala's own
+  lexer, parser, desugarer and compiler and then emits C++ from the resulting
+  `BytecodeModule` tree instead of running it; `make` builds it into a `module.so`;
+  `protoscala --run-module module.so` loads and runs it. `ldd` names
+  `libprotoScala.so.1` and `libprotoCore.so.3`, which is the honest statement of what
+  loading such a module costs.
+
+  **What it is for, so it is not mis-read.** A transpiled module's functions are
+  `proto::ProtoMethod`s, and a `proto::ProtoMethod` is callable by any runtime in the
+  family; protoScala bytecode is not. Track Y had already proved that *values* cross a
+  runtime boundary without copying and that a foreign runtime **cannot call** a
+  bytecode method. Cross-runtime *calls* are the capability this adds. It is **not** a
+  performance feature — the generated C++ calls the runtime dynamically, so it removes
+  the front end and the dispatch loop's `switch` and removes neither dynamic dispatch
+  nor the cost of a send — and it is **not** justified by start-up, where the prelude
+  image already took parse + desugar + compile (82 %).
+
+  **One semantics, two consumers.** Every opcode body lives once, in
+  `src/runtime/OpcodeOps.h`, and both `ExecutionEngine::runLoop` and the generated C++
+  call it. The transpiler cannot drift from the interpreter because there is nothing to
+  drift from, and a second implementation inside the emitter would be a defect
+  regardless of whether it were correct.
+
+  **P1 is structural here, not remembered.** The emitter tracks the operand-stack depth
+  at emit time, so every stack access is a constant index into the frame's traced
+  automatic locals and there is **no expression-temporary mechanism at all**;
+  `tests/cli/transpiler-cli.sh` greps the generated output for a C++ local holding a
+  value, and for a `catch`, and finds neither. `JUMP_BACK` emits `gen::safepoint(C)`,
+  without which a generated loop reclaims nothing while looking healthy (P4 rule 1).
+  `#line` directives point at the `.scala` file, so g++, GDB and LLDB report Scala
+  lines.
+
+  **The decision that made a correct first cut possible came from four measured wrong
+  answers, not from reasoning.** A transpiled function object the runtime cannot
+  recognise is a wrong answer with **no error**: `Try.apply` refused it; a `Map`'s
+  arity-deciding `map` read its arity through `compiledModuleOf` and defaulted to 1, so
+  `map { (k, v) => … }` was called with one argument; a by-name parameter was never
+  forced, so a `Function` reached arithmetic; and eta-expansion reads `arity()` too.
+  The fix is not a second callable shape: **a transpiled block IS a `BytecodeModule`**,
+  one with no code words, carrying the real arity, variadic, method, paramless and
+  capture-slot metadata, whose `nativeEntry()` is the block's `proto::ProtoMethod` and
+  which `ExecutionEngine::execute` calls in one added branch. All nineteen
+  `compiledModuleOf` call sites are then correct **unchanged**, because the metadata is
+  where all nineteen already look.
+
+  **Two harnesses, and the second exists because the first has a blind spot.** The
+  fixture differential runs every one of the **921** registered conformance fixtures
+  through transpile → `make` → `--run-module` and judges it against the fixture's own
+  first-line directive: **921 pass, 0 fail**, of which **360** transpiled, compiled and
+  ran, **61** were correctly rejected at compile time, and **500** are excluded as
+  refusals with a reason code. Its three anti-rot guards are that a C++ compile failure
+  is always a FAIL, that a refusal is a FAIL unless the fixture is listed, and that a
+  **listed fixture which now works is a FAIL naming itself**.
+
+  The corpus differential runs the Scala 3 `tests/run` corpus down both paths, because
+  the fixture differential proves the transpiler agrees with the **interpreter**, not
+  with Scala. Over the 601 in-scope tests the interpreter passes **191 (31.8 %)**, and
+  of those the transpiler **refuses 186**, runs **5** — one checkfile-verified — and
+  **diverges on none**, in either direction. **Zero divergences and almost no
+  coverage**: the rule is satisfied vacuously, because a `tests/run` test *is*
+  `object X { def main … }` and a class is exactly what the first cut refuses. So
+  **the 360 is what our fixtures are made of, not a third of Scala** — which is the
+  finding the fixture harness could not have produced.
+
+  `docs/PROTOSCALAC_SPECIFICATION.md` is the specification of record. The build gains
+  one shared library with `SOVERSION 1` and exactly **one** installed header,
+  `include/protoScala/GeneratedModule.h`, which is the whole published surface.
+
 - **`import Obj.*` works again (Track X), and that was a regression we made.**
   Phase 6 turned `import` into a module-loading form and, without recording it
   anywhere, removed plain Scala's member import with it: `enum Color: case Red,
@@ -152,6 +222,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   verbatim its fixture's body. For the Python and JavaScript reader it puts reading
   a file beside `open()` and `fs.readFileSync`, with the four things that do not
   carry over, and a table of the writing operations in all three languages.
+
+### Known limitations
+
+- **Phase 7 is a FIRST CUT, and what it does not do is a longer list than what it
+  does.** `protoscalac` refuses six things at transpile time, each with a named
+  message and a source position, and never mistranslates: classes / traits / objects
+  (**D118**), `import` (**D123**), `try`/`catch`/`finally` (**D120**), `await`
+  (**D113**), named arguments and defaults (**D121**), and `super` (**D122**). D118 is
+  the one that matters: it is 305 of the 500 excluded fixtures and 179 of the 186
+  refusals among the corpus tests the interpreter passes.
+
+  Four parts of the phase are **not built**: `CompiledModuleProvider` (so `import` of
+  a compiled module is not available and `--run-module` is the whole loading surface),
+  the `ExportsRec` tables that would let a compiled module be imported with early type
+  binding, the cross-runtime-call demonstration from a caller that names no protoScala
+  symbol — which is the phase's headline capability, argued but **not yet
+  demonstrated** — and the measurement task. The version is deliberately **not** bumped
+  to 0.7.0: the phase has not shipped.
 
 ### Changed
 

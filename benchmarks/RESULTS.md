@@ -560,3 +560,62 @@ records that verdict in its own table rather than being overridden here. A
 dedicated quiet host would settle the question; this one runs VS Code, Chrome and
 PyCharm throughout, which is stated in the report's method note for exactly this
 reason.
+
+
+## Phase 7 — the same source, interpreted and transpiled (2026-09-26)
+
+**The transpiler is not a performance feature. The generated C++ calls the runtime
+dynamically, so it removes front-end cost and the dispatch loop's `switch`, and it
+removes neither dynamic dispatch nor the cost of a send. protoScala's positioning is
+an agile, interoperable, easily integrable and very simple Scala, not a fast one.**
+
+That sentence is the plan's, written before anything was measured. What was then
+measured is stronger than it: **removing the dispatch loop is worth nothing
+measurable, and the transpiled path is slower on a call.**
+
+Method: `benchmarks/run_transpiled_benchmarks.py`, the two paths interleaved
+**round-robin inside one window** (never in blocks) so contention hits both columns
+equally, 1 warm-up plus **5 timed rounds**, every sample verified against the
+workload's own `// EXPECT:` line (**0 verification failures**), load average 3.52 →
+3.90 → 5.06. **Absolutes are contended; the ratio is the finding.**
+
+| workload | interpreted | transpiled | **transpiled ÷ interpreted** |
+|---|---:|---:|---:|
+| `fib30` | 472.3 ms | 1212.4 ms | **2.57** |
+| `fib` | 62.5 ms | 128.4 ms | **2.06** |
+| `tak` | 34.5 ms | 46.8 ms | **1.36** |
+| `list_ops` | 775.9 ms | 1050.5 ms | **1.35** |
+| `sum_loop` | 86.7 ms | 90.5 ms | 1.04 |
+| `int_sum_loop` | 28.1 ms | 28.7 ms | 1.02 |
+| `map_build` | 445.4 ms | 449.3 ms | 1.01 |
+| `range_iterate` | 31.3 ms | 30.6 ms | 0.98 |
+| `str_concat` | 26.7 ms | 26.1 ms | 0.98 |
+| `factorial_100` | 24.6 ms | 21.9 ms | 0.89 |
+| **geomean, 10 workloads** | | | **1.244** |
+
+Two groups, and the split is by *shape*, not by contention: the four call- and
+closure-bound workloads are **1.35–2.57× slower** transpiled with non-overlapping
+ranges, and the other six have a **geomean of 0.985** with heavily overlapping ranges —
+indistinguishable. A **null program** measures 22.29 ms interpreted and 22.40 ms
+transpiled, so removing the user program's parse, desugar and compile is worth nothing
+measurable either (Phase 6's prelude image already took the large share).
+
+**Why a call is slower**, and it is the calling convention rather than the generated
+code: a `proto::ProtoMethod` takes a `ProtoList` of arguments, so
+`ExecutionEngine::execute`'s native-entry branch allocates one **per call** and opens a
+`ProtoContext` that the generated body's own `Frame` then duplicates — where the
+interpreter passes a C array into the frame's slots and opens one context.
+`fib(30)` is 2.69 M calls. That cost is paid *for* the capability the phase adds: a
+transpiled function is callable by any runtime in the family precisely because it
+presents that convention.
+
+**No transpiled twin**, listed rather than omitted: `attr_lookup` and `object_tree`
+(both **D118**, they declare classes) and all nine `benchmarks/actors/*.scala` (**D113**,
+`await`). Those are the workloads DESIGN §1 names as the work protoScala is *for*, so
+this table measures the integer loops and the recursion — the part of the suite
+protoScala is explicitly not optimised for.
+
+**What follows:** any future optimisation effort belongs in the **object model** —
+attribute lookup, allocation, the send path — not in the interpreter's `switch`. Full
+operands, spreads and the per-call analysis:
+[`reports/2026-09-26-interpreted-vs-transpiled.md`](reports/2026-09-26-interpreted-vs-transpiled.md).
