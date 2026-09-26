@@ -448,10 +448,14 @@ módulos como raíz"*, and, separately, that a module's identity in that list is
 
 The instrument came first, and it is not ours: the Scala 3 compiler's own
 `tests/run` corpus (1654 single-file programs, dotty `a68b419c`), run one file per
-process against `build_release/protoscala` and scored by dotty's rule. 257 of its
-disagreements with real Scala were anticipated by no document in this repository.
-Every one of protoScala's other 1263 tests was written here, so they measure
-faithfulness to the implementer's model of Scala rather than to Scala.
+process against `build_release/protoscala` and scored by dotty's rule. **257** of its
+disagreements with real Scala were anticipated by no document in this repository —
+measured on Track S's shim run of 2026-09-25; **236** on a re-run of the same
+instrument against the tree at protoCore 2.5.0 (derivation and both runs in
+STATUS.md, "Track S deviations"). Every one of protoScala's *other* tests was
+written here, so they measure faithfulness to the implementer's model of Scala
+rather than to Scala; that holds whatever the total is, which is why the total is
+not quoted.
 
 **The scalac outputs that fixed every message text.** Compiled with
 `tools/scala3-3.9.0/bin/scalac -d out Probe.scala` and run with

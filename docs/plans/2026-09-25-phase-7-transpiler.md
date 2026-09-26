@@ -48,7 +48,7 @@ Six artefacts. Two are new build products, three are new source components, one 
 
 ## Tech Stack
 
-C++20 (no extensions), CMake ≥ **3.20** (protoScala's declared floor), protoCore **2.4.0** / `PROTOCORE_ABI_SOVERSION 3` (protoScala pins the soversion and hard-errors on a mismatch; its declared *version* floor is still `2.1.0`), GoogleTest 1.14 via the existing `FetchContent` block with `INSTALL_GTEST OFF`, GNU `make` (the generated build file, as `protopyc` does), `bash` for the differential harness (the existing `tests/conformance/run.sh` idiom), `perf stat -r 3` for the Task 3 cycle gate, CPack DEB/TGZ for Task 14. No new third-party dependency.
+C++20 (no extensions), CMake ≥ **3.20** (protoScala's declared floor), protoCore **2.5.0** / `PROTOCORE_ABI_SOVERSION 3` (2.4.0 when this plan was written; take the version from the configure output rather than from here — protoScala pins the soversion and hard-errors on a mismatch; its declared *version* floor is still `2.1.0`), GoogleTest 1.14 via the existing `FetchContent` block with `INSTALL_GTEST OFF`, GNU `make` (the generated build file, as `protopyc` does), `bash` for the differential harness (the existing `tests/conformance/run.sh` idiom), `perf stat -r 3` for the Task 3 cycle gate, CPack DEB/TGZ for Task 14. No new third-party dependency.
 
 ## Spec
 
@@ -94,8 +94,16 @@ This plan is the spec of record until **Task 16** writes `protoScala/docs/PROTOS
 
   | Project | Baseline | Build discipline |
   |---|---|---|
-  | protoCore | **488/488** ctest, version **2.4.0**, `PROTOCORE_ABI_SOVERSION 3` | unchanged by this phase; `-j4` maximum if rebuilt |
-  | protoScala | **1263/1263** ctest | `build_release/`, `-j4` maximum |
+  | protoCore | **499/499** ctest, version **2.5.0**, `PROTOCORE_ABI_SOVERSION 3` | unchanged by this phase; `-j4` maximum if rebuilt |
+  | protoScala | **1344** ctest cases, 0 failed, 7 skipped | `build_release/`, `-j4` maximum |
+
+  Both rows re-measured from clean on **2026-09-25** against protoCore `df8406a3`;
+  they superseded 488/488 at 2.4.0 and 1263/1263 within a day. **Do not trust
+  either number on sight — take the baseline from
+  `ctest --test-dir build_release -N | tail -1` and a green run at the moment the
+  phase starts**, and record it. protoScala's total moves with protoCore's rule
+  list as well as with its own fixtures: 15 → 16 embedder-conformance cases is the
+  whole of the 1343 → 1344 step, from protoCore 2.5.0's new `mutable.graph_cycles`.
 
   "From clean" means a fresh build directory. This phase does not change protoCore, so no sibling embedder needs rebuilding — but Task 2 changes protoScala's own link structure from static to shared, which is exactly the shape that produces the ABI-mismatch class of crash against a stale object file (memory: ABI mismatch crashes stale binaries). **`rm -rf build_release` before the first build of Task 2 and after it**, path checked.
 - **`ctest` is run with stdin at EOF, everywhere**: every invocation in this plan appends `< /dev/null`. protoScala's REPL CLI tests block forever on an open stdin, and a harness that hangs is indistinguishable from a harness that found a hang.
@@ -126,7 +134,7 @@ Ten decisions, each with options and a recommendation. **These are recommendatio
 - Better than (a): the for-comprehension, string-interpolation, multiple-parameter-list and nested-template rewrites are already done. Still rejected: linearization, pattern compilation, template synthesis, scope/slot assignment, capture analysis and keyword binding are all *after* desugar, in the compiler. (b) buys the cheapest third of the problem and leaves the expensive two thirds.
 
 **(c) The compiled `BytecodeModule` tree. — RECOMMENDED**
-- The entire front end is reused **unchanged**: `tokenize(source)` → `Parser(toks).parseCompilationUnit()` → `desugarModule(unit, objectName)` → `Compiler(globals).compileUnit(unit, UnitMode::Script)`. Everything Scala-specific — linearization, patterns, templates, slots, captures, by-name masks, D5 key qualification, `@main` detection — is already decided, by the code the 1263 tests validate.
+- The entire front end is reused **unchanged**: `tokenize(source)` → `Parser(toks).parseCompilationUnit()` → `desugarModule(unit, objectName)` → `Compiler(globals).compileUnit(unit, UnitMode::Script)`. Everything Scala-specific — linearization, patterns, templates, slots, captures, by-name masks, D5 key qualification, `@main` detection — is already decided, by the code the conformance suite validates (its size at the time of writing was 1263; see Step 2 for why that number is not to be relied on).
 - The remaining job is the **54 opcodes actually defined** in `src/compiler/Opcodes.h` (the enum spans 0–97 with three reserved gaps). Of those, roughly 20 vanish into C++ (`PUSH_CONST` is a slot write, `JUMP`/`JUMP_IF_FALSE`/`JUMP_BACK` are labels and `goto`s, `POP`/`DUP` are `sp` arithmetic, `RETURN` is `return`); **only six** map onto an already-public `ExecutionEngine` member — `CALL`/`CALL_SPREAD`→`invoke`, `SEND`→`send`, `NEW`→`construct`, `FORCE`→`force`, with `callTopLevel`, `showTopLevel`, `materialise`, `resumeFrames` and `run` completing the public surface; and the rest need a shared body. **The useful half of `ExecutionEngine` is `private`** — `dispatch`, `callMember`, `callWithReceiver`, `bindMethod`, `forceMember`, `instantiate`, `makeClass`, `makeTuple`, `superSend`, `sendKeywords`, `callKeywords`, `bindKeywordsAndDefaults`, `testType`, `execute`, `callNative`, `slowBinary`, `siteName` and `throwMissingMember` all are — which is precisely why the extraction below is the mechanism rather than an optimisation: the alternative is promoting eighteen private members to public and enlarging the class's contract instead of narrowing it into a header of free functions. That is a small, enumerable surface with a total ordering for review.
 - **It makes the differential harness meaningful rather than merely large.** With (a) or (b), a fixture that passes transpiled proves two independent Scala implementations agree today; with (c), it proves the *emitter* reproduced one implementation. The first is a coincidence detector, the second is a code-generator test.
 - **It preserves debuggability.** `BytecodeModule::lineAt(pc)` is a parallel line table the compiler already fills, so the emitter writes `#line <lineAt(pc)> "<source>.scala"` and GDB, LLDB and compiler diagnostics point at Scala source lines — the same property `protopyc` gets from AST node lines.
@@ -297,7 +305,7 @@ D91 says a module may not define an `@main`, and `desugarModule` throws `ParseEr
   cmake --build build_release -j4
   ctest --test-dir build_release --output-on-failure < /dev/null 2>&1 | tail -5
   ```
-  Append the `tests passed` line to `baseline.md`. It must read **1263/1263**; `ctest -N | tail -1` must print `Total Tests: 1263`. Record the composition, because a later count that moves must be attributable: **841** `conformance/<rel-path>.scala` (the glob, minus 18 `_`-prefixed helpers of 859 files), **368** GoogleTest cases, **24** `cli/*`, **15** `embedder-conformance/*`, **12** `benchmarks/*`, **2** explicit `unit/modules` and `unit/actors`, **1** `umd/protost-interop`. (The Phase 6 plan's baseline of 1104 is stale; 1263 is current.) Record protoCore's version and soversion from the configure output line `protoCore ... (SOVERSION 3)`; it must be **2.4.0** and **3**.
+  Append the `tests passed` line to `baseline.md`, and **take the total from the run rather than from this plan** — it has already moved twice (1104 in the Phase 6 plan, 1263 here, 1344 on 2026-09-25). What must hold is **0 failed**, with only the process-isolation skips. Record the composition, because a later count that moves must be attributable; as measured on 2026-09-25 against protoCore 2.5.0 it is **919** `conformance/<rel-path>.scala`, **370** GoogleTest cases, **24** `cli/*`, **16** `embedder-conformance/*`, **12** `benchmarks/*`, **2** explicit `unit/modules` and `unit/actors`, **1** `umd/protost-interop` = **1344**, 0 failed, 7 skipped. The `embedder-conformance` row is **not** protoScala's to hold still: it is parameterised over protoCore's rule list, and protoCore 2.5.0's new `mutable.graph_cycles` is the whole 1343 → 1344 step. Record protoCore's version and soversion from the configure output line `protoCore ... (SOVERSION 3)`; as of 2026-09-25 it is **2.5.0** and **3**.
 - [ ] **Step 3 — Re-derive the deviation floor.** Do not trust this plan's `D103`.
   ```bash
   grep -oE '\bD[0-9]+\b' /home/gamarino/Documentos/proyectos/protoScala/docs/STATUS.md \
@@ -320,7 +328,7 @@ D91 says a module may not define an `@main`, and `desugarModule` throws `ParseEr
 
 - [ ] **Step 6 — Record the framing in `DECISIONS-LOG.md`.** Append a Phase 7 section with four numbered entries, each one sentence: (1) not a performance feature — the generated code dispatches dynamically; (2) cold start is already solved, the headroom is 4.0 %; (3) what it unlocks is cross-runtime calls, because a transpiled function is a `proto::ProtoMethod` and bytecode is not; (4) it does not gate the libtorch demonstration, which needs only Phase 6's `dlopen` provider loading. Mark the entry `[agent, pending review]`.
 
-**Done when:** `cat /home/gamarino/Documentos/proyectos/.agent_scratch/phase7-transpiler/baseline.md` shows the 1263/1263 line, protoCore 2.4.0 / SOVERSION 3, the deviation floor, the four opcode numbers and both start-up measurements; and `git -C /home/gamarino/Documentos/proyectos/protoScala diff --stat docs/DECISIONS-LOG.md` shows exactly one added section.
+**Done when:** `cat /home/gamarino/Documentos/proyectos/.agent_scratch/phase7-transpiler/baseline.md` shows the measured green line (**0 failed**; the total is whatever that run reports, not a number from this plan), protoCore's measured version / SOVERSION 3, the deviation floor, the four opcode numbers and both start-up measurements; and `git -C /home/gamarino/Documentos/proyectos/protoScala diff --stat docs/DECISIONS-LOG.md` shows exactly one added section.
 
 ---
 
@@ -627,7 +635,7 @@ const proto::ProtoObject* importModule(proto::ProtoContext*, const char* provide
   ```
   plus `configure_package_config_file` / `write_basic_package_version_file` with `COMPATIBILITY SameMajorVersion`, matching what protoCore's Phase I generated. Keep the executable's `INSTALL_RPATH` as it is and add the same to `protoScala`.
 - [ ] **Step 5 — A unit test that the facade links and runs.** `tests/unit/test_generated_support.cpp`: create a `Session`, take its `space()`, open a child context, and assert `gen::add(ctx, ctx->fromInteger(2), ctx->fromInteger(3))->asLong(ctx) == 5`; assert `gen::add` promotes at the boundary by adding `1LL << 53` twice and checking the result is still exact; assert `gen::truthy(ctx, PROTO_NONE)` throws `ScalaError` with class `ClassCastException`.
-- [ ] **Step 6 — Rebuild from clean, twice.** `rm -rf build_release` (path checked), configure, build, `ctest ... < /dev/null`. The count must be **1263 + 3 = 1266** (the three new unit cases). Then `rm -rf build_release` and repeat, to prove nothing in the build depends on a stale object file.
+- [ ] **Step 6 — Rebuild from clean, twice.** `rm -rf build_release` (path checked), configure, build, `ctest ... < /dev/null`. The count must be **the Step 2 baseline + 3** (the three new unit cases) — the baseline as measured then, not 1263, which was already stale a day after this plan was written. Then `rm -rf build_release` and repeat, to prove nothing in the build depends on a stale object file.
 
 **Done when:**
 ```bash
@@ -1269,7 +1277,7 @@ passes all three, and `grep -c protoScala tests/umd/foreign-caller.cpp` prints `
 
 ## Task 11: The differential conformance harness
 
-**This task is the phase's strongest asset and it is a first-class deliverable, not a verification afterthought.** protoScala has **1263** tests, of which **859** files under `tests/conformance/**/*.scala` are fixtures (about 18 are `_`-prefixed helpers, leaving roughly **841** registered: 693 `// EXPECT:`, 142 `// EXPECT-ERROR`, 6 `// XFAIL`). If the transpiler is correct, **every such fixture must produce the same observable output transpiled as interpreted.** That is enormous coverage for free, and for a code generator it is the only practical way to earn trust.
+**This task is the phase's strongest asset and it is a first-class deliverable, not a verification afterthought.** protoScala's suite (1263 cases when this was written, 1344 on 2026-09-25 — measure it) includes **859** files under `tests/conformance/**/*.scala` are fixtures (about 18 are `_`-prefixed helpers, leaving roughly **841** registered: 693 `// EXPECT:`, 142 `// EXPECT-ERROR`, 6 `// XFAIL`). If the transpiler is correct, **every such fixture must produce the same observable output transpiled as interpreted.** That is enormous coverage for free, and for a code generator it is the only practical way to earn trust.
 
 **Files:**
 - `tests/conformance/run-transpiled.sh` (**create**).
@@ -1508,7 +1516,7 @@ cd /home/gamarino/Documentos/proyectos/protoScala && \
 ctest --test-dir build_release --output-on-failure < /dev/null 2>&1 | tail -3 && \
 grep -c 'D10[3-7]' docs/STATUS.md
 ```
-prints `0.7.0`, a green total of **1263 + 795 + 12 + the new unit and CLI cases** with 0 failures, and at least `5`.
+prints `0.7.0`, a green total of **the Step 2 baseline + 795 + 12 + the new unit and CLI cases** with 0 failures, and at least `5`.
 
 ---
 

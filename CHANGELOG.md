@@ -69,8 +69,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   leaves a body unwritten failed at the first line with `Not found: assert`, and
   nothing in this repository said so — the gap was found by running the Scala 3
   compiler's own `tests/run` corpus (1654 single-file programs, dotty
-  `a68b419c`), not by our own tests, all 1263 of which were written here and
-  therefore encode the same blind spot.
+  `a68b419c`), not by our own tests — every one of which was written here and
+  therefore encodes the same blind spot. (The count is deliberately not quoted:
+  the argument is that *all* of them share our authorship, and the total moves
+  with every fixture added. `ctest --test-dir build_release -N | tail -1`.)
 
   Exception types and message texts were verified against **scalac 3.9.0** and
   match it exactly, including the two details a shim gets wrong: a call with **no**

@@ -15,7 +15,7 @@ give, and what each capability of the adaptor does and does not prove.
 |---|---|---|---|
 | `gc.young_submitted` | 1 | **PASS** | grew in-use by 363,162 cells; 3 cycles reclaimed 360,082; residual 3,080 |
 | `gc.transient_reclaimed` | 5 | **PASS** | grew 305,818; residual −264 (`List` is a `ProtoList`, not a `ProtoTuple`) |
-| **`gc.host_stress`** | **3** | **PASS** (was FAIL) | first run: live set 316,230 under a 400,000-cell ceiling, reclaimed 0. **Fixed** — see the resolved retention finding below. Now 20/20 rounds, 3 runs out of 3 |
+| **`gc.host_stress`** | **3** | **PASS** (was FAIL) | pre-fix it aborted under its 400,000-cell ceiling having reclaimed 0. **Fixed** — see the resolved retention finding below. The pre-fix live sets that are actually *measured* are the mutation experiment's, **325,030 / 313,358 / 307,125 cells, 3 runs of 3** ("Mutation", below); the single figure this row used to quote ("316,230") matched no run on record and is **withdrawn rather than replaced**, because the case reports no live set once it passes. Green now, and the numbers it does report are run-variant: 20/20 stress rounds, `cycles` **23 / 24 / 22** and `reclaimedSum` **4,318,490 / 3,835,270 / 4,502,298** over three consecutive runs, 2026-09-25, protoCore 2.5.0 |
 | `symbol.fast_path_key_hits` | 4 | **PASS** | a 31-byte key is readable through both `getAttribute` and `getOwnAttributeDirect` |
 | `external.finalizer_runs` | 7 | **PASS** | kernel characterisation: one call, right pointer |
 | `module.root_survives_cycle` | 9b | **PASS** | kernel characterisation: module and contents survived 3 cycles |
@@ -26,14 +26,30 @@ give, and what each capability of the adaptor does and does not prove.
 | `join.parks` | 2b | **PASS** (isolated) | a cycle completed while `Thread.start`/`t.join()` was blocked |
 | **`heap.ceiling_progress`** | **8** | **PASS** (isolated, was FAIL) | same cause, same fix. **Intermittent: about 2 runs in 10 alone**, for a second defect the retention had been masking — a protoCore `ProtoMPSCQueue` finding, diagnosed and not fixed here. See below |
 
-Suite total, first run: **1263** ctest cases, **1261 passing** — 1248 pre-existing
-plus 15 conformance entries, with **no previously-passing test newly failing**.
-Both failures were one defect.
+First run: **two cases red, both the same defect**, with **no previously-passing
+test newly failing**. After the fix the whole suite was green, and the retention
+the two cases measured is gone rather than reduced. Read the rule-8 section before
+trusting that: the case is intermittent for a reason that is not protoScala's.
 
-Suite total after the fix: **1263 / 1263**, 88 s. The two cases that were red are
-green, and the retention they measured is gone rather than reduced. Read the rule-8
-section before trusting that number: the case is intermittent for a reason that is
-not protoScala's.
+The suite total is deliberately **not** quoted here as a bare number, because it
+moves with every fixture added and with protoCore's own rule list — the total
+recorded at the first run (1263) had already drifted twice by the next day. It is
+one command:
+
+```bash
+ctest --test-dir build_release -N | tail -1        # the total
+ctest --test-dir build_release < /dev/null         # the result
+```
+
+**As of 2026-09-25, against protoCore 2.5.0 (`df8406a3`), from a clean build:
+1344 cases, 0 failed, 7 skipped** (the seven embedder-conformance rules that need
+process isolation and are skipped in a shared run). Composition, so that a later
+count that moves is attributable: **919** `tests/conformance/**/*.scala` fixtures,
+**373** GoogleTest cases (including the separate `unit/actors` and `unit/modules`
+binaries and `umd/protost-interop`), **24** `cli/*`, **16** `embedder-conformance/*`,
+**12** `benchmarks/*`. The step from 1343 to 1344 is **entirely** the
+embedder-conformance group going 15 → 16: protoCore 2.5.0 adds one rule,
+`mutable.graph_cycles`, and this suite is parameterised over protoCore's rule list.
 
 Static check: **0 unjustified findings**, 1 justified entry, 3 informational.
 
@@ -98,8 +114,9 @@ Remove that context and pass the worker's `ctx` straight to `runTurn` /
 
 ## Rule 8 is green, and it is INTERMITTENT — a protoCore finding, not a protoScala one
 
-`heap.ceiling_progress` passes with the fix, including in a full suite run
-(1263/1263, 5.59 s). **It fails about 2 runs in 10 when run alone**, and the
+`heap.ceiling_progress` passes with the fix, including in a full suite run (green
+in 5.59 s at the time; the total that run reported is no longer quoted here — see
+the command above). **It fails about 2 runs in 10 when run alone**, and the
 failure is a different defect that the retention had been masking — which is what
 the case's own text warns about ("the third was unreachable until the first was
 fixed").

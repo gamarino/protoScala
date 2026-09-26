@@ -35,10 +35,16 @@
 > and a hand-written `object E` is the enum's own companion instead of a second
 > object that crashed the compiler. Recorded rather than fixed: D108–D112. In-scope
 > corpus rate **30.1 % → 31.8 %**, zero regressions across all 1654 files.
-> **Tests:** 1343 total (`ctest --test-dir build_release -N`) — 373 unit
+> **Tests: as of 2026-09-25, against protoCore 2.5.0 (`df8406a3`), from a clean
+> build — 1344 total** (`ctest --test-dir build_release -N | tail -1`), 0 failed,
+> 7 skipped (the embedder-conformance rules that need process isolation) — 373 unit
 > (GoogleTest, including the separate `unit/actors` and `unit/modules` binaries
 > and `umd/protost-interop`), 919 conformance fixtures, 24 CLI checks, 12
-> benchmark smoke checks, 15 embedder-conformance rules. **All
+> benchmark smoke checks, **16** embedder-conformance rules. The step from the
+> 1343 recorded a day earlier is **entirely** that last group going 15 → 16:
+> protoCore 2.5.0 adds the rule `mutable.graph_cycles` and this suite is
+> parameterised over protoCore's rule list, so the figure moves when protoCore
+> does. **All
 > green**, and green at `PROTOSCALA_ACTOR_WORKERS=1` and `=16` (1248/1248
 > including `umd/protost-interop` in all three). Under
 > `PROTOCORE_HEAP_LIMIT_CELLS=20000` (the whole suite, unfiltered) 1247 of 1248
@@ -447,7 +453,7 @@ one shown to be capable of failing by a mutation of the implementation.
 
 ### Track X — what the Scala 3 run corpus found
 
-Every one of protoScala's other 1263 tests was written here, so they encode our
+Every one of protoScala's other tests was written here, so they encode our
 beliefs and cannot detect a misunderstanding we share with them. Track X is the
 first work driven by tests nobody here wrote: the Scala 3 compiler's own
 `tests/run` corpus. Both items below were verified against **scalac 3.9.0**
@@ -943,7 +949,7 @@ deliberately unused and were not recycled.
 ### Track S deviations — the silent wrong answers the Scala 3 corpus found
 
 A full run of the Scala 3 compiler's own `tests/run` corpus (1654 single-file
-tests, corpus commit `a68b419c`) turned up 257 disagreements with scalac that no
+tests, corpus commit `a68b419c`) turned up **257** disagreements with scalac that no
 deviation anticipated. Most were fixed; the rows below are what could not be,
 and each one exists because protoScala's model cannot express what Scala's does.
 Every row was measured against **scalac 3.9.0** with `bin/scalac -d out` and
@@ -951,6 +957,19 @@ Every row was measured against **scalac 3.9.0** with `bin/scalac -d out` and
 fixture that prints both answers. Decided by the implementing agent under the
 maintainer's standing authorisation. D106 and D107 are reserved by the Phase 7
 plan, so this track uses **D108 onwards**.
+
+**Where 257 comes from, and what it is now.** It is not a number the harness
+prints; it is a count over the triage of the **shim** run — the in-scope
+(bucket 3) failures whose output differed from the test's `.check` expectation
+(category `c`) plus those whose error message no rule classified (category `?`),
+as `attribute.py` reports them. That derivation reproduces 257 exactly on Track S's
+archived run of 2026-09-25 (`c` 241 + `?` 16 of 424 in-scope failures). Re-run
+against the tree at protoCore 2.5.0 the same day, the same derivation gives
+**236** (`c` 225 + `?` 11 of 409), so the figure **moved down by 21** as Track S's
+fixes landed. Both are the shim instrument, not the plain run whose 191/601 the
+README quotes: on the plain run only 4 in-scope failures are output mismatches,
+because most tests now stop at an error before they can disagree. Quote 257 only
+with its date and its instrument.
 
 | id | Deviation | Plan | Revisit |
 |---|---|---|---|
@@ -1021,8 +1040,9 @@ exercised for the first time in Phase 6** — see the three entries below it.
   it moves a number — and it also cut the in-scope `no module found` failures from
   45 to 37, the rest being `import scala.*` (D90/D91) and `Double.NaN`.
 
-  **What this says about the suite:** all 1263 of protoScala's other tests were
-  written here. 257 of the corpus's disagreements with real Scala were anticipated
+  **What this says about the suite:** every one of protoScala's other tests was
+  written here — the point is the authorship, not the count, which is why no total
+  is quoted. 257 of the corpus's disagreements with real Scala were anticipated
   by no document in this repository, and the single largest of them — six missing
   Predef names — cost 103 in-scope tests and was invisible to a suite that had
   never needed them. Track S went after the worst of the remaining 257 — the ones

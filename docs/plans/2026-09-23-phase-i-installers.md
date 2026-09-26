@@ -2562,7 +2562,11 @@ what remains, unchanged.
 7. **protoJS included `"headers/protoCore.h"` in 89 files** — protoCore's source
    layout, which no installed prefix has. It could not compile against an
    installed protoCore at all. Normalised to `"protoCore.h"`, which resolves in
-   both discovery modes and matches the other three runtimes.
+   both discovery modes and matches the other three runtimes. *The count is
+   established, not estimated (checked 2026-09-25):* protoJS commit `eb98159d8`
+   removes that include from exactly 89 files, and
+   `grep -rn '"headers/protoCore.h"' --include=*.cpp --include=*.h .` in protoJS
+   now returns 0.
 8. **protoST's stdlib candidate order was wrong on Linux too.** `<exe>/../lib`
    was probed before `<exe>/../share/protoST/lib`, and in an installation the
    former is `<prefix>/lib` — the library directory. An installed `protost`

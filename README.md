@@ -446,6 +446,58 @@ or `clj` provider, nested classes in a `class` or `trait`, and anything about fi
 beyond reading and writing one whole text file (no directories, no binary files, no
 streaming).
 
+### Conformance: what is measured, and against whose tests
+
+**protoScala's own suite.** As of **2026-09-25**, against protoCore 2.5.0
+(`df8406a3`) from a clean build: **1344 ctest cases, 0 failed, 7 skipped** — the
+skips are the embedder-conformance rules that need process isolation. Reproduce with
+`ctest --test-dir build_release -N | tail -1` and
+`ctest --test-dir build_release < /dev/null`; the figure moves with every fixture
+added, and with protoCore's rule list, so prefer the command to the number. **Every
+one of those tests was written in this repository**, which is the limit that matters:
+they measure faithfulness to the implementers' model of Scala, not to Scala.
+
+**The Scala 3 compiler's own tests.** So protoScala is also measured against tests
+nobody here wrote — the single-file programs under `tests/run` in the Scala 3
+(dotty) compiler, at corpus commit `a68b419c`, **1654** of them, each scored by
+dotty's own rule (the program must run and its output must match its `.check` file).
+Measured 2026-09-25 against the tree above:
+
+| Denominator | Passing | What the denominator is |
+|---|---|---|
+| **601 in scope** | **191 — 31.8 %** | our own triage, described below |
+| **1654 whole corpus** | **216 — 13.1 %** | no triage at all |
+
+**The 601 is our triage and it is not a standard.** Scala has no standards-body
+conformance suite — there is no equivalent of JavaScript's Test262 — so this is the
+reference implementation's own test corpus, and the in-scope bucket is a judgement
+made in this repository, with one named rule recorded per test rather than any
+wildcard exclusion. Of the 1654: **410 are out by design**, because they test a JVM
+or Java surface protoScala has no equivalent for (95 reflection / `ClassTag` /
+`Mirror`, 83 `java.*` interop, 62 `System` / `Console`, 56 `classOf`, 49
+`getClass`, 22 `scala.compiletime`, 15 Java threads, 8 serialization, 6
+`synchronized`, and 14 whose expected output is a JVM-specific class name or stack
+trace); and **643 are out for now**, being roadmap rather than boundary (197
+implicits and givens, 153 `inline` and macros, 77 lazy collections and `Iterator`,
+75 `Seq` and mutable collections, 61 `Array`, 39 nested or anonymous classes, 23
+`PartialFunction`, and 18 others). A reader who does not accept the triage should
+read the 13.1 %; a reader who wants to know how much roadmap is left should read the
+643.
+
+**What the corpus found that our own documents had not.** On the run of 2026-09-25,
+**257** of the corpus's disagreements with `scalac` were anticipated by no deviation
+recorded here; re-running the same instrument against the tree at protoCore 2.5.0
+the same day gives **236**, the difference being the fixes that landed in between.
+The largest single cause — six missing `Predef` names — cost 103 in-scope tests and
+was invisible to a suite that had never needed them. Both figures, how they are
+derived and the per-test attribution are in [docs/STATUS.md](docs/STATUS.md)
+("Track S deviations") and [docs/DECISIONS-LOG.md](docs/DECISIONS-LOG.md).
+
+These are low rates and they are published to be read as such. protoScala's aim is
+an agile, interoperable, easily integrable and very simple Scala — not a complete
+one and not a fast one. The corpus is here to find disagreements we had not
+anticipated, and that count, not the percentage, is the number worth watching.
+
 ## Performance
 
 protoScala is positioned as an agile, interoperable, easily integrable and

@@ -80,4 +80,7 @@ D35 and D36. New: D108-D112, with D109, D110 and D112 flagged for the maintainer
 in `docs/DECISIONS-LOG.md`.
 
 **Suite:** 1299/1299 at the start, 1343/1343 at the end, green before every one
-of the eight pushes.
+of the eight pushes. (Both totals are against protoCore 2.4.0. Re-measured from
+clean against protoCore 2.5.0 on 2026-09-25 the suite is **1344**, 0 failed, 7
+skipped: the whole of the step is protoCore adding one conformance rule,
+`mutable.graph_cycles`, which this suite is parameterised over.)

@@ -18,7 +18,7 @@ The same session produced four more of the same shape:
 
 | Bug | The rule that was omitted | How it announced itself |
 |---|---|---|
-| protoST S15 | the young generation must be submitted | it did not — 833 tests green |
+| protoST S15 | the young generation must be submitted | it did not — **848** tests green (corrected 2026-09-25: this row quoted 833, which was the suite size at the earlier S13 fix; when S15 was measured the suite was 848/848, which is the figure the `MailboxCursor::adopt` row below already used. Source: protoST `2d5bc6f`, and protoCore `docs/FIELD-NOTES.md` case 1) |
 | protoClojure idle actor worker on `queueCv_` | a registered thread that blocks does so inside `UnmanagedScope` | a hang, with no message, only under load |
 | protoClojure `ActorMessage` payloads | no `ProtoObject*` across an allocation in a bare C++ local | intermittent wrong values |
 | protoScala `Mailbox::push` | same rule — a CAS snapshot held across `appendLast` | nothing, until GC pressure |
@@ -1077,7 +1077,8 @@ git -C $P commit  # "feat(conformance): framework-free Host adaptor, runner and 
 // an unsubmitted chain is live BY CONSTRUCTION -- no cycle can consider it.
 //
 // protoST ran cycles for its entire history, reclaimed 0 of 2,748,398 cells
-// and passed 833 tests.  This case is the one that would have said so.
+// and passed 848 tests (corrected 2026-09-25 from 833, the suite size at the
+// earlier S13 fix; source protoST 2d5bc6f).  This case would have said so.
 static CaseResult caseYoungSubmitted(Host& host)
 {
     const char* kId = "gc.young_submitted";
@@ -2154,7 +2155,11 @@ The adaptor declares three kinds with §D12's verdicts: `"deferred-worker"` → 
 R=/home/gamarino/Documentos/proyectos/protoJS; S=/home/gamarino/Documentos/proyectos/.agent_scratch/p4-conformance
 # STOP.  This re-runs protoJS's ctest suite, sequentially, with the kernel's
 # defensive content fallback disabled.  It is the §D11 case and it is expected
-# to fail loudly, because protoJS has 248 key-shaped fromUTF8String sites.
+# to fail loudly, because protoJS has 596 key-shaped fromUTF8String sites
+# (corrected 2026-09-25 from 248, which no measurement supports: protoJS's own
+# docs/CONFORMANCE.md "Rule 4" reports 1,401 fromUTF8String occurrences against
+# 114 createSymbol, of which a defensible 596 are key-shaped, bounds 596-628,
+# with the method recorded in the P4 report).
 # ASK THE MAINTAINER BEFORE RUNNING IT, and never run a full test262 sweep here.
 PROTOCORE_TRUST_SYMBOLS=1 ctest --test-dir $R/build_p4 --output-on-failure < /dev/null \
   2>&1 | tail -40 | tee $S/trustsymbols-protoJS.txt
