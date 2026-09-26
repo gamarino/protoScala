@@ -872,6 +872,22 @@ deliberately unused and were not recycled.
 | D104 | **`App` is the entry point, with three restrictions Scala does not have.** `object Main extends App` runs the object's body, as in Scala (verified against scalac 3.9.0, including an object extending a trait that extends `App`), and protoScala runs it *after* the file's top-level statements, which Scala has none of (D9). The restrictions: (a) **one App object per file** — Scala allows several because a JVM launcher picks one by class name, and a script has nothing to pick with; (b) **not an App object and an `@main` in the same file** — the same argument; (c) **no App object in a module**, refused for the reason D91 refuses an `@main` there, because a module is imported and never run and a silently ignored entry point is a trap. All three are compile errors that name both candidates. `App` is deprecated in Scala 3 and is kept because it is what a decade of Scala teaching material writes | Track X | (perm) |
 | D105 | **An `import` is a member import when its longest in-scope prefix names an object, a companion or an `enum`, and a module load otherwise.** Both halves are Scala-conformant; the *rule* is protoScala's, because Scala has no module-loading form to disambiguate against. Scala's own resolution has the same shape — a definition in scope shadows a package of that name — so a file defining `object util` and writing `import util.Shapes` gets its own object in either language. Two places this is narrower than Scala. (a) A **`val` cannot be a member-import prefix**: a wildcard has to enumerate the prefix's members and a dynamic value has no static type to enumerate (D4), so `import someVal.*` falls through to the module loader and its `ImportError` rather than guessing a member set. (b) A member import of a prefix **this same file declares** is resolved after the file's templates are described, so a class in that file cannot name, as a **parent**, a type reached only through such an import — `class Sub extends Base` after `import Holder.*` in the same file; `extends Holder.Base` always works. Everything else is Scala's: the four forms, `as` and `=>` as renames, `*` and `_` as wildcards, an `enum`'s cases and an object's nested templates under their simple names, an import losing to a local and shadowing an outer global, and a selector that names nothing being an error | Track X | (perm) |
 
+### Track S deviations — the silent wrong answers the Scala 3 corpus found
+
+A full run of the Scala 3 compiler's own `tests/run` corpus (1654 single-file
+tests, corpus commit `a68b419c`) turned up 257 disagreements with scalac that no
+deviation anticipated. Most were fixed; the rows below are what could not be,
+and each one exists because protoScala's model cannot express what Scala's does.
+Every row was measured against **scalac 3.9.0** with `bin/scalac -d out` and
+`java -cp "$SCALA_HOME/lib/*:out"`, never `bin/scala`, and every row has a
+fixture that prints both answers. Decided by the implementing agent under the
+maintainer's standing authorisation. D106 and D107 are reserved by the Phase 7
+plan, so this track uses **D108 onwards**.
+
+| id | Deviation | Plan | Revisit |
+|---|---|---|---|
+| D108 | **An `override val` constructor parameter is invisible to an ancestor that declares the member in its *body*.** `class B { val y: Int = 10; println(this.y) }` with `class C(override val y: Int) extends B`: scalac prints 20, protoScala prints 10 and settles on 20 once the chain returns. A public member's attribute key is its plain name, so `B.y` and `C.y` are **one** slot, where scalac gives each class a field and overrides the accessor. Parameter fields, which Scala assigns before the superclass initialiser, are stored with `STORE_FIELD_IF_NEW` and therefore survive (`class B(val y: Int)` above prints 20, as scalac does), but the store of a *body* `val` cannot be guarded the same way: a subclass's own body `val` runs after the ancestor's and has to be able to overwrite it. The faithful fix is one field per class plus a virtual accessor for every `val`, which is a change to the object model, not to a constructor. Fixture: `tests/conformance/07-classes/override-val-over-ancestor-body-val.scala` | Track S | later |
+
 ## Known issues / platform dependencies
 
 See DESIGN §11 for the full table. Unchanged this phase: R2, R4, R8. **R5 was

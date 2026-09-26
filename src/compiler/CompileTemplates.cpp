@@ -546,10 +546,16 @@ void Compiler::compileConstructor(const TemplateDef& t, const ClassInfo& info) {
     // that calls an overridden method must already see them. compileInitCall
     // stores the `this` the callee returns back into slot 0, so the fields
     // survive the initialiser chain.
+    //
+    // STORE_FIELD_IF_NEW, not STORE_FIELD: a public member's attribute key is
+    // its plain name, so an ancestor's `val y` and a subclass's `override val y`
+    // are one slot. Since the subclass stores first, the guard is what makes the
+    // override win for the ancestor's own initialiser body -- scalac gives the
+    // ancestor a second field and an overridden accessor instead.
     for (std::size_t k = 0; k < t.ctorParams.size(); ++k) {  // parameter fields
         emit(Op::PUSH_LOCAL, 1 + k, t.pos, +1);
-        emit(Op::STORE_FIELD, fn_->mod->addSymbol(info.members.at(t.ctorParams[k].name).key), t.pos,
-             -1);
+        emit(Op::STORE_FIELD_IF_NEW,
+             fn_->mod->addSymbol(info.members.at(t.ctorParams[k].name).key), t.pos, -1);
     }
     if (info.kind != ClassKind::Trait) {  // a trait's initialiser runs only its own body
         const ClassInfo* super = superclassOf(info);
@@ -578,8 +584,10 @@ void Compiler::compileConstructor(const TemplateDef& t, const ClassInfo& info) {
     }
     // A parameter field that overrides an inherited member is stored twice: once
     // before the chain (so an inherited initialiser sees it, as scalac does) and
-    // once after it, because the ancestor's own initialiser writes the same
-    // attribute key and the override must win afterwards.
+    // once after it. The second store is still needed when the ancestor declares
+    // the member in its *body* rather than as a parameter: that store runs after
+    // the subclass's and is unconditional, because a subclass's own body `val`
+    // must in turn be able to overwrite it (D108).
     for (std::size_t k = 0; k < t.ctorParams.size(); ++k) {
         const std::string& name = t.ctorParams[k].name;
         if (info.members.at(name).key != name) continue;  // a private field: no clash

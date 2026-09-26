@@ -211,6 +211,17 @@ Implementing an abstract member needs no `override`. Redefining a member that
 already has a body *does*, exactly as in Scala 3 — that is what `override def
 toString` in §6.1 was for.
 
+> **One rough edge with `override val`.** A constructor parameter declared
+> `override val` is assigned before the superclass initialiser runs, as in
+> Scala, so a superclass *constructed with* one value but *overridden with*
+> another sees the override: `class B(val y: Int) { println(this.y) }` with
+> `class C(override val y: Int) extends B(10)` and `new C(20)` prints 20, just
+> as scalac does. If the superclass instead declares `y` in its **body**
+> (`class B { val y = 10 }`), its own initialiser overwrites the override while
+> the chain is still running, so `this.y` reads 10 inside `B` and 20 everywhere
+> afterwards. That is D108, and it is the one place protoScala's single
+> attribute slot per member name shows through.
+
 A class may extend one class and any number of traits. When several of them
 define the same member, Scala decides which wins by **linearization**:
 

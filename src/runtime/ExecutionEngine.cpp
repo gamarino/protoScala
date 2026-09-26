@@ -1255,6 +1255,19 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                     slots[0] = slots[0]->setAttribute(&frame, mod.constAt(operand).symbol, sp[-1]);
                     --sp;
                     continue;
+                case Op::STORE_FIELD_IF_NEW: {
+                    // A constructor parameter field: a more-derived constructor
+                    // stored its own `override val` before calling this one, and
+                    // that value must survive the whole initialiser chain. The
+                    // probe is `hasOwnAttribute` and not a read, because
+                    // PROTO_NONE is both a value and the missing-attribute
+                    // answer.
+                    const proto::ProtoString* key = mod.constAt(operand).symbol;
+                    if (slots[0]->hasOwnAttribute(&frame, key) != PROTO_TRUE)
+                        slots[0] = slots[0]->setAttribute(&frame, key, sp[-1]);
+                    --sp;
+                    continue;
+                }
                 case Op::SET_FIELD: {  // setters of var fields: the instance is mutable
                     const proto::ProtoObject* obj = sp[-2];
                     if (obj->setAttribute(&frame, mod.constAt(operand).symbol, sp[-1]) != obj)

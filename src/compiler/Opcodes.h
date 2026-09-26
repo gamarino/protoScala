@@ -86,7 +86,14 @@ enum class Op : uint8_t {
     // The keyword ProtoSparseList is keyed by the address of the interned
     // parameter-name symbol, protoCore's own convention (A0-12).
     CALL_KW        = 80,  // [f a1..an v1..vm] -> [r]     operand: KwSendSite constant
-    // 81..95   reserved (object model)
+    // A constructor parameter field. Scala assigns these before the superclass
+    // initialiser runs, and a subclass's `override val` param must win, so the
+    // store is skipped when a more-derived constructor -- which ran first --
+    // already wrote the key. Without the guard the ancestor's own parameter
+    // field clobbers the override for the whole initialiser chain.
+    STORE_FIELD_IF_NEW = 81,  // [v] -> []  slot[0].setAttribute(key, v) unless
+                              //            slot[0] already has key; operand: Symbol
+    // 82..95   reserved (object model)
     // Phase 4: exceptions (DESIGN §7). The protected regions live in the
     // module's handler table, not in the instruction stream.
     THROW          = 96,  // [v] -> throws                v must be a Throwable (A0-5)
