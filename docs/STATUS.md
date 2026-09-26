@@ -1657,66 +1657,86 @@ method, counts by site and the protoCore/protoScala separation are in
   of the code path (`14-futures/threads-send-concurrently.scala`,
   `20-exceptions/thread-body-throws.scala`,
   `tutorial/13-threads-and-time.scala`) continues to pass.
-- **The actor scheduler: one further report, and the earlier "no race of its
-  own" claim was wrong.** That claim is withdrawn. The same log does name a
-  protoScala site in the scheduler:
+- **The actor scheduler's own race: diagnosed, reproduced, and FIXED.** The earlier
+  "no race of its own" claim is withdrawn. The same log named
   `SUMMARY: ThreadSanitizer: data race … ActorScheduler.cpp:227 in
-  ActorScheduler::nextMessage` — a 4-byte write racing a 4-byte read on a 24-byte
-  heap block, which is `ActorState` (`pendingIdx[band]`), between two worker
-  threads. It was missed because the earlier pass grepped the reports for
-  `Mailbox` and `ReadyStack` and read the scheduler frames as callers only.
-  It appeared **once in one run and in none of the three post-fix runs**, and was
-  first recorded as undiagnosed. **It has since been diagnosed, by reading, and it
-  is a real defect.** It is out of the `Thread.start` fix's scope and is **not
-  fixed**; the fix is planned and the order of work is recorded in
-  `../.agent_scratch/pendingidx/fix-plan.md`. `Mailbox` and `ReadyStack` are named
-  as race sites by no report, before or after. The 8 × 25,000-send stress case
-  printed `200000` exactly in all four runs, so the single-method invariant held
-  each time — and that is the point:
+  ActorScheduler::nextMessage` — a 4-byte write racing a 4-byte read on a 24-byte heap
+  block, which is `ActorState` (`pendingIdx[band]`), between two worker threads. It was
+  missed because the earlier pass grepped for `Mailbox` and `ReadyStack` and read the
+  scheduler frames as callers only.
 
-  **The single-method invariant holds; the guarantee that breaks is narrower.** No
-  two workers can be inside a handler, `deliver` or `nextMessage` for one actor:
-  ownership *is* popping the `ActorState*` off a ready stack, and every push is
-  made by a thread that has just moved `sched` into 1 by a single CAS (`send`,
-  `resume` ×2, `finishTurn` ×2) or that still holds the claim. protoClojure's
-  session-19 hole — per-message clearing of the claim — is **absent**: `finishTurn`
-  runs once per turn and nothing in the 8-message loop touches `sched`.
+  **The single-method invariant held; the guarantee that broke was narrower.** No two
+  workers can be inside a handler, `deliver` or `nextMessage` for one actor: ownership
+  *is* popping the `ActorState*` off a ready stack, and every push follows a single CAS
+  into `sched == 1` or is made by a thread that still holds the claim. protoClojure's
+  session-19 hole — per-message clearing of the claim — is **absent**. What broke is
+  that `finishTurn` **released the claim and then read shared per-actor state**: its
+  non-suspended path CASed `sched` 1→0 and *then* called `hasWork` and
+  `highestPendingBand`, both of which read `ActorState::pendingIdx[b]` and walk the
+  actor's `__pend<b>__` list, while the new owner's `nextMessage` writes both. There
+  was no exclusion at that site by construction, and the comment there reasoned only
+  about *senders*. TSan was right, not confused.
 
-  **What breaks is that `finishTurn` reads shared per-actor state AFTER
-  deliberately releasing ownership.** Its non-suspended path CASes `sched` 1→0 and
-  *then* calls `hasWork` and `highestPendingBand`, both of which read
-  `ActorState::pendingIdx[b]` and walk the actor's `__pend<b>__` list. From the
-  instant of that store any thread may claim the actor, so the new owner's
-  `nextMessage` is concurrently writing `pendingIdx[band]` and `setAttribute`-ing
-  `pendingKey[band]`. There is no exclusion at that site **by construction**, and
-  the comment there reasons only about *senders* — never about the new owner being a
-  second worker. TSan is right, not confused.
+  **Two halves, and only one was benign.** The cursor half: a stale read implies a
+  concurrent claimer, whose existence made the old gating CAS fail, so the answer was
+  discarded and the worst case was one empty turn. The heap half was not benign —
+  `hasWork` held the `__pend<b>__` list in a bare C++ local across
+  `asList(ctx)->getSize(ctx)` while the new owner replaced that attribute, leaving the
+  list reachable from no root, no attribute and no automatic local, which
+  `Mailbox.cpp:50-54` documents as a crash under a small heap. **Not observed to
+  crash** in 6 runs under ceilings of 20,000 / 100,000 / 500,000 cells: recorded as not
+  demonstrated, not as absent, because the overlap itself is ~1 in 55,000.
 
-  **Two halves, and only one is benign.** The cursor half is argued harmless: a
-  stale read implies a concurrent claimer, so the gating CAS 0→1 discards the answer
-  and the worst case is one empty turn; no message is lost or duplicated on a
-  machine with atomic aligned 4-byte loads. **The heap half is not benign and
-  reading cannot settle it**: `hasWork` holds the `__pend<b>__` list in a bare C++
-  local across `asList(ctx)->getSize(ctx)` while the new owner replaces that
-  attribute, which leaves the list reachable from nothing — no attribute, no root,
-  no automatic local. `Mailbox.cpp:50-54` documents exactly that shape as a crash
-  under a small heap. It is the same class as the three "held a `ProtoObject*`
-  across an allocation" bugs this project has already fixed, with a second thread
-  supplying the unreachability instead of a CAS loop.
+  **Why it existed:** the post-release re-check was inherited from protoClojure, whose
+  version reads *only* `ProtoMPSCQueue::isEmpty` — callable from any thread by
+  contract — and whose `ActorState` holds no cursor, because a protoClojure turn drains
+  its whole `takeAll`. A0-10's batch of 8 made the remainder persist across turns, in
+  `pendingIdx` and in `__pend<n>__`, and the re-check was not revisited. None of the
+  eight Phase-5 deviations (D43, D45–D49, D51, D53) said which thread may read that
+  cursor.
 
-  **Why it exists, precisely:** the post-release re-check was inherited from
-  protoClojure, whose version reads **only** `ProtoMPSCQueue::isEmpty` — which
-  protoCore documents as callable from any thread — and whose `ActorState` holds no
-  cursor at all, because a protoClojure turn drains its whole `takeAll`. A0-10's
-  batch of 8 made the remainder persist across turns, in `pendingIdx` and in
-  `__pend<n>__`, and the re-check was not revisited. Neither of the eight Phase-5
-  deviations (D43, D45–D49, D51, D53) says which thread may read that cursor.
+  **The fix decides before releasing**, and `pendingIdx` deliberately stays a plain
+  `unsigned`: making it atomic would have silenced the one line TSan could see and left
+  both real hazards untouched. The work question is now evaluated under the claim; on
+  the work-known path the claim is kept and the actor handed straight back, exactly as
+  the `s == 2` branch already did; otherwise `sched` is released and **nothing but the
+  atomic is touched afterwards**. No wakeup is lost — a message arriving before the
+  release makes the sender mark 2, so the release CAS fails and the loop re-reads under
+  the claim; one arriving after makes the sender claim and enqueue itself. The spurious
+  empty turn the old re-check could schedule is gone too. ~25 lines in one function, no
+  header change, no ABI change.
 
-  **The fix is to decide before releasing**, not to make `pendingIdx` atomic:
-  evaluate the work question once under the claim and, when there is work, hand the
-  actor back with `sched` still at 1 — which the `s == 2` branch already does — so
-  nothing outside the atomic is read after the release. Making the cursor atomic
-  would silence the line TSan reported and leave **both** real hazards in place.
+  **The evidence is a differential on a workload that reproduces the race, not a
+  non-reproduction.** The original report appeared once in four runs, so its absence
+  would prove nothing. Two things were needed first. The **workload**: the
+  8 × 25,000-send stress case almost never reaches the window, because with senders
+  hammering one actor `sched` is 2 at the end of nearly every turn and the re-check
+  happens *under* the claim — zero firings at 4, 8 and 16 workers. Six sender threads
+  trickling one message at a time over **64 actors** enter it ~18,000 times per run.
+  And the **detector**: a temporary `inTurn` mark on `ActorState` sampled at entry to
+  `hasWork` reported 0 overlaps in ~20,000 window entries, every run; widened to span
+  the whole read — `hasWork` loops over three bands, and a second worker can claim part
+  way through — it reported **2 firings in 6 runs**, both `hasWork` on exit, and its
+  "two workers in one turn" branch never fired at all. Then, under TSan with the
+  window-driving workload at 12 workers:
+
+  | build | runs | `ActorScheduler`-sited reports | printed result |
+  |---|---:|---:|---|
+  | pre-fix | 2 | **4 and 4**, all `ActorScheduler.cpp:237 in nextMessage` | `24192` ✓ |
+  | post-fix | 3 | **0, 0, 0** | `24192` ✓ |
+
+  `:237` is `pendingIdx[band] = 1`, the sibling write to the `:227` the original log
+  named. The stress case under TSan is also 0 protoScala-sited in three runs, printing
+  `200000` exactly. The `inTurn` probe, kept across the fix, reports the instrumented
+  site as no longer existing while still performing ~20,000 cursor reads a run.
+
+  Fixture: `tests/conformance/13-actors/concurrent-sends-no-race.scala`, mirroring
+  protoClojure's `concurrent-sends-no-race.clj`. **It has no mutation that turns it
+  red, and its header says so**: the pre-fix code printed the correct total every run,
+  because the cursor half is benign. It drives the interleaving and verifies the
+  message count; the differential above is the proof. All instrumentation was removed —
+  `ActorScheduler.h` is byte-identical to its pre-experiment state. Operands:
+  `../.agent_scratch/pendingidx/experiment-and-fix.md`.
 - **protoCore's population is pre-existing and not actor-specific**: a control
   run of 8 plain `Thread.start` threads touching no actor still reports 13
   protoCore races, concentrated in `core/SparseListAlgorithms.h`'s

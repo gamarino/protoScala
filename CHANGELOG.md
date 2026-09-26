@@ -294,6 +294,54 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **The actor scheduler's second data race is fixed: `finishTurn` no longer reads
+  shared per-actor state after releasing the claim.** Its non-suspended path used to
+  CAS `sched` 1→0 and *then* call `hasWork`/`highestPendingBand`, which read
+  `ActorState::pendingIdx` and walk the actor's `__pend<n>__` list — while the worker
+  that claimed the actor next was writing both. The single-method invariant was never
+  broken (no two workers in one turn; protoClojure's session-19 hole is absent); the
+  narrower guarantee that `ActorState` is touched only by the claim holder was. It now
+  decides **under** the claim, and on the work-known path keeps the claim and hands the
+  actor straight back, exactly as the `s == 2` branch already did.
+
+  **`pendingIdx` deliberately stays a plain `unsigned`.** Making it atomic was the
+  obvious change and the wrong one: it would have silenced the single line TSan could
+  see and left both real hazards — the `__pend<n>__` attribute race and a P1 hazard —
+  exactly as they were. The P1 half is the one that mattered: `hasWork` held that list
+  in a bare C++ local across `asList(ctx)->getSize(ctx)` while the new owner replaced
+  the attribute, leaving it reachable from no root, no attribute and no automatic
+  local — the shape `Mailbox.cpp:50-54` documents as a crash under a small heap. It was
+  **not observed to crash** in 6 runs under ceilings of 20,000–500,000 cells, and that
+  is recorded as *not demonstrated* rather than as absent.
+
+  **Two things had to be got right before the evidence meant anything, and both were
+  wrong at the first attempt.** The workload: the 8 × 25,000-send stress case that
+  produced the original report almost never reaches the window, because with senders
+  hammering one actor `sched` is 2 at the end of nearly every turn and the re-check
+  happens under the claim — 0 firings at 4, 8 and 16 workers. Six sender threads
+  trickling one message at a time over 64 actors enter it ~18,000 times a run. The
+  detector: a temporary `inTurn` mark sampled at *entry* to `hasWork` reported 0
+  overlaps in ~20,000 window entries, every run; `hasWork` loops over three bands and a
+  second worker can claim part way through, so widening it to span the whole read
+  produced **2 firings in 6 runs** — and its "two workers in one turn" branch never
+  fired, which is what confirmed the invariant. ~20,000 entries with zero overlaps is
+  the shape a too-narrow detector produces, not a clean bill.
+
+  The proof is therefore a **differential on a workload that reproduces the race**,
+  because the original report appeared once in four runs and its absence would prove
+  nothing. Under TSan at 12 workers: **pre-fix 4 and 4** reports, all
+  `ActorScheduler.cpp:237 in nextMessage` (`pendingIdx[band] = 1`, the sibling write to
+  the `:227` first reported); **post-fix 0, 0, 0**; both printing the verified total.
+  The stress case is also 0 protoScala-sited in three runs, printing `200000`.
+
+  The `SparseListAlgorithms.h` population **survives**, as predicted in writing before
+  the run, because a control of 8 plain threads touching no actor already produced 13
+  of them — so this fix reassigns nothing to or from protoCore. New fixture:
+  `tests/conformance/13-actors/concurrent-sends-no-race.scala`, which **has no mutation
+  that turns it red and says so in its header** — the pre-fix code printed the correct
+  total every run, because the cursor half is benign. All instrumentation was removed;
+  `ActorScheduler.h` is byte-identical to its pre-experiment state.
+
 - **The `Thread.start` data race ThreadSanitizer found is gone, and the global it
   lived in is gone with it.** `ActiveCallContext g_threadBlueprint` was a plain
   non-atomic global: the spawning thread wrote it, the spawned thread read it, no

@@ -434,15 +434,42 @@ void ActorScheduler::finishTurn(proto::ProtoContext* ctx, ActorState* a, bool su
             if (a->sched.compare_exchange_strong(claimed, 0, std::memory_order_acq_rel)) return;
             continue;  // a sender re-marked 2: go round again
         }
-        if (!a->sched.compare_exchange_strong(s, 0, std::memory_order_acq_rel)) continue;
-        // Released. A sender racing this store sees 0 and enqueues itself; one
-        // that raced just before marked 2 and the CAS above failed. Only the
-        // backlog this turn already knows about is left to us.
-        if (hasWork(ctx, a)) {
-            unsigned idle = 0;
-            if (a->sched.compare_exchange_strong(idle, 1, std::memory_order_acq_rel))
-                enqueue(a, highestPendingBand(ctx, a));
+        // DECIDE BEFORE RELEASING. This used to release the claim first and then
+        // call hasWork/highestPendingBand, which read ActorState::pendingIdx and
+        // walked the actor's __pend<n>__ list after any thread was free to claim
+        // the actor and start writing both. TSan reported it once
+        // (ActorScheduler.cpp:227 against hasWork), and an inTurn probe driven by
+        // six sender threads over 64 actors reproduced it: 2 overlaps in ~110,000
+        // post-release re-checks, every one of them `hasWork` overlapping a turn
+        // begun by another worker, and never two workers inside one turn -- so the
+        // single-method invariant was intact and only this re-check was outside it.
+        //
+        // Two hazards followed, and the second is why making pendingIdx atomic
+        // would have been the wrong fix: the cursor read was benign (a stale answer
+        // implies a concurrent claimer, whose existence makes the CAS below fail, so
+        // the answer is discarded), but hasWork holds the __pend<n>__ list in a bare
+        // C++ local across `asList(ctx)->getSize(ctx)` while the new owner replaces
+        // that attribute -- leaving the list reachable from no root, no attribute and
+        // no automatic local. Mailbox.cpp:50-54 documents that exact shape as a crash
+        // under a small heap.
+        //
+        // Deciding here, under the claim, removes both: every read of ActorState and
+        // of the actor's attributes now happens while this thread owns the actor, and
+        // nothing but the atomic is touched afterwards.
+        const bool work = hasWork(ctx, a);
+        if (work) {
+            // Keep the claim and hand the actor straight back to a worker, exactly as
+            // the s == 2 branch above does. No release, so no window at all.
+            enqueue(a, highestPendingBand(ctx, a));
+            return;
         }
+        if (!a->sched.compare_exchange_strong(s, 0, std::memory_order_acq_rel)) continue;
+        // Released, with NOTHING read afterwards. A message arriving before this
+        // store makes the sender see 1 and mark 2, so the CAS fails and the loop
+        // re-reads under the claim; one arriving after makes the sender see 0 and
+        // enqueue itself, which is the path the old comment here already relied on.
+        // So no wakeup is lost, and the spurious empty turn the old re-check could
+        // schedule is gone as well.
         return;
     }
 }

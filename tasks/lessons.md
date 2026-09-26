@@ -175,3 +175,34 @@ codes. The verification saved the table; the selection should never have happene
 present: `--version` is the cheapest universal probe and a loader failure fails it.
 This matters most for sibling runtimes, whose build trees go stale far more often than
 one's own.
+
+## The heaviest stress case can be the one that hides the bug
+
+**2026-09-26.** ThreadSanitizer reported a race in `finishTurn`'s post-release
+re-check, once, during the 8 × 25,000-send stress case. I reached for that same case to
+reproduce it — 4, 8 and 16 workers, a temporary assertion in place — and got **zero
+firings**. The reason is structural: with senders hammering one actor, `sched` is 2 at
+the end of nearly every turn, so `finishTurn` takes the branch that reads *under* the
+claim and never enters the unprotected window. The window needed the **opposite**
+shape: many actors each taking a short burst, so a turn ends with nothing queued and
+the next message arrives just after the release. Six senders trickling over 64 actors
+entered it ~18,000 times a run.
+
+**Rule.** Before reproducing a concurrency report, read the code for *which branch*
+the window is in, and construct the workload that takes that branch. A heavier load is
+not a more likely reproduction; it can systematically take the safe path. And count
+the window, not only the violation — instrumentation that reports "how often the risky
+branch ran" is what tells you a zero means "safe" rather than "never tried".
+
+## Widen a detector before believing its zero
+
+**2026-09-26.** My assertion sampled the owner flag at *entry* to `hasWork` and
+reported 0 overlaps in ~20,000 window entries, on every run. `hasWork` loops over three
+bands doing attribute reads, and a second thread can claim the actor part way through,
+so entry-sampling could only catch an overlap that had already started. Checking at
+entry **and** exit found 2 firings in 6 runs.
+
+**Rule.** A detector for a window must span the window. When an instrumented run
+reports a suspiciously clean zero over a large number of opportunities, the first
+hypothesis is the detector, not the code — and the cheapest test is to make the
+detector cover more of the operation and see whether the zero survives.

@@ -16,7 +16,7 @@
 # the six codes below was added because a fixture produced one.
 #
 # Counts by code:
-#   D113    26
+#   D113    27
 #   D118   305
 #   D120    64
 #   D121    18
@@ -203,6 +203,7 @@
 13-actors/await-refused-inside-map.scala                               D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
 13-actors/case-class-messages-braces.scala                             D118   classes, traits and objects are not transpiled in the first cut
 13-actors/case-class-messages.scala                                    D118   classes, traits and objects are not transpiled in the first cut
+13-actors/concurrent-sends-no-race.scala                               D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
 13-actors/handler-returns-state-only.scala                             D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
 13-actors/handler-state-is-a-pair.scala                                D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
 13-actors/many-actors.scala                                            D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
