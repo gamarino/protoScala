@@ -28,6 +28,12 @@ namespace protoScala {
 class BytecodeModule;
 class ExecutionEngine;
 
+// Phase 7 §D1: the one bridge between ExecutionEngine's private opcode bodies and
+// the second consumer of the instruction set. `ops::Engine`'s members are
+// one-line forwards (src/runtime/OpcodeOps.h); declaring it a friend keeps ONE
+// implementation of every opcode without promoting eighteen members to public.
+namespace ops { struct Engine; }
+
 struct ActiveCallContext {
     ExecutionEngine* engine;
     const RuntimeLayout* layout;
@@ -122,6 +128,8 @@ public:
     const proto::ProtoObject* materialise(proto::ProtoContext* ctx, const ScalaError& e);
 
 private:
+    friend struct ops::Engine;
+
     static constexpr unsigned kNoPendingCall = 0xFFFFFFFFu;
     const RuntimeLayout& layout_;
 

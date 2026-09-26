@@ -348,7 +348,7 @@ std::int32_t scalaHash(proto::ProtoContext* ctx, const RuntimeLayout& L, const p
     return identityHash(ctx, v);
 }
 
-const proto::ProtoObject* makeString(proto::ProtoContext* ctx, const std::string& utf8) {
+const proto::ProtoObject* makeString(proto::ProtoContext* ctx, std::string_view utf8) {
     std::uint8_t rest[4];  // an incomplete trailing sequence (never in our strings)
     std::uint8_t restCount = 0;
     return proto::ProtoString::fromUTF8Buffer(ctx, reinterpret_cast<const std::uint8_t*>(utf8.data()),

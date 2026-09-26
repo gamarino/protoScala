@@ -1,4 +1,5 @@
 #include "runtime/ExecutionEngine.h"
+#include "runtime/OpcodeOps.h"
 #include "compiler/GlobalTable.h"
 #include "compiler/BytecodeModule.h"
 #include "runtime/Errors.h"
@@ -43,11 +44,6 @@ std::string plainName(std::string n) {
     const auto sep = n.rfind("::");
     if (sep != std::string::npos && sep > 0 && sep + 2 < n.size()) n = n.substr(sep + 2);
     return n;
-}
-
-[[noreturn, gnu::cold]] void throwNotBoolean(proto::ProtoContext* ctx, const RuntimeLayout& L,
-                                             const proto::ProtoObject* v) {
-    throw ScalaError("ClassCastException", typeName(ctx, L, v) + " cannot be cast to Boolean");
 }
 
 } // namespace
@@ -938,17 +934,8 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                 case Op::NOP: case Op::EXTEND: continue;
                 case Op::PUSH_CONST: {
                     const auto& c = mod.constAt(operand);
-                    using K = BytecodeModule::ConstKind;
-                    switch (c.kind) {
-                        case K::Int:    *sp++ = frame.fromInteger(c.ival); break;
-                        case K::BigInt: *sp++ = frame.fromString(c.sval.c_str(), c.base); break;
-                        case K::Double: *sp++ = frame.fromDouble(c.dval); break;
-                        case K::String: *sp++ = makeString(&frame, c.sval); break;  // may hold NUL
-                        case K::Char:   *sp++ = frame.fromUnicodeChar(static_cast<unsigned>(c.ival)); break;
-                        case K::Symbol: case K::SendSite: case K::Names:
-                        case K::ClassSpec: case K::SuperSite: case K::KwSendSite:
-                            throw std::logic_error("PUSH_CONST of a name constant");
-                    }
+                    *sp++ = ops::constantOf(&frame, c.kind, c.ival, c.dval, c.base, c.sval,
+                                            mod.name());
                     continue;
                 }
                 case Op::PUSH_UNIT:  *sp++ = L.unit; continue;
@@ -960,43 +947,32 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                 case Op::PUSH_LOCAL:  *sp++ = slots[operand]; continue;
                 case Op::STORE_LOCAL: slots[operand] = *--sp; continue;
                 case Op::MAKE_CELL:
-                    slots[operand] = L.cellProto->newChild(&frame, /*isMutable=*/true);
+                    slots[operand] = ops::makeCell(&frame, L);
                     continue;
-                case Op::PUSH_CELL: {
-                    const proto::ProtoObject* v = slots[operand]->getOwnAttributeDirect(&frame, L.valueKey);
-                    *sp++ = v ? v : PROTO_NONE;
+                case Op::PUSH_CELL:
+                    *sp++ = ops::cellGet(&frame, L, slots[operand]);
                     continue;
-                }
                 case Op::STORE_CELL:
-                    slots[operand]->setAttribute(&frame, L.valueKey, sp[-1]);  // mutable: in place
+                    slots[operand] = ops::cellSet(&frame, L, slots[operand], sp[-1]);
                     --sp;
                     continue;
                 case Op::PUSH_GLOBAL: {
-                    const auto* key = mod.constAt(operand).symbol;
-                    const proto::ProtoObject* v = L.globals->getOwnAttributeDirect(&frame, key);
-                    if ((!v || v == PROTO_NONE) &&
-                        L.globals->hasOwnAttribute(&frame, key) != PROTO_TRUE) [[unlikely]]
-                        throw ScalaError("UninitializedFieldError",
-                                         GlobalTable::nameOfKey(mod.constAt(operand).sval) +
-                                             " is used before it is initialised");
-                    *sp++ = v ? v : PROTO_NONE;
+                    const auto& c = mod.constAt(operand);
+                    *sp++ = ops::pushGlobal(&frame, L, c.symbol, c.sval);
                     continue;
                 }
                 case Op::STORE_GLOBAL:
-                    L.globals->setAttribute(&frame, mod.constAt(operand).symbol, sp[-1]);
+                    ops::storeGlobal(&frame, L, mod.constAt(operand).symbol, sp[-1]);
                     --sp;
                     continue;
                 case Op::MAKE_FN: {
                     const BytecodeModule& sub = mod.block(operand);
                     const unsigned nc = static_cast<unsigned>(sub.captureCount());
-                    const auto address = reinterpret_cast<std::intptr_t>(&sub);
                     // User-space addresses are below 2^47, inside the SmallInteger range.
-                    const proto::ProtoObject* fn =
-                        L.functionProtoFor(static_cast<unsigned>(sub.arity()))->newChild(&frame)
-                            ->setAttribute(&frame, L.codeKey, proto::makeSmallInt(address));
-                    if (nc > 0)
-                        fn = fn->setAttribute(&frame, L.capturesKey,
-                                              frame.newList(nc, sp - nc)->asObject(&frame));
+                    const auto address = reinterpret_cast<std::intptr_t>(&sub);
+                    const proto::ProtoObject* fn = ops::makeFunctionObject(
+                        &frame, L, static_cast<unsigned>(sub.arity()), L.codeKey,
+                        proto::makeSmallInt(address), sp - nc, nc);
                     sp -= nc;
                     *sp++ = fn;
                     continue;
@@ -1041,8 +1017,8 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                     const auto& site = mod.constAt(operand);
                     const proto::ProtoObject** base = sp - site.argc - 1;  // receiver
                     pendingBase = static_cast<unsigned>(base - slots);
-                    base[0] = dispatch(&frame, base, siteName(&frame, base[0], site), site.argc,
-                                       op == Op::SEND_APPLY);
+                    base[0] = ops::sendNamed(&frame, *this, base, site.symbol, site.argc,
+                                             site.keySymbol, op == Op::SEND_APPLY);
                     pendingBase = kNoPendingCall;
                     sp = base + 1;
                     continue;
@@ -1052,12 +1028,9 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                     frame.returnValue = r;
                     return r;
                 }
-                case Op::MAKE_LAZY: {
-                    const proto::ProtoObject* holder = L.lazyProto->newChild(&frame, true);
-                    holder->setAttribute(&frame, L.thunkKey, sp[-1]);  // mutable: in place
-                    sp[-1] = holder;
+                case Op::MAKE_LAZY:
+                    sp[-1] = ops::makeLazy(&frame, L, sp[-1]);
                     continue;
-                }
                 case Op::FORCE:
                     pendingBase = static_cast<unsigned>(sp - 1 - slots);
                     sp[-1] = force(&frame, sp[-1]);
@@ -1069,65 +1042,31 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                     // other value is the argument itself, already evaluated at
                     // a call site the compiler could not resolve (D53), and
                     // passes through untouched.
-                    const BytecodeModule* thunk = compiledModuleOf(&frame, L, sp[-1]);
-                    if (!thunk || thunk->isMethod() || thunk->arity() != 0) continue;
+                    if (!ops::isZeroArgThunk(&frame, L, sp[-1])) continue;
                     pendingBase = static_cast<unsigned>(sp - 1 - slots);
                     sp[-1] = invoke(&frame, sp[-1], nullptr, 0);
                     pendingBase = kNoPendingCall;
                     continue;
                 }
                 case Op::JUMP: ip += operand; continue;
-                case Op::JUMP_IF_FALSE: {
-                    const proto::ProtoObject* v = *--sp;
-                    if (v == PROTO_FALSE) ip += operand;
-                    else if (v != PROTO_TRUE) throwNotBoolean(&frame, L, v);
+                case Op::JUMP_IF_FALSE:
+                    if (!ops::truthy(&frame, L, *--sp)) ip += operand;
                     continue;
-                }
-                case Op::JUMP_IF_TRUE: {
-                    const proto::ProtoObject* v = *--sp;
-                    if (v == PROTO_TRUE) ip += operand;
-                    else if (v != PROTO_FALSE) throwNotBoolean(&frame, L, v);
+                case Op::JUMP_IF_TRUE:
+                    if (ops::truthy(&frame, L, *--sp)) ip += operand;
                     continue;
-                }
                 case Op::JUMP_BACK:
                     ip -= operand;
-                    frame.safepoint();  // Open question Q21; every live value is in a slot
+                    ops::safepoint(&frame);  // Open question Q21; every live value is in a slot
                     continue;
-                case Op::ADD: case Op::SUB: case Op::MUL: {
-                    const proto::ProtoObject* a = sp[-2];
-                    const proto::ProtoObject* b = sp[-1];
-                    if (proto::isSmallInt(a) && proto::isSmallInt(b)) {
-                        const long long x = proto::asSmallInt(a), y = proto::asSmallInt(b);
-                        long long r;
-                        bool fits;
-                        if (op == Op::ADD)      { r = x + y; fits = proto::smallIntInRange(r); }
-                        else if (op == Op::SUB) { r = x - y; fits = proto::smallIntInRange(r); }
-                        else fits = !__builtin_mul_overflow(x, y, &r) && proto::smallIntInRange(r);
-                        // |x|, |y| < 2^53, so x + y and x - y cannot overflow a long long.
-                        sp[-2] = fits ? proto::makeSmallInt(r)
-                               : op == Op::ADD ? a->add(&frame, b)        // promotes to LargeInteger
-                               : op == Op::SUB ? a->subtract(&frame, b)
-                                               : a->multiply(&frame, b);
-                    } else {
-                        sp[-2] = slowBinary(&frame, op, a, b);
-                    }
+                case Op::ADD: case Op::SUB: case Op::MUL:
+                    sp[-2] = ops::arith(&frame, *this, op, sp[-2], sp[-1]);
                     --sp;
                     continue;
-                }
-                case Op::LT: case Op::LE: case Op::GT: case Op::GE: {
-                    const proto::ProtoObject* a = sp[-2];
-                    const proto::ProtoObject* b = sp[-1];
-                    if (proto::isSmallInt(a) && proto::isSmallInt(b)) {
-                        const long long x = proto::asSmallInt(a), y = proto::asSmallInt(b);
-                        const bool r = op == Op::LT ? x < y : op == Op::LE ? x <= y
-                                     : op == Op::GT ? x > y : x >= y;
-                        sp[-2] = r ? PROTO_TRUE : PROTO_FALSE;
-                    } else {
-                        sp[-2] = slowBinary(&frame, op, a, b);
-                    }
+                case Op::LT: case Op::LE: case Op::GT: case Op::GE:
+                    sp[-2] = ops::compare(&frame, *this, op, sp[-2], sp[-1]);
                     --sp;
                     continue;
-                }
                 case Op::EQ: case Op::NE: {
                     // No SmallInteger fast path here, and deliberately: the
                     // first branch of valuesEqual already is one
@@ -1140,48 +1079,20 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                     // Mcycles, an 8 % regression from code layout alone in the
                     // hottest function of the runtime. Phase 3 Task 1 Step 2
                     // was therefore backed out under its own 3 % rule.
-                    const bool eq = valuesEqual(&frame, L, sp[-2], sp[-1]);
-                    sp[-2] = (eq == (op == Op::EQ)) ? PROTO_TRUE : PROTO_FALSE;
+                    sp[-2] = ops::equality(&frame, L, op, sp[-2], sp[-1]);
                     --sp;
                     continue;
                 }
-                case Op::NEG: {
-                    const proto::ProtoObject* a = sp[-1];
-                    if (proto::isSmallInt(a) && proto::asSmallInt(a) != proto::PROTO_SMALL_INT_MIN)
-                        sp[-1] = proto::makeSmallInt(-proto::asSmallInt(a));
-                    else if (isNumberFast(a))
-                        sp[-1] = a->negate(&frame);
-                    else
-                        sp[-1] = send(&frame, a, L.unaryMinusName, nullptr, 0);
+                case Op::NEG:
+                    sp[-1] = ops::neg(&frame, *this, sp[-1]);
                     continue;
-                }
-                case Op::NOT: {
-                    const proto::ProtoObject* a = sp[-1];
-                    if (a == PROTO_TRUE) sp[-1] = PROTO_FALSE;
-                    else if (a == PROTO_FALSE) sp[-1] = PROTO_TRUE;
-                    else sp[-1] = send(&frame, a, L.unaryNotName, nullptr, 0);
+                case Op::NOT:
+                    sp[-1] = ops::notOp(&frame, *this, sp[-1]);
                     continue;
-                }
                 case Op::CONCAT: {
                     const unsigned n = static_cast<unsigned>(operand);
-                    if (n < 2)
-                        throw std::logic_error("CONCAT of arity " + std::to_string(n) + " in " +
-                                               mod.name());
                     const proto::ProtoObject** base = sp - n;
-                    // toScalaString returns a string unchanged and calls a user
-                    // toString through the active engine otherwise, so a rope
-                    // argument is joined, never flattened. Each converted piece
-                    // is written back into its operand-stack slot before the
-                    // next allocation: an accumulator held only in a C++ local
-                    // is the Phase 5 Mailbox::push bug.
-                    base[0] = toScalaString(&frame, L, base[0]);
-                    for (unsigned k = 1; k < n; ++k) {
-                        base[k] = toScalaString(&frame, L, base[k]);
-                        base[0] = reinterpret_cast<const proto::ProtoString*>(base[0])
-                                      ->appendLast(&frame,
-                                                   reinterpret_cast<const proto::ProtoString*>(base[k]))
-                                      ->asObject(&frame);
-                    }
+                    ops::concat(&frame, L, base, n, mod.name());
                     sp = base + 1;
                     continue;
                 }
@@ -1189,7 +1100,7 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                     const auto& spec = mod.constAt(operand);
                     const proto::ProtoObject** base =
                         sp - spec.argc - static_cast<unsigned>(spec.nameSymbols.size());
-                    base[0] = makeClass(&frame, spec, base);
+                    base[0] = ops::Engine::makeClass(*this, &frame, spec, base);
                     sp = base + 1;
                     continue;
                 }
@@ -1246,84 +1157,65 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                     const proto::ProtoObject* init = base[0]->getOwnAttributeDirect(&frame, site.symbol);
                     if (!init) throw std::logic_error("INVOKE_INIT: no initialiser " + site.sval);
                     pendingBase = static_cast<unsigned>(base - slots);
-                    base[0] = callWithReceiver(&frame, init, base + 1, site.argc);
+                    base[0] = ops::Engine::callWithReceiver(*this, &frame, init, base + 1,
+                                                            site.argc);
                     pendingBase = kNoPendingCall;
                     sp = base + 1;
                     continue;
                 }
                 case Op::STORE_FIELD:  // constructors: `this` is slot 0 (Design note 10)
-                    slots[0] = slots[0]->setAttribute(&frame, mod.constAt(operand).symbol, sp[-1]);
+                    slots[0] = ops::storeField(&frame, slots[0], mod.constAt(operand).symbol, sp[-1]);
                     --sp;
                     continue;
-                case Op::STORE_FIELD_IF_NEW: {
-                    // A constructor parameter field: a more-derived constructor
-                    // stored its own `override val` before calling this one, and
-                    // that value must survive the whole initialiser chain. The
-                    // probe is `hasOwnAttribute` and not a read, because
-                    // PROTO_NONE is both a value and the missing-attribute
-                    // answer.
-                    const proto::ProtoString* key = mod.constAt(operand).symbol;
-                    if (slots[0]->hasOwnAttribute(&frame, key) != PROTO_TRUE)
-                        slots[0] = slots[0]->setAttribute(&frame, key, sp[-1]);
+                case Op::STORE_FIELD_IF_NEW:
+                    slots[0] =
+                        ops::storeFieldIfNew(&frame, slots[0], mod.constAt(operand).symbol, sp[-1]);
                     --sp;
                     continue;
-                }
-                case Op::SET_FIELD: {  // setters of var fields: the instance is mutable
-                    const proto::ProtoObject* obj = sp[-2];
-                    if (obj->setAttribute(&frame, mod.constAt(operand).symbol, sp[-1]) != obj)
-                        throw ScalaError("UnsupportedOperationException",
-                                         "cannot assign a field of an immutable object");
+                case Op::SET_FIELD:  // setters of var fields: the instance is mutable
+                    ops::setField(&frame, sp[-2], mod.constAt(operand).symbol, sp[-1]);
                     sp -= 2;
                     continue;
-                }
                 case Op::SEND_SUPER: {
                     const auto& site = mod.constAt(operand);
                     const proto::ProtoObject** base = sp - site.argc - 1;  // [this a1..an]
                     pendingBase = static_cast<unsigned>(base - slots);
-                    base[0] = superSend(&frame, base, site);
+                    base[0] = ops::Engine::superSend(*this, &frame, base, site);
                     pendingBase = kNoPendingCall;
                     sp = base + 1;
                     continue;
                 }
                 case Op::TEST_TYPE:
-                    sp[-1] = testType(&frame, static_cast<TypeCode>(operand), sp[-1]) ? PROTO_TRUE : PROTO_FALSE;
+                    sp[-1] = ops::Engine::testType(*this, &frame, static_cast<TypeCode>(operand),
+                                                   sp[-1]) ? PROTO_TRUE : PROTO_FALSE;
                     continue;
-                case Op::TEST_PROTO: {  // class membership by marker (Design note 5)
-                    const proto::ProtoObject* v = sp[-1];
-                    sp[-1] = v != PROTO_NONE &&
-                                     v->getAttribute(&frame, mod.constAt(operand).symbol) == PROTO_TRUE
+                case Op::TEST_PROTO:  // class membership by marker (Design note 5)
+                    sp[-1] = ops::testProtoKey(&frame, mod.constAt(operand).symbol, sp[-1])
                                  ? PROTO_TRUE : PROTO_FALSE;
                     continue;
-                }
                 case Op::UNAPPLY_FIELDS: {
                     const auto& names = mod.constAt(operand);
                     const proto::ProtoObject* v = *--sp;  // also held by the match's scrutinee slot
-                    for (const proto::ProtoString* key : names.nameSymbols) {
-                        const proto::ProtoObject* f = v->getOwnAttributeDirect(&frame, key);
-                        *sp++ = f ? f : PROTO_NONE;
-                    }
+                    sp += ops::unapplyFieldsWith(&frame, names.nameSymbols.data(),
+                                                 static_cast<unsigned>(names.nameSymbols.size()), v,
+                                                 sp);
                     continue;
                 }
-                case Op::UNCONS: {
-                    const proto::ProtoList* list = sp[-1]->asList(&frame);
-                    sp[-1] = list->getAt(&frame, 0);
-                    *sp++ = list->removeFirst(&frame)->asObject(&frame);
+                case Op::UNCONS:
+                    ops::uncons(&frame, sp[-1], sp - 1, sp);
+                    ++sp;
                     continue;
-                }
-                case Op::MATCH_ERROR: {
-                    const proto::ProtoObject* v = sp[-1];
-                    throw ScalaError("MatchError", show(&frame, L, v) + " (of class " + typeName(&frame, L, v) + ")");
-                }
+                case Op::MATCH_ERROR:
+                    ops::matchError(&frame, L, sp[-1]);
                 case Op::CAST_FAIL:
-                    throw ScalaError("ClassCastException", typeName(&frame, L, sp[-1]) +
-                                                               " cannot be cast to " + mod.constAt(operand).sval);
+                    ops::castFail(&frame, L, sp[-1], mod.constAt(operand).sval);
                 case Op::MAKE_TUPLE: {
                     const unsigned n = static_cast<unsigned>(operand);
                     if (n < 2 || n > kMaxTupleArity)  // Tuple2..Tuple22 only
                         throw std::logic_error("MAKE_TUPLE of arity " + std::to_string(n) + " in " +
                                                mod.name());
                     const proto::ProtoObject** base = sp - n;
-                    base[0] = makeTuple(&frame, base, n);
+                    base[0] = ops::Engine::makeTuple(*this, &frame, base, n);
                     sp = base + 1;
                     continue;
                 }
@@ -1332,7 +1224,7 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                     const proto::ProtoObject** base =
                         sp - site.argc - static_cast<unsigned>(site.nameSymbols.size()) - 1;
                     pendingBase = static_cast<unsigned>(base - slots);
-                    base[0] = sendKeywords(&frame, base, site);
+                    base[0] = ops::Engine::sendKeywords(*this, &frame, base, site);
                     pendingBase = kNoPendingCall;
                     sp = base + 1;
                     continue;
@@ -1342,33 +1234,18 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                     const proto::ProtoObject** base =
                         sp - site.argc - static_cast<unsigned>(site.nameSymbols.size()) - 1;
                     pendingBase = static_cast<unsigned>(base - slots);
-                    base[0] = callKeywords(&frame, base, site);
+                    base[0] = ops::Engine::callKeywords(*this, &frame, base, site);
                     pendingBase = kNoPendingCall;
                     sp = base + 1;
                     continue;
                 }
-                case Op::THROW: {
-                    const proto::ProtoObject* v = *--sp;
-                    if (v == PROTO_NONE)
-                        throw ScalaError("NullPointerException", "throw null");
-                    // Only a Throwable may be thrown (plan A0-5, Scala's rule),
-                    // tested with the Phase 2 per-class marker attribute and not
-                    // with protoCore's isInstanceOf (R3).
-                    if (v->getAttribute(&frame, L.throwableKey) != PROTO_TRUE)
-                        throw ScalaError("IllegalArgumentException",
-                                         "throw expects a Throwable, got " +
-                                             typeName(&frame, L, v));
-                    throw ScalaThrow(v);
-                }
-                case Op::RETHROW: {
-                    // A Catch cascade that matched nothing, or a Finally body
-                    // that has finished: re-raise the value the handler saved in
-                    // slot `operand` (plan A0-4).
-                    const proto::ProtoObject* v = slots[operand];
-                    if (!v || v == PROTO_NONE)
-                        throw std::logic_error("RETHROW with no saved exception in " + mod.name());
-                    throw ScalaThrow(v);
-                }
+                case Op::THROW:
+                    ops::throwValue(&frame, L, *--sp);
+                case Op::RETHROW:
+                    // A Catch cascade that matched nothing, or a Finally body that
+                    // has finished: re-raise the value the handler saved in slot
+                    // `operand` (plan A0-4).
+                    ops::rethrow(slots[operand], mod.name());
             }
             // Every handled opcode continues the loop or returns; reaching this
             // point means the module holds an opcode value the VM does not know

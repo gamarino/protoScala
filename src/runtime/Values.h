@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 namespace protoScala {
 
@@ -129,7 +130,7 @@ std::string typeName(proto::ProtoContext* ctx, const RuntimeLayout& L, const pro
 // string holding show(v). Used by string concatenation; keeps ropes intact.
 // A String from UTF-8 bytes, by length: an embedded NUL is kept (the
 // zero-terminated protoCore constructors stop at it).
-const proto::ProtoObject* makeString(proto::ProtoContext* ctx, const std::string& utf8);
+const proto::ProtoObject* makeString(proto::ProtoContext* ctx, std::string_view utf8);
 
 const proto::ProtoObject* toScalaString(proto::ProtoContext* ctx, const RuntimeLayout& L,
                                         const proto::ProtoObject* v);
