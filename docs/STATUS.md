@@ -24,9 +24,20 @@
 > **member import** (`import Color.*`, D105), which Phase 6 had silently replaced
 > with the module-loading form. See "The Scala 3 run-corpus measurement" under
 > "Known issues" for the before/after numbers.
-> **Tests:** 1299 total (`ctest --test-dir build_release -N`) — 371 unit
+> **Track S** (2026-09-25) is Track X's instrument turned on the disagreements
+> that returned a *wrong answer* rather than an error, plus two crashes and one
+> missing feature. Fixed: `case` in a `for` generator now filters whatever the
+> pattern is; a blank line ends a leading-infix continuation; an `override val`
+> constructor parameter survives the superclass initialiser; `type` aliases are
+> implemented; an integer widens wherever `Double` is written at the declaration;
+> top-level `def`s overload by number of parameters; `>>>` works where it has an
+> answer; an enum may be called `Enum`, `case C()` is a zero-parameter case class,
+> and a hand-written `object E` is the enum's own companion instead of a second
+> object that crashed the compiler. Recorded rather than fixed: D108–D112. In-scope
+> corpus rate **30.1 % → 31.8 %**, zero regressions across all 1654 files.
+> **Tests:** 1343 total (`ctest --test-dir build_release -N`) — 373 unit
 > (GoogleTest, including the separate `unit/actors` and `unit/modules` binaries
-> and `umd/protost-interop`), 877 conformance fixtures, 24 CLI checks, 12
+> and `umd/protost-interop`), 919 conformance fixtures, 24 CLI checks, 12
 > benchmark smoke checks, 15 embedder-conformance rules. **All
 > green**, and green at `PROTOSCALA_ACTOR_WORKERS=1` and `=16` (1248/1248
 > including `umd/protost-interop` in all three). Under
@@ -44,7 +55,7 @@
 > beside this tree (`-DPROTOSCALA_PROTOST_INTEROP=OFF` restores a suite that
 > refers to no other tree). It holds the cross-runtime import tests; see R5 under
 > "Known issues".
-> Last verified 2026-09-25 (Track F).
+> Last verified 2026-09-25 (Track S).
 
 ## Implemented
 
@@ -467,6 +478,63 @@ compared are quoted in [DECISIONS-LOG.md](DECISIONS-LOG.md).
       shown to be capable of failing by a named mutation of the implementation:
       11 mutations for the Predef half and 12 for the import half, every fixture
       turned red by at least one. Plus 4 tutorial/README fixtures.
+
+### Track S — the wrong answers, the crashes and the missing feature
+
+Track X measured; Track S went after the worst class of what it found: a
+construct that **returns a wrong number instead of failing**. A construct that
+fails is honest, one that quietly answers 31 where Scala answers 1 is not. Every
+item below was verified against **scalac 3.9.0** (`bin/scalac -d out`, then
+`java -cp "$SCALA_HOME/lib/*:out"`, never `bin/scala`), and the outputs compared
+are quoted in the commit that made each change.
+
+- [x] **`case` in a `for` generator filters whatever the pattern is.**
+      `for (case (a, b) <- List(1, (1, 2), 4, (3, 1)))` raised
+      `MatchError: 1 (of class Int)` where scalac yields `List(1, 3)`, while
+      `case Some(v)` filtered correctly — the same construct behaving two ways.
+      The parser was discarding the `case` keyword, which is the only signal a
+      dialect without static types has. D35 and D36 both said something that is no
+      longer true and are corrected.
+- [x] **A blank line ends a leading-infix continuation.** `val x = 1`, a blank
+      line, then `+ a * 6` read as `val x = 1 + a * 6` and printed 31 where scalac
+      prints 1. Pinned against scalac over six shapes before choosing the fix,
+      which is how it was established that the *indentation* is not part of the
+      rule (scalac only warns) and that a comment-only line is not a blank one.
+- [x] **An `override val` constructor parameter survives the superclass
+      initialiser** (new opcode `STORE_FIELD_IF_NEW`). Not a regression of the
+      Phase 2 fixes — both are present verbatim — but a path neither covered.
+      Residue: D108.
+- [x] **`>>>` where it has an answer**, and D1/D15/D19 corrected to say that
+      shift behaviour follows from there being no integer *width* rather than from
+      overflow. The masking question is genuinely ambiguous and was resolved by
+      not choosing a width: D112.
+- [x] **Type-directed widening** at every site where `Double` or `Float` is
+      written at the point of declaration — a `val`, a `var`'s initialiser, a
+      `def` result, every parameter form including constructors and lambdas, a
+      class field and an `(e: Double)` ascription. Remainder: D110.
+- [x] **Top-level `def` overloads dispatch by number of parameters**, which is
+      the part of a signature that survives erasure. What a count cannot identify
+      is now reported rather than silently resolved to the last definition.
+      Remainder: D111. D31 is corrected: it claimed overloading was impossible
+      outright.
+- [x] **Three `internal error: unordered_map::at` escapes fixed** (D74 says such
+      an escape is a bug). An `enum X` and a hand-written `object X` were two
+      templates sharing one type key; the generated companion now absorbs the
+      hand-written one, as Scala's single companion per enum requires. The general
+      case — two same-named objects or classes — is a naming error, as scalac's
+      E161 is.
+- [x] **`enum Enum` no longer extends itself** (the marker trait is named by its
+      type key, which no source can spell) and **`case C()` is a zero-parameter
+      case class**, so `E.C()` finds its companion `apply`.
+- [x] **`type` aliases** (D109 for the remainder): `type X = T`, `type X[A] = T`,
+      and the abstract forms. With types erased this is a naming concern, and the
+      whole surface where a type name is *consumed* is three functions.
+- [x] 42 conformance fixtures, each shown to be capable of failing by a named
+      mutation of the implementation — 14 mutations across the ten groups, every
+      fixture turned red by at least one. Plus two new layout unit tests and
+      rewritten assertions in the parser, desugar and primitive unit tests.
+- [x] In-scope corpus rate **181/601 = 30.1 % → 191/601 = 31.8 %**, **zero
+      regressions** across all 1654 files, and the three internal errors gone.
 
 ## Not yet implemented
 
@@ -937,9 +1005,17 @@ exercised for the first time in Phase 6** — see the three entries below it.
   | 0.6.0, before Track X | **75/601 = 12.5 %** |
   | after the Predef surface (D103–D104) | **178/601 = 29.6 %** |
   | after member imports as well (D105) | **183/601 = 30.4 %** |
+  | re-measured on this machine at the start of Track S | **181/601 = 30.1 %** |
+  | after Track S | **191/601 = 31.8 %** |
 
   Zero regressions: no test that passed anywhere in the 1654-file corpus before
-  this work fails after it. Across the whole corpus, in-scope and out, 82 → 206.
+  this work fails after it. Across the whole corpus, in-scope and out, 82 → 206
+  at the end of Track X and **216** at the end of Track S, and the three
+  `internal error: unordered_map::at` escapes are gone (D74). The two-test
+  difference between Track X's 183 and Track S's starting 181 is the instrument,
+  not the tree: the harness's 10-second per-file timeout is marginal for a
+  handful of files on this machine, so the starting point was re-measured with
+  the same scripts and both Track S numbers come from that run.
   The member-import half is worth 5 in-scope tests on its own, which is small and
   was expected — its case is that it is the first thing a new user hits, not that
   it moves a number — and it also cut the in-scope `no module found` failures from
@@ -949,7 +1025,12 @@ exercised for the first time in Phase 6** — see the three entries below it.
   written here. 257 of the corpus's disagreements with real Scala were anticipated
   by no document in this repository, and the single largest of them — six missing
   Predef names — cost 103 in-scope tests and was invisible to a suite that had
-  never needed them. A suite written by the implementer measures faithfulness to
+  never needed them. Track S went after the worst of the remaining 257 — the ones
+  that returned a **wrong number** instead of failing — and every one of the four
+  it found turned out to be a defect rather than a limit: `case` in a `for`
+  generator, a blank line inside an expression, an `override val` parameter, and a
+  shift. The two that looked like consequences of erasure were only partly so
+  (D110, D111). A suite written by the implementer measures faithfulness to
   the implementer's model, not to Scala. The remaining 423 in-scope failures are
   attributed one reason each; the largest groups are syntax the parser does not
   accept (96), further stdlib names (52), `C(...)` on a plain class (D41, 34),
