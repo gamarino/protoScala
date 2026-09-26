@@ -271,6 +271,7 @@ add_library(protoscala_compiler OBJECT
     src/compiler/Compiler.cpp
     src/compiler/CompilePatterns.cpp
     src/compiler/CompileTemplates.cpp
+    src/compiler/CppTables.cpp
 )
 target_link_libraries(protoscala_compiler PUBLIC protoscala_frontend protoscala_support)
 target_compile_options(protoscala_compiler PRIVATE -Wall -Wextra -Wpedantic)

@@ -15,6 +15,7 @@
 #include "frontend/Desugar.h"
 #include "frontend/Parser.h"
 #include "support/BuiltinNames.h"
+#include "compiler/CppTables.h"
 #include "support/PreludeImage.h"
 
 #include <algorithm>
@@ -31,38 +32,16 @@ using namespace protoScala;
 namespace {
 
 // --- Emission helpers ------------------------------------------------------
+//
+// The string escaper and the exact-double literal live in
+// src/compiler/CppTables.{h,cpp} and are SHARED with protoscalac (Phase 7 Task 5
+// Step 1). They were moved there rather than copied: two escapers that disagree
+// about one byte is a class of bug with no symptom until a string literal is
+// wrong.
 
-void emitString(std::ostream& o, const std::string& s) {
-    o << '"';
-    for (unsigned char c : s) {
-        if (c == '"' || c == '\\') o << '\\' << static_cast<char>(c);
-        else if (c == '\n') o << "\\n";
-        else if (c == '\t') o << "\\t";
-        else if (c == '\r') o << "\\r";
-        else if (c == '?') o << "\\?";              // never start a trigraph
-        else if (c >= 0x20 && c < 0x7f) o << static_cast<char>(c);
-        else { char b[16]; std::snprintf(b, sizeof b, "\"\"\\x%02x\"\"", c); o << b; }
-    }
-    o << '"';
-}
+using tables::quoted;
 
-std::string quoted(const std::string& s) {
-    std::ostringstream o;
-    emitString(o, s);
-    return o.str();
-}
-
-// A double as a C++ literal that round-trips bit for bit. A hexadecimal
-// floating literal (C++17) is exact; a non-finite value would not be, so it is
-// refused rather than silently approximated.
-std::string exactDouble(double d) {
-    if (!(d == d) || d == 1.0 / 0.0 || d == -1.0 / 0.0)
-        throw std::runtime_error("the prelude holds a non-finite double literal, "
-                                 "which the image format cannot represent exactly");
-    std::ostringstream o;
-    o << std::hexfloat << d;
-    return o.str();
-}
+std::string preludeDouble(double d) { return tables::exactDouble(d, "the prelude"); }
 
 // The tables being built. Every *Pool is shared by index ranges.
 struct Tables {
@@ -335,7 +314,7 @@ bool emitImage(const char* path, const std::string& source, const GlobalTable& g
     emitArray(o, "PreludeConstRec", "kConsts", t.consts,
               [&](std::ostream& s, const PreludeConstRec& c, std::size_t i) {
                   s << "{." << "kind = " << unsigned(c.kind) << ", .ival = " << c.ival << "LL"
-                    << ", .dval = " << exactDouble(c.dval)
+                    << ", .dval = " << preludeDouble(c.dval)
                     << ", .base = " << c.base << ", .argc = " << c.argc << "u"
                     << ", .flags = " << c.flags << "u"
                     << ", .exact = " << (c.exact ? "true" : "false")
