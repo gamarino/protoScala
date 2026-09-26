@@ -24,7 +24,13 @@ TEST(Primitives, IntMethods) {
     EXPECT_EQ(h.eval("6 & 3"), "2");
     EXPECT_EQ(h.eval("1 << 60"), "1152921504606846976");
     EXPECT_EQ(h.eval("1 / 0"), "error: ArithmeticException: / by zero");
-    EXPECT_TRUE(isError(h.eval("8 >>> 1"), "UnsupportedOperationException"));
+    // `>>>` of a non-negative operand is the arithmetic shift, which is Scala's
+    // answer exactly; of a negative one it is refused, because the result would
+    // depend on a width protoScala's integers do not have (D15).
+    EXPECT_EQ(h.eval("8 >>> 1"), "4");
+    EXPECT_EQ(h.eval("0 >>> 5"), "0");
+    EXPECT_EQ(h.eval("2147483647 >>> 30"), "1");
+    EXPECT_TRUE(isError(h.eval("-8 >>> 1"), "UnsupportedOperationException"));
 }
 
 TEST(Primitives, DoubleMethods) {

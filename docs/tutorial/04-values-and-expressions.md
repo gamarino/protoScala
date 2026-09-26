@@ -47,6 +47,13 @@ produces a `Double`.
 - Integer division or remainder by zero raises `ArithmeticException: / by zero`.
 - `7.0 / 2` and `7 / 2.0` are both `3.5`; `1.0 / 0` is `Infinity`.
 - A `Char` in arithmetic is its code point: `'a' + 1` is `98`.
+- **Bit operators.** `&`, `|`, `^` and `~` behave as in Scala. `<<` and `>>` are
+  an exact multiplication by a power of two and an exact arithmetic shift: since
+  integers have no width, the shift **count is not masked**, so `1 << 33` is
+  `8589934592` where Scala gives `2` (D112). `>>>` works on a non-negative
+  operand, where it is the same as `>>` and matches Scala — `(lo + hi) >>> 1` is
+  the usual binary-search midpoint — and is refused on a negative one, whose
+  answer would depend on a width protoScala does not have (D15).
 - **Writing `Double` widens an integer.** `val d: Double = 42` is `42.0`, not
   `42`, and the same holds for a `def`'s result type, any parameter's type, a
   class field and an explicit `(42: Double)`. What does *not* widen is an

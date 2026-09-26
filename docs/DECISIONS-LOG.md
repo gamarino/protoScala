@@ -518,3 +518,43 @@ and protoScala now prints the same five lines, byte for byte.
 | 2026-09-25 | **The prefix is bound under a hidden name pinned to its key**, `__scope$Color`, as Phase 6 does for a module (`__module$M`). Using the user-visible name directly would work until a REPL redefinition of the prefix, after which an import taken earlier would silently follow the new binding — the failure mode D25 exists to describe. One table entry per import | [agent, pending review] | `Compiler::inScopePrefix` |
 | 2026-09-25 | **Two gaps the change exposed are RECORDED, not fixed.** An imported member cannot be an assignment target (`import Box.*; counter = 5` says `Not found: counter`) — verified pre-existing by running the identical program through Phase 6's module form on the tree before this work, so it is Phase 6's rewrite mechanism and not this change; fixing it means teaching the assignment path to emit a setter send, which belongs with D96's scoping work. And `import someVal.*` is refused where Scala accepts it, by the decision above. Both are in STATUS.md under "Known issues" with the corpus test that stops on each | [agent, pending review] | `docs/STATUS.md` |
 | 2026-09-25 | **The gap in the documentation is named as ours.** No deviation claimed the member import was absent by design — there was nothing to retract, which is worse than a wrong entry: `docs/LANGUAGE.md` §3.2 was titled "Modules and imports" and described `import` only as a file-loading form, so a reader checking whether `import Color.*` should work found a section that neither promised nor denied it. §3.2 is retitled and now opens with the member form. (The brief for this work cited "INTEROP.md §3.2"; INTEROP.md has no §3.2 and never mentions the ordinary import — the section meant is LANGUAGE.md §3.2) | [agent, pending review] | `docs/LANGUAGE.md` |
+
+## Track S — the silent wrong answers the Scala 3 run corpus found (2026-09-25)
+
+Taken by the implementing agent under the maintainer's standing authorisation,
+against a full run of the Scala 3 compiler's own `tests/run` corpus (1654
+single-file tests, corpus commit `a68b419c`). Every answer below was measured with
+`tools/scala3-3.9.0/bin/scalac -d out` followed by
+`java -cp "$SCALA_HOME/lib/*:out"`, never `bin/scala`. **Please review the two
+marked (decision).**
+
+- **D108** — an `override val` constructor parameter now survives the superclass
+  initialiser, via the new `STORE_FIELD_IF_NEW` opcode. The residue, an ancestor
+  that declares the member in its own *body*, is recorded rather than fixed: the
+  faithful fix is one field per class plus a virtual accessor for every `val`,
+  which is a change to the object model.
+- **D109** — a `type` alias is recorded unit-wide under its simple name rather
+  than scoped to its template. **(decision)** The alternative is a type-name scope
+  stack; nothing else about aliases diverges.
+- **D110** — type-directed widening reaches every site where `Double` or `Float`
+  is written at the point of declaration, and no further. **(decision)** An
+  assignment to a variable declared earlier was deliberately left alone: matching
+  it means remembering which names were declared `Double`, and without a scope a
+  name matched across scopes would turn a correct `2` into a wrong `2.0`.
+  Replacing one silent wrong answer with another is not an improvement.
+- **D111** — top-level `def`s overload by number of parameters, which is the part
+  of a signature that survives erasure. What a count cannot identify is reported:
+  two alternatives of one arity, a default value, a repeated or by-name parameter,
+  and several parameter lists. Note that scalac 3.9 *accepts* a default in an
+  overloaded set (it resolves by type), so this restriction is protoScala's.
+- **D112** — a shift count is not masked. This is the one genuinely ambiguous
+  item the corpus raised, and it was resolved by **not** choosing: the mask width
+  *is* the operand width, protoScala's integers have none (D1, permanent), and
+  masking to 5 bits would match Scala for `1 << 33` while missing `1L << 65`,
+  masking to 6 the reverse. The `L` suffix that distinguishes them is accepted and
+  ignored (D1) and says nothing about `val n = 1; n << 33`. D1, D15 and D19 were
+  corrected to say this in those terms instead of citing "overflow".
+- `>>>` is now implemented for a **non-negative** operand, where it equals `>>`
+  and is Scala's answer exactly, and refused for a negative one, whose result
+  would name a width. That makes the `(lo + hi) >>> 1` midpoint idiom work
+  without inventing a width.

@@ -41,6 +41,7 @@
 | `if`/`then`/`else`, `while`/`do`, blocks as expressions, `return` | 1 |
 | lambdas `x => e`, `(x, y) => e`, placeholder syntax `_ + 1` | 1 (placeholders: 2 ✅) |
 | infix, prefix (`-x`, `!b`, `~n`) and postfix-free method application | 1 |
+| bit operators on integers: `&`, `\|`, `^`, `~`, `<<`, `>>`, `>>>` | 1 ✅ (`>>>`: Track S). `&`, `\|`, `^` and `~` are the unbounded two's-complement ones, which agree with Scala wherever no width is involved. `<<` is an exact multiplication by a power of two and `>>` an exact arithmetic shift: the **count is not masked** to the operand's width, since there is none (D112), and a negative count is an error (D19). `>>>` of a **non-negative** operand is `>>`, which is Scala's answer; of a negative one it is refused, because the result would name a width (D15) |
 | string interpolation `s""`, `f""`, `raw""` | 3 ✅ |
 | `for` comprehensions (generators, guards, value definitions, patterns, `yield` and `do`) | 2 ✅ |
 | `match` with the patterns of DESIGN §5.3, pattern `val`s, `{ case ... }` literals | 2 ✅ |
@@ -511,7 +512,7 @@ trap.
 
 | Id | Departure | Reason |
 |---|---|---|
-| D1 | `Int`/`Long` never overflow: results promote to arbitrary precision; integer literals have no range limit (`0xFFFFFFFF` is `4294967295`, `2147483648` needs no `L`) | protoCore integer model |
+| D1 | `Int`/`Long` never overflow: results promote to arbitrary precision; integer literals have no range limit (`0xFFFFFFFF` is `4294967295`, `2147483648` needs no `L`). There is therefore **no integer width**, from which D112 (shift counts are not masked) and D15 (`>>>` of a negative operand) follow | protoCore integer model |
 | D2 | `Float` is `Double` | protoCore has one floating type |
 | D3 | No implicits / givens / `using` resolution (parsed, rejected with a clear error if used) | resolution needs static types |
 | D4 | No exhaustiveness or static type checking; type errors surface at run time | types are erased |
@@ -614,6 +615,7 @@ and `Priority` was three integers on an object. Their ids are not reused.
 | D109 | A **`type` alias is recorded unit-wide**, under its simple name, so two templates in one file cannot each have their own `type T` | Scala scopes a type member to its template; protoScala has no type-name scope stack, and with types erased (D4) an alias is a naming concern only |
 | D110 | **Widening to `Double`/`Float` happens where the declared type is written**: a `val`, a `var`'s initialiser, a `def` result, every parameter form, a class field and an `(e: Double)` ascription all widen, as Scala does. An **assignment** to a variable declared earlier and a **type argument** do not: `var v: Double = 1; v = 2` prints `2` (Scala `2.0`) and `val l: List[Double] = List(4, 5)` prints `List(4, 5)` (Scala `List(4.0, 5.0)`) | there is no expected type (D4); the declaration site is the only place the type is available. Remembering which names were declared `Double` without a scope would widen an unrelated same-named variable, replacing one wrong answer with another |
 | D111 | **Top-level `def` overloads resolve by number of parameters.** Alternatives must differ in their parameter count, and none may have a default value, a repeated or a by-name parameter, or several parameter lists; each of those is a diagnostic. A bare overloaded `f` as a value eta-expands the first alternative. Methods in a template still cannot be overloaded (D31) | arity is what survives erasure; scalac resolves by type and accepts sets protoScala cannot tell apart, so protoScala reports them rather than keeping one silently |
+| D112 | **A shift count is not masked.** Scala masks it to the operand's width — 5 bits for an `Int`, 6 for a `Long` — so `1 << 33` is `2` and `1L << 65` is `2`; protoScala gives `8589934592` and `36893488147419103232`, because `<<` is an exact multiplication by a power of two | the mask width *is* the operand width, and there is none (D1). Masking to 5 bits would match Scala for the `Int` case and miss the `Long` one, masking to 6 the reverse, and the `L` suffix is ignored (D1), so no width was chosen |
 
 **D57, D60, D64 and D78 do not exist**, and are not reused. They were reserved for
 a `Char`-key divergence, a `Range == List` divergence, a `Try.apply` divergence

@@ -811,7 +811,7 @@ to the colon — `assertion failed`, `assertion failed: why`, `requirement faile
 `Error`, so a broad `catch case e: Exception` does not swallow them. The message
 parameter is by-name.
 
-### The Scala 3 run corpus (Track S, D108–D111)
+### The Scala 3 run corpus (Track S, D108–D112)
 
 Measured against the Scala 3 compiler's own `tests/run` corpus. Almost everything
 it found was fixed; these are the two that could not be.
@@ -826,6 +826,15 @@ it found was fixed; these are the two that could not be.
 - **D109** — a **`type` alias is recorded for the whole file**, not for the
   template that declares it, so two classes in one file cannot each have their
   own `type T`. Everything else about aliases matches Scala.
+- **D112** — **a shift count is not masked.** Scala masks it to the operand's
+  width, 5 bits for an `Int` and 6 for a `Long`, so `1 << 33` is `2` and
+  `1L << 65` is `2`; protoScala gives `8589934592` and `36893488147419103232`.
+  This one is an ambiguity rather than a shortfall: the mask width *is* the
+  operand width, and protoScala's integers have none (D1, permanent). Masking to
+  5 bits would match Scala for the `Int` case and miss the `Long` one, masking to
+  6 the reverse, and the `L` suffix that distinguishes them is accepted and
+  ignored. Neither was picked. Related: `>>>` now works on a non-negative operand,
+  where it is `>>` and is Scala's answer, and is refused on a negative one (D15).
 - **D111** — **top-level `def`s overload by number of parameters.** `def f(x:
   Int)` and `def f(x: Int, y: Int)` in one file both work and `f(1)` picks the
   first, where before Track S the second definition silently replaced the first.

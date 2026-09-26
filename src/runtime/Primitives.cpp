@@ -352,8 +352,10 @@ PRIM(int_or)  { return widenChar(self)->bitwiseOr(ctx, integerArg(ctx, arg(ctx, 
 PRIM(int_xor) { return widenChar(self)->bitwiseXor(ctx, integerArg(ctx, arg(ctx, args, 0, "^", 1), "^")); }
 PRIM(int_not) { expectArgs(ctx, args, "unary_~", 0); return widenChar(self)->bitwiseNot(ctx); }
 
-// Shift amounts are not masked to a word width (D1): a negative amount is
-// an error rather than a wrap-around.
+// Shift amounts are not masked to a word width (D1, D112): with no fixed integer
+// width there is no width to mask to, and masking to 5 or 6 bits would be
+// choosing one of Scala's two answers arbitrarily. A negative amount is an error
+// rather than a wrap-around.
 int shiftAmount(ProtoContext* ctx, const ProtoList* args, const char* method) {
     const long long n = intArg(ctx, arg(ctx, args, 0, method, 1), method);
     if (n < 0 || n > INT_MAX)
@@ -365,9 +367,21 @@ int shiftAmount(ProtoContext* ctx, const ProtoList* args, const char* method) {
 PRIM(int_shl) { return widenChar(self)->shiftLeft(ctx, shiftAmount(ctx, args, "<<")); }
 PRIM(int_shr) { return widenChar(self)->shiftRight(ctx, shiftAmount(ctx, args, ">>")); }
 
+// `>>>` is a *width-relative* operator: Scala fills the vacated bits from a
+// 32-bit Int or a 64-bit Long, and protoScala's integers have neither width
+// (D1). For a **non-negative** operand there are no bits to fill, so the answer
+// is the arithmetic shift and agrees with Scala exactly -- which is the whole of
+// the `(lo + hi) >>> 1` idiom. For a negative operand the answer *is* the width
+// (`-8 >>> 1` is 2147483644 as an Int and 9223372036854775804 as a Long), so it
+// stays an error rather than becoming a silently wrong number (D15).
 PRIM(int_ushr) {
-    throw ScalaError("UnsupportedOperationException",
-                     ">>> is not supported: integers have no fixed width (D1)");
+    const ProtoObject* x = widenChar(self);
+    const int n = shiftAmount(ctx, args, ">>>");
+    if (x->partialCompare(ctx, ctx->fromInteger(0)) < 0)
+        throw ScalaError("UnsupportedOperationException",
+                         ">>> of a negative integer is not supported: the result depends on the "
+                         "operand's width, and integers have no fixed width (D1, D15)");
+    return x->shiftRight(ctx, n);
 }
 
 PRIM(int_toChar) {
