@@ -506,15 +506,23 @@ matching protoClojure's raw actor throughput, are explicit non-goals (see
 [docs/DESIGN.md](docs/DESIGN.md) §1). Where the numbers below show protoScala
 losing, they are reported as measured, not adjusted or explained away.
 
-Both tables in this section come from an **interleaved re-run** (2026-09-23)
-that supersedes an earlier same-day run measured in blocks. This machine is
-the maintainer's daily-driver desktop: VS Code, Chrome and PyCharm run
-throughout, the load-average floor is roughly 2-3 on 12 logical CPUs, and
-there is no quiet window to wait for. Every runtime is sampled round-robin
-(one sample of column A, then B, then C, … then back to A) so ambient load
-hits every column alike, and every cell below reports its median **and**
-`[min-max]` spread — ratios between columns are the primary result, absolute
-milliseconds/msg-per-second are indicative only.
+**Both tables in this section were re-measured on 2026-09-26 on a genuinely
+quiet host** — 0.55–0.59 busy CPUs of 12, verified with `mpstat -P ALL` before
+each run — superseding figures taken at 3.1–9.1. The quiet window did **not**
+flatter protoScala: the general suite's geomean against CPython moved from
+0.91× to **1.06×**, and every one of its twelve ratios moved against
+protoScala, because CPython gained more from the quiet host than protoScala did
+(§ *The general suite*). That is reported as measured.
+
+This machine is the maintainer's daily-driver desktop (AMD Ryzen 5 5500U, 6
+physical / 12 logical CPUs); the quiet window was arranged, not typical. Every
+runtime is sampled round-robin (one sample of column A, then B, then C, … then
+back to A) so ambient load hits every column alike, and every cell below reports
+its median **and** `[min-max]` spread — ratios between columns are the primary
+result, absolute milliseconds/msg-per-second are indicative only. Every cell
+verifies the work it did before a rate is computed; a cell that cannot be
+verified is published as `FAILED`, never as a fast time. Full report:
+[`benchmarks/reports/2026-09-26-quiet-window.md`](benchmarks/reports/2026-09-26-quiet-window.md).
 
 ### Actors (0.3.0)
 
@@ -530,6 +538,38 @@ spread:
 (the superseded single-sample run is kept at
 [benchmarks/reports/2026-09-23-actors.md](benchmarks/reports/2026-09-23-actors.md)).
 
+**Re-measured 2026-09-26 on a quiet host** (0.59 busy CPUs of 12; idle 94.30 /
+95.49 / 95.35 %), protoScala `f835aee`, protoCore `da5f19e2` (2.5.0),
+protoClojure `39d8353`, **ProtoMPSCQueue mailboxes** — the superseded table below
+it was measured on CAS-list mailboxes at load 3.59→9.09. 5 samples per cell,
+protoScala and protoClojure sampled back to back at every (mode, workers) pair,
+every cell verifying its own message count. The mode set is the current seven:
+`MPSC` and `MPMC` were replaced by the two CPU-bound `saturation-*` modes.
+
+| Mode | peak msg/s (median) | at | protoClojure at the same worker count | ratio |
+|---|---:|---|---:|---:|
+| single | 212,406 [210,807-230,738] | 2 workers | 257,742 [241,538-268,202] | **0.82×** |
+| fan-out | 243,108 [233,633-252,268] | 2 workers | 483,679 [450,546-493,075] | **0.50×** |
+| ping-pong | 26,939 [26,298-27,588] | 4 workers | no twin | — |
+| await | 67,271 [66,136-71,312] | 6 workers | no twin | — |
+| priority | 157,089 [153,404-160,404] | 2 workers | no twin | — |
+| saturation-8 | 2,947 [2,567-3,034] | 12 workers | 2,679 [1,939-3,020] | **1.10×** |
+| saturation-32 | 3,373 [3,178-3,402] | 6 workers | 2,874 [2,655-2,979] | **1.17×** |
+
+**Where protoScala loses, it loses increasingly, and that is the honest reading
+of this table.** On `fan-out` protoClojure scales 292,983 → 670,082 msg/s from 1
+to 4 workers while protoScala peaks at 2 and then falls, so the ratio decays
+**0.67× → 0.50× → 0.34× → 0.32× → 0.29× → 0.23×** at w = 1, 2, 4, 6, 8, 16. On
+`single` it decays **0.84× → 0.59×**, because protoScala's rate *falls* with
+added workers (210,572 → 149,160) where protoClojure's stays flat near 253,000.
+Both are the single-method invariant serialising one actor while the extra
+workers still cost synchronisation: **protoScala pays for workers it cannot
+use.** It leads only on the two CPU-bound saturation shapes, where per-message
+work dominates mailbox cost. Ask latency, 5,000 pooled samples per worker count:
+p50 rises 24.4 → 33.9 µs from w=1 to w=16, p99 2,131 → 2,486 µs.
+
+*The superseded 2026-09-23 table, CAS-list mailboxes at load 2.96→9.68:*
+
 | Mode | peak msg/s (median) | at | protoClojure at the same worker count |
 |---|---:|---|---:|
 | single | 133,942 | 2 workers | 302,051 [294,048-330,161] |
@@ -540,12 +580,13 @@ spread:
 | await | 46,815 | 4 workers | no twin |
 | priority | 118,575 | 1 worker | no twin |
 
-Across the four comparable shapes, protoScala runs at **0.11×-0.83×**
-protoClojure's median rate on *these scripts* — but see the correction
-below: for `fan-out` that ratio compares two different workloads that share
-a name. `await` completes at every worker count **including one**, which is
-the point of the cooperative suspension. protoScala's mailboxes are still
-the CAS-list fallback (`protoscala --version` reports it explicitly).
+*Reading of that superseded table, kept as written:* across the four comparable
+shapes protoScala ran at **0.11×-0.83×** protoClojure's median rate on *those
+scripts* — but see the correction below: for `fan-out` that ratio compared two
+different workloads that shared a name. `await` completes at every worker count
+**including one**, which is the point of the cooperative suspension and still
+holds. Mailboxes were the CAS-list fallback in that run; the current table above
+is on `ProtoMPSCQueue`.
 
 #### Correction (v4): the `fan-out` comparison was not like-for-like
 
@@ -606,14 +647,47 @@ protoClojure twin of the same shape and the **same message count**, and both
 assert the **sum their actors actually computed**, so a handler that silently
 did no work fails instead of reading as a fast run.
 
-Shipped CAS-list binary, median of 4 interleaved samples, speedup against 1
-worker (full tables:
+**Re-measured 2026-09-26 on a quiet host** (0.55 busy CPUs of 12; idle 95.15 /
+95.46 / 95.67 %), 5 samples per cell, protoClojure's twin interleaved at every
+`(mode, w)` **as the load control**, speedup against each series' own `w=1`
+(full tables:
+[benchmarks/reports/2026-09-26-qw-saturation.md](benchmarks/reports/2026-09-26-qw-saturation.md);
+superseded contended run:
 [benchmarks/reports/2026-09-23-actors-v5-saturation.md](benchmarks/reports/2026-09-23-actors-v5-saturation.md)):
 
-| speedup vs w=1 | w=2 | w=3 | w=4 | w=6 | w=8 | w=12 | w=16 |
-|---|---|---|---|---|---|---|---|
-| `saturation-8` | 1.98× | 2.35× | 3.18× | **3.16×** | 3.47× | 3.14× | 3.26× |
-| `saturation-32` | 2.02× | 2.82× | 3.43× | **3.68×** | 3.90× | **3.97×** | 3.93× |
+| speedup vs w=1 | w=2 | w=3 | w=4 | w=5 | w=6 | w=8 | w=12 | w=16 |
+|---|---|---|---|---|---|---|---|---|
+| `saturation-32` | 1.91× | 2.79× | 3.56× | 3.80× | **4.23×** | 3.71× | 2.40× | 2.30× |
+| `saturation-32`, protoClojure (control) | 1.89× | 2.77× | 3.46× | 3.83× | **3.99×** | 3.76× | 2.39× | 2.34× |
+| `saturation-8` | 2.04× | 2.57× | 3.56× | 3.46× | 3.36× | 3.14× | **3.59×** | 3.32× |
+| `saturation-8`, protoClojure (control) | 1.89× | 2.38× | 3.42× | 3.32× | 3.00× | 3.02× | **3.67×** | 3.23× |
+
+*(contended, superseded: `saturation-32` read 2.02 / 2.82 / 3.43 / 3.60 / 3.68 /
+3.90 / 3.97 / 3.93, peaking at w=12.)*
+
+**Two questions the v5 report left open because of load are now answered, and
+both answers changed.**
+
+**The near-linear region reaches the physical core count.** `saturation-32` is
+95.7 % efficient per worker at w=2, 93.1 % at w=3 and **88.9 % at w=4**, and the
+curve keeps rising to a peak at **w=6 — exactly the six physical cores**, at
+**4.23×**. Under contention it bent at w=3 and peaked at w=12. So the earlier
+bend *was* the machine's spare capacity, not the scheduler, as that report
+suspected but could not show.
+
+**The SMT regression is real.** Above six workers `saturation-32` **falls** —
+4.23× → 3.71× → 2.40× → 2.30× at w = 6, 8, 12, 16, a **46 % loss from peak** —
+where the contended run read a flat 3.90 / 3.97 / 3.93. **And the load control
+falls with it** (3.99× → 3.76× → 2.39× → 2.34×): two independent runtimes on the
+same protoCore, same hardware, same moment, both regressing above the physical
+cores. That makes it a property of the **platform and the machine**, not of
+protoScala's scheduler, and it reproduces the shape protoST documented (3.11× at
+w=6, regressions at 8 and 12).
+
+`saturation-8` does **not** settle it: it peaks at w=12, dips at w=6, and its
+spreads are wide ([2,549-3,220] at w=6), because 8 actors cap concurrency at 8
+under the single-method invariant. Its twin has the same irregular shape, which
+again points away from protoScala. The SMT answer rests on `saturation-32`.
 | protoClojure twin, 32 actors | 1.79× | 2.69× | 3.09× | 3.51× | 3.65× | 3.91× | 3.76× |
 
 **protoScala's actors do scale with workers** — this is the first mode in the
@@ -638,18 +712,103 @@ Full reading, with every mode and worker count:
 protoCore objects that the collector traces, which is a deliberate cost of
 the design (DESIGN §8.4), not an accident.
 
+#### ThreadSanitizer: protoScala's own code is clean
+
+Re-run 2026-09-26 on a quiet host with `-DPROTOSCALA_SANITIZER=thread` against a
+matching ThreadSanitizer build of protoCore 2.5.0. **`setarch -R` is required at
+two sites** — the test run *and* the build, because the precompiled prelude runs
+an instrumented `protoscala-precompile` at build time and otherwise aborts at
+45 %.
+
+**Across nine workloads — a single-threaded script (0 reports), six actor
+conformance cases, an 8 × 25,000-send stress and an 8-thread no-actor control —
+no protoScala frame is the access site of any report.** Checked rather than
+assumed: frame `#0` of every reported access, and every `SUMMARY` site, is a
+protoCore file. The one protoScala-sited race the first TSan run found — a plain
+global `ActiveCallContext` handed to spawned threads with no happens-before
+edge — was fixed in `63d3505` and no longer appears. The correctness invariants
+hold: the stress printed **`200000`, exactly right**.
+
+**This is a non-reproduction, not a clean bill of health.** `ActorScheduler.cpp`
+has a separately diagnosed defect — `finishTurn` releases its claim by CAS and
+*then* reads `pendingIdx` and the `__pend<b>__` list that the next owner is
+already writing — which did not surface in these nine runs. A data race is
+nondeterministic and nine runs on one host do not retire one; that defect is
+pending a fix and its check is a re-run of the stress case.
+
+What remains are protoCore sites, concentrated in `SparseListAlgorithms.h`.
+**These are judged TSan false positives**, for four reasons: every "Previous
+write" is a *constructor* (memory no other thread can yet reference); the
+algorithm is a persistent AVL tree that never writes a published node, only
+`new(context) Node(...)`; all reports fall inside **one 16 MiB `posix_memalign`
+arena** whose cells are recycled through freelists with no `free()` and **no
+`__tsan_*` annotations anywhere in protoCore**, so TSan's shadow history is never
+invalidated on reuse; and the control's eight threads share no user object at all,
+so they cannot genuinely race. The same output would also be produced by a real
+live-cell recycle, which is strongly disfavoured but **not excluded** — annotating
+protoCore's freelist handoff and re-running is the experiment that would close it.
+Details: [`benchmarks/reports/2026-09-26-quiet-window.md`](benchmarks/reports/2026-09-26-quiet-window.md) §2.
+
 ### The general suite (0.3.0)
 
-Interleaved re-run: 2026-09-23, AMD Ryzen 5 5500U (6 cores, 12 logical CPUs),
-Linux 7.0, protoScala commit `3703759` (main, actors landed), protoCore
-`bf972d3f` (2.0.0), load average 3.37 at start, 4.08 at midpoint, 4.39 at
-end. Full report, with versions and build types of every runtime:
+**Re-measured 2026-09-26 on a quiet host** (0.59 busy CPUs of 12; idle 94.57 /
+95.23 / 95.49 %), AMD Ryzen 5 5500U (6 cores, 12 logical CPUs), Linux 7.0,
+protoScala `f835aee`, protoCore `da5f19e2` (2.5.0), CPython 3.14.0,
+protoPython `f40137cd`, protoST `55fe70f`, protoClojure `39d8353`. 5 runs per
+cell, median wall-clock in ms of a **cold process** (start-up included, for every
+runtime) with its `[min-max]` spread, every run's printed result verified;
+`—` means the runtime has no twin of that workload. Full report:
+[benchmarks/reports/2026-09-26-qw-suite.md](benchmarks/reports/2026-09-26-qw-suite.md)
+(superseded contended runs are kept at
 [benchmarks/reports/2026-09-23-suite-v2.md](benchmarks/reports/2026-09-23-suite-v2.md)
-(the superseded run, whose protoScala figures agree within 10%, is kept at
-[benchmarks/reports/2026-09-23-suite.md](benchmarks/reports/2026-09-23-suite.md)).
-Median wall-clock in ms of a **cold process** (start-up included, for every
-runtime) with its `[min-max]` spread, 2 warmup + 7 timed runs, every run's
-printed result verified; `—` means the runtime has no twin of that workload.
+and [benchmarks/reports/2026-09-23-phase3-v1.md](benchmarks/reports/2026-09-23-phase3-v1.md)).
+
+**The quiet host moved this table against protoScala.** The geomean versus
+CPython went from **0.91× to 1.06×** — from 9 % faster to 6 % slower — and
+**every one of the twelve ratios moved the same way**, because CPython gained
+more from the quiet host than protoScala did: CPython's medians fell 16–22 %
+(`fib30` 179.6 → 140.6, `object_tree` 209.1 → 166.6) while protoScala's fell
+0.5–15 % (`fib30` 372.3 → 370.3, `object_tree` 406.9 → 382.0). **The contended
+figures flattered protoScala.** Why CPython is the more load-sensitive of the two
+is **not settled here**; a plausible but unverified candidate is that
+protoScala's ~20 ms kernel-bound start-up is a large, load-insensitive constant
+in every cell.
+
+Two columns from the superseded table are absent rather than re-measured:
+**Scala 3.9 (JVM 21)**, because no `SCALA_HOME` is installed on this host, and
+**protoScala Release**, because `build_bench/protoscala` links the retired
+`libprotoCore.so.2` and dies in the loader — the harness marked all 12 of its
+cells `FAILED` and its 4.45 ms cold-start median is a crash, not a win. That
+slot needs a rebuild before it means anything.
+
+| Workload | protoScala | CPython 3.14 | protopy | protost | protoclj | protoScala ÷ CPython | was |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `int_sum_loop` (0 until 100000) | 24.1 [23.4-24.9] | 32.1 [31.4-32.8] | 101.0 [100.8-101.9] | 32.9 [31.1-33.8] | — | 0.75× | 0.65× |
+| `fib` (fib(25)) | 49.3 [49.1-49.3] | 38.1 [37.6-39.8] | 158.4 [152.8-362.5] | 346.8 [340.5-534.6] | — | 1.29× | 1.07× |
+| `str_concat` (2000 concats) | 20.8 [20.5-22.0] | 28.6 [27.5-29.6] | 101.1 [99.9-114.4] | 15.9 [15.4-16.7] | — | 0.73× | 0.57× |
+| `range_iterate` (100000) | 23.6 [23.3-24.2] | 31.5 [31.1-32.6] | 101.8 [92.6-105.3] | 58.5 [51.2-69.0] | — | 0.75× | 0.63× |
+| `tak` (18, 12, 6) | 27.2 [26.1-28.4] | 29.9 [29.8-35.6] | 33.5 [33.3-34.2] | — | 39.0 [38.5-40.8] | 0.91× | 0.72× |
+| `fib30` (fib(30)) | 370.3 [356.8-393.9] | 140.6 [136.4-147.5] | 730.9 [713.5-746.4] | — | 482.1 [471.3-495.4] | 2.63× | 2.07× |
+| `sum_loop` (0..1000000) | 63.5 [62.3-64.4] | 76.4 [74.2-77.7] | 71.8 [71.5-72.5] | — | 57.7 [55.8-58.5] | 0.83× | 0.75× |
+| `factorial_100` (BigInt) | 18.9 [17.6-20.6] | 28.2 [27.4-28.4] | 17.9 [17.2-18.5] | — | 14.0 [13.3-16.9] | 0.67× | 0.54× |
+| `attr_lookup` (3 field reads × 100000) | 37.3 [36.4-39.3] | 37.9 [37.3-41.5] | 134.7 [133.5-163.2] | 103.8 [102.2-105.7] | — | 0.98× | 0.79× |
+| `object_tree` (131071-object tree) | 382.0 [376.5-414.0] | 166.6 [165.4-170.4] | 3119.7 [3076.7-3144.0] | — | — | 2.29× | 1.95× |
+| `list_ops` (map / filter / foldLeft, 100000) | 398.2 [393.3-418.9] | 1562.8 [1539.3-1867.7] | 525.2 [521.2-537.9] | — | — | 0.25× | 0.24× |
+| `map_build` (build and read back 50000) | 299.9 [294.6-306.4] | 63.3 [62.6-66.6] | 796.6 [783.9-801.1] | — | — | 4.74× | 4.43× |
+| **Geomean vs CPython** (12 workloads) | **1.06×** | 1.00× | 2.70× (12) | 1.93× (5) | 1.14× (4) | **1.06×** | 0.91× |
+
+`map_build`'s 4.74× is the honest cost of an immutable map: each of the 50000
+inserts returns a new `ProtoMap` version where CPython's `dict` mutates one
+object in place. protopy runs the same twin in 796.6 ms, so it is the shared
+object kernel's cost, not protoScala's frontend. `list_ops`'s 0.25× is partly the
+Python twin's O(n) `insert(0, i)` against an O(log n) `::` — the row says the
+prepend-and-fold surface is cheap, not that protoScala is four times CPython.
+`fib30` and `object_tree` are the two clear losses to CPython, and they are the
+two the quiet host worsened most.
+
+*The superseded 2026-09-23 table follows, kept as measured at load 3.37→4.39
+against protoCore `bf972d3f` (2.0.0), with the Scala/JVM column this run could
+not reproduce.*
 
 | Workload | protoScala | protoScala Release | Scala 3.9 (JVM 21) | CPython 3.14 | protopy | protost | protoclj | protoScala ÷ CPython |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -669,7 +828,8 @@ printed result verified; `—` means the runtime has no twin of that workload.
 ROADMAP's benchmark suite v1 names, measured on 2026-09-23 at load average 3.90
 against protoCore `983bbf98` (2.1.0) — full table:
 [benchmarks/reports/2026-09-23-phase3-v1.md](benchmarks/reports/2026-09-23-phase3-v1.md),
-reading: [benchmarks/RESULTS.md](benchmarks/RESULTS.md).
+reading: [benchmarks/RESULTS.md](benchmarks/RESULTS.md). Both rows are carried
+into the current table above, re-measured; these are the figures as recorded then.
 
 | Workload | protoScala | CPython 3.14 | protoScala ÷ CPython |
 |---|---:|---:|---:|
@@ -677,56 +837,63 @@ reading: [benchmarks/RESULTS.md](benchmarks/RESULTS.md).
 | `map_build` (build and read back 50000 entries) | 354.9 [345.7-355.3] | 80.0 [74.6-84.3] | 4.43× |
 | **Geomean vs CPython**, all 12 workloads | 0.91× | 1.00× | **0.91×** |
 
-`map_build` is the honest cost of an immutable map: each of the 50000 inserts
-returns a new `ProtoMap` version where CPython's `dict` mutates one object in
-place. protopy runs the same twin in 935.0 ms, so it is the shared object
-kernel's cost, not protoScala's frontend. `list_ops`'s 0.24× is partly the
-Python twin's O(n) `insert(0, i)` against an O(log n) `::` — the row says the
-prepend-and-fold surface is cheap, not that protoScala is four times CPython.
-
 Cold start (`benchmarks/cold-start.sh`, 21 runs, target < 25 ms).
-**Verdict: MISSED.** This is a correction. The table below said *MET* on the
-strength of a 23.73 ms script median recorded at 0.6.0; a re-measurement on
-2026-09-26 **refuted it** and that earlier figure **did not reproduce**. The
-current reading, taken on the shipped `Release` binary at the quietest moment of
-that window (load average 1.84), 21 runs per mode, **21/21 verified in both**:
+**Verdict: MET.** This supersedes a `MISSED` verdict recorded on 2026-09-26,
+which was a **load artefact**: it gated on a load *average* of 1.84 while its own
+`mpstat` never put the foreign load below 2.3 of 12 busy CPUs. Re-measured on
+2026-09-26 at **0.55 busy CPUs** (idle 95.59 / 94.97 / 95.61 %), three
+interleaved rounds, 21 runs per cell, **all 378 runs verified**,
+`cold-start.sh` exiting **0 in 24 of 24 cells**:
 
-| mode | median | min | max | target | verdict |
-|---|---:|---:|---:|---:|---|
-| script | **26.38 ms** | 22.50 | 30.06 | 25 | **MISSED** by 1.38 ms |
-| repl | **25.43 ms** | 23.20 | 29.57 | 25 | **MISSED** by 0.43 ms (straddles) |
+| build / prelude path | mode | median of 3 rounds | per-cell spread | verdict |
+|---|---|---:|---:|---|
+| Release, image | script | **21.63 ms** | 20.15–33.67 | **MET** |
+| Release, image | repl | **22.32 ms** | 21.22–34.05 | **MET** |
+| RelWithDebInfo, image | script | **21.73 ms** | 19.88–31.09 | **MET** |
+| RelWithDebInfo, image | repl | **22.20 ms** | 20.35–24.54 | **MET** |
+| Release, `PROTOSCALA_PRELUDE_NO_IMAGE=1` | script | 24.09 ms | 22.37–25.65 | MET |
+| Release, `PROTOSCALA_PRELUDE_NO_IMAGE=1` | repl | 24.66 ms | 23.15–27.67 | MET |
 
-`benchmarks/cold-start.sh` exits **1 in 12 of 12 cases** — both builds, both
-modes, three interleaved rounds each, **all 252 runs verified**, load 4.03–4.22 —
-and that exit status *is* the done-when, so the budget is missed, not merely
-approached. **`Release` and `RelWithDebInfo` are indistinguishable**: 0.34–0.90 ms
-apart on the median-of-medians against a 3–18 ms within-cell spread, which does
-not support calling either faster.
+**`Release` and `RelWithDebInfo` are indistinguishable**: 0.10–0.12 ms apart on
+the median-of-medians against 1.5–12.7 ms within-cell spreads, which does not
+support calling either faster. The image is worth **2.46 ms** (script) and
+**2.34 ms** (repl), agreeing with the 1.92 / 2.12 ms measured at 0.6.0.
+
+**The 23.73 ms reproduces, and is beaten.** The decisive control is the same
+binary at two loads: `build_rwdi/protoscala`, unrebuilt since the loaded window,
+measured **28.37 / 27.97 ms** there and **22.16 / 22.02 ms** here. Five
+independently built binaries now land in **21.34–22.32 ms**. Load was the
+variable all along, so the earlier "did not reproduce, cause unidentified" is
+withdrawn.
 
 Two operands belong beside that number, because they change what it means:
 
-- **About 5 ms of it is the harness, not protoScala.** `cold-start.sh` times a
+- **The harness's own floor is ~4.7 ms on this host.** `cold-start.sh` times a
   pipeline — two `date +%s%N` forks, the binary, a pipe, an `awk`, plus an
   `sh -c` and a `printf` for the REPL case — and timing that same construct
-  around trivial commands gives medians of **5.55 ms for `/bin/true`**, 4.79 ms
-  for `/bin/echo hi` and 4.67 ms for `sh -c true`, 21 runs each. So roughly
-  **21.4 ms of the 26.38 ms is protoScala**. That is **stated, not deducted**:
-  the done-when is the script's exit status, and redefining it is a maintainer's
-  decision rather than a measurement's.
-- **Start-up is kernel-bound here, not interpreter-bound.** Across 42 runs the
-  harness spent **0.26 s of user time against 1.07 s of system time** — about
-  25 ms of `sys` per run — which is process creation, `mmap` and dynamic linking
-  rather than prelude work. That is a **diagnostic direction, not a defect**: it
-  says where to look next, and it is not itself evidence of a fault.
+  around trivial commands gives medians of **4.67 ms for `/bin/true`**, 5.07 ms
+  for `/bin/echo hi` and 4.46 ms for `sh -c true`, 21 runs each. It is **stated,
+  not deducted**, and it is **not additive**: 42 bare runs with no harness around
+  them take 0.819 s wall, i.e. **19.5 ms per run**, against the harness's 21.6 ms
+  median — so ~2 ms, not ~5 ms, is what the harness actually adds here.
+- **Start-up is kernel-bound here, not interpreter-bound.** Across the same 42
+  runs the binary spent **0.172 s of user time against 0.669 s of system
+  time** — `sys` is 3.9× `user` — which is process creation, `mmap` and dynamic
+  linking rather than prelude work. That is a **diagnostic direction, not a
+  defect**.
 
-And one thing is honestly unexplained: the published **23.73 ms did not reproduce
-even at a lower load** (2.65 ms worse at load 1.84 than the figure taken at load
-2.97), on a binary confirmed to be using the prelude image. **Load therefore does
-not explain the gap, and its cause is unidentified.** Candidates not separated:
-a change in the tree since that measurement, a difference in how that figure was
-taken, or a host-state variable neither run recorded. The full write-up, with
-every operand, is
-[`benchmarks/reports/2026-09-26-quiet-host-attempt.md`](benchmarks/reports/2026-09-26-quiet-host-attempt.md).
+One trap worth naming, because it was raised and then refuted: this host is
+`amd-pstate-epp` / `powersave` / `balance_power`, 1.11–4.06 GHz, so a 22 ms burst
+on an idle machine might plausibly never boost — which would make a quiet host
+the *wrong* host for this measurement. **It does not happen for this workload:**
+the quiet host is 3–6 ms *faster* in every cell, so contention dominates clock
+ramp. Mean CPU MHz is now logged beside every gate reading (1,746–3,410 MHz
+across five gates, with no matching movement in the medians).
+
+Full write-up, with every operand and the gate readings:
+[`benchmarks/reports/2026-09-26-quiet-window.md`](benchmarks/reports/2026-09-26-quiet-window.md)
+(the superseded loaded-host attempt is kept at
+[`benchmarks/reports/2026-09-26-quiet-host-attempt.md`](benchmarks/reports/2026-09-26-quiet-host-attempt.md)).
 
 The history the table used to carry stands as *history*, not as a current
 verdict — these are the figures as recorded at each release, in one interleaved
@@ -740,11 +907,15 @@ window per row group, 21 runs per case, every case `verified=21`, load average
 | 0.6.0, precompiled prelude image | 23.73 ms | 23.89 ms |
 | 0.6.0, `PROTOSCALA_PRELUDE_NO_IMAGE=1` (the 0.5.0 path) | 25.65 ms | 26.01 ms |
 
-Read that as what the harness printed then, superseded now by the 26.38 / 25.43
-reading above. `benchmarks/run_benchmarks.py`, which applies a stricter
-per-sample verdict, already recorded all four 0.6.0 cases as **STRADDLES** —
-median below target, spread crossing it — and the 2026-09-26 re-measurement moved
-the median across too.
+Read that as what the harness printed then. The 0.6.0 image row is the one the
+2026-09-26 quiet-window run **reproduced and beat** (21.63 / 22.32 ms), and its
+`NO_IMAGE` row is reproduced too (24.09 / 24.66 ms), so the 2 ms the image is
+worth is now measured three times on three different hosts' loads.
+`benchmarks/run_benchmarks.py`, which applies a stricter per-sample verdict,
+still reads **script STRADDLES** (median 21.94 ms, worst sample 25.54) and
+**repl MET** (median 21.69, worst 23.36): the median is comfortably inside the
+target and an occasional sample on a daily-driver desktop still crosses it.
+Both readings are true, and neither overrides the other.
 
 What the prelude image does is still real, and is unaffected by the verdict: it
 removes parse, desugar and compile, measured before it was built at 59.6 %, 2.6 %
