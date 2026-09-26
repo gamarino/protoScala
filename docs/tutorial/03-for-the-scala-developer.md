@@ -399,8 +399,9 @@ Scala prints `1`, because `b` is still `0` when `a` is computed. The
 protoScala behaviour surfaces the initialisation-order bug instead of hiding
 it behind a zero, which is why it is kept.
 
-**D31 — no method overloading.** Two members of one template may not share a
-name. With types erased there is nothing to dispatch on.
+**D31 — no method overloading in a template.** Two members of one template may
+not share a name. With types erased there is nothing to dispatch on. *Top-level*
+`def`s are different: they overload by **number** of parameters (D111, below).
 
 Fixture: [`tests/conformance/tutorial/03-scala-dev-d31-no-overloading.scala`](../../tests/conformance/tutorial/03-scala-dev-d31-no-overloading.scala)
 
@@ -419,7 +420,8 @@ It is rejected with:
 Scala compiles it. Auxiliary constructors *may* share the name `this`, but
 only when they differ in their **number** of parameters
 (`constructors of Calc must differ in their number of parameters (D31)`).
-Give the alternatives distinct names, or take an `Any` and `match` on it.
+Give the alternatives distinct names, or take an `Any` and `match` on it — or, at
+the top level of a file, give them different arities (D111).
 
 **D32 — tuples stop at 22.** A tuple literal or a tuple pattern of more than
 22 elements is a compile error
@@ -809,7 +811,7 @@ to the colon — `assertion failed`, `assertion failed: why`, `requirement faile
 `Error`, so a broad `catch case e: Exception` does not swallow them. The message
 parameter is by-name.
 
-### The Scala 3 run corpus (Track S, D108–D110)
+### The Scala 3 run corpus (Track S, D108–D111)
 
 Measured against the Scala 3 compiler's own `tests/run` corpus. Almost everything
 it found was fixed; these are the two that could not be.
@@ -824,6 +826,15 @@ it found was fixed; these are the two that could not be.
 - **D109** — a **`type` alias is recorded for the whole file**, not for the
   template that declares it, so two classes in one file cannot each have their
   own `type T`. Everything else about aliases matches Scala.
+- **D111** — **top-level `def`s overload by number of parameters.** `def f(x:
+  Int)` and `def f(x: Int, y: Int)` in one file both work and `f(1)` picks the
+  first, where before Track S the second definition silently replaced the first.
+  Arity is the part of a signature that survives erasure, so what a count cannot
+  identify is refused with a diagnostic rather than guessed: two alternatives of
+  the same arity (`def f(x: Int)` / `def f(x: String)`, which scalac accepts), a
+  default parameter value (which scalac also accepts, resolving by type), a
+  repeated or by-name parameter, and several parameter lists. A bare overloaded
+  `f` as a function value eta-expands the first alternative.
 - **D110** — **widening to `Double` happens where the declared type is written**.
   `val d: Double = 42` is `42.0`, and so are a `def` result, every parameter
   form, a class field and an `(e: Double)` ascription. What does not widen is an

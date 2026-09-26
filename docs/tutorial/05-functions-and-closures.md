@@ -378,3 +378,44 @@ literal, where scalac rejects it because `Function2.apply`'s parameters are call
 A default value is not supported on a method that also takes a repeated
 parameter: the callee could not tell an omitted default from an empty repeated
 argument, so it is a compile error rather than a guess.
+
+## 5.11 Overloading a top-level `def`
+
+Fixture: [`tests/conformance/tutorial/05-top-level-overloads.scala`](../../tests/conformance/tutorial/05-top-level-overloads.scala)
+
+```scala
+def f(): String = "zero"
+def f(x: Int): String = "one:" + x
+def f(x: Int, y: Int): String = "two:" + (x + y)
+
+@main def run(): Unit =
+  println(f() + " " + f(1) + " " + f(1, 2))
+```
+
+Prints:
+
+```text
+zero one:1 two:3
+```
+
+Several `def`s at the top level of a file may share a name, provided they take
+**different numbers of parameters**. The number of arguments at the call site
+picks the one to run.
+
+Scala chooses between overloads by the parameter *types*; protoScala has none, so
+it uses the count, which is the part of a signature that erasure leaves behind.
+That has consequences worth knowing, all of them reported as errors rather than
+guessed at:
+
+- two alternatives with the same number of parameters — `def f(x: Int)` and
+  `def f(x: String)` — cannot be told apart, and Scala accepts them where
+  protoScala does not;
+- an overloaded alternative may not have a **default** parameter value, a
+  **repeated** parameter, a **by-name** parameter, or more than one parameter
+  list, because each of those turns its argument count into a range;
+- a call that matches no alternative says so, and lists the arities available;
+- a bare `f` used as a *value* eta-expands the **first** alternative, since
+  nothing at that point says which one is meant.
+
+Methods inside a class, trait or object still cannot be overloaded at all
+(D31); this is D111 and applies to the top level of a file.

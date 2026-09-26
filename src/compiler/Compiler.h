@@ -235,6 +235,7 @@ private:
     // parameters can be honoured there (D47).
     // `selfAlias`: an extra name bound to slot 0 of a Method, which is how an
     // extension's receiver (`extension (x: T) def m = x`) reaches `this`.
+    void checkOverloadSets(const CompilationUnit& unit) const;
     void widenDoubleParams(const std::vector<Param>& params, bool method, SourcePos pos);
     void compileFunction(const std::string& name, const std::vector<Param>& params,
                          const Node& body, FnShape shape, SourcePos pos,

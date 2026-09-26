@@ -39,6 +39,15 @@ struct GlobalBinding {
     // in a thunk (D47). For a `def` the masks come from its parameter lists;
     // for a builtin object they describe its `apply`.
     std::vector<std::uint32_t> byNameMasks;
+    // Top-level `def` overloads (Track S), one entry per distinct parameter
+    // count, in declaration order. `key` above is the FIRST alternative's: a bare
+    // `f` used as a function value eta-expands that one, since without types there
+    // is nothing else to choose by. A name declared once has a single entry.
+    struct Overload {
+        std::size_t arity;
+        std::string key;
+    };
+    std::vector<Overload> overloads;
 };
 
 class GlobalTable {
@@ -61,8 +70,56 @@ public:
         auto [counter, fresh] = counters_->try_emplace(name, 0);
         std::string key = fresh ? name : name + "#" + std::to_string(++counter->second);
         GlobalBinding& b = table_[name];
-        b = GlobalBinding{kind, std::move(key), {}};
+        b = GlobalBinding{kind, std::move(key), {}, {}};
         return b.key;
+    }
+
+    // Declares a top-level `def` alternative of `arity` parameters and returns its
+    // key. Within one unit, a *different* arity is a new alternative with a key of
+    // its own, so the two bodies coexist and the call site chooses by argument
+    // count; the SAME arity is reported to the caller through `duplicate`, because
+    // telling two same-arity alternatives apart needs the parameter types
+    // protoScala erases (D111). Across units the name is redeclared from scratch,
+    // which is the REPL rule every other global follows (D25).
+    const std::string& declareDef(const std::string& name, BindingKind kind, std::size_t arity,
+                                  bool* duplicate) {
+        *duplicate = false;
+        if (declaredInUnit_.count(name)) {
+            GlobalBinding& b = table_.at(name);
+            b.kind = kind;
+            for (const GlobalBinding::Overload& o : b.overloads)
+                if (o.arity == arity) {
+                    *duplicate = true;
+                    return o.key;
+                }
+            auto [counter, fresh] = counters_->try_emplace(name, 0);
+            (void)fresh;
+            b.overloads.push_back({arity, name + "#" + std::to_string(++counter->second)});
+            return b.overloads.back().key;
+        }
+        const std::string& key = declare(name, kind);
+        table_.at(name).overloads.push_back({arity, key});
+        return table_.at(name).overloads.back().key;
+    }
+
+    // The alternative of `name` that takes `argc` arguments, or nullptr. A name
+    // with a single alternative always answers it, so an arity mismatch is still
+    // the runtime's IllegalArgumentException (D14) rather than a compile error.
+    const GlobalBinding::Overload* overloadFor(const std::string& name, std::size_t argc) const {
+        const GlobalBinding* b = binding(name);
+        if (!b || b->overloads.size() < 2) return nullptr;
+        for (const GlobalBinding::Overload& o : b->overloads)
+            if (o.arity == argc) return &o;
+        return nullptr;
+    }
+    // The arities of an overloaded `name`, for a diagnostic. Empty when it is not
+    // overloaded.
+    std::vector<std::size_t> overloadArities(const std::string& name) const {
+        const GlobalBinding* b = binding(name);
+        std::vector<std::size_t> out;
+        if (!b || b->overloads.size() < 2) return out;
+        for (const GlobalBinding::Overload& o : b->overloads) out.push_back(o.arity);
+        return out;
     }
 
     // Binds `name` to an EXISTING binding, rather than allocating a key for

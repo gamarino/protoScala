@@ -887,6 +887,29 @@ void Compiler::compileApply(const Apply& a) {
                 return;
             }
         }
+        // An overloaded top-level `def` (Track S): the alternative is chosen by
+        // the number of arguments, which is the only part of a Scala signature
+        // that survives erasure. checkOverloadSets has already guaranteed that the
+        // count identifies exactly one alternative.
+        if (r.ref == RefKind::Global) {
+            const std::vector<std::size_t> arities = globals_.overloadArities(id.name);
+            if (!arities.empty()) {
+                const GlobalBinding::Overload* alt =
+                    globals_.overloadFor(id.name, a.args.size());
+                if (!alt) {
+                    std::string list;
+                    for (std::size_t k = 0; k < arities.size(); ++k)
+                        list += (k ? ", " : "") + std::to_string(arities[k]);
+                    throw CompileError("no overload of " + id.name + " takes " +
+                                           std::to_string(a.args.size()) +
+                                           " arguments; the alternatives take " + list,
+                                       a.pos);
+                }
+                emit(Op::PUSH_GLOBAL, fn_->mod->addSymbol(alt->key), a.pos, +1);
+                compileArgsAndCall(a.args, a.pos, byName);
+                return;
+            }
+        }
     }
     compileExpr(*fn);
     compileArgsAndCall(a.args, a.pos, byName);
@@ -1219,6 +1242,64 @@ std::vector<std::string> Compiler::splitNamedArgs(const std::vector<NodePtr>& ar
 // conversion happens in the prologue: `x = x.toDouble`. A by-name parameter is
 // left alone (forcing it here would change when it runs) and so is a repeated
 // one, whose slot holds a List rather than a number.
+// Top-level `def` overloads (Track S). Scala dispatches them on the parameter
+// *types*; protoScala erases those, so it dispatches on the number of parameters,
+// which is the part of a signature that survives erasure. Before any of them is
+// declared, an overload set is validated as a whole, because what makes an
+// alternative identifiable is a property of the set:
+//
+//   - two alternatives of the **same arity** cannot be told apart at all.
+//   - a **default value** turns an alternative's acceptable argument count into a
+//     range, so the count stops identifying it. scalac 3.9 accepts such a set --
+//     verified, it prints 1 for `def f(x: Int) = 1; def f(x: Int, y: Int = 2) = 3;
+//     f(1)` -- because it resolves the call by type. This restriction is
+//     protoScala's, and the alternative to it is guessing.
+//   - a **repeated** parameter makes that range unbounded.
+//   - several **parameter lists** mean the call site sees only the first one's
+//     count.
+//   - a **by-name** parameter would need the thunking mask of the alternative the
+//     call site has not chosen yet, since the mask is looked up by name.
+//
+// A name declared once is unaffected: nothing here fires for it.
+void Compiler::checkOverloadSets(const CompilationUnit& unit) const {
+    std::unordered_map<std::string, std::vector<const DefDef*>> byName;
+    for (const NodePtr& s : unit.stats)
+        if (s && s->kind == NodeKind::DefDef) byName[as<DefDef>(*s).name].push_back(&as<DefDef>(*s));
+    for (const auto& [name, alts] : byName) {
+        if (alts.size() < 2) continue;
+        std::unordered_set<std::size_t> seen;
+        for (const DefDef* d : alts) {
+            const std::vector<Param>& params = paramsOf(*d);
+            if (!seen.insert(params.size()).second)
+                throw CompileError(name + " is already defined with " +
+                                       std::to_string(params.size()) +
+                                       (params.size() == 1 ? " parameter" : " parameters") +
+                                       ": overloads must differ in their number of parameters, "
+                                       "because protoScala has no parameter types to tell them "
+                                       "apart (D111)",
+                                   d->pos);
+            if (d->paramLists.size() > 1)
+                throw CompileError("an overloaded " + name +
+                                       " cannot take several parameter lists (D111)", d->pos);
+            for (const Param& p : params) {
+                if (p.defaultValue)
+                    throw CompileError("an overloaded " + name +
+                                           " cannot have a default parameter value: the number of "
+                                           "arguments it accepts would no longer identify it, and "
+                                           "protoScala has no parameter types to resolve the call "
+                                           "with (D111)",
+                                       p.pos);
+                if (p.repeated)
+                    throw CompileError("an overloaded " + name +
+                                           " cannot have a repeated parameter (D111)", p.pos);
+                if (p.byName)
+                    throw CompileError("an overloaded " + name +
+                                           " cannot have a by-name parameter (D111)", p.pos);
+            }
+        }
+    }
+}
+
 void Compiler::widenDoubleParams(const std::vector<Param>& params, bool method, SourcePos pos) {
     const int base = method ? 1 : 0;
     for (std::size_t k = 0; k < params.size(); ++k) {
@@ -1672,6 +1753,7 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
         boxed_.clear();
         globals_.beginUnit();
         importedTerms_.clear();
+        checkOverloadSets(unit);   // Track S: before a single name is declared
         // 0. Imports first, and for the whole unit (D96). They are resolved by
         //    LOADING the module (D90), which is why a module's top level runs
         //    during the importing unit's compilation -- and why --disassemble
@@ -1709,11 +1791,16 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
         const DefDef* main = nullptr;
         std::vector<const TemplateDef*> templates;
         std::unordered_set<std::string> declaredTypeNames;  // this unit, for the clash check
+        std::unordered_map<const DefDef*, std::string> defKeys;  // per alternative (Track S)
         std::unordered_map<const TemplateDef*, std::string> typeKeys;
         for (const auto& s : unit.stats) {
             if (s->kind == NodeKind::DefDef) {
                 const auto& d = as<DefDef>(*s);
-                const std::string& key = globals_.declare(d.name, kindOf(d));
+                bool duplicateArity = false;
+                const std::string& key =
+                    globals_.declareDef(d.name, kindOf(d), paramsOf(d).size(), &duplicateArity);
+                (void)duplicateArity;  // checkOverloadSets already reported it
+                defKeys[&d] = key;
                 globals_.setByNameMasks(d.name, byNameMasksOfDef(d));
                 if (d.isMain()) {
                     if (main) throw CompileError("only one @main method is allowed per file", d.pos);
@@ -1855,7 +1942,7 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
                 const auto& d = as<DefDef>(*s);
                 compileFunction(d.name, paramsOf(d), bodyOf(d), FnShape::Def, d.pos,
                                 /*paramless=*/false, /*allowByName=*/true);
-                emit(Op::STORE_GLOBAL, top.mod->addSymbol(globalKey(d.name)), d.pos, -1);
+                emit(Op::STORE_GLOBAL, top.mod->addSymbol(defKeys.at(&d)), d.pos, -1);
             } else if (s->kind == NodeKind::ValDef && as<ValDef>(*s).isLazy) {
                 const auto& v = as<ValDef>(*s);
                 compileLazyThunk(rhsOf(v), v.pos);
