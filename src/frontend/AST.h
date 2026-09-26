@@ -15,8 +15,19 @@
 
 namespace protoScala {
 
+// The one builtin type the desugarer has to name by itself: an `enum` body
+// extends the `Enum` marker trait. It is named by its type KEY, which no source
+// can spell, because an enum may itself be called `Enum` -- Scala allows it, and
+// the plain name `Enum` would otherwise resolve to the enum's own generated
+// class and report "cyclic inheritance: Enum extends itself". Must equal
+// `kEnumKey` in compiler/ClassInfo.h; CompileTemplates.cpp static_asserts it.
+inline constexpr const char* kEnumMarkerKey = "@Enum";
+
 struct TypeTree {
-    enum class Kind : uint8_t { Name, Applied, Function, Tuple, ByName, Repeated, Wildcard, Infix };
+    // Builtin: `name` is a type KEY, resolved by key rather than by name.
+    enum class Kind : uint8_t {
+        Name, Applied, Function, Tuple, ByName, Repeated, Wildcard, Infix, Builtin
+    };
     Kind kind;
     std::string name;  // Name: dotted path; Infix: the operator; Applied: the type constructor
     std::vector<std::unique_ptr<TypeTree>> args;  // Function: params..., result (last)
@@ -254,6 +265,12 @@ struct TemplateDef : Node {
     std::string selfName;                  // `self =>` alias of `this`, or empty
     std::vector<NodePtr> body;             // template statements
     bool synthetic = false;                // a companion object created by Desugar
+    // The companion object `expandEnum` generates for an `enum`. A hand-written
+    // `object <Name>` in the same unit is the *same* companion in Scala, and
+    // mergeEnumCompanions folds it into this one. Kept apart from `synthetic`
+    // because that flag also suppresses the REPL's "// defined object" line, and
+    // an enum's companion is one a user can legitimately add members to.
+    bool enumCompanion = false;
     // Phase 4, `enum` only: the cases in declaration order. A case with no
     // parameters and no parent arguments becomes a `case object`; anything else a
     // `case class`. Desugar expands the whole TemplateDef into a sealed abstract
@@ -261,9 +278,15 @@ struct TemplateDef : Node {
     // `values` / `valueOf` / `fromOrdinal`.
     struct EnumCase {
         std::string name;
-        std::vector<Param> params;        // empty: a singleton case
+        std::vector<Param> params;        // empty *and* !hasParens: a singleton case
         std::vector<NodePtr> parentArgs;  // `case Red extends Color(0xFF0000)`
         bool hasParentArgs = false;
+        // `case C()` was written with an empty parameter clause. Scala makes
+        // that a zero-parameter case *class* -- `E.C()` calls its companion's
+        // `apply` -- where `case C` is a case object. Without the flag the two
+        // are indistinguishable and `E.C()` fails with "value apply is not a
+        // member of C".
+        bool hasParens = false;
         SourcePos pos;
     };
     std::vector<EnumCase> enumCases;

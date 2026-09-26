@@ -1610,6 +1610,7 @@ void Parser::parseEnumCases(TemplateDef& target) {
         c.name = expect(TokenKind::Identifier, "an enum case name").text;
         if (at(TokenKind::LBracket)) parseTypeParams();        // erased, like every other
         if (at(TokenKind::LParen) && !peek().firstOnLine) {
+            c.hasParens = true;
             c.params = parseClassParamClause();
             while (at(TokenKind::LParen) && !peek().firstOnLine) {
                 std::vector<Param> more = parseClassParamClause();
@@ -1627,7 +1628,7 @@ void Parser::parseEnumCases(TemplateDef& target) {
         target.enumCases.push_back(std::move(c));
         // A comma list is only legal for bare singletons.
         if (!at(TokenKind::Comma)) break;
-        if (!target.enumCases.back().params.empty() || target.enumCases.back().hasParentArgs)
+        if (target.enumCases.back().hasParens || target.enumCases.back().hasParentArgs)
             fail("only enum cases without parameters may be listed after a comma", kw);
         advance();
     }

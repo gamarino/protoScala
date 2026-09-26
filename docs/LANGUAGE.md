@@ -108,7 +108,11 @@ Delivered in Phase 4 ✅:
 - `enum` with simple and parameterised cases, `values`, `ordinal`, `valueOf` and
   `fromOrdinal`, lowered entirely in the frontend to a sealed abstract class, one
   `case object` or `case class` per case, and a companion (D77, D79). A case is
-  named `E.Case`, as in Scala.
+  named `E.Case`, as in Scala. Three details follow Scala exactly: `case C` is a
+  case **object** while `case C()` is a zero-parameter case **class**, so `E.C()`
+  calls its companion's `apply`; a hand-written `object E` in the same file is the
+  **same** companion the desugarer generates and is folded into it; and the enum
+  may itself be called `Enum`.
 - Extension methods `extension (x: T) def m ...`, dispatched on the receiver's
   runtime prototype (D6) and global for the session (D82, D83). A custom string
   interpolator is one of these, on `StringContext` (D56 retired).

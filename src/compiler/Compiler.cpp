@@ -1682,6 +1682,7 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
         // 1. Declare every top-level name; validate @main.
         const DefDef* main = nullptr;
         std::vector<const TemplateDef*> templates;
+        std::unordered_set<std::string> declaredTypeNames;  // this unit, for the clash check
         std::unordered_map<const TemplateDef*, std::string> typeKeys;
         for (const auto& s : unit.stats) {
             if (s->kind == NodeKind::DefDef) {
@@ -1702,17 +1703,33 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
                          key});
             } else if (s->kind == NodeKind::TemplateDef) {
                 const auto& t = as<TemplateDef>(*s);
+                // Two templates of one unit declaring the same type name would
+                // share a single type key, and the ClassInfo of the second would
+                // describe a body the first is then compiled against -- which
+                // reached a reader as `internal error: unordered_map::at`, the
+                // kind of escape D74 calls a bug. scalac reports a naming error,
+                // and so does this. A class and its companion object do not
+                // collide: an object's type name is `<Name>.type`.
+                const std::string typeName =
+                    t.kind == TemplateKind::Object ? t.name + ".type" : t.name;
+                if (!declaredTypeNames.insert(typeName).second)
+                    throw CompileError(t.name + " is already defined as " +
+                                           (t.kind == TemplateKind::Object ? "object "
+                                            : t.kind == TemplateKind::Trait ? "trait "
+                                                                            : "class ") +
+                                           t.name,
+                                       t.pos);
                 templates.push_back(&t);
                 if (t.kind == TemplateKind::Object) {
                     const std::string termKey = globals_.declare(t.name, BindingKind::Object);
-                    typeKeys[&t] = globals_.declareType(t.name + ".type");
+                    typeKeys[&t] = globals_.declareType(typeName);
                     if (mode == UnitMode::Repl && !t.synthetic)
                         out.definitions.push_back(
                             {std::string("// defined ") +
                                  (t.isCase ? "case object " : "object ") + t.name,
                              termKey});
                 } else {
-                    typeKeys[&t] = globals_.declareType(t.name);
+                    typeKeys[&t] = globals_.declareType(typeName);
                     if (mode == UnitMode::Repl)
                         out.definitions.push_back(
                             {std::string("// defined ") +

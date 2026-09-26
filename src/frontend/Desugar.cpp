@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "frontend/Desugar.h"
 #include "frontend/Parser.h"
 #include "runtime/StackGuard.h"
@@ -240,7 +241,45 @@ public:
             }
             out.push_back(std::move(s));
         }
+        mergeEnumCompanions(out);
         ss = std::move(out);
+    }
+
+    // Scala has exactly one companion object per enum, so a hand-written
+    // `object <Name>` is the *same* object as the one `expandEnum` generates for
+    // the cases and for `values` / `valueOf` / `fromOrdinal`, not a second one.
+    // Two objects of one name reached the compiler as two templates sharing a
+    // single type key, whose ClassInfo described one body while the other was
+    // compiled against it -- `info.members.at("fromOrdinal")` then threw
+    // `std::out_of_range("unordered_map::at")` and escaped as
+    // `protoscala: internal error`, which D74 calls a bug. The generated
+    // companion absorbs the hand-written one and keeps its own position, right
+    // after the sealed class.
+    void mergeEnumCompanions(std::vector<NodePtr>& ss) {
+        for (NodePtr& g : ss) {
+            if (!g || g->kind != NodeKind::TemplateDef) continue;
+            TemplateDef& gen = as<TemplateDef>(*g);
+            if (!gen.enumCompanion || gen.kind != TemplateKind::Object) continue;
+            for (NodePtr& u : ss) {
+                if (!u || u.get() == g.get() || u->kind != NodeKind::TemplateDef) continue;
+                TemplateDef& user = as<TemplateDef>(*u);
+                if (user.enumCompanion || user.kind != TemplateKind::Object ||
+                    user.name != gen.name)
+                    continue;
+                // The hand-written object owns the modifiers, the parents and the
+                // self alias; the generated one owns the cases and the generated
+                // methods, which come first so a hand-written member can call
+                // them.
+                gen.mods = user.mods;
+                gen.isCase = user.isCase;
+                gen.selfName = user.selfName;
+                gen.parents = std::move(user.parents);
+                for (NodePtr& m : user.body) gen.body.push_back(std::move(m));
+                u.reset();   // the statement list tolerates a null (expandEnums does)
+                break;
+            }
+        }
+        ss.erase(std::remove(ss.begin(), ss.end(), nullptr), ss.end());
     }
 
     // Phase 4: a template nested in an `object` is LIFTED to the top level with
@@ -356,7 +395,8 @@ private:
         cls->selfName = e.selfName;
         cls->body = std::move(e.body);
         ParentRef enumParent;
-        enumParent.type = nameType("Enum", e.pos);
+        enumParent.type = nameType(kEnumMarkerKey, e.pos);
+        enumParent.type->kind = TypeTree::Kind::Builtin;
         enumParent.pos = e.pos;
         cls->parents.push_back(std::move(enumParent));
 
@@ -366,18 +406,21 @@ private:
         auto companion = std::make_unique<TemplateDef>(e.pos);
         companion->kind = TemplateKind::Object;
         companion->name = e.name;
+        companion->enumCompanion = true;  // mergeEnumCompanions may absorb a hand-written one
         bool allSingletons = true;
         std::vector<std::string> singletons;   // the cases `values` covers
         for (std::size_t i = 0; i < e.enumCases.size(); ++i) {
             TemplateDef::EnumCase& c = e.enumCases[i];
-            const bool singleton = c.params.empty();
+            // `case C` is a case object; `case C()` is a zero-parameter case
+            // class, as in Scala, so that `E.C()` finds a companion `apply`.
+            const bool singleton = c.params.empty() && !c.hasParens;
             allSingletons = allSingletons && singleton;
             if (singleton) singletons.push_back(c.name);
             auto cse = std::make_unique<TemplateDef>(c.pos);
             cse->kind = singleton ? TemplateKind::Object : TemplateKind::Class;
             cse->isCase = true;
             cse->name = c.name;
-            cse->hasParamClause = !singleton;
+            cse->hasParamClause = c.hasParens;
             cse->ctorParams = std::move(c.params);
             ParentRef p;
             p.type = nameType(e.name, c.pos);

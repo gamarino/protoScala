@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <string_view>
 #include <unordered_set>
 
 namespace protoScala {
@@ -68,7 +69,16 @@ void Compiler::loadThis(SourcePos pos) {
     loadLocal(info, pos);
 }
 
+static_assert(std::string_view(kEnumKey) == std::string_view(kEnumMarkerKey),
+              "the desugarer's Enum marker spelling must be the Enum type key");
+
 const ClassInfo& Compiler::resolveType(const TypeTree& t, SourcePos pos) const {
+    // A Builtin type names a key, not a source name: the desugarer uses it for
+    // the `Enum` marker trait so that an enum may itself be called `Enum`.
+    if (t.kind == TypeTree::Kind::Builtin) {
+        if (const ClassInfo* c = globals_.findTypeByKey(t.name)) return *c;
+        throw CompileError("Not found: builtin type " + t.name, pos);
+    }
     std::string name = typeNameOf(t);
     if (name.empty()) throw CompileError("a class or trait name is expected here", pos);
     for (const char* prefix : {"scala.", "java.lang."})

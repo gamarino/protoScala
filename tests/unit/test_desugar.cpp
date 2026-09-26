@@ -162,7 +162,10 @@ TEST(Desugar, AnEnumExpandsToASealedClassCasesAndACompanion) {
     EXPECT_NE(u.find("class abstract sealed Color"), std::string::npos) << u;
     EXPECT_NE(u.find("Color.Red"), std::string::npos) << u;
     EXPECT_NE(u.find("Color.Green"), std::string::npos) << u;
-    EXPECT_NE(u.find("Enum"), std::string::npos) << u;      // the marker parent
+    // The marker parent is named by the `Enum` type KEY, not by the source name
+    // `Enum`, so that an enum may itself be called `Enum` without extending
+    // itself.
+    EXPECT_NE(u.find("@Enum"), std::string::npos) << u;
     EXPECT_NE(u.find("values"), std::string::npos) << u;
     EXPECT_NE(u.find("valueOf"), std::string::npos) << u;
     EXPECT_NE(u.find("fromOrdinal"), std::string::npos) << u;

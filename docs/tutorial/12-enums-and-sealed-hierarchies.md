@@ -41,7 +41,14 @@ Three things fall out of the declaration:
   identity, and there is exactly one of it;
 - each case has an **`ordinal`**, its position in the declaration, counting from
   zero;
-- the enum's companion carries **`values`**, the cases in declaration order.
+- the enum's companion carries **`values`**, the cases in declaration order. It
+  is an ordinary companion, so writing `object Colour` in the same file adds
+  members to it rather than declaring a second object -- exactly as in Scala.
+
+`case Red` declares a single value. `case Red()`, with an empty parameter list,
+declares a zero-parameter case **class** instead, so every `Colour.Red()` is a
+fresh instance that compares equal to any other -- again Scala's rule, and the
+reason the parentheses are worth noticing.
 
 The qualifier is required, as in Scala: `Red` on its own is not in scope unless
 you are inside the enum's own body or its companion.

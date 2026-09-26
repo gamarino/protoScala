@@ -130,6 +130,9 @@ void renderType(std::string& out, const TypeTree& t) {
         case TypeTree::Kind::Wildcard:
             out += '?';
             break;
+        case TypeTree::Kind::Builtin:
+            out += t.name;   // a type key, e.g. `@Enum`: no source spells it
+            break;
         case TypeTree::Kind::Infix:
             renderType(out, *t.args[0]);
             out += ' ';
