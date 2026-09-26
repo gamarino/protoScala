@@ -1213,6 +1213,24 @@ std::vector<std::string> Compiler::splitNamedArgs(const std::vector<NodePtr>& ar
     return keywords;
 }
 
+// Scala widens an integer argument to a floating-point parameter, so
+// `def g(x: Double) = x; g(7)` answers 7.0. protoScala has no expected type at the
+// call site (D4), but the *callee* has its parameter's declared type, so the
+// conversion happens in the prologue: `x = x.toDouble`. A by-name parameter is
+// left alone (forcing it here would change when it runs) and so is a repeated
+// one, whose slot holds a List rather than a number.
+void Compiler::widenDoubleParams(const std::vector<Param>& params, bool method, SourcePos pos) {
+    const int base = method ? 1 : 0;
+    for (std::size_t k = 0; k < params.size(); ++k) {
+        const Param& p = params[k];
+        if (p.byName || p.repeated || !isDoubleTypeName(p.type.get())) continue;
+        const std::uint64_t slot = static_cast<std::uint64_t>(base + static_cast<int>(k));
+        emit(Op::PUSH_LOCAL, slot, p.pos, +1);
+        emit(Op::SEND, sendSite("toDouble", 0), p.pos, 0);
+        emit(Op::STORE_LOCAL, slot, p.pos, -1);
+    }
+}
+
 void Compiler::compileFunction(const std::string& name, const std::vector<Param>& params,
                                const Node& body, FnShape shape, SourcePos pos,
                                bool paramless, bool allowByName,
@@ -1256,6 +1274,7 @@ void Compiler::compileFunction(const std::string& name, const std::vector<Param>
     mod->setArity(arity);
     mod->setVariadic(!params.empty() && params.back().repeated);
     analyseCaptures(params, body);
+    widenDoubleParams(params, method, pos);
     compileExpr(body);
     emit(Op::RETURN, 0, pos, -1);
     // After the body: the capture list is final, so a default block can mirror it.

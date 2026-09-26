@@ -47,6 +47,13 @@ produces a `Double`.
 - Integer division or remainder by zero raises `ArithmeticException: / by zero`.
 - `7.0 / 2` and `7 / 2.0` are both `3.5`; `1.0 / 0` is `Infinity`.
 - A `Char` in arithmetic is its code point: `'a' + 1` is `98`.
+- **Writing `Double` widens an integer.** `val d: Double = 42` is `42.0`, not
+  `42`, and the same holds for a `def`'s result type, any parameter's type, a
+  class field and an explicit `(42: Double)`. What does *not* widen is an
+  assignment to a variable declared earlier -- `var v: Double = 1` then `v = 2`
+  leaves `2` -- or a type argument, as in `val l: List[Double] = List(4, 5)`.
+  protoScala has no type inference to carry an expected type to those places
+  (D110).
 
 ## 4.3 Operators are methods
 

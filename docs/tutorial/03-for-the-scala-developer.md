@@ -809,7 +809,7 @@ to the colon — `assertion failed`, `assertion failed: why`, `requirement faile
 `Error`, so a broad `catch case e: Exception` does not swallow them. The message
 parameter is by-name.
 
-### The Scala 3 run corpus (Track S, D108–D109)
+### The Scala 3 run corpus (Track S, D108–D110)
 
 Measured against the Scala 3 compiler's own `tests/run` corpus. Almost everything
 it found was fixed; these are the two that could not be.
@@ -824,6 +824,14 @@ it found was fixed; these are the two that could not be.
 - **D109** — a **`type` alias is recorded for the whole file**, not for the
   template that declares it, so two classes in one file cannot each have their
   own `type T`. Everything else about aliases matches Scala.
+- **D110** — **widening to `Double` happens where the declared type is written**.
+  `val d: Double = 42` is `42.0`, and so are a `def` result, every parameter
+  form, a class field and an `(e: Double)` ascription. What does not widen is an
+  **assignment** to a variable declared earlier (`var v: Double = 1; v = 2` is
+  `2`, Scala `2.0`) and a **type argument** (`List[Double](4, 5)` keeps its
+  integers). Deliberate: with no type-name scope, remembering which names were
+  declared `Double` would widen an unrelated `x` in another method, which is a
+  worse answer than the one it fixes.
 
 ## 3.3 What is missing
 

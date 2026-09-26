@@ -10,6 +10,8 @@
  * member (D5). None of these can be a Scala identifier.
  */
 #pragma once
+#include "frontend/AST.h"
+
 #include <cstdint>
 #include <string>
 #include <unordered_map>

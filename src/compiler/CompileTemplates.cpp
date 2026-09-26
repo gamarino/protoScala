@@ -574,6 +574,10 @@ void Compiler::compileConstructor(const TemplateDef& t, const ClassInfo& info) {
                  s->kind != NodeKind::Import && s->kind != NodeKind::TypeDef)
             analyseCaptures(t.ctorParams, *s);
     }
+    // A `Double` parameter widens an integer argument before anything reads it,
+    // so `class P(val x: Double)` with `new P(4)` stores 4.0 as scalac does.
+    widenDoubleParams(t.ctorParams, /*method=*/true, t.pos);
+
     // Parameter fields first, as scalac assigns them: a superclass constructor
     // that calls an overridden method must already see them. compileInitCall
     // stores the `this` the callee returns back into slot 0, so the fields

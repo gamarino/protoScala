@@ -29,8 +29,11 @@ public:
                 // `(e: Unit)`: the expected type Unit discards e's value.
                 auto& t = as<Typed>(*n);
                 const bool unit = isUnitType(t.type.get());
+                const bool dbl = isDoubleType(t.type.get());
                 NodePtr e = expr(std::move(t.expr));
-                return unit ? discardValue(std::move(e)) : std::move(e);
+                if (unit) return discardValue(std::move(e));
+                if (dbl) return widenToDouble(std::move(e));
+                return e;
             }
             case NodeKind::If: {
                 // `if c then t` has type Unit: t runs for its effect and the
@@ -119,6 +122,8 @@ public:
                 auto& v = as<ValDef>(*n);
                 v.rhs = expr(std::move(v.rhs));
                 if (v.rhs && isUnitType(v.type.get())) v.rhs = discardValue(std::move(v.rhs));
+                else if (v.rhs && isDoubleType(v.type.get()))
+                    v.rhs = widenToDouble(std::move(v.rhs));
                 return n;
             }
             case NodeKind::DefDef: return defDef(std::move(n));
@@ -502,6 +507,21 @@ private:
         t.body = std::move(keep);
     }
 
+    // `Double` / `Float` as written (types are not resolved). Scala widens an
+    // integer to the expected floating-point type, so `val d: Double = 42` is
+    // 42.0 and not 42. protoScala cannot infer an expected type (D4), but the
+    // declared type *is* written at the point of declaration, and that is enough
+    // for a `val`, a `def` result and an explicit ascription. D2: Float is Double.
+    static bool isDoubleType(const TypeTree* t) { return isDoubleTypeName(t); }
+
+    // e.toDouble -- defined on Int, Char and Double alike (on a Double it is the
+    // identity), so the rewrite is total over the numeric types.
+    static NodePtr widenToDouble(NodePtr e) {
+        const SourcePos pos = e->pos;
+        auto sel = std::make_unique<Select>(pos, std::move(e), "toDouble");
+        return std::make_unique<Apply>(pos, std::move(sel));
+    }
+
     // `Unit` / `scala.Unit` as written (types are not resolved in Phase 1).
     static bool isUnitType(const TypeTree* t) {
         return t && t->kind == TypeTree::Kind::Name && (t->name == "Unit" || t->name == "scala.Unit");
@@ -668,6 +688,8 @@ private:
         if (body && isUnitType(d.resultType.get())) {
             discardReturnValues(*body);
             body = discardValue(std::move(body));
+        } else if (body && isDoubleType(d.resultType.get())) {
+            body = widenToDouble(std::move(body));
         }
         // def f(a)(b)(c) = e  →  def f(a) = (b) => (c) => e; the innermost
         // lambda's body is the def's body, so `return` returns from it.

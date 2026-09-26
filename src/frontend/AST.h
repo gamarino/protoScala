@@ -35,6 +35,16 @@ struct TypeTree {
 };
 using TypePtr = std::unique_ptr<TypeTree>;
 
+// `Double` or `Float` as written (D2: Float is Double). Scala widens an integer
+// to the expected floating-point type, and the declared type is the only expected
+// type protoScala has (D4), so this is what a widening site tests.
+inline bool isDoubleTypeName(const TypeTree* t) {
+    if (!t || t->kind != TypeTree::Kind::Name) return false;
+    return t->name == "Double" || t->name == "scala.Double" || t->name == "Float" ||
+           t->name == "scala.Float";
+}
+
+
 enum class NodeKind : uint8_t {
     IntLit, FloatLit, StringLit, CharLit, BoolLit, NullLit, UnitLit, InterpString,
     Ident, Select, Apply, TypeApply, Infix, Prefix, Assign, If, While, Return,
