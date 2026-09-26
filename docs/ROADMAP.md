@@ -241,10 +241,20 @@ Four things Phase 4 left for this phase to finish:
 - **Decide whether extension methods gain import scoping** (D82). The import
   mechanism arrives here, and scoping an extension is a public-surface change that
   needs it.
-- ✅ **Precompile or cache the prelude, and reclaim the cold-start budget.**
-  **Done, and the budget is met**: 0.6.0 measures script 23.73 ms and REPL
-  23.89 ms against the 25 ms target, three rounds interleaved, all twelve cases
-  `verified=21`. The same binary with `PROTOSCALA_PRELUDE_NO_IMAGE=1` still
+- ⚠️ **Precompile or cache the prelude, and reclaim the cold-start budget.**
+  **The prelude work is done; the budget is NOT met.** This is a correction: this
+  item read "Done, and the budget is met" on the strength of a 0.6.0 measurement
+  of script 23.73 ms and REPL 23.89 ms (three rounds interleaved, all twelve cases
+  `verified=21`). A re-measurement on 2026-09-26 **refuted it and that figure did
+  not reproduce**: at load average 1.84 — *lower* than the 2.97 of the original —
+  the shipped `Release` binary measures **26.38 ms script / 25.43 ms REPL**, and
+  `benchmarks/cold-start.sh` exits **1 in 12 of 12 cases** (both builds, both
+  modes, all 252 runs verified). Load does not explain the gap and **its cause is
+  unidentified**. Two operands, stated and not deducted: the harness's own floor
+  is ~5 ms, so ~21.4 ms of the 26.38 is protoScala; and start-up is kernel-bound
+  (0.26 s user against 1.07 s sys over 42 runs), which is a direction to look, not
+  a defect. What the *image* is worth is unaffected — the figures below stand as
+  the 2026-09-24 measurement. The same binary with `PROTOSCALA_PRELUDE_NO_IMAGE=1` still
   measures 25.65 / 26.01 ms, which is what proves the image moved the number. The
   prelude became a **build product**, not a cache, so it cannot go stale. What no
   protoScala change can remove is `linkSymbols` and running the compiled prelude

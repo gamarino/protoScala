@@ -434,7 +434,32 @@ parse + desugar + compile removes 3,752 µs — **84.8 %** of the prelude's cost
 and leaves link (342 µs) and run (177 µs), which no protoScala-side change can
 remove.
 
-### Cold start at 0.6.0 — the budget is met (2026-09-24)
+### Cold start at 0.6.0 — SUPERSEDED: the budget is MISSED (correction, 2026-09-26)
+
+> **This section's verdict is withdrawn.** A re-measurement on 2026-09-26, on the
+> shipped `Release` binary at load average **1.84** — *lower* than the 2.97 this
+> section was taken at — gives **script 26.38 ms** (22.50–30.06) and **REPL
+> 25.43 ms** (23.20–29.57), 21 runs per mode, 21/21 verified, and
+> `benchmarks/cold-start.sh` exits **1 in 12 of 12 cases** across both builds,
+> both modes and three interleaved rounds (all 252 runs verified). `Release` and
+> `RelWithDebInfo` are indistinguishable (0.34–0.90 ms apart on the
+> median-of-medians, against a 3–18 ms within-cell spread).
+>
+> Two operands, stated and **not** deducted: the harness's own floor is about
+> **5 ms** (the identical construct around `/bin/true` measures 5.55 ms), so
+> roughly **21.4 ms of the 26.38 ms is protoScala**; and start-up is
+> **kernel-bound**, 0.26 s user against 1.07 s sys across 42 runs — a diagnostic
+> direction, not a defect.
+>
+> **The 23.73 ms below did not reproduce**, at a lower load, on a binary confirmed
+> to use the image. Load does not explain the gap and its cause is
+> **unidentified**. Everything this section says about what the *image* is worth
+> stands; only the "met" verdict and the headroom it implied are withdrawn. Full
+> write-up: [`reports/2026-09-26-quiet-host-attempt.md`](reports/2026-09-26-quiet-host-attempt.md) §2.
+
+*The section as originally recorded follows, kept as the measurement of
+2026-09-24.*
+
 
 `benchmarks/cold-start.sh <binary> 21`, **three rounds interleaved in one
 window**, image and source path alternating, on this host (AMD Ryzen 5 5500U).
@@ -525,9 +550,11 @@ when the median is at or above it, and **STRADDLES** in between. By that reading
 all four 0.6.0 cases are **STRADDLES**: medians 23.48–24.53 ms, worst samples
 26.2–30.8 ms.
 
-Both are true and they are not in conflict. What they say together is: **the
+Both are true and they were not in conflict. What they said together was: **the
 budget is met on the measure DESIGN §1 and the done-when use, and on a
-daily-driver desktop the occasional sample still crosses 25 ms.** Nothing here
+daily-driver desktop the occasional sample still crosses 25 ms.** Read now, the
+stricter verdict was the early warning: on 2026-09-26 the **median** crossed the
+target too, and both readings agree on MISSED. Nothing here
 claims the worst case is under target, because it is not, and the suite report
 records that verdict in its own table rather than being overridden here. A
 dedicated quiet host would settle the question; this one runs VS Code, Chrome and

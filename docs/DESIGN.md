@@ -25,6 +25,20 @@ reproduce `scalac`'s static typechecker. Its value proposition:
    embedded Scala prelude began to grow — the standard library will keep adding
    start-up work, and 25 ms keeps the "instant" property without turning every
    prelude addition into a performance negotiation.)
+
+   **Status of this target: MISSED, as of 2026-09-26.** The done-when is
+   `benchmarks/cold-start.sh <binary> 21` exiting 0, and it exits 1 in 12 of 12
+   cases; the quietest sample of that window measures **26.38 ms** (script) and
+   **25.43 ms** (REPL). The target stays as written — this is a statement about
+   the runtime, not a revision of the goal. Two operands to read it with, neither
+   of them deducted from the figure: about **5 ms** of the measurement is the
+   harness's own floor (the same construct around `/bin/true` measures 5.55 ms),
+   so roughly 21.4 ms is protoScala; and start-up is **kernel-bound** here,
+   0.26 s user against 1.07 s sys across 42 runs, which points at process
+   creation, `mmap` and dynamic linking rather than at prelude work. The gap's
+   cause is **unidentified**: the previously published 23.73 ms did not reproduce
+   even at a lower load. `docs/STATUS.md` and
+   `benchmarks/reports/2026-09-26-quiet-host-attempt.md` §2 carry the detail.
 2. **Native structural immutability** — functional collections and case
    classes map onto protoCore's persistent structures.
 3. **Real concurrency without a GIL** — native actors with O(1) message

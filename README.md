@@ -6,7 +6,7 @@ protoScala is a language runtime of the [protoCore](https://github.com/numaes/pr
 
 It is **not** a JVM replacement: there is no JVM, no sbt/Maven, no Java interop and no static typechecker. It runs Scala 3 source — braces or significant indentation — with types parsed and erased, on a runtime that aims to:
 
-- **start in under 25 ms with ~20 MB RSS**, making Scala viable for scripts and REPL-driven work;
+- **start fast and small** — a < 25 ms, ~20 MB RSS *target*, so Scala is viable for scripts and REPL-driven work. The start-up target is currently **missed**: the latest measurement is 26.38 ms script / 25.43 ms REPL, and `benchmarks/cold-start.sh` exits 1 ([Performance](#performance));
 - map **case classes and functional collections** onto protoCore's persistent, structurally shared data;
 - run **native actors without a GIL**: messages are pointers to immutable data, mailboxes are lock-free with three priority bands, and `await` inside an actor suspends cooperatively instead of blocking a thread;
 - **load modules through protoCore's Unified Module Discovery.** `import util.Shapes` loads a `.scala` module and its classes are usable as *types* — `new Point(1, 2)`, `case Point(x, y)` — because an import is resolved when the file is compiled. protoScala also *registers itself* as a UMD provider (`provider:scala`), and the four family prefixes `py.`, `js.`, `st.` and `clj.` route to their providers. Across that boundary there is no serialization and no adapter, by construction: a value is a protoCore object on both sides, and a named argument arrives in the callee's `keywordParameters` unchanged — and `import st.<module>` now proves it across a real runtime boundary, with the same object's address printed from both runtimes. **What no runtime in the family registers is a `py`, `js` or `clj` provider**, so `import py.numpy as np` compiles, routes, and reports `ImportError: no provider registered for 'py'` — see [What polyglot interop does and does not do today](#what-polyglot-interop-does-and-does-not-do-today).
@@ -684,42 +684,75 @@ kernel's cost, not protoScala's frontend. `list_ops`'s 0.24× is partly the
 Python twin's O(n) `insert(0, i)` against an O(log n) `::` — the row says the
 prepend-and-fold surface is cheap, not that protoScala is four times CPython.
 
-Cold start (`benchmarks/cold-start.sh`, 21 runs, target < 25 ms). **Verdict for
-0.6.0: MET.** The prelude is now compiled at build time rather than at every
-start-up, and the third row is what proves it was the *image* and not anything
-else in the release: both paths live in one binary, and
-`PROTOSCALA_PRELUDE_NO_IMAGE=1` takes the source path. Three rounds interleaved in
-one window, 21 runs per case, **every case reported `verified=21`**, load average
-2.97 at the start and 2.67 at the end:
+Cold start (`benchmarks/cold-start.sh`, 21 runs, target < 25 ms).
+**Verdict: MISSED.** This is a correction. The table below said *MET* on the
+strength of a 23.73 ms script median recorded at 0.6.0; a re-measurement on
+2026-09-26 **refuted it** and that earlier figure **did not reproduce**. The
+current reading, taken on the shipped `Release` binary at the quietest moment of
+that window (load average 1.84), 21 runs per mode, **21/21 verified in both**:
+
+| mode | median | min | max | target | verdict |
+|---|---:|---:|---:|---:|---|
+| script | **26.38 ms** | 22.50 | 30.06 | 25 | **MISSED** by 1.38 ms |
+| repl | **25.43 ms** | 23.20 | 29.57 | 25 | **MISSED** by 0.43 ms (straddles) |
+
+`benchmarks/cold-start.sh` exits **1 in 12 of 12 cases** — both builds, both
+modes, three interleaved rounds each, **all 252 runs verified**, load 4.03–4.22 —
+and that exit status *is* the done-when, so the budget is missed, not merely
+approached. **`Release` and `RelWithDebInfo` are indistinguishable**: 0.34–0.90 ms
+apart on the median-of-medians against a 3–18 ms within-cell spread, which does
+not support calling either faster.
+
+Two operands belong beside that number, because they change what it means:
+
+- **About 5 ms of it is the harness, not protoScala.** `cold-start.sh` times a
+  pipeline — two `date +%s%N` forks, the binary, a pipe, an `awk`, plus an
+  `sh -c` and a `printf` for the REPL case — and timing that same construct
+  around trivial commands gives medians of **5.55 ms for `/bin/true`**, 4.79 ms
+  for `/bin/echo hi` and 4.67 ms for `sh -c true`, 21 runs each. So roughly
+  **21.4 ms of the 26.38 ms is protoScala**. That is **stated, not deducted**:
+  the done-when is the script's exit status, and redefining it is a maintainer's
+  decision rather than a measurement's.
+- **Start-up is kernel-bound here, not interpreter-bound.** Across 42 runs the
+  harness spent **0.26 s of user time against 1.07 s of system time** — about
+  25 ms of `sys` per run — which is process creation, `mmap` and dynamic linking
+  rather than prelude work. That is a **diagnostic direction, not a defect**: it
+  says where to look next, and it is not itself evidence of a fault.
+
+And one thing is honestly unexplained: the published **23.73 ms did not reproduce
+even at a lower load** (2.65 ms worse at load 1.84 than the figure taken at load
+2.97), on a binary confirmed to be using the prelude image. **Load therefore does
+not explain the gap, and its cause is unidentified.** Candidates not separated:
+a change in the tree since that measurement, a difference in how that figure was
+taken, or a host-state variable neither run recorded. The full write-up, with
+every operand, is
+[`benchmarks/reports/2026-09-26-quiet-host-attempt.md`](benchmarks/reports/2026-09-26-quiet-host-attempt.md).
+
+The history the table used to carry stands as *history*, not as a current
+verdict — these are the figures as recorded at each release, in one interleaved
+window per row group, 21 runs per case, every case `verified=21`, load average
+2.97 falling to 2.67:
 
 | binary | script | REPL |
 |---|---:|---:|
 | 0.4.0 | 23.91 ms | 24.46 ms |
 | 0.5.0 | 25.22 ms | 25.58 ms |
-| **0.6.0, precompiled prelude image** | **23.73 ms** | **23.89 ms** |
+| 0.6.0, precompiled prelude image | 23.73 ms | 23.89 ms |
 | 0.6.0, `PROTOSCALA_PRELUDE_NO_IMAGE=1` (the 0.5.0 path) | 25.65 ms | 26.01 ms |
 
-`cold-start.sh` exited 0 in all three image rounds and 1 in all three source
-rounds, on both cases; that exit code *is* the check, because it fails when any
-run printed the wrong line or when a median is not below the target. The
-artefact the `.deb` and the `.tar.gz` ship is a different binary (`Release`
-rather than `RelWithDebInfo`) and was measured separately: 23.28 ms script and
-23.73 ms REPL, also passing.
+Read that as what the harness printed then, superseded now by the 26.38 / 25.43
+reading above. `benchmarks/run_benchmarks.py`, which applies a stricter
+per-sample verdict, already recorded all four 0.6.0 cases as **STRADDLES** —
+median below target, spread crossing it — and the 2026-09-26 re-measurement moved
+the median across too.
 
-One thing that reading does **not** claim: the *worst* sample is still above
-25 ms. `benchmarks/run_benchmarks.py` applies a stricter per-sample verdict and
-records all four 0.6.0 cases as **STRADDLES** — median below the target, spread
-crossing it — on a machine that runs an editor and a browser throughout. The
-budget is met on the measure DESIGN §1 uses; the tail is not yet quiet.
-
-The image removes parse, desugar and compile — measured before it was built at
-59.6 %, 2.6 % and 22.5 % of the prelude's 4.4 ms. What it cannot remove is
-`linkSymbols` (342 µs) and *running* the compiled prelude (177 µs): the tables
-hold strings and PODs, so the symbols must still be interned into a `ProtoSpace`
-and `MAKE_CLASS`/`MAKE_FN`/`STORE_GLOBAL` must still execute. Removing those would
-need a protoCore space image, which does not exist. The budget is met with about
-1.3 ms of headroom on the script case, and that headroom is what the next twenty
-prelude classes would spend.
+What the prelude image does is still real, and is unaffected by the verdict: it
+removes parse, desugar and compile, measured before it was built at 59.6 %, 2.6 %
+and 22.5 % of the prelude's 4.4 ms. What it cannot remove is `linkSymbols`
+(342 µs) and *running* the compiled prelude (177 µs): the tables hold strings and
+PODs, so the symbols must still be interned into a `ProtoSpace` and
+`MAKE_CLASS`/`MAKE_FN`/`STORE_GLOBAL` must still execute. Removing those would
+need a protoCore space image, which does not exist.
 
 The REPL column comes from a two-binary interleave and the script column from a
 three-binary one, so compare down a column and never across; the 0.4.0 script
@@ -736,9 +769,10 @@ prelude's size, not the exception machinery in the engine. That is what 0.6.0's
 image removes, and the fourth row above is the same code path 0.5.0 shipped,
 still missing by 0.65 ms.
 
-Earlier phases met the target: the 0.3.0 run measured script 21.02
-[19.44-22.68] ms and REPL 21.77 [20.37-23.28] ms with every individual sample,
-worst included, under 25 ms.
+Earlier phases measured under the target: the 0.3.0 run gave script 21.02
+[19.44-22.68] ms and REPL 21.77 [20.37-23.28] ms, with every individual sample,
+worst included, under 25 ms. Whether 0.3.0 would still measure there on the host
+as it is now was **not** re-checked, so that row is history too.
 
 **Reading.** Short rows measure start-up more than work: protoScala starts in
 about 17-18 ms (`factorial_100` is almost pure start-up) and CPython in about

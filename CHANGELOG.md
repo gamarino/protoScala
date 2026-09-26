@@ -64,6 +64,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the 0.6.0 measurement. Neither confirmed nor refuted, and Track X is not what
   would have broken it. STATUS.md carries the table.
 
+  **Settled since, and it is a correction: the budget is MISSED.** See the
+  *Changed* entry below.
+
 - **The Predef surface (Track X): `assert`, `assume`, `require`, `???` and
   `App`.** None of them existed. Every Scala program that checks an invariant or
   leaves a body unwritten failed at the first line with `Not found: assert`, and
@@ -151,6 +154,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   carry over, and a table of the writing operations in all three languages.
 
 ### Changed
+
+- **The cold-start verdict is corrected to MISSED. `< 25 ms` (DESIGN §1) is
+  refuted, and 0.6.0's "met" claim is withdrawn.** `benchmarks/cold-start.sh`
+  must exit 0 — that is the done-when in `DECISIONS-LOG.md` — and on 2026-09-26
+  it exited **1 in 12 of 12 cases**: both builds, both modes, three interleaved
+  rounds each, **all 252 runs verified**, load 4.03–4.22. The quietest sample of
+  the window, shipped `Release` binary, load average **1.84**, 21 runs per mode,
+  21/21 verified in both: **script 26.38 ms** (22.50–30.06) and **REPL 25.43 ms**
+  (23.20–29.57). `Release` and `RelWithDebInfo` are **indistinguishable** —
+  0.34–0.90 ms apart on the median-of-medians against a 3–18 ms within-cell
+  spread.
+
+  Two operands belong beside the number, because they change what it means.
+  **The harness's own floor is about 5 ms**: `cold-start.sh` times a pipeline, and
+  the identical construct around `/bin/true` measures **5.55 ms** (4.79 ms for
+  `/bin/echo hi`, 4.67 ms for `sh -c true`, 21 runs each), so roughly **21.4 ms
+  of the 26.38 ms is protoScala** — **stated, not deducted**, because the
+  done-when is the script's exit status and redefining it is the maintainer's
+  call. And **start-up is kernel-bound, not interpreter-bound**: 0.26 s user
+  against **1.07 s sys** across 42 runs, about 25 ms of `sys` per run, which is
+  process creation, `mmap` and dynamic linking — a **diagnostic direction, not a
+  defect**.
+
+  Recorded honestly: **the published 23.73 ms did not reproduce even at a lower
+  load** (26.38 ms at load 1.84 against 23.73 ms at load 2.97), on a binary
+  confirmed to use the prelude image. **Load does not explain the gap and its
+  cause is unidentified** — a tree change since, a difference in method, or an
+  unrecorded host-state variable, none of them separated. The withdrawn claim
+  takes its corollary with it: there is **no measured 1.3 ms of headroom**, and
+  the protoCore-space-image question (escalation E5) is live again. What the
+  prelude image does is unaffected; what is withdrawn is that it brought the
+  number under target. Corrected in `README.md`, `docs/STATUS.md` and here;
+  `docs/DESIGN.md` keeps `< 25 ms` as the target and now says it is missed. Full
+  write-up: `benchmarks/reports/2026-09-26-quiet-host-attempt.md` §2.
 
 - **The worked example (`examples/log-report/`) opens `sample.log`.** It was
   written around the absence of file I/O and carried the log twice, once as the real
@@ -369,7 +406,10 @@ which the installer phase recorded as its own deliberate gap.
   question as scoping extension methods (D82) and is decided with it.
 - Nothing outstanding on DESIGN §1's cold-start budget: it is **met** at 0.6.0
   (script 23.73 ms, REPL 23.89 ms, against a target of 25 ms), which 0.5.0 missed
-  by about 1 ms. Three rounds interleaved in one window, 21 verified runs per
+  by about 1 ms. **[Superseded 2026-09-26: this claim is withdrawn. A
+  re-measurement puts the script median at 26.38 ms and `cold-start.sh` exits 1 in
+  12 of 12 cases, and the 23.73 ms did not reproduce. See the Unreleased
+  *Changed* entry.]** Three rounds interleaved in one window, 21 verified runs per
   case; `PROTOSCALA_PRELUDE_NO_IMAGE=1` still measures 25.65 / 26.01 ms, which is
   what proves the image and not the release moved the number. What no protoScala
   change can remove is `linkSymbols` and *running* the compiled prelude

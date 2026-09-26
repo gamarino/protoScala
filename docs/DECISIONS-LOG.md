@@ -25,8 +25,26 @@ recorded beside it. Four outcomes are not a plain approval:
   2.0.0 and is merged and released. It is ready to revisit; the behaviour is
   unchanged for now.
 
-Two entries are **acknowledged, not approved as done**: ThreadSanitizer was
+Two entries were **acknowledged, not approved as done**: ThreadSanitizer was
 never run against the actors, and the cold-start budget is not claimed as met.
+Both moved on 2026-09-26, and neither closed:
+
+- **ThreadSanitizer has now been run** (`-DPROTOSCALA_SANITIZER=thread`). It found
+  two races whose site is protoScala's own code. `Thread.start`'s
+  `g_threadBlueprint` is **fixed** — the engine and layout are handed to the
+  spawned thread through its argument list, so thread creation is the
+  happens-before edge. `ActorScheduler::nextMessage`'s write to
+  `ActorState::pendingIdx` is **recorded and undiagnosed**. protoCore's own
+  population (700–1000 reports, `SparseListAlgorithms.h`) is pre-existing and not
+  protoScala's to fix. So the gap is narrowed, not closed.
+- **The cold-start budget is now refuted rather than unclaimed.** `cold-start.sh`
+  exits 1 in 12 of 12 cases; the quietest sample measures 26.38 ms script /
+  25.43 ms REPL against the < 25 ms target, and the previously published 23.73 ms
+  did not reproduce **even at a lower load**, so the cause is unidentified. Two
+  operands are on the record and deliberately not deducted: the harness's own
+  floor is ~5 ms, and start-up is kernel-bound (0.26 s user against 1.07 s sys
+  over 42 runs).
+
 They stay visible as known gaps.
 
 Two items remain **open for the maintainer** — see "Still open" at the end of
@@ -281,7 +299,8 @@ Recorded in full in `benchmarks/RESULTS.md`. The short form:
   **2,456 us**, with link and run unchanged as predicted.
 - **The budget itself** is DESIGN §1's `< 25 ms`, and it is a done-when rather
   than an aspiration: `benchmarks/cold-start.sh <binary> 21` must exit 0 with
-  `verified=21`. **It is met.** Three rounds interleaved in one window, image and
+  `verified=21`. **It was reported met here on 2026-09-24; that verdict is
+  withdrawn — see the correction at the end of this entry.** Three rounds interleaved in one window, image and
   source path alternating, load average 2.97 at the start and 2.67 at the end,
   and **all twelve cases reported `verified=21`**:
 
@@ -307,6 +326,22 @@ Recorded in full in `benchmarks/RESULTS.md`. The short form:
   still the only way to remove the remaining 519 µs (`linkSymbols` 342 µs plus
   running the prelude 177 µs), and the budget is met with about 1.3 ms of
   headroom — which is what the next twenty prelude classes would spend.
+
+  **Correction, 2026-09-26: the "met" verdict above is withdrawn, and so is the
+  1.3 ms of headroom.** `cold-start.sh` exits **1 in 12 of 12 cases** — both
+  builds, both modes, three interleaved rounds, all 252 runs verified — and the
+  quietest sample of that window, at load average **1.84**, measures **26.38 ms
+  script** (22.50–30.06) and **25.43 ms REPL** (23.20–29.57). `Release` and
+  `RelWithDebInfo` are indistinguishable. **The 23.73 ms did not reproduce even at
+  a lower load**, on a binary confirmed to use the image, so load is not the
+  variable and the cause is **unidentified**. Two operands are recorded and
+  deliberately **not deducted**, because the done-when is the exit status: the
+  harness's own floor is about **5 ms** (`/bin/true` measures 5.55 ms through the
+  identical construct), leaving roughly **21.4 ms** as protoScala's; and start-up
+  is **kernel-bound**, 0.26 s user against 1.07 s sys across 42 runs, which is a
+  diagnostic direction rather than a defect. **E5 is therefore a live question
+  again**, not merely open on its merits. Write-up:
+  `benchmarks/reports/2026-09-26-quiet-host-attempt.md` §2.
 
 ## Decisions the implementation took, beyond the plan
 
@@ -562,3 +597,12 @@ marked (decision).**
   and is Scala's answer exactly, and refused for a negative one, whose result
   would name a width. That makes the `(lo + hi) >>> 1` midpoint idiom work
   without inventing a width.
+
+## Corrections before Phase 7 — the race and the cold-start claim (2026-09-26)
+
+| Date | Decision | Taken by | Where |
+|---|---|---|---|
+| 2026-09-26 | **The `Thread.start` blueprint is HANDED OVER, not published through an atomic.** Making `ActiveCallContext g_threadBlueprint`'s fields atomic would have silenced ThreadSanitizer and left the actual defect: one global, last writer wins, so two spawns with different engines still install the wrong one. The engine and the layout now travel in the spawned thread's own argument list as two tagged `SmallInteger` addresses, the mechanism `ActorScheduler::ensureStarted` already uses for `workerEntry`; they are written before `ProtoSpace::newThread`, so thread creation is the happens-before edge, and each spawn carries its own pair. Cost of reversing: one shared global and the race back, since nothing else reads the argument slots. Alternative rejected: a `std::atomic<const ActiveCallContext*>` publishing an immutable heap blueprint — correct as to ordering, but it keeps the single-slot semantics and adds an allocation lifetime | [agent, pending review] | `src/runtime/ActorPrimitives.cpp` |
+| 2026-09-26 | **No conformance fixture is offered as proof of the race fix, and the reason is stated rather than the rule bent.** R5 gives a process one engine and one layout, so no Scala program can distinguish the two designs; a fixture would pass before and after, and this project has eight tests that could not fail already. The evidence is the sanitizer differential — 3 protoScala-sited reports of 989 before, 0 of 727/770/805 across three runs after, output `200000` every time. Cost of reversing: none; if a second engine per process is ever built, that is when the fixture becomes possible | [agent, pending review] | `benchmarks/reports/2026-09-26-quiet-host-attempt.md` §3 addendum |
+| 2026-09-26 | **The `< 25 ms` cold-start budget is recorded as MISSED, and the two operands are STATED rather than deducted.** The harness's own floor is ~5 ms, so ~21.4 ms of the 26.38 ms median is protoScala; the done-when in this file is `cold-start.sh` exiting 0, and re-defining it to subtract the harness is a maintainer's call, not a measurement's. Start-up is kernel-bound (0.26 s user against 1.07 s sys over 42 runs), recorded as a direction to investigate and explicitly **not** as a defect. That the previously published 23.73 ms did not reproduce **at a lower load** is recorded as unexplained rather than attributed. Cost of reversing: if the maintainer re-defines the done-when net of harness overhead, the budget becomes met with ~3.6 ms of margin and every corrected document flips back | [agent, pending review] | `README.md`, `docs/STATUS.md`, `docs/DESIGN.md`, `CHANGELOG.md`, `docs/ROADMAP.md`, `benchmarks/RESULTS.md` |
+| 2026-09-26 | **Two earlier claims were withdrawn rather than quietly dropped**: that exactly one race named a protoScala site (there were two — `ActorScheduler::nextMessage` writing `ActorState::pendingIdx` was missed by a grep for `Mailbox`/`ReadyStack`), and that the cold-start budget was met at 0.6.0. Each superseded passage is marked at its original location and points to the correction, because a silently rewritten record cannot be audited | [agent, pending review] | `docs/STATUS.md`, `benchmarks/RESULTS.md`, `docs/DECISIONS-LOG.md` |
