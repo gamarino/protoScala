@@ -204,6 +204,13 @@ endif()
 
 include_directories(${PROTOCORE_INCLUDE_DIRS} src ${CMAKE_CURRENT_BINARY_DIR}/generated)
 
+# --- The published ABI of libprotoScala.so (Phase 7 D3) -------------------------
+# One shared library, one installed header. PROTOSCALA_ABI_SOVERSION moves when
+# include/protoScala/GeneratedModule.h changes INCOMPATIBLY, and only then: a
+# module built against one soversion and loaded against another must fail with a
+# version message rather than with an undefined symbol.
+set(PROTOSCALA_ABI_SOVERSION "1")
+
 # --- readline (interactive REPL) -------------------------------------------------
 find_library(READLINE_LIBRARY NAMES readline)
 find_path(READLINE_INCLUDE_DIR NAMES readline/readline.h)
@@ -234,7 +241,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
 # protoscala_repl next to it (docs/DESIGN.md §3.1).
 # The native stack guard (src/runtime/StackGuard.cpp) lives here too: the
 # parser, the desugarer and the compiler check it as well as the VM.
-add_library(protoscala_support STATIC
+add_library(protoscala_support OBJECT
     src/support/Version.cpp
     src/support/FormatSpec.cpp
     src/support/BuiltinNames.cpp
@@ -242,9 +249,10 @@ add_library(protoscala_support STATIC
 )
 target_link_libraries(protoscala_support PUBLIC ${PROTOCORE_LIBRARY} pthread)
 target_compile_options(protoscala_support PRIVATE -Wall -Wextra -Wpedantic)
+set_property(TARGET protoscala_support PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 # --- Frontend: lexer (with offside rule), parser, AST, desugar ------------------
-add_library(protoscala_frontend STATIC
+add_library(protoscala_frontend OBJECT
     src/frontend/Lexer.cpp
     src/frontend/Layout.cpp
     src/frontend/AST.cpp
@@ -254,9 +262,10 @@ add_library(protoscala_frontend STATIC
 )
 target_link_libraries(protoscala_frontend PUBLIC protoscala_support)
 target_compile_options(protoscala_frontend PRIVATE -Wall -Wextra -Wpedantic)
+set_property(TARGET protoscala_frontend PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 # --- Compiler: opcodes, bytecode modules, AST -> bytecode ------------------------
-add_library(protoscala_compiler STATIC
+add_library(protoscala_compiler OBJECT
     src/compiler/BytecodeModule.cpp
     src/compiler/ClassInfo.cpp
     src/compiler/Compiler.cpp
@@ -265,6 +274,7 @@ add_library(protoscala_compiler STATIC
 )
 target_link_libraries(protoscala_compiler PUBLIC protoscala_frontend protoscala_support)
 target_compile_options(protoscala_compiler PRIVATE -Wall -Wextra -Wpedantic)
+set_property(TARGET protoscala_compiler PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 # --- The precompiled prelude image (a build product, not a cache) ----------------
 # protoscala-precompile compiles lib/prelude.scala on the BUILD host and writes
@@ -280,7 +290,12 @@ target_compile_options(protoscala_compiler PRIVATE -Wall -Wextra -Wpedantic)
 # only protoscala, and shipping a build tool would ship a binary no user runs.
 if(NOT CMAKE_CROSSCOMPILING)
     add_executable(protoscala-precompile src/tools/PrecompileMain.cpp)
-    target_link_libraries(protoscala-precompile PRIVATE protoscala_compiler protoscala_support)
+    # Every OBJECT library it needs is named explicitly: CMake adds the object
+    # files of a DIRECT object-library dependency, and does not reliably add
+    # those of a transitive one, so relying on protoscala_compiler's PUBLIC link
+    # to protoscala_frontend leaves the frontend's symbols undefined.
+    target_link_libraries(protoscala-precompile PRIVATE protoscala_compiler
+        protoscala_frontend protoscala_support)
     target_include_directories(protoscala-precompile PRIVATE src)
     target_compile_options(protoscala-precompile PRIVATE -Wall -Wextra -Wpedantic)
     set(PROTOSCALA_PRELUDE_IMAGE "${CMAKE_CURRENT_BINARY_DIR}/generated/PreludeImage.cpp")
@@ -296,7 +311,7 @@ else()
 endif()
 
 # --- Runtime: VM, values, primitives (the stack guard is in support) -----------
-add_library(protoscala_runtime STATIC
+add_library(protoscala_runtime OBJECT
     src/runtime/Runtime.cpp
     src/runtime/Values.cpp
     src/runtime/Format.cpp
@@ -318,6 +333,7 @@ add_library(protoscala_runtime STATIC
 target_link_libraries(protoscala_runtime PUBLIC protoscala_compiler protoscala_support
     ${PROTOCORE_LIBRARY} pthread)
 target_compile_options(protoscala_runtime PRIVATE -Wall -Wextra -Wpedantic)
+set_property(TARGET protoscala_runtime PROPERTY POSITION_INDEPENDENT_CODE ON)
 # Provider plug-ins are dlopen'd (src/umd/ProviderPlugins.cpp); the installed
 # directory is baked in so a relocated install finds its own.
 target_link_libraries(protoscala_runtime PUBLIC ${CMAKE_DL_LIBS})
@@ -349,7 +365,7 @@ else()
 endif()
 
 # --- REPL and session (script runner + interactive loop share Session) -----------
-add_library(protoscala_repl STATIC
+add_library(protoscala_repl OBJECT
     src/repl/Session.cpp
     src/repl/ModuleTable.cpp
     src/repl/Repl.cpp
@@ -357,14 +373,46 @@ add_library(protoscala_repl STATIC
 target_link_libraries(protoscala_repl PUBLIC protoscala_runtime protoscala_compiler
     protoscala_frontend protoscala_support)
 target_include_directories(protoscala_repl PRIVATE "${READLINE_INCLUDE_DIR}")
-target_link_libraries(protoscala_repl PRIVATE "${READLINE_LIBRARY}")
+# PUBLIC, not PRIVATE: protoscala_repl is an OBJECT library, and an OBJECT
+# library does not propagate a PRIVATE link library to whoever performs the
+# final link, so readline would be an undefined symbol in libprotoScala.so.
+target_link_libraries(protoscala_repl PUBLIC "${READLINE_LIBRARY}")
 target_compile_options(protoscala_repl PRIVATE -Wall -Wextra -Wpedantic)
+set_property(TARGET protoscala_repl PROPERTY POSITION_INDEPENDENT_CODE ON)
+
+# --- libprotoScala.so: the runtime a generated module links against -------------
+# Phase 7 D3. The five libraries above are OBJECT libraries and are combined into
+# ONE shared library, so the internal structure is unchanged and only the final
+# link differs. The alternatives were rejected in the plan's Task 0: linking the
+# static libraries into every module would give each .so a private prelude image,
+# private prototypes and a private ProtoSpace registration -- the host's `List`
+# would not be the module's `List`, which is a correctness problem and not a size
+# one; and resolving a module's undefined symbols from the host executable would
+# leave the ABI as bare C++ mangling with no version marker, loadable only by the
+# `protoscala` binary.
+add_library(protoScala SHARED
+    src/runtime/GeneratedSupport.cpp
+)
+target_link_libraries(protoScala
+    PRIVATE protoscala_repl protoscala_runtime protoscala_compiler
+            protoscala_frontend protoscala_support
+    PUBLIC  ${PROTOCORE_LIBRARY} pthread ${CMAKE_DL_LIBS})
+target_include_directories(protoScala
+    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+           $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    PRIVATE src)
+set_target_properties(protoScala PROPERTIES
+    OUTPUT_NAME protoScala
+    VERSION ${PROJECT_VERSION}
+    SOVERSION ${PROTOSCALA_ABI_SOVERSION}
+    PUBLIC_HEADER include/protoScala/GeneratedModule.h)
+target_compile_options(protoScala PRIVATE -Wall -Wextra -Wpedantic)
 
 # --- protoscala binary ----------------------------------------------------------
 add_executable(protoscala
     src/main.cpp
 )
-target_link_libraries(protoscala PRIVATE protoscala_repl protoscala_support)
+target_link_libraries(protoscala PRIVATE protoScala)
 target_compile_options(protoscala PRIVATE -Wall -Wextra -Wpedantic)
 
 # --- Tests ----------------------------------------------------------------------
@@ -383,14 +431,39 @@ if(UNIX)
     if(APPLE)
         set_target_properties(protoscala PROPERTIES
             INSTALL_RPATH "@executable_path/../${CMAKE_INSTALL_LIBDIR}")
+        set_target_properties(protoScala PROPERTIES INSTALL_RPATH "@loader_path")
     else()
         set_target_properties(protoscala PROPERTIES
             INSTALL_RPATH "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
+        set_target_properties(protoScala PROPERTIES INSTALL_RPATH "\$ORIGIN")
     endif()
 endif()
 
 install(TARGETS protoscala
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT protoScala)
+# Phase 7 D3: the library and its ONE header are what a module author needs.
+install(TARGETS protoScala
+    EXPORT protoScalaTargets
+    LIBRARY       DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/protoScala
+    COMPONENT protoScala)
+install(EXPORT protoScalaTargets
+    FILE protoScalaTargets.cmake NAMESPACE protoScala::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/protoScala
+    COMPONENT protoScala)
+include(CMakePackageConfigHelpers)
+configure_package_config_file(cmake/protoScalaConfig.cmake.in
+    "${CMAKE_CURRENT_BINARY_DIR}/protoScalaConfig.cmake"
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/protoScala)
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/protoScalaConfigVersion.cmake"
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion)
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/protoScalaConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/protoScalaConfigVersion.cmake"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/protoScala
     COMPONENT protoScala)
 install(FILES LICENSE README.md
     DESTINATION ${CMAKE_INSTALL_DOCDIR}

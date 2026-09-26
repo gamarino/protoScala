@@ -1,0 +1,25 @@
+# protoScalaConfig.cmake — so a consumer can `find_package(protoScala CONFIG)`
+# and link the runtime a transpiled module needs (Phase 7 §D3).
+#
+# The published surface is one library and one header,
+# `protoScala::protoScala` and `<protoScala/GeneratedModule.h>`. Nothing else is
+# installed, which is what keeps the ABI bounded and reviewable in one diff.
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+set(protoScala_VERSION "@PROJECT_VERSION@")
+# The soversion a module must have been built against. It moves only when
+# GeneratedModule.h changes incompatibly, so a mismatch here is a real
+# incompatibility and not a version bump.
+set(protoScala_SOVERSION "@PROTOSCALA_ABI_SOVERSION@")
+set(protoScala_GENERATED_MODULE_ABI "@PROTOSCALA_ABI_SOVERSION@")
+# protoScala links protoCore publicly, so a consumer inherits it. The package
+# does not try to find protoCore itself: protoScala's own build resolved it, and
+# re-resolving here could pick a different one -- which is the class of mistake
+# that puts a stale /usr/local library under a workspace binary.
+set(protoScala_PROTOCORE_ABI_SOVERSION "@PROTOCORE_ABI_SOVERSION@")
+
+include("${CMAKE_CURRENT_LIST_DIR}/protoScalaTargets.cmake")
+
+check_required_components(protoScala)

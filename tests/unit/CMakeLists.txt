@@ -34,6 +34,16 @@ target_compile_options(protoscala_unit_tests PRIVATE -Wall -Wextra -Wpedantic)
 include(GoogleTest)
 gtest_discover_tests(protoscala_unit_tests)
 
+# The installed facade, exercised through libprotoScala.so ALONE -- no object
+# library -- so that this target failing to link is the alarm that something a
+# generated module needs has left the shared library (Phase 7 Task 2 Step 5).
+add_executable(test_generated_support test_generated_support.cpp)
+target_link_libraries(test_generated_support PRIVATE protoScala gtest gtest_main)
+target_include_directories(test_generated_support PRIVATE "${CMAKE_SOURCE_DIR}/src")
+target_compile_options(test_generated_support PRIVATE -Wall -Wextra -Wpedantic)
+add_test(NAME unit/generated_support COMMAND test_generated_support)
+set_tests_properties(unit/generated_support PROPERTIES TIMEOUT 300)
+
 # The stand-in provider of the Phase 6 interop fixtures. A MODULE library, so it
 # is dlopen'd and never linked, and it is never installed: protoScala ships no
 # provider plug-in of its own.
