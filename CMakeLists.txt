@@ -51,6 +51,48 @@ option(PROTOSCALA_PROTOST_INTEROP
 option(PROTOCORE_REQUIRE_PACKAGE
     "Require an installed protoCore CMake package; never fall back to ../protoCore" OFF)
 
+# Sanitizer builds. protoScala had no sanitizer option at all until this point,
+# which is why the actors' ThreadSanitizer run stayed a declared-unproven item
+# from Phase 5 onwards (protoCore/docs/FIELD-NOTES.md records the gap).
+#
+# A sanitizer build is only meaningful when protoCore is built with the SAME
+# sanitizer: TSan cannot see into an uninstrumented shared library, and mixing
+# an instrumented executable with an uninstrumented libprotoCore.so produces
+# both false negatives (missed races inside protoCore) and false positives
+# (unannotated synchronisation read as a data race). Point the build at a
+# matching protoCore with
+#   -DPROTOCORE_LIBRARY=<tsan-build>/libprotoCore.so
+#
+# Usage:
+#   cmake -B build_tsan -S . -DPROTOSCALA_SANITIZER=thread \
+#         -DPROTOCORE_LIBRARY=/path/to/protoCore-tsan/libprotoCore.so
+#
+# On kernels where vm.mmap_rnd_bits exceeds what TSan's shadow mapping
+# tolerates, run the binary under `setarch -R` (ASLR off). Raising
+# vm.mmap_rnd_bits needs root; `setarch -R` does not.
+set(PROTOSCALA_SANITIZER "" CACHE STRING
+    "Build with a sanitizer: thread, address, undefined, or empty for none")
+set_property(CACHE PROTOSCALA_SANITIZER PROPERTY STRINGS
+    "" thread address undefined)
+
+if(PROTOSCALA_SANITIZER)
+    set(_ps_san_allowed thread address undefined)
+    if(NOT PROTOSCALA_SANITIZER IN_LIST _ps_san_allowed)
+        message(FATAL_ERROR
+            "PROTOSCALA_SANITIZER must be one of: ${_ps_san_allowed} "
+            "(got '${PROTOSCALA_SANITIZER}').")
+    endif()
+    # -g so every warning carries a resolvable frame, and a preserved frame
+    # pointer so the stacks are not truncated at -O2.
+    add_compile_options(-fsanitize=${PROTOSCALA_SANITIZER} -g
+                        -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=${PROTOSCALA_SANITIZER})
+    message(STATUS
+        "protoScala: ${PROTOSCALA_SANITIZER} sanitizer ON -- protoCore MUST be "
+        "built with -fsanitize=${PROTOSCALA_SANITIZER} too, or the run reports "
+        "both false negatives and false positives")
+endif()
+
 if(DEFINED PROTO_CORE_PREFIX)
     list(APPEND CMAKE_PREFIX_PATH "${PROTO_CORE_PREFIX}")
 endif()

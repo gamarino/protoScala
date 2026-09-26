@@ -1457,6 +1457,35 @@ ThreadSanitizer build of the Phase 5 plan's Task 8 Step 4. Phase 4 adds no new
 concurrency mechanism — it extends the existing one — so it neither needs nor
 supplies that evidence; it remains the first thing to run on a quiet host.
 
+**Update, 2026-09-26 — ThreadSanitizer has now been run, and it is dirty.**
+The build option that was missing exists (`-DPROTOSCALA_SANITIZER=thread`), and
+the run found **one race that is protoScala's own**, plus a large protoCore
+population that is not actor-specific. Full method, counts by site and the
+protoCore/protoScala separation are in
+[`benchmarks/reports/2026-09-26-quiet-host-attempt.md`](../benchmarks/reports/2026-09-26-quiet-host-attempt.md) §3.
+
+- **protoScala's own race — `Thread.start`, not the actor scheduler.**
+  `ActiveCallContext g_threadBlueprint` (`src/runtime/ActorPrimitives.cpp:29`) is
+  a plain non-atomic global, written by the spawning thread at line 431 and read
+  by the spawned thread at 407–408 with no happens-before edge. It is a single
+  global shared by every `Thread.start`, so a second spawn overwrites it whether
+  or not the first child has read it. Latent today — every spawn in the tests
+  installs the same engine and layout, and an aligned 8-byte x86-64 load does not
+  tear — and a wrong-engine bug as soon as two spawns with different
+  `ActiveCallContext` values overlap. **Reported, not fixed:** the fix is a
+  behaviour change in the concurrency surface (pass the context through the
+  thread argument that already carries the handle) and wants its own test.
+- **The actor scheduler itself produced no race of its own.** No TSan report
+  names `ActorScheduler`, `Mailbox` or `ReadyStack` as the race *site*; they
+  appear only as callers into protoCore. The 8 × 25,000-send stress case printed
+  `200000` exactly, so the single-method invariant held.
+- **protoCore's population is pre-existing and not actor-specific**: a control
+  run of 8 plain `Thread.start` threads touching no actor still reports 13
+  protoCore races, concentrated in `core/SparseListAlgorithms.h`'s
+  `getAt`/`setAt`/`removeAt` on the mutable-object attribute map. Reported to
+  protoCore; not diagnosed further here, and not claimed to be either a genuine
+  protoCore bug or a TSan false positive.
+
 ## History
 
 See [CHANGELOG.md](../CHANGELOG.md).
