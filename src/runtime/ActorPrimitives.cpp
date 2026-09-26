@@ -24,10 +24,6 @@ namespace protoScala {
 namespace prim {
 namespace {
 
-// The blueprint a thread started by Thread.start installs (one runtime per
-// process, R5), captured from the first Thread.start.
-ActiveCallContext g_threadBlueprint{};
-
 bool isCallable(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* v) {
     if (!v || v == PROTO_NONE) return false;
     if (v->isMethod(ctx)) return true;
@@ -400,21 +396,36 @@ PRIM(futureObject_failed) {
 // Thread and System (D49)
 // ---------------------------------------------------------------------------
 
+// The thread entry protoCore calls. The blueprint the thread installs — the
+// engine and the layout of the spawning call — travels in the argument list as
+// two SmallIntegers, exactly as the scheduler's address does in workerEntry.
+//
+// It is handed over rather than read from a shared global on purpose. The
+// spawning thread writes these arguments *before* ProtoSpace::newThread, so
+// thread creation itself is the happens-before edge that publishes them, and
+// every spawn carries its own pair: two spawns with different engines or
+// layouts are each correct, where one shared global would have installed
+// whichever was written last (and raced while doing it).
 const ProtoObject* threadEntry(ProtoContext* ctx, const ProtoObject*, const proto::ParentLink*,
                                const ProtoList* args, const proto::ProtoSparseList*) {
-    if (!args || args->getSize(ctx) == 0) return PROTO_NONE;
+    if (!args || args->getSize(ctx) < 3) return PROTO_NONE;
     const ProtoObject* handle = args->getAt(ctx, 0);
-    ExecutionEngine::ActiveCallGuard guard(g_threadBlueprint.engine, g_threadBlueprint.layout);
-    const RuntimeLayout& L = *g_threadBlueprint.layout;
+    auto* engine = reinterpret_cast<ExecutionEngine*>(
+        static_cast<std::intptr_t>(args->getAt(ctx, 1)->asLong(ctx)));
+    const auto* layout = reinterpret_cast<const RuntimeLayout*>(
+        static_cast<std::intptr_t>(args->getAt(ctx, 2)->asLong(ctx)));
+    if (!engine || !layout) return PROTO_NONE;
+    ExecutionEngine::ActiveCallGuard guard(engine, layout);
+    const RuntimeLayout& L = *layout;
     try {
         const ProtoObject* body = handle->getOwnAttributeDirect(ctx, L.bodyKey);
-        g_threadBlueprint.engine->invoke(ctx, body, nullptr, 0);
+        engine->invoke(ctx, body, nullptr, 0);
     } catch (ScalaThrow& t) {
         // A throwing thread body reports and joins; it never terminates the
         // process (plan A0-7 invariant 6).
         std::fflush(stdout);
         std::fprintf(stderr, "protoscala: thread failed: %s\n",
-                     g_threadBlueprint.engine->showTopLevel(ctx, t.value).c_str());
+                     engine->showTopLevel(ctx, t.value).c_str());
     } catch (ScalaError& e) {
         std::fflush(stdout);
         std::fprintf(stderr, "protoscala: thread failed: %s\n", e.what());
@@ -428,7 +439,9 @@ PRIM(threadObject_start) {
     if (!isCallable(ctx, L, body))
         throw ScalaError("IllegalArgumentException",
                          "Thread.start expects a function: write Thread.start(() => expr)");
-    g_threadBlueprint = *activeCallContext();
+    const ActiveCallContext* blueprint = activeCallContext();
+    if (!blueprint || !blueprint->engine || !blueprint->layout)
+        throw ScalaError("IllegalStateException", "Thread.start: no active runtime to hand over");
     proto::ProtoContext scope(ctx->space, ctx);
     auto* handle = const_cast<ProtoObject*>(L.threadProto->newChild(&scope, /*isMutable=*/true));
     scope.returnValue = handle;
@@ -446,7 +459,20 @@ PRIM(threadObject_start) {
         if (reg->setAttributeIfEqual(&one, L.threadsKey, cur, next)) break;
     }
     const proto::ProtoString* name = proto::ProtoString::createSymbol(&scope, "protoscala-thread");
+    // Built before newThread: thread creation publishes it (see threadEntry).
+    // Both addresses are tagged SmallIntegers, so neither allocates; the list
+    // itself does, so each intermediate is rooted across the next append (P1).
+    const ProtoObject* engineRef = scope.fromInteger(
+        static_cast<long long>(reinterpret_cast<std::intptr_t>(blueprint->engine)));
+    const ProtoObject* layoutRef = scope.fromInteger(
+        static_cast<long long>(reinterpret_cast<std::intptr_t>(blueprint->layout)));
+    scope.resizeAutomaticLocals(1);
     const ProtoList* targs = scope.newList()->appendLast(&scope, handle);
+    scope.setAutomaticLocal(0, targs->asObject(&scope));
+    targs = targs->appendLast(&scope, engineRef);
+    scope.setAutomaticLocal(0, targs->asObject(&scope));
+    targs = targs->appendLast(&scope, layoutRef);
+    scope.setAutomaticLocal(0, targs->asObject(&scope));
     const proto::ProtoThread* t = scope.space->newThread(&scope, name, &threadEntry, targs, nullptr);
     handle->setAttribute(&scope, L.threadRefKey,
                          scope.fromInteger(static_cast<long long>(reinterpret_cast<std::intptr_t>(t))));

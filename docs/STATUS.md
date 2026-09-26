@@ -1459,26 +1459,70 @@ supplies that evidence; it remains the first thing to run on a quiet host.
 
 **Update, 2026-09-26 — ThreadSanitizer has now been run, and it is dirty.**
 The build option that was missing exists (`-DPROTOSCALA_SANITIZER=thread`), and
-the run found **one race that is protoScala's own**, plus a large protoCore
-population that is not actor-specific. Full method, counts by site and the
-protoCore/protoScala separation are in
+the run found **two races whose site is protoScala's own code** — one in
+`Thread.start`, now fixed, and one in the actor scheduler, undiagnosed — plus a
+large protoCore population that is not actor-specific. (The first pass reported
+one; the second is recorded below, together with why it was missed.) Full
+method, counts by site and the protoCore/protoScala separation are in
 [`benchmarks/reports/2026-09-26-quiet-host-attempt.md`](../benchmarks/reports/2026-09-26-quiet-host-attempt.md) §3.
 
-- **protoScala's own race — `Thread.start`, not the actor scheduler.**
-  `ActiveCallContext g_threadBlueprint` (`src/runtime/ActorPrimitives.cpp:29`) is
-  a plain non-atomic global, written by the spawning thread at line 431 and read
-  by the spawned thread at 407–408 with no happens-before edge. It is a single
-  global shared by every `Thread.start`, so a second spawn overwrites it whether
-  or not the first child has read it. Latent today — every spawn in the tests
+- **protoScala's own race — `Thread.start`, not the actor scheduler. FIXED.**
+  `ActiveCallContext g_threadBlueprint` (then `src/runtime/ActorPrimitives.cpp:29`)
+  was a plain non-atomic global, written by the spawning thread at line 431 and
+  read by the spawned thread at 407–408 with no happens-before edge. It was a
+  single global shared by every `Thread.start`, so a second spawn overwrote it
+  whether or not the first child had read it. Latent — every spawn in the tests
   installs the same engine and layout, and an aligned 8-byte x86-64 load does not
   tear — and a wrong-engine bug as soon as two spawns with different
-  `ActiveCallContext` values overlap. **Reported, not fixed:** the fix is a
-  behaviour change in the concurrency surface (pass the context through the
-  thread argument that already carries the handle) and wants its own test.
-- **The actor scheduler itself produced no race of its own.** No TSan report
-  names `ActorScheduler`, `Mailbox` or `ReadyStack` as the race *site*; they
-  appear only as callers into protoCore. The 8 × 25,000-send stress case printed
-  `200000` exactly, so the single-method invariant held.
+  `ActiveCallContext` values overlapped.
+
+  **The fix (2026-09-26) removes the global rather than making its fields
+  atomic.** The engine and the layout now travel to the spawned thread in the
+  thread's own argument list, as two tagged `SmallInteger` addresses beside the
+  handle — the same mechanism `ActorScheduler::ensureStarted` already uses to
+  hand the scheduler to `workerEntry`. Two properties follow, and the second is
+  the one an atomic global would not have given:
+
+  1. The arguments are written *before* `ProtoSpace::newThread`, so thread
+     creation is itself the happens-before edge that publishes them. There is no
+     shared mutable location left to order.
+  2. Every spawn carries its own pair, so two spawns with different engines or
+     layouts are each correct. A single atomic global would have been race-free
+     and still installed whichever value was written last.
+
+  `Thread.start` now refuses with `IllegalStateException` if there is no active
+  runtime to hand over, instead of publishing a null blueprint.
+
+  **Evidence (the differential is the proof; no fixture can produce this).**
+  Under `-DPROTOSCALA_SANITIZER=thread` against an instrumented protoCore, on
+  the 8 × 25,000-send stress case: **before**, `SUMMARY: ThreadSanitizer: data
+  race … ActorPrimitives.cpp:431 in threadObject_start`, with
+  `Location is global 'protoScala::prim::(anonymous namespace)::g_threadBlueprint'
+  of size 16`, reported twice in one run; **after**, three runs report **zero**
+  races whose site is any file under `protoScala/src` (727, 770 and 805 reports
+  remain, every one of them in protoCore), and each run still prints `200000`.
+  No conformance fixture is claimed as proof: R5 gives a process one engine and
+  one layout, so no Scala program can distinguish the two designs, and a fixture
+  that cannot fail without the fix would not be evidence. The existing coverage
+  of the code path (`14-futures/threads-send-concurrently.scala`,
+  `20-exceptions/thread-body-throws.scala`,
+  `tutorial/13-threads-and-time.scala`) continues to pass.
+- **The actor scheduler: one further report, and the earlier "no race of its
+  own" claim was wrong.** That claim is withdrawn. The same log does name a
+  protoScala site in the scheduler:
+  `SUMMARY: ThreadSanitizer: data race … ActorScheduler.cpp:227 in
+  ActorScheduler::nextMessage` — a 4-byte write racing a 4-byte read on a 24-byte
+  heap block, which is `ActorState` (`pendingIdx[band]`), between two worker
+  threads. It was missed because the earlier pass grepped the reports for
+  `Mailbox` and `ReadyStack` and read the scheduler frames as callers only.
+  It appeared **once in one run and in none of the three post-fix runs**, so it
+  is reported as an undiagnosed finding, not as a characterised bug: whether the
+  claim/`sched` protocol is missing an edge or TSan cannot follow the handoff
+  through `ReadyStack`'s CAS is **not established here**. It is out of the
+  `Thread.start` fix's scope and is not claimed fixed. `Mailbox` and `ReadyStack`
+  are named as race sites by no report, before or after. The 8 × 25,000-send
+  stress case printed `200000` exactly in all four runs, so the single-method
+  invariant held each time.
 - **protoCore's population is pre-existing and not actor-specific**: a control
   run of 8 plain `Thread.start` threads touching no actor still reports 13
   protoCore races, concentrated in `core/SparseListAlgorithms.h`'s

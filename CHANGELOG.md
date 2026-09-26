@@ -170,6 +170,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **The `Thread.start` data race ThreadSanitizer found is gone, and the global it
+  lived in is gone with it.** `ActiveCallContext g_threadBlueprint` was a plain
+  non-atomic global: the spawning thread wrote it, the spawned thread read it, no
+  happens-before edge, and one global shared by every `Thread.start`. The engine
+  and the layout now travel in the spawned thread's own argument list as two
+  tagged `SmallInteger` addresses beside the handle — the mechanism
+  `ActorScheduler::ensureStarted` already uses for its workers. They are written
+  before `ProtoSpace::newThread`, so **thread creation is the happens-before
+  edge**, and each spawn carries **its own** pair, so two spawns with different
+  engines or layouts are each correct. Making the global's fields atomic would
+  have silenced the report and still installed whichever value was written last;
+  that is why it was not the fix. `Thread.start` now raises
+  `IllegalStateException` rather than publish a null blueprint if no runtime is
+  active.
+
+  The proof is the sanitizer differential, not a fixture, and the reason is
+  stated rather than skipped: R5 gives a process one engine and one layout, so no
+  Scala program can distinguish the two designs, and a fixture that cannot fail
+  without its fix is not evidence. Under `-DPROTOSCALA_SANITIZER=thread` against
+  an instrumented protoCore, on the 8 × 25,000-send stress case — **before**: 3
+  reports whose site is under `protoScala/src` (`ActorPrimitives.cpp:431` twice,
+  `ActorScheduler.cpp:227` once) out of 989; **after**: **0** in each of three
+  runs, out of 727, 770 and 805 — every remaining report has a protoCore site —
+  and all four runs printed `200000`.
+
+  Two records corrected while doing it: the earlier claim that exactly **one**
+  race named a protoScala site, and the claim that the actor scheduler produced
+  no race of its own. Both were wrong; the missed report is
+  `ActorScheduler::nextMessage` writing `ActorState::pendingIdx[band]` against
+  another worker's read. It reproduced once in one run and in none of the three
+  post-fix runs, is **not** diagnosed, and is **not** claimed fixed.
+
 - **A cross-runtime import works: `import st.<module>` loads a protoST module,
   binds its members and shares its values with no copy at the boundary.** Phase 6
   measured this as a miss and concluded it needed a change to protoCore's UMD

@@ -301,6 +301,52 @@ that already carries the handle would remove the race by construction rather
 than by luck. Not changed here: it is a behaviour change in the concurrency
 surface, it wants its own test, and this window's mandate was to measure.
 
+#### Addendum, 2026-09-26 (later the same day): fixed, and the count above was wrong
+
+Two corrections to the paragraphs immediately above, both against the same logs.
+
+1. **"Exactly one race names a protoScala file as the race site" is wrong. There
+   were two.** The stress log also contains
+   `SUMMARY: ThreadSanitizer: data race … ActorScheduler.cpp:227 in
+   ActorScheduler::nextMessage` — a 4-byte write racing a 4-byte read on a
+   24-byte heap block, which is `ActorState`, i.e. `pendingIdx[band]`, between two
+   worker threads. The original pass searched the reports for `Mailbox` and
+   `ReadyStack`, read the scheduler frames as callers into protoCore, and missed
+   the one report whose *site* is the scheduler. So §3.2's "the actor scheduler
+   produced no race of its own" does not stand either. It appeared **once, in one
+   run**, and in **none** of the three post-fix runs, so it is recorded as an
+   undiagnosed finding: whether the claim/`sched` protocol is missing an edge, or
+   TSan cannot follow the handoff through `ReadyStack`'s CAS, is **not
+   established**. Not fixed here — it is outside the `Thread.start` fix.
+
+2. **The `Thread.start` race is fixed, by removing the global rather than making
+   it atomic.** The engine and the layout now travel in the spawned thread's own
+   argument list as two tagged `SmallInteger` addresses beside the handle — the
+   mechanism `ActorScheduler::ensureStarted` already uses for `workerEntry`. They
+   are written before `ProtoSpace::newThread`, so thread creation is the
+   happens-before edge, and each spawn carries its own pair, so two spawns with
+   different engines or layouts are each correct. An atomic global would have
+   silenced the race and still installed whichever value was written last.
+
+**Differential, same build option, same stress case, same instrumented protoCore:**
+
+| | reports whose site is under `protoScala/src` | total reports | program output |
+|---|---|---|---|
+| before | **3** (`ActorPrimitives.cpp:431` ×2, `ActorScheduler.cpp:227` ×1) | 989 | `200000` |
+| after, run 1 | **0** | 727 | `200000` |
+| after, run 2 | **0** | 770 | `200000` |
+| after, run 3 | **0** | 805 | `200000` |
+
+Every remaining report in all three post-fix runs has a protoCore site. The
+totals move between runs because the protoCore population is workload- and
+interleaving-dependent; the figure that carries the claim is the protoScala
+column, and the run-to-run variation is also why a single clean run would not
+have been enough to retire the scheduler report.
+
+No conformance fixture is offered as proof and none could be: R5 gives a process
+one engine and one layout, so no Scala program can tell the two designs apart.
+The suite is unchanged at 1344 tests, 0 failed, 7 skipped.
+
 ### Reproducing
 
 ```bash
