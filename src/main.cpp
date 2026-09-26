@@ -7,6 +7,7 @@
  */
 #include "protoScala/Version.h"
 #include "repl/Repl.h"
+#include "runtime/Prelude.h"
 #include "runtime/Errors.h"
 #include "runtime/Mailbox.h"
 #include "repl/Session.h"
@@ -26,15 +27,30 @@ namespace {
 void printVersion() {
     std::printf("protoScala %s (actor mailboxes: %s)\n", protoScala::versionString(),
                 protoScala::Mailbox::implementationName());
-    // Which prelude path this binary takes. A user who measures start-up needs
-    // to know whether the image is in it, and a binary built by cross-compiling
-    // honestly says it is not.
-#if defined(PROTOSCALA_HAVE_PRELUDE_IMAGE)
-    std::printf("prelude: precompiled image (set PROTOSCALA_PRELUDE_NO_IMAGE=1 to compile "
-                "lib/prelude.scala at start-up instead)\n");
-#else
-    std::printf("prelude: compiled at start-up (no precompiled image in this build)\n");
-#endif
+    // Which prelude path this binary takes, asked of the LIBRARY. It used to be a
+    // #if on PROTOSCALA_HAVE_PRELUDE_IMAGE here, which stopped reaching this
+    // translation unit when protoscala began linking the shared protoScala target
+    // (Phase 7): the image stayed in use and this line started denying it. A
+    // `--version` that is quietly wrong is worse than one that is missing, because
+    // it is what a user checks. tests/cli/version.sh now compares this line against
+    // PROTOSCALA_PRELUDE_TIMING's own `image=` flag, which is ground truth.
+    switch (protoScala::preludePath()) {
+        case protoScala::PreludePath::Image:
+            std::printf("prelude: precompiled image (set PROTOSCALA_PRELUDE_NO_IMAGE=1 to "
+                        "compile lib/prelude.scala at start-up instead)\n");
+            break;
+        case protoScala::PreludePath::ImageDisabled:
+            std::printf("prelude: compiled at start-up — a precompiled image is in this build "
+                        "but PROTOSCALA_PRELUDE_NO_IMAGE is set\n");
+            break;
+        case protoScala::PreludePath::ImageStale:
+            std::printf("prelude: compiled at start-up — the precompiled image in this build "
+                        "does not match lib/prelude.scala and was rejected\n");
+            break;
+        case protoScala::PreludePath::Source:
+            std::printf("prelude: compiled at start-up (no precompiled image in this build)\n");
+            break;
+    }
     // Which providers this binary can reach. protoScala ships no plug-in, so a
     // stock install prints only the directory it looks in -- which is the honest
     // answer to "can I `import py.numpy` yet?".

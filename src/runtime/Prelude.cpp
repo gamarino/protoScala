@@ -40,6 +40,24 @@ namespace protoScala {
 
 const PreludeTiming& preludeTiming() { return g_timing; }
 
+PreludePath preludePath() {
+    // Deliberately duplicates loadPrelude's conditions rather than reading a flag
+    // it sets: `--version` runs before any session exists, so there is nothing to
+    // read yet. The two are kept adjacent so a change to one is visible from the
+    // other, and the enum makes the four states distinguishable instead of the
+    // single boolean that was wrong.
+#if defined(PROTOSCALA_HAVE_PRELUDE_IMAGE)
+    const bool ok = preludeImageData().format == kPreludeImageFormat &&
+                    preludeImageData().sourceHash == preludeSourceHash();
+    if (!ok) return PreludePath::ImageStale;
+    const char* noImage = std::getenv("PROTOSCALA_PRELUDE_NO_IMAGE");
+    if (noImage && *noImage) return PreludePath::ImageDisabled;
+    return PreludePath::Image;
+#else
+    return PreludePath::Source;
+#endif
+}
+
 void loadPrelude(proto::ProtoContext* parent, ExecutionEngine& engine, GlobalTable& globals,
                  std::vector<std::unique_ptr<BytecodeModule>>& modules) {
     auto where = [](SourcePos p) {

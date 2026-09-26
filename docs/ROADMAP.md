@@ -241,26 +241,21 @@ Four things Phase 4 left for this phase to finish:
 - **Decide whether extension methods gain import scoping** (D82). The import
   mechanism arrives here, and scoping an extension is a public-surface change that
   needs it.
-- ⚠️ **Precompile or cache the prelude, and reclaim the cold-start budget.**
-  **The prelude work is done; the budget is NOT met.** This is a correction: this
-  item read "Done, and the budget is met" on the strength of a 0.6.0 measurement
-  of script 23.73 ms and REPL 23.89 ms (three rounds interleaved, all twelve cases
-  `verified=21`). A re-measurement on 2026-09-26 **refuted it and that figure did
-  not reproduce**: at load average 1.84 — *lower* than the 2.97 of the original —
-  the shipped `Release` binary measures **26.38 ms script / 25.43 ms REPL**, and
-  `benchmarks/cold-start.sh` exits **1 in 12 of 12 cases** (both builds, both
-  modes, all 252 runs verified). Load does not explain the gap and **its cause is
-  unidentified**. Two operands, stated and not deducted: the harness's own floor
-  is ~5 ms, so ~21.4 ms of the 26.38 is protoScala; and start-up is kernel-bound
-  (0.26 s user against 1.07 s sys over 42 runs), which is a direction to look, not
-  a defect. What the *image* is worth is unaffected — the figures below stand as
-  the 2026-09-24 measurement. The same binary with `PROTOSCALA_PRELUDE_NO_IMAGE=1` still
-  measures 25.65 / 26.01 ms, which is what proves the image moved the number. The
-  prelude became a **build product**, not a cache, so it cannot go stale. What no
-  protoScala change can remove is `linkSymbols` and running the compiled prelude
-  (342 µs + 177 µs); that needs a protoCore space image, which does not exist, and
-  stays open on its merits rather than as a blocker (escalation E5). The original
-  statement of the problem follows.
+- ✅ **Precompile or cache the prelude, and reclaim the cold-start budget.**
+  **Done, and the budget is met** — re-certified on 2026-09-26 at **0.55 busy CPUs
+  of 12**: `cold-start.sh` exits 0 in **24 of 24 cells**, 378 runs verified, the
+  shipped `Release` binary at **21.63 ms** (script) / **22.32 ms** (repl), and the
+  image worth 2.46 / 2.34 ms against the source path. 0.6.0's 23.73 / 23.89 ms both
+  reproduces and is beaten. A `MISSED` verdict recorded briefly the same day is
+  withdrawn as a load artefact — it gated on a load *average* while its own `mpstat`
+  never put the foreign load below 2.3 busy CPUs, and the same unrebuilt binary read
+  28.37 ms there against 22.16 ms on the quiet host. **The rule that survives: state
+  measured idle, never a load average.** The prelude became a **build product**, not
+  a cache, so it cannot go stale. What no protoScala change can remove is
+  `linkSymbols` and running the compiled prelude (342 µs + 177 µs); that needs a
+  protoCore space image, which does not exist, and stays open on its merits rather
+  than as a blocker (escalation E5), with about **3.4 ms** of measured headroom. The
+  original statement of the problem follows.
 
   0.5.0 missed DESIGN §1's < 25 ms by about 1 ms, and the cause was measured: roughly
   60 µs per prelude class, so the growth from 156 to 200 lines costs +1.31 ms

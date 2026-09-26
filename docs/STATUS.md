@@ -1322,12 +1322,13 @@ exercised for the first time in Phase 6** — see the three entries below it.
   Scala's. Every conformance fixture that prints more than one entry sorts
   first, so the suite pins behaviour and never pins the order; a program that
   depends on the order is depending on something neither dialect promises.
-- **Phase 3 / cold start — SUPERSEDED (was: inside the budget on a load-3.9 host,
-  and at the line).** Refuted by the 2026-09-26 entry further down, which is the
-  current verdict: MISSED. Measured on the suite-v1 run: 24.43 ms (script) and 24.24 ms (REPL)
+- **Phase 3 / cold start — superseded by the quiet-window run, and consistent with
+  it.** Measured on the suite-v1 run: 24.43 ms (script) and 24.24 ms (REPL)
   for the RelWithDebInfo build, 22.71 ms and 23.72 ms for the Release build, all
-  21/21 verified, at load average 3.90. That was inside DESIGN §1's < 25 ms then,
-  and it superseded the Phase 5 entry below. It is not comfortable: an earlier
+  21/21 verified, at load average 3.90. That was inside DESIGN §1's < 25 ms then and
+  still is, and it superseded the Phase 5 entry below. (Its load *average* is exactly
+  the metric the 2026-09-26 correction says not to gate on; the figure happens to
+  agree with the quiet-host one.) It is not comfortable: an earlier
   measurement during this phase read 27.05 ms at load average 4.03, after the
   prelude grew by `Either` and the extended `Option`/`Try`. The figure is only
   meaningful with its load average beside it, and the prelude is compiled at
@@ -1338,59 +1339,52 @@ exercised for the first time in Phase 6** — see the three entries below it.
   calls `ProtoContext::safepoint()` at every back-edge (Q21). The scheduler
   unit test's polling loop learned this the hard way under
   `PROTOCORE_HEAP_LIMIT_CELLS=20000`.
-- **Cold start — MISSED. `< 25 ms` (DESIGN §1) is refuted, not met.**
-  This supersedes every cold-start entry in this file, including the two below it,
-  and it is a **correction**: the record said MET.
+- **Cold start — MET. `< 25 ms` (DESIGN §1) is met, on a genuinely quiet host.**
+  This supersedes the `MISSED` verdict recorded earlier the same day, which was a
+  **load artefact**: it gated on a load *average* of 1.84 while its own `mpstat`
+  never put the foreign load below **2.3 of 12 busy CPUs**. Re-measured at **0.55
+  busy CPUs** (idle 95.59 / 94.97 / 95.61 %), three interleaved rounds, 21 runs per
+  cell, **all 378 runs verified**, `benchmarks/cold-start.sh` exiting **0 in 24 of
+  24 cells**: Release **21.63 ms** (script) and **22.32 ms** (repl),
+  RelWithDebInfo 21.73 / 22.20 — indistinguishable, 0.10–0.12 ms apart on the
+  median-of-medians against 1.5–12.7 ms within-cell spreads.
 
-  `benchmarks/cold-start.sh <binary> 21` must exit 0 — that is the done-when in
-  `DECISIONS-LOG.md` — and on 2026-09-26 it exited **1 in 12 of 12 cases**: both
-  builds, both modes, three interleaved rounds each, **all 252 runs verified**,
-  load average 4.03–4.22. The quietest sample of that window, on the shipped
-  `Release` binary at load average **1.84** — the lowest the host reached — 21 runs
-  per mode, 21/21 verified in both:
+  **The control that settles it is the same binary at two loads.**
+  `build_rwdi/protoscala`, unrebuilt since the loaded window, measured **28.37 /
+  27.97 ms** there and **22.16 / 22.02 ms** on the quiet host. Load was the
+  variable; the 23.73 ms of 0.6.0 both reproduces and is beaten. The image is worth
+  2.46 ms (script) and 2.34 ms (repl), agreeing with the 1.92 / 2.12 ms measured at
+  0.6.0.
 
-  | mode | median | min | max | target | verdict |
-  |---|---:|---:|---:|---:|---|
-  | script | **26.38 ms** | 22.50 | 30.06 | 25 | MISSED by 1.38 ms |
-  | repl | **25.43 ms** | 23.20 | 29.57 | 25 | MISSED by 0.43 ms (straddles) |
+  **The durable lesson, which matters more than the verdict: a cold-start claim
+  must state MEASURED IDLE, never a load average.** A load average counts runnable
+  *and* uninterruptible tasks and lags by design; the two verdicts differ by nothing
+  but the host, and the wrong one gated on the wrong metric. Any future claim on
+  this figure states `mpstat` idle, or busy CPUs of 12, at the start, the middle and
+  the end.
 
-  **`Release` and `RelWithDebInfo` are indistinguishable**: 0.34–0.90 ms apart on
-  the median-of-medians, against a 3–18 ms within-cell spread. Nothing here
-  supports calling either build faster.
+  **Two operands still belong beside the number, and one of them is now smaller
+  than it looked.** The harness's own floor is **4.67 ms** on this host (the
+  identical construct around `/bin/true`, 21 runs, 3.20–5.66), and it is **not
+  simply additive**: 42 bare runs of the binary with no harness average **19.5 ms**
+  against the harness's 21.6 ms median, so only about **2 ms** of the floor shows up
+  in the figure and the ~5 ms must **not** be subtracted to claim 16.6 ms. It stays
+  **stated, not deducted** — the done-when is the script's exit status. And start-up
+  is still **kernel-bound**: 0.172 s user against 0.669 s sys over the same 42 runs,
+  sys 3.9× user. A direction to investigate, not a defect.
 
-  Two operands belong in the record, because they change what the number means:
+  **E5's headroom corollary is restored, with its arithmetic corrected.** The budget
+  is met with about **3.4 ms** of margin on the script case (21.63 against 25), not
+  the 1.3 ms the 0.6.0 entry claimed — so the twenty prelude classes that headroom
+  was sized for still fit, and a protoCore space image (escalation **E5**) is once
+  more open on its merits rather than as a blocker. Full write-up:
+  [`../benchmarks/reports/2026-09-26-quiet-window.md`](../benchmarks/reports/2026-09-26-quiet-window.md) §1.
 
-  - **The harness's own floor is about 5 ms.** `cold-start.sh` times a pipeline
-    (two `date +%s%N` forks, the binary, a pipe, an `awk`; plus `sh -c` and
-    `printf` for the REPL mode). The identical construct around trivial commands,
-    21 runs each, measures **5.55 ms for `/bin/true`**, 4.79 ms for
-    `/bin/echo hi`, 4.67 ms for `sh -c true`. So roughly **21.4 ms of the
-    26.38 ms is protoScala**. **Stated, not deducted:** the done-when is the
-    script's exit status, and redefining it is a maintainer's decision.
-  - **Start-up is kernel-bound, not interpreter-bound.** Across 42 runs the
-    harness spent **0.26 s user against 1.07 s sys** — about 25 ms of `sys` per
-    run — consistent with process creation, `mmap` and dynamic linking rather
-    than prelude work. That is a **diagnostic direction, not a defect**.
-
-  **And the previously published 23.73 ms did not reproduce even at a lower
-  load** — 26.38 ms at load 1.84 against 23.73 ms at load 2.97, on a binary
-  confirmed to be using the prelude image. **Load is therefore not the variable
-  that explains the gap, and the cause is unidentified.** Not separated here: a
-  change in the tree since that measurement, a difference in how the figure was
-  taken, or a host-state variable neither run recorded. The method for re-opening
-  it is the one `DECISIONS-LOG.md` prescribes — rebuild the commit the 23.73 ms
-  came from and interleave it against the current tree in one window.
-
-  Everything the prelude image does remains true and is untouched by the verdict
-  (see the superseded entry below for the 59.6 / 2.6 / 22.5 % split); what is
-  withdrawn is the claim that it brought the number under target, and with it the
-  "about 1.3 ms of headroom" that claim rested on. There is no measured headroom.
-  Full write-up:
-  [`../benchmarks/reports/2026-09-26-quiet-host-attempt.md`](../benchmarks/reports/2026-09-26-quiet-host-attempt.md) §2.
-
-- **SUPERSEDED (was: MET at 0.6.0, and met by the precompiled prelude image).**
-  Refuted by the entry above; kept because the image's cost breakdown and the
-  source-path comparison are still the evidence for what the image does. Three
+- **The 0.6.0 measurement: MET, and CONFIRMED by the quiet-window run above.**
+  It was briefly recorded as refuted, on the loaded host whose verdict is now
+  withdrawn; its 23.73 / 23.89 ms both reproduces and is beaten by 21.63 / 22.32 ms
+  at 0.55 busy CPUs. Kept in full because the image's cost breakdown and the
+  source-path comparison are the evidence for what the image does. Three
   rounds interleaved in one window, image and source path alternating, all twelve
   cases `verified=21`, load average 2.97 at the start and 2.67 at the end:
   **0.6.0 with the image, script 23.73 ms and REPL 23.89 ms**, against 25.65 and
@@ -1406,8 +1400,10 @@ exercised for the first time in Phase 6** — see the three entries below it.
   **What this does not claim:** the worst sample is still above the target.
   `run_benchmarks.py` applies a stricter per-sample verdict and records all four
   0.6.0 cases as **STRADDLES** — median below 25 ms, spread crossing it — on a
-  daily-driver desktop. (Read now: the stricter verdict was the early warning, and
-  the 2026-09-26 re-measurement moved the median across the target as well.)
+  daily-driver desktop. (Read now: that is still the honest per-sample reading. The
+  quiet-window run's worst samples reach 33.67 ms, so the *tail* still crosses the
+  target even where the median sits 3.4 ms inside it; the budget is met on the
+  measure DESIGN §1 and the done-when use, and the tail is not yet quiet.)
 
   What the image cannot remove is `linkSymbols` (342 µs) and *running* the
   compiled prelude (177 µs), by construction: the tables hold strings and PODs, so
@@ -1418,12 +1414,12 @@ exercised for the first time in Phase 6** — see the three entries below it.
   and the only caching facility is the in-process `SharedModuleCache`, which holds
   live objects and cannot cross a process. That stays a P3, maintainer-owned
   question (escalation **E5**), and the 2026-09-26 verdict **restores it as a
-  live one**: the "about 1.3 ms of headroom on the script case" this entry
-  claimed is withdrawn along with the MET verdict — the current median is 1.38 ms
-  *over* the target, not under it. Full tables in `benchmarks/RESULTS.md`.
+  question open on its merits: the headroom is real and is **larger** than this
+  entry claimed — about **3.4 ms** on the script case at 21.63 ms against 25, not
+  1.3 ms. Full tables in `benchmarks/RESULTS.md`.
 
 - **Cold start after Track X — the delta is below the noise floor; the budget
-  could not be re-certified on this host, and has since been refuted.** Track X adds four prelude declarations
+  could not be re-certified on that host, and has since been MET on a quiet one.** Track X adds four prelude declarations
   that carry start-up work: `AssertionError`, `NotImplementedError`,
   `object __NoMessage` and `trait App`. At the recorded marginal cost of ~60 µs per
   prelude class that is ~240 µs, and the measurement cannot see it. Three rounds
@@ -1454,14 +1450,15 @@ exercised for the first time in Phase 6** — see the three entries below it.
   was therefore: **the budget is neither confirmed nor refuted here, and Track X is
   not what would have broken it.**
 
-  **Settled since, on 2026-09-26: refuted.** The re-measurement at load 1.84
-  reached a *lower* load than either the 0.6.0 run or this one and still measured
-  26.38 / 25.43 ms with `cold-start.sh` exiting 1 in 12 of 12 cases, so what this
-  entry left open is now closed against the budget. The second half of the
-  statement stands unchanged and is worth keeping: **Track X is still not what
-  broke it** — the four declarations are ~240 µs against a 1.38 ms miss, and the
-  gap predates them, since the 23.73 ms figure they were compared with did not
-  reproduce either. Raw samples:
+  **Settled since, on 2026-09-26: the budget is MET**, and this entry's caution was
+  right for the wrong reason. A re-measurement at load *average* 1.84 read 26.38 /
+  25.43 ms and was recorded as a refutation; a third run at **0.55 measured busy
+  CPUs** read 21.63 / 22.32 ms with `cold-start.sh` exiting 0 in 24 of 24 cells, and
+  the same unrebuilt `build_rwdi` binary read 28.37 ms on the loaded host and 22.16 ms
+  on the quiet one. **Load was the variable in both directions**, which is exactly
+  what "could not be re-certified on this host" said. The second half of the statement
+  also stands: **Track X is not what moved it** — four declarations at ~240 µs against
+  a host effect of 6 ms. Raw samples:
   `../.agent_scratch/predef-import/coldstart-interleaved-final.txt` (and
   `coldstart-interleaved.txt` for the Predef half alone, measured at load 5.6).
 

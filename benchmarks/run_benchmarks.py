@@ -230,9 +230,42 @@ def first_existing(cands):
     return None
 
 
+def runnable(binary):
+    """True when `binary` exists AND can actually start.
+
+    `exists()` alone is not enough, and the failure it let through was published:
+    `build_bench/protoscala` was linked against the retired `libprotoCore.so.2`, so
+    it died in the dynamic loader, and the harness selected it as the Release column
+    and reported a 4.45 ms "time" that was a crash. The printed-work verification
+    caught it as FAILED, which is why nothing wrong was published as a RESULT -- but a
+    dead build tree should never have been selected in the first place, and sibling
+    runtimes' build trees (protoPython, protoST, protoClojure) go stale far more often
+    than this one. `--version` is the cheapest universal probe: every runtime in the
+    family answers it, and a loader failure fails it.
+    """
+    b = Path(binary)
+    if not b.exists():
+        return False
+    try:
+        p = subprocess.run([str(b), "--version"], capture_output=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if p.returncode != 0:
+        err = (p.stderr or b"").decode(errors="replace").strip().splitlines()
+        print(f"note: {b} exists but does not run -- column skipped"
+              + (f": {err[0]}" if err else ""), file=sys.stderr)
+        return False
+    return True
+
+
 def find_bin(var, cands):
     p, overridden = env_path(var)
-    return p if overridden else first_existing(cands)
+    if overridden:
+        return p
+    for c in cands:
+        if runnable(c):
+            return first_existing([c])
+    return None
 
 
 def build_type(binary):

@@ -434,28 +434,26 @@ parse + desugar + compile removes 3,752 µs — **84.8 %** of the prelude's cost
 and leaves link (342 µs) and run (177 µs), which no protoScala-side change can
 remove.
 
-### Cold start at 0.6.0 — SUPERSEDED: the budget is MISSED (correction, 2026-09-26)
+### Cold start at 0.6.0 — CONFIRMED on a quiet host (2026-09-26)
 
-> **This section's verdict is withdrawn.** A re-measurement on 2026-09-26, on the
-> shipped `Release` binary at load average **1.84** — *lower* than the 2.97 this
-> section was taken at — gives **script 26.38 ms** (22.50–30.06) and **REPL
-> 25.43 ms** (23.20–29.57), 21 runs per mode, 21/21 verified, and
-> `benchmarks/cold-start.sh` exits **1 in 12 of 12 cases** across both builds,
-> both modes and three interleaved rounds (all 252 runs verified). `Release` and
-> `RelWithDebInfo` are indistinguishable (0.34–0.90 ms apart on the
-> median-of-medians, against a 3–18 ms within-cell spread).
+> **This section's verdict stands.** A `MISSED` correction published on 2026-09-26
+> is **withdrawn as a load artefact**: it gated on a load *average* of 1.84 while its
+> own `mpstat` never put the foreign load below 2.3 of 12 busy CPUs. Re-measured at
+> **0.55 busy CPUs** (`mpstat` idle ~95 %), 21 runs per cell × 3 interleaved rounds,
+> **378 runs all verified**, `cold-start.sh` exiting **0 in 24 of 24 cells**: shipped
+> `Release` **21.63 ms** script / **22.32 ms** repl; `RelWithDebInfo` 21.73 / 22.20,
+> indistinguishable. **The 23.73 ms below reproduces and is beaten.**
 >
-> Two operands, stated and **not** deducted: the harness's own floor is about
-> **5 ms** (the identical construct around `/bin/true` measures 5.55 ms), so
-> roughly **21.4 ms of the 26.38 ms is protoScala**; and start-up is
-> **kernel-bound**, 0.26 s user against 1.07 s sys across 42 runs — a diagnostic
-> direction, not a defect.
+> The control that settles it is the same binary at two loads: `build_rwdi`,
+> unrebuilt since the loaded window, read 28.37 / 27.97 ms there and 22.16 /
+> 22.02 ms here. **Load was the variable, and the rule that survives is: state
+> measured idle, never a load average.**
 >
-> **The 23.73 ms below did not reproduce**, at a lower load, on a binary confirmed
-> to use the image. Load does not explain the gap and its cause is
-> **unidentified**. Everything this section says about what the *image* is worth
-> stands; only the "met" verdict and the headroom it implied are withdrawn. Full
-> write-up: [`reports/2026-09-26-quiet-host-attempt.md`](reports/2026-09-26-quiet-host-attempt.md) §2.
+> Operands, neither deducted: the harness's floor is **4.67 ms** and is **not simply
+> additive** (42 bare runs average **19.5 ms** against 21.6 ms through the harness,
+> so only ~2 ms shows and the ~5 ms must not be subtracted); start-up is
+> **kernel-bound**, 0.172 s user against 0.669 s sys. Headroom: about **3.4 ms**.
+> Full write-up: [`reports/2026-09-26-quiet-window.md`](reports/2026-09-26-quiet-window.md) §1.
 
 *The section as originally recorded follows, kept as the measurement of
 2026-09-24.*
@@ -550,11 +548,12 @@ when the median is at or above it, and **STRADDLES** in between. By that reading
 all four 0.6.0 cases are **STRADDLES**: medians 23.48–24.53 ms, worst samples
 26.2–30.8 ms.
 
-Both are true and they were not in conflict. What they said together was: **the
-budget is met on the measure DESIGN §1 and the done-when use, and on a
-daily-driver desktop the occasional sample still crosses 25 ms.** Read now, the
-stricter verdict was the early warning: on 2026-09-26 the **median** crossed the
-target too, and both readings agree on MISSED. Nothing here
+Both are true and they are not in conflict. What they say together is: **the budget
+is met on the measure DESIGN §1 and the done-when use, and the tail still crosses
+25 ms.** That is still the honest reading on a quiet host — the 2026-09-26 run's
+medians sit 2.7–3.4 ms inside the target while its worst samples reach 33.67 ms, so
+`run_benchmarks.py`'s per-sample verdict remains **STRADDLES** and the median-based
+done-when remains MET. Nothing here
 claims the worst case is under target, because it is not, and the suite report
 records that verdict in its own table rather than being overridden here. A
 dedicated quiet host would settle the question; this one runs VS Code, Chrome and

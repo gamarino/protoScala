@@ -81,17 +81,19 @@ measurable** — which is the expected result, and the reason is on the record: 
 6's prelude image already removed the large share, and a one-file user program's
 front end is small.
 
-**That 22.3 ms is not the cold-start figure, and the difference is the point of the
-cold-start correction.** `benchmarks/cold-start.sh` measures **26.38 ms** for a script
-and the `< 25 ms` budget is **MISSED**; this runner measures 22.29 ms for a
-near-identical program. The gap is the cold-start harness's own floor — about **5 ms**,
-measured as 5.55 ms for `/bin/true` through the identical shell construct — which that
-harness includes and this one does not, because this one calls `subprocess.run`
-directly. Both figures are right for what they measure; neither may be quoted as the
-other. Start-up is also **kernel-bound** (0.26 s user against 1.07 s sys across 42
-runs), so a difference of a few milliseconds between two harnesses is a difference in
-how many processes each one forks. The previously published 23.73 ms did not reproduce
-even at a lower load.
+**That 22.3 ms is not the cold-start figure, and after the quiet-window run the two
+agree.** `benchmarks/cold-start.sh` measures **21.63 ms** for a script on a quiet host
+and the `< 25 ms` budget is **MET**; this runner measured **22.29 ms** for a
+near-identical program on a host at load ~3.5–5. Those are the same number to within
+the contention, which is the cross-check: a harness that called `subprocess.run`
+directly and one that times a shell pipeline land within 0.7 ms of each other once the
+host is quiet, because the pipeline's 4.67 ms floor is **not simply additive** (42 bare
+runs average 19.5 ms against 21.6 ms through the harness, so only ~2 ms of it shows).
+A `MISSED` verdict of 26.38 ms published earlier the same day was a load artefact and
+is withdrawn; this table's absolutes were taken under the same contention that produced
+it, which is why only its **ratios** are the finding. Start-up is also **kernel-bound**
+(0.172 s user against 0.669 s sys), so a millisecond between two harnesses is a
+difference in how many processes each forks.
 
 Because that floor is ~22 ms of the ~25 ms several workloads take, a "work-only"
 ratio derived by subtracting it is meaningless for the short ones — `factorial_100`

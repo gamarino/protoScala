@@ -33,6 +33,27 @@ struct PreludeTiming {
 };
 const PreludeTiming& preludeTiming();
 
+/**
+ * Which prelude path this BINARY will take, answered by the library rather than by
+ * a macro in the caller.
+ *
+ * Why it exists: `--version` used to test `PROTOSCALA_HAVE_PRELUDE_IMAGE` in
+ * `src/main.cpp`. That macro is `PUBLIC` on the `protoscala_runtime` OBJECT library,
+ * and once Phase 7 made `protoscala` link the shared `protoScala` target — which
+ * links the object libraries PRIVATE — it stopped reaching `main.cpp`. The binary
+ * kept using the image and `--version` started reporting that it did not, which is
+ * the worst shape of defect for a `--version`: the thing a user checks, quietly
+ * wrong. Asking the library removes the class of bug, because the answer now comes
+ * from a translation unit compiled with the definition, by construction.
+ */
+enum class PreludePath {
+    Source,            // this build has no image (cross-compiled, or the tool absent)
+    Image,             // an image is present and valid, and will be used
+    ImageDisabled,     // an image is present and valid, but PROTOSCALA_PRELUDE_NO_IMAGE is set
+    ImageStale,        // an image is present but its format or source hash does not match
+};
+PreludePath preludePath();
+
 // Parses, compiles and runs the prelude under `parent`: its definitions join
 // `globals`, its modules `modules` (retained for the session). Throws
 // std::logic_error when the prelude fails — a build defect, never user input.

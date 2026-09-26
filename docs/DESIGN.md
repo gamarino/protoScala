@@ -26,19 +26,26 @@ reproduce `scalac`'s static typechecker. Its value proposition:
    start-up work, and 25 ms keeps the "instant" property without turning every
    prelude addition into a performance negotiation.)
 
-   **Status of this target: MISSED, as of 2026-09-26.** The done-when is
-   `benchmarks/cold-start.sh <binary> 21` exiting 0, and it exits 1 in 12 of 12
-   cases; the quietest sample of that window measures **26.38 ms** (script) and
-   **25.43 ms** (REPL). The target stays as written — this is a statement about
-   the runtime, not a revision of the goal. Two operands to read it with, neither
-   of them deducted from the figure: about **5 ms** of the measurement is the
-   harness's own floor (the same construct around `/bin/true` measures 5.55 ms),
-   so roughly 21.4 ms is protoScala; and start-up is **kernel-bound** here,
-   0.26 s user against 1.07 s sys across 42 runs, which points at process
-   creation, `mmap` and dynamic linking rather than at prelude work. The gap's
-   cause is **unidentified**: the previously published 23.73 ms did not reproduce
-   even at a lower load. `docs/STATUS.md` and
-   `benchmarks/reports/2026-09-26-quiet-host-attempt.md` §2 carry the detail.
+   **Status of this target: MET, certified 2026-09-26 on a quiet host.** The
+   done-when is `benchmarks/cold-start.sh <binary> 21` exiting 0, and it exits 0 in
+   **24 of 24 cells**, 378 runs all verified, at **0.55 busy CPUs of 12** (`mpstat`
+   idle ~95 %): **21.63 ms** (script) and **22.32 ms** (repl) for the shipped
+   `Release` build, with `RelWithDebInfo` indistinguishable at 21.73 / 22.20.
+
+   A `MISSED` verdict recorded earlier the same day is **withdrawn as a load
+   artefact**: it gated on a load *average* of 1.84 while its own `mpstat` never put
+   the foreign load below 2.3 of 12 busy CPUs. The control that settles it is the
+   same unrebuilt binary at two loads — 28.37 ms on the loaded host, 22.16 ms on the
+   quiet one. **The durable rule this leaves behind: a cold-start claim states
+   measured idle, never a load average.**
+
+   Two operands, neither deducted. The harness's own floor is **4.67 ms** and it is
+   **not simply additive** — 42 bare runs average **19.5 ms** against the harness's
+   21.6 ms median, so only about **2 ms** of it shows in the figure and the ~5 ms
+   must not be subtracted. And start-up is **kernel-bound**: 0.172 s user against
+   0.669 s sys, sys 3.9× user — a direction to investigate, not a defect. The budget
+   is met with about **3.4 ms** of margin. `docs/STATUS.md` and
+   `benchmarks/reports/2026-09-26-quiet-window.md` §1 carry the detail.
 2. **Native structural immutability** — functional collections and case
    classes map onto protoCore's persistent structures.
 3. **Real concurrency without a GIL** — native actors with O(1) message

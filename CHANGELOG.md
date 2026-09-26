@@ -134,7 +134,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the 0.6.0 measurement. Neither confirmed nor refuted, and Track X is not what
   would have broken it. STATUS.md carries the table.
 
-  **Settled since, and it is a correction: the budget is MISSED.** See the
+  **Settled since: the budget is MET**, re-certified at 0.55 busy CPUs, and this
+  entry's "not re-certified" was the right call on the host it had. See the
   *Changed* entry below.
 
 - **The Predef surface (Track X): `assert`, `assume`, `require`, `???` and
@@ -243,39 +244,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **The cold-start verdict is corrected to MISSED. `< 25 ms` (DESIGN §1) is
-  refuted, and 0.6.0's "met" claim is withdrawn.** `benchmarks/cold-start.sh`
-  must exit 0 — that is the done-when in `DECISIONS-LOG.md` — and on 2026-09-26
-  it exited **1 in 12 of 12 cases**: both builds, both modes, three interleaved
-  rounds each, **all 252 runs verified**, load 4.03–4.22. The quietest sample of
-  the window, shipped `Release` binary, load average **1.84**, 21 runs per mode,
-  21/21 verified in both: **script 26.38 ms** (22.50–30.06) and **REPL 25.43 ms**
-  (23.20–29.57). `Release` and `RelWithDebInfo` are **indistinguishable** —
-  0.34–0.90 ms apart on the median-of-medians against a 3–18 ms within-cell
-  spread.
+- **The cold-start verdict is MET, and the `MISSED` correction published earlier
+  the same day is withdrawn as a load artefact.** Two corrections in one day is not
+  a good look, so the mechanism is on the record rather than glossed: the `MISSED`
+  reading gated on a load **average** of 1.84 while its own `mpstat` never put the
+  foreign load below **2.3 of 12 busy CPUs**. Re-measured at **0.55 busy CPUs**
+  (`mpstat` idle ~95 %), three interleaved rounds, 21 runs per cell, **378 runs all
+  verified**, `benchmarks/cold-start.sh` exiting **0 in 24 of 24 cells**: shipped
+  `Release` **21.63 ms** (script) / **22.32 ms** (repl), `RelWithDebInfo`
+  indistinguishable at 21.73 / 22.20 (0.10–0.12 ms apart against 1.5–12.7 ms
+  within-cell spreads).
 
-  Two operands belong beside the number, because they change what it means.
-  **The harness's own floor is about 5 ms**: `cold-start.sh` times a pipeline, and
-  the identical construct around `/bin/true` measures **5.55 ms** (4.79 ms for
-  `/bin/echo hi`, 4.67 ms for `sh -c true`, 21 runs each), so roughly **21.4 ms
-  of the 26.38 ms is protoScala** — **stated, not deducted**, because the
-  done-when is the script's exit status and redefining it is the maintainer's
-  call. And **start-up is kernel-bound, not interpreter-bound**: 0.26 s user
-  against **1.07 s sys** across 42 runs, about 25 ms of `sys` per run, which is
-  process creation, `mmap` and dynamic linking — a **diagnostic direction, not a
-  defect**.
+  **The control that settles it is the same binary at two loads**, not a rebuild:
+  `build_rwdi/protoscala`, untouched since the loaded window, read **28.37 / 27.97 ms**
+  there and **22.16 / 22.02 ms** here. Load was the variable, and 0.6.0's 23.73 /
+  23.89 ms both reproduces and is beaten.
 
-  Recorded honestly: **the published 23.73 ms did not reproduce even at a lower
-  load** (26.38 ms at load 1.84 against 23.73 ms at load 2.97), on a binary
-  confirmed to use the prelude image. **Load does not explain the gap and its
-  cause is unidentified** — a tree change since, a difference in method, or an
-  unrecorded host-state variable, none of them separated. The withdrawn claim
-  takes its corollary with it: there is **no measured 1.3 ms of headroom**, and
-  the protoCore-space-image question (escalation E5) is live again. What the
-  prelude image does is unaffected; what is withdrawn is that it brought the
-  number under target. Corrected in `README.md`, `docs/STATUS.md` and here;
-  `docs/DESIGN.md` keeps `< 25 ms` as the target and now says it is missed. Full
-  write-up: `benchmarks/reports/2026-09-26-quiet-host-attempt.md` §2.
+  **The durable lesson, which outlasts the number: a cold-start claim states
+  MEASURED IDLE, never a load average.** A load average counts runnable *and*
+  uninterruptible tasks and lags by design. The two verdicts differ by nothing but
+  the host, and the wrong one gated on the wrong metric.
+
+  Two operands stay, and one shrank. The harness's own floor is **4.67 ms** and is
+  **not simply additive** — 42 bare runs average **19.5 ms** against the harness's
+  21.6 ms median, so only about **2 ms** of it shows and the ~5 ms must **not** be
+  subtracted to claim 16.6 ms. It remains **stated, not deducted**: the done-when is
+  the script's exit status. Start-up is still **kernel-bound**, 0.172 s user against
+  0.669 s sys, sys 3.9× user — a direction, not a defect. **E5's headroom corollary
+  is restored with its arithmetic corrected:** about **3.4 ms** of margin on the
+  script case, not the 1.3 ms the 0.6.0 entry claimed, so a protoCore space image is
+  open on its merits rather than as a blocker. Full write-up:
+  `benchmarks/reports/2026-09-26-quiet-window.md` §1.
 
 - **The worked example (`examples/log-report/`) opens `sample.log`.** It was
   written around the absence of file I/O and carried the log twice, once as the real
@@ -504,10 +503,10 @@ which the installer phase recorded as its own deliberate gap.
   question as scoping extension methods (D82) and is decided with it.
 - Nothing outstanding on DESIGN §1's cold-start budget: it is **met** at 0.6.0
   (script 23.73 ms, REPL 23.89 ms, against a target of 25 ms), which 0.5.0 missed
-  by about 1 ms. **[Superseded 2026-09-26: this claim is withdrawn. A
-  re-measurement puts the script median at 26.38 ms and `cold-start.sh` exits 1 in
-  12 of 12 cases, and the 23.73 ms did not reproduce. See the Unreleased
-  *Changed* entry.]** Three rounds interleaved in one window, 21 verified runs per
+  by about 1 ms. **[Confirmed 2026-09-26: this claim stands. On a quiet host (0.55 busy CPUs) the
+  script median is 21.63 ms and `cold-start.sh` exits 0 in 24 of 24 cells, so the
+  23.73 ms both reproduces and is beaten. A `MISSED` reading published in between was
+  a load artefact and is withdrawn; see the Unreleased *Changed* entry.]** Three rounds interleaved in one window, 21 verified runs per
   case; `PROTOSCALA_PRELUDE_NO_IMAGE=1` still measures 25.65 / 26.01 ms, which is
   what proves the image and not the release moved the number. What no protoScala
   change can remove is `linkSymbols` and *running* the compiled prelude

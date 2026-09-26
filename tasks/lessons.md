@@ -117,3 +117,61 @@ transpiler refuses a class, the shim alone refused every corpus test, and the
 the new measurement is sensitive to any of it. Run the comparison with the
 adaptation and without it, report both, and name the artefact rather than picking
 the flattering row.
+
+## A load average is not a quiet host
+
+**2026-09-26.** I propagated a `MISSED` cold-start verdict into seven documents. It
+was wrong. The measurement it rested on gated on a **load average of 1.84** while its
+own `mpstat` in the same report never put the foreign load below **2.3 of 12 busy
+CPUs** — the two metrics were both in the document and they disagreed, and the verdict
+took the flattering one. On a host at **0.55** busy CPUs the same suite exits 0 in 24
+of 24 cells at 21.63 ms. The control is decisive and costs nothing: the **same
+unrebuilt binary** read 28.37 ms loaded and 22.16 ms quiet.
+
+**Rule.** A load average counts runnable *and* uninterruptible tasks and lags by
+design, so it is not a measure of available CPU. Any timing claim states **measured
+idle** — `mpstat`'s `%idle`, or busy CPUs of N — at the start, the middle and the end.
+And when a report carries two metrics that disagree about whether the host qualified,
+that disagreement is the finding: stop and re-measure, do not pick one.
+
+## Never mutate a file whose fix is uncommitted — I did it again
+
+**2026-09-26.** `tasks/lessons.md` already carried this rule, from Track S. I
+mutated `src/main.cpp` to check that a new test could fail, then reverted with
+`git checkout -- src/main.cpp`, which discarded the **fix** along with the mutation,
+because the fix was not committed. I noticed only because the test then passed for the
+wrong reason.
+
+**Rule, restated because reading it once was not enough:** copy the file aside first
+(`cp x "$SCRATCH/x.fixed"`) and restore from the copy. `git checkout` restores the last
+*commit*, which during mutation testing is precisely what you do not want. If a rule in
+this file has already been broken once, put the mechanism in the command, not in the
+intention.
+
+## A test whose oracle is the code under test proves nothing
+
+**2026-09-26.** `--version` had misreported the prelude image since `3fa7ff0`. My
+first regression check compared `--version` **with and without**
+`PROTOSCALA_PRELUDE_NO_IMAGE=1` and required the two lines to differ. A mutation that
+made `--version` always report "no precompiled image in this build" — which is the bug
+that actually shipped — **passed** it, because both lines then agreed. The oracle was
+another reading of the same broken code path.
+
+**Rule.** A regression check needs a source of truth *outside* the thing it checks.
+Here it was `PROTOSCALA_PRELUDE_TIMING`'s `image=` flag, set by the code that actually
+chooses the path; the check now compares the report against the behaviour. Before
+writing the assertion, name what would tell you the answer if the feature under test
+were lying — and if the answer is "the feature", find something else.
+
+## An `exists()` check is not an "is usable" check
+
+**2026-09-26.** `benchmarks/run_benchmarks.py` selected a Release column by
+`Path.exists()`. `build_bench/protoscala` existed and was linked against the retired
+`libprotoCore.so.2`, so it died in the dynamic loader — and was selected, timed at
+4.45 ms, and only caught because the harness verifies *printed work* rather than exit
+codes. The verification saved the table; the selection should never have happened.
+
+**Rule.** A harness that discovers a binary must prove it **runs**, not that it is
+present: `--version` is the cheapest universal probe and a loader failure fails it.
+This matters most for sibling runtimes, whose build trees go stale far more often than
+one's own.
