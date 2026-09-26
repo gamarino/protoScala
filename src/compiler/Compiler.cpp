@@ -218,7 +218,7 @@ private:
         switch (n.kind) {
             case NodeKind::IntLit: case NodeKind::FloatLit: case NodeKind::StringLit:
             case NodeKind::CharLit: case NodeKind::BoolLit: case NodeKind::NullLit:
-            case NodeKind::UnitLit: case NodeKind::Import:
+            case NodeKind::UnitLit: case NodeKind::Import: case NodeKind::TypeDef:
                 return;
             // Phase 3: an interpolation's holes are ordinary expressions, so a
             // name they read from an enclosing scope must be boxed like any
@@ -628,6 +628,7 @@ void Compiler::compileExpr(const Node& n) {
         case NodeKind::ValDef:
         case NodeKind::DefDef:
         case NodeKind::Import:
+        case NodeKind::TypeDef:
             throw CompileError("definition used as an expression", n.pos);
         case NodeKind::TemplateDef:
             throw CompileError("classes, traits and objects must be defined at the top level "
@@ -1075,6 +1076,12 @@ void Compiler::compileStats(const std::vector<NodePtr>& stats, std::size_t from,
     for (std::size_t k = from; k < stats.size(); ++k) {
         const Node& s = *stats[k];
         const bool last = (k + 1 == stats.size());
+        if (s.kind == NodeKind::TypeDef) {
+            // A type alias produces no code: the compiler recorded it when the
+            // block was declared (see declareTypeAliases).
+            if (last) { emit(Op::PUSH_UNIT, 0, s.pos, +1); valueOnStack = true; }
+            continue;
+        }
         if (s.kind == NodeKind::Import) {
             // Hoisted out of the block (D96): the binding is installed in the
             // unit's tables and outlives the block, so it takes effect from here
@@ -1701,6 +1708,8 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
                     out.definitions.push_back(
                         {std::string(v.isLazy ? "lazy val " : v.isVar ? "var " : "val ") + v.name,
                          key});
+            } else if (s->kind == NodeKind::TypeDef) {
+                declareTypeAlias(as<TypeDef>(*s));
             } else if (s->kind == NodeKind::TemplateDef) {
                 const auto& t = as<TemplateDef>(*s);
                 // Two templates of one unit declaring the same type name would
@@ -1840,7 +1849,7 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
             if (s->kind == NodeKind::ValDef) {
                 if (!as<ValDef>(*s).isLazy) analyseCaptures({}, rhsOf(as<ValDef>(*s)));
             } else if (s->kind != NodeKind::DefDef && s->kind != NodeKind::Import &&
-                       s->kind != NodeKind::TemplateDef &&
+                       s->kind != NodeKind::TemplateDef && s->kind != NodeKind::TypeDef &&
                        s->kind != NodeKind::ExtensionDef) {
                 analyseCaptures({}, *s);
             }
@@ -1850,7 +1859,7 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
             const Node& s = *unit.stats[k];
             const bool last = (k + 1 == unit.stats.size());
             if (s.kind == NodeKind::DefDef || s.kind == NodeKind::Import ||
-                s.kind == NodeKind::TemplateDef)
+                s.kind == NodeKind::TemplateDef || s.kind == NodeKind::TypeDef)
                 continue;
             if (s.kind == NodeKind::ExtensionDef) {
                 // In source order, so a later definition sees the member and an
@@ -1892,7 +1901,8 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
 // does not describe: the primitive prototypes the Runtime rebinds, which have no
 // ClassInfo because a type pattern tests them by TypeCode rather than by a marker
 // key. Anything else must be a declared type.
-std::string Compiler::extensionTarget(const std::string& typeName) const {
+std::string Compiler::extensionTarget(const std::string& rawName) const {
+    const std::string typeName = globals_.followTypeAlias(rawName);
     static const char* const kBuiltins[] = {"Int",    "Long",   "Short",  "Byte",  "BigInt",
                                             "Double", "Float",  "Boolean", "Char", "String",
                                             "List",   "Unit",   "Any",    "AnyRef"};

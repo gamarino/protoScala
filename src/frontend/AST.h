@@ -42,6 +42,7 @@ enum class NodeKind : uint8_t {
     ValDef, DefDef, Import,
     TemplateDef, New, Match, For,   // Phase 2
     Try, Throw, Super, ExtensionDef,  // Phase 4
+    TypeDef,                          // Track S: `type X = T`
 };
 
 struct Node {
@@ -367,6 +368,22 @@ struct ExtensionDef : Node {
     std::string receiverName;      // `x`
     TypePtr receiverType;          // `T`
     std::vector<NodePtr> members;  // DefDef nodes
+};
+
+// `type X = T`, `type X[A] = T`, and the abstract forms `type X` and
+// `type X >: L <: U`. protoScala erases types (D4), so an alias is a *naming*
+// concern: the compiler records `X` -> the alias's target name and expands it
+// wherever a type name is actually consumed -- a parent, a `new`, a type pattern,
+// an `isInstanceOf` and an extension's receiver. Everywhere else the type is
+// discarded anyway, so nothing has to be substituted. `rhs` is null for an
+// abstract type member, whose bounds are parsed and discarded like every other
+// bound.
+struct TypeDef : Node {
+    explicit TypeDef(SourcePos p) : Node(NodeKind::TypeDef, p) {}
+    std::string name;
+    std::vector<std::string> typeParams;  // erased, like every other type parameter
+    TypePtr rhs;                          // null: an abstract type member
+    Modifiers mods;
 };
 
 struct Enumerator {

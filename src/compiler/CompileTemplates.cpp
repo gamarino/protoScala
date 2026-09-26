@@ -72,6 +72,21 @@ void Compiler::loadThis(SourcePos pos) {
 static_assert(std::string_view(kEnumKey) == std::string_view(kEnumMarkerKey),
               "the desugarer's Enum marker spelling must be the Enum type key");
 
+// `type X = T` (Track S). protoScala erases types, so an alias is recorded as a
+// name-to-name mapping and expanded wherever a type name is consumed; the alias
+// itself compiles to nothing. A right-hand side that is not a named type is
+// recorded with an empty target: the alias is accepted and is then no more usable
+// as a class than its right-hand side would have been.
+//
+// An alias declared inside a template is recorded in the same unit-wide table,
+// under its simple name: Scala scopes it to the template, and honouring that
+// would need a type-name scope the compiler does not have (D109).
+void Compiler::declareTypeAlias(const TypeDef& d) {
+    std::string target = d.rhs ? typeNameOf(*d.rhs) : std::string();
+    if (target == d.name) target.clear();  // `type X = X`: not a chain
+    globals_.declareTypeAlias(d.name, target);
+}
+
 const ClassInfo& Compiler::resolveType(const TypeTree& t, SourcePos pos) const {
     // A Builtin type names a key, not a source name: the desugarer uses it for
     // the `Enum` marker trait so that an enum may itself be called `Enum`.
@@ -79,16 +94,22 @@ const ClassInfo& Compiler::resolveType(const TypeTree& t, SourcePos pos) const {
         if (const ClassInfo* c = globals_.findTypeByKey(t.name)) return *c;
         throw CompileError("Not found: builtin type " + t.name, pos);
     }
-    std::string name = typeNameOf(t);
-    if (name.empty()) throw CompileError("a class or trait name is expected here", pos);
+    const std::string written = typeNameOf(t);
+    if (written.empty()) throw CompileError("a class or trait name is expected here", pos);
+    std::string name = globals_.followTypeAlias(written);   // `type X = C` (Track S)
     for (const char* prefix : {"scala.", "java.lang."})
         if (name.rfind(prefix, 0) == 0) name = name.substr(std::char_traits<char>::length(prefix));
+    name = globals_.followTypeAlias(name);   // `type X = scala.C`
     // A template lifted out of an `object` has a dotted name, and Scala's scoping
     // sees a sibling without the qualifier, so the enclosing prefixes are tried
     // innermost first.
     for (const std::string& candidate : scopedNames(name))
         if (const ClassInfo* c = globals_.findType(candidate)) return *c;
-    throw CompileError("Not found: type " + name, pos);
+    // An alias names its target in the message as well, so that `type X = Int`
+    // followed by `new X` says which of the two names the compiler could not use.
+    throw CompileError("Not found: type " + written +
+                           (name == written ? "" : " (an alias for " + name + ")"),
+                       pos);
 }
 
 // Parents first; a template of this unit may extend another one defined below it.
@@ -372,6 +393,7 @@ ClassInfo Compiler::buildClassInfo(const TemplateDef& t, const std::string& type
                                    "of a file or in an object",
                                    s->pos);
             case NodeKind::Import:
+            case NodeKind::TypeDef:   // erased; recorded by declareTypeAliases
                 break;
             default:
                 hasStatements = true;  // an expression statement runs in the constructor
@@ -549,7 +571,7 @@ void Compiler::compileConstructor(const TemplateDef& t, const ClassInfo& info) {
         if (s->kind == NodeKind::ValDef && as<ValDef>(*s).rhs && !as<ValDef>(*s).isLazy)
             analyseCaptures(t.ctorParams, *as<ValDef>(*s).rhs);
         else if (s->kind != NodeKind::ValDef && s->kind != NodeKind::DefDef &&
-                 s->kind != NodeKind::Import)
+                 s->kind != NodeKind::Import && s->kind != NodeKind::TypeDef)
             analyseCaptures(t.ctorParams, *s);
     }
     // Parameter fields first, as scalac assigns them: a superclass constructor
@@ -634,7 +656,8 @@ void Compiler::compileConstructor(const TemplateDef& t, const ClassInfo& info) {
             if (v.isLazy || !v.rhs) continue;
             compileExpr(*v.rhs);
             emit(Op::STORE_FIELD, fn_->mod->addSymbol(info.members.at(v.name).key), v.pos, -1);
-        } else if (s->kind != NodeKind::DefDef && s->kind != NodeKind::Import) {
+        } else if (s->kind != NodeKind::DefDef && s->kind != NodeKind::Import &&
+                   s->kind != NodeKind::TypeDef) {
             compileExpr(*s);
             emit(Op::POP, 0, s->pos, -1);
         }

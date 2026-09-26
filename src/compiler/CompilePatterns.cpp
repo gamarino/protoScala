@@ -428,8 +428,10 @@ bool Compiler::compileTypeTest(const TypeTree& t, int slot, SourcePos pos, bool 
         case TypeTree::Kind::Function: name = "Function"; break;
         default: throw CompileError("this type cannot be tested at run time", pos);
     }
+    name = globals_.followTypeAlias(name);   // `type X = Int` (Track S)
     for (const char* prefix : {"scala.", "java.lang.", "Predef."})
         if (name.rfind(prefix, 0) == 0) name = name.substr(std::char_traits<char>::length(prefix));
+    name = globals_.followTypeAlias(name);
     static const std::unordered_map<std::string, TypeCode> builtin = {
         {"Int", TypeCode::Integer}, {"Long", TypeCode::Integer}, {"Short", TypeCode::Integer},
         {"Byte", TypeCode::Integer}, {"BigInt", TypeCode::Integer}, {"Integer", TypeCode::Integer},

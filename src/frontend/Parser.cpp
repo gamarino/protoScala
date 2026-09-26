@@ -1082,7 +1082,13 @@ NodePtr Parser::parseDefinition(std::vector<std::string> annotations) {
         case TokenKind::KwEnum:
             if (isLazy) fail("'lazy' is not allowed on an enum", t);
             return parseEnumDef(mods);
-        case TokenKind::KwType: case TokenKind::KwPackage:
+        case TokenKind::KwType: {
+            if (isLazy) fail("'lazy' is not allowed on a type", t);
+            NodePtr d = parseTypeDef();
+            as<TypeDef>(*d).mods = mods;
+            return d;
+        }
+        case TokenKind::KwPackage:
         case TokenKind::KwExport:
             notImplemented("'" + t.text + "' definitions", t);
         default:
@@ -2229,6 +2235,32 @@ void Parser::parseEnumerators(For& f, TokenKind terminator) {
         }
         return;
     }
+}
+
+// TypeDef ::= 'type' id ['[' TypeParams ']'] ( '=' Type | TypeBounds )
+//
+// The right-hand side is kept only as a name to expand (see AST.h); bounds are
+// parsed and discarded, exactly as a type parameter's are.
+NodePtr Parser::parseTypeDef() {
+    const Token& kw = expect(TokenKind::KwType, "'type'");
+    auto node = std::make_unique<TypeDef>(kw.pos);
+    node->name = expect(TokenKind::Identifier, "a type name").text;
+    if (at(TokenKind::LBracket)) node->typeParams = parseTypeParams();
+    if (at(TokenKind::Equals)) {
+        advance();
+        node->rhs = parseType();
+        return node;
+    }
+    // `type X`, `type X >: L`, `type X <: U`, `type X >: L <: U`: abstract.
+    if (at(TokenKind::Subtype) || at(TokenKind::Supertype)) {
+        advance();
+        parseType();
+        if (at(TokenKind::Subtype) || at(TokenKind::Supertype)) {
+            advance();
+            parseType();
+        }
+    }
+    return node;
 }
 
 // [case] Pattern1 `<-` Expr | Pattern1 `=` Expr

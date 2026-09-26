@@ -424,8 +424,8 @@ TEST(ParserImports, ParsesEveryAcceptedForm) {
 }
 
 TEST(ParserDefs, UnsupportedDefinitionsAreReportedClearly) {
-    EXPECT_NE(unitError("type T = Int").find("not implemented yet"), std::string::npos);
     EXPECT_NE(unitError("package p").find("not implemented yet"), std::string::npos);
+    EXPECT_NE(unitError("export a.b").find("not implemented yet"), std::string::npos);
     EXPECT_NE(unitError("lazy val (a, b) = p").find("lazy pattern definitions"), std::string::npos);
     EXPECT_NE(unitError("given x: Int = 1").find("(D3)"), std::string::npos);
     EXPECT_NE(unitError("def f(using x: Int) = x").find("(D3)"), std::string::npos);
@@ -465,7 +465,14 @@ TEST(ParserDefs, MoreUnsupportedAndInvalidDefinitions) {
     // that Desugar expands into a sealed class, its cases and a companion.
     EXPECT_EQ(unitError("enum E { case A }"), "");
     EXPECT_NE(unitError("enum E { }").find("at least one case"), std::string::npos);
-    EXPECT_NE(unitError("type T = Int").find("'type' definitions are not implemented yet"),
+    // `type` is implemented (Track S): the alias, its parameterised form and the
+    // abstract forms all parse. `package` and `export` still do not.
+    EXPECT_EQ(unitError("type T = Int"), "");
+    EXPECT_EQ(unitError("type L[A] = List[A]"), "");
+    EXPECT_EQ(unitError("type T"), "");
+    EXPECT_EQ(unitError("type T >: Null <: AnyRef"), "");
+    EXPECT_NE(unitError("type = Int").find("a type name"), std::string::npos);
+    EXPECT_NE(unitError("package p").find("'package' definitions are not implemented yet"),
               std::string::npos);
     // Extension methods are implemented (Phase 4). What is rejected is a `:`
     // before the body, which scalac rejects too, and a member that is not a def.

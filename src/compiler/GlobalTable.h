@@ -160,6 +160,31 @@ public:
         }
         return typeKeyOfName_.at(name);
     }
+    // --- Type aliases (Track S) ------------------------------------------
+    // `type X = T` records X -> the target's type NAME, never a TypeTree: a REPL
+    // session outlives the AST of the line that declared the alias. A target of
+    // "" is an alias whose right-hand side is not a named type (a function or a
+    // structural type), which is accepted and then unusable as a class -- exactly
+    // as the right-hand side would be if written out.
+    void declareTypeAlias(const std::string& name, const std::string& target) {
+        typeAliases_[name] = target;
+    }
+    bool isTypeAlias(const std::string& name) const { return typeAliases_.count(name) != 0; }
+    // Follows the alias chain from `name`, at most `kMaxAliasDepth` steps so that
+    // `type A = B; type B = A` terminates. A name that is not an alias is its own
+    // answer.
+    std::string followTypeAlias(const std::string& name) const {
+        static constexpr int kMaxAliasDepth = 32;
+        std::string cur = name;
+        for (int step = 0; step < kMaxAliasDepth; ++step) {
+            auto it = typeAliases_.find(cur);
+            if (it == typeAliases_.end()) return cur;
+            if (it->second.empty() || it->second == cur) return cur;
+            cur = it->second;
+        }
+        return cur;
+    }
+
     // Makes `name` resolve to an existing type key (an imported type). The key
     // was allocated by the module's own table, which shares `typeCounters_`.
     void aliasType(const std::string& name, const std::string& key) {
@@ -268,6 +293,7 @@ private:
         std::make_shared<std::unordered_map<std::string, int>>();
 
     std::unordered_map<std::string, std::string> typeKeyOfName_;  // name -> current type key
+    std::unordered_map<std::string, std::string> typeAliases_;  // `type X = T` (Track S)
     std::unordered_map<std::string, ClassInfo> typesByKey_;
     std::unordered_set<std::string> typesDeclaredInUnit_;
     std::shared_ptr<std::unordered_map<std::string, int>> typeCounters_ =

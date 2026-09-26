@@ -113,6 +113,13 @@ Delivered in Phase 4 ✅:
   calls its companion's `apply`; a hand-written `object E` in the same file is the
   **same** companion the desugarer generates and is folded into it; and the enum
   may itself be called `Enum`.
+- `type` aliases (Track S): `type X = T`, `type X[A] = T`, and the abstract forms
+  `type X` and `type X >: L <: U`. Types are erased (D4), so an alias is a
+  **naming** concern: the compiler records `X` -> its target and expands it
+  wherever a type name is consumed -- a parent, a `new`, a type pattern, an
+  `isInstanceOf` and an extension's receiver. Chains work; bounds and type
+  parameters are parsed and discarded like every other. An alias is recorded
+  unit-wide rather than per template (D109).
 - Extension methods `extension (x: T) def m ...`, dispatched on the receiver's
   runtime prototype (D6) and global for the session (D82, D83). A custom string
   interpolator is one of these, on `StringContext` (D56 retired).
@@ -604,6 +611,7 @@ and `Priority` was three integers on an object. Their ids are not reused.
 | D104 | **`App` is the entry point**, with three restrictions Scala does not have: one App object per file, not an App object and an `@main` in the same file, and none in a module | a script has no class name with which to choose between two entry points, and a silently ignored entry point is the trap D91 refused |
 | D105 | An `import` is a **member import when its longest in-scope prefix names an object, a companion or an `enum`**, and a module load otherwise. Both forms are Scala-conformant; what has no Scala counterpart is the fallback to loading a file, and what is narrower than Scala is that a `val` cannot be a member-import prefix | a wildcard must enumerate the prefix's members and a dynamic value has no static type to enumerate (D4). A same-unit member import is resolved after the unit's templates are described, so a class in the same file cannot name an imported-from-its-own-object type as a **parent**; the qualified name always works |
 | D108 | An **`override val` constructor parameter is invisible to an ancestor that declares the member in its own body**: `class B { val y = 10; println(this.y) }` with `class C(override val y: Int) extends B` prints 10 where scalac prints 20. The value settles on the override once the constructor chain returns, and an ancestor that declares `y` as a *parameter* sees the override (protoScala matches scalac there) | a public member's attribute key is its plain name, so the two `y`s are one slot; scalac gives each class a field and overrides the accessor. Parameter fields are guarded with `STORE_FIELD_IF_NEW`; a body `val` cannot be, because a subclass's body `val` must be able to overwrite an ancestor's |
+| D109 | A **`type` alias is recorded unit-wide**, under its simple name, so two templates in one file cannot each have their own `type T` | Scala scopes a type member to its template; protoScala has no type-name scope stack, and with types erased (D4) an alias is a naming concern only |
 
 **D57, D60, D64 and D78 do not exist**, and are not reused. They were reserved for
 a `Char`-key divergence, a `Range == List` divergence, a `Try.apply` divergence

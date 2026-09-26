@@ -809,6 +809,22 @@ to the colon — `assertion failed`, `assertion failed: why`, `requirement faile
 `Error`, so a broad `catch case e: Exception` does not swallow them. The message
 parameter is by-name.
 
+### The Scala 3 run corpus (Track S, D108–D109)
+
+Measured against the Scala 3 compiler's own `tests/run` corpus. Almost everything
+it found was fixed; these are the two that could not be.
+
+- **D108** — an **`override val` constructor parameter is invisible to an
+  ancestor that declares the member in its own body**. `class B { val y = 10;
+  println(this.y) }` with `class C(override val y: Int) extends B` prints 10
+  where scalac prints 20, and settles on 20 once construction finishes. An
+  ancestor that declares `y` as a **parameter** does see the override, matching
+  scalac. protoScala keeps one attribute slot per member name; scalac gives each
+  class a field and overrides the accessor.
+- **D109** — a **`type` alias is recorded for the whole file**, not for the
+  template that declares it, so two classes in one file cannot each have their
+  own `type T`. Everything else about aliases matches Scala.
+
 ## 3.3 What is missing
 
 Out of scope by design: implicits and givens (D3), the static type checker
@@ -844,6 +860,7 @@ Not implemented yet, with the phase that brings each (see
 | Feature | Phase |
 |---|---|
 | Exhaustiveness checking for `match` (D4: types are erased), local and anonymous classes and templates nested in a `class` (D80) | later (v0.7+) |
+| `package` and `export` clauses. `type` aliases are **no longer** on this list: Track S implements them (D109) | later |
 | A `py`, `js` or `clj` provider for the polyglot import prefixes — cross-repository work, not a protoScala change (chapter 15, §15.5) | later (Track Y) |
 | A wildcard import of a foreign module (D92), lexical import scoping (D96) | later |
 

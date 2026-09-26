@@ -299,7 +299,8 @@ private:
     // The prototype target `__installExtension` resolves: a type key `@C` for a
     // type the compiler knows, or a builtin value type's name (`Int`, `String`,
     // `List`, ...). Empty when the type is not extendable.
-    std::string extensionTarget(const std::string& typeName) const;
+    std::string extensionTarget(const std::string& rawName) const;
+    void declareTypeAlias(const TypeDef& d);
 
     void compileLazyThunk(const Node& rhs, SourcePos pos);  // thunk + MAKE_LAZY
     void compileStats(const std::vector<NodePtr>& stats, std::size_t from, SourcePos pos);

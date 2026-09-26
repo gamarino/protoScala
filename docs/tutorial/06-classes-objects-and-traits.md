@@ -488,7 +488,44 @@ So `new Rect(1)(2)` and `new Rect(1, 2)` are the same call here, where scalac
 accepts only the curried spelling. Partial application of a constructor does not
 exist.
 
-## 6.10 For Scala developers
+## 6.10 Type aliases
+
+Fixture: [`tests/conformance/tutorial/06-type-aliases.scala`](../../tests/conformance/tutorial/06-type-aliases.scala)
+
+```scala
+type Name = String
+class Box(val v: Int)
+type B = Box
+trait Shape
+type S = Shape
+class Square extends S
+
+@main def run(): Unit =
+  val n: Name = "abc"
+  val b: B = new B(7)
+  println(n.length.toString + " " + b.v + " " + (new Square).isInstanceOf[S])
+```
+
+Prints:
+
+```text
+3 7 true
+```
+
+`type X = T` gives a type a second name. Because protoScala erases types, an
+alias is a *naming* convenience rather than a checked one: it costs nothing at
+run time, and it works everywhere a type name is used for something — as a
+parent (`class Square extends S`), in a `new`, in a type pattern and in an
+`isInstanceOf`. Parameterised aliases (`type Ints = List[Int]`,
+`type L[A] = List[A]`), chains of aliases, and the abstract forms `type X` and
+`type X >: L <: U` are all accepted; bounds and type parameters are parsed and
+discarded, as everywhere else.
+
+One thing to know: an alias is recorded for the **whole file**, not for the
+template that declares it, so two classes in one file cannot each have their own
+`type T` (D109).
+
+## 6.11 For Scala developers
 
 What differs from Scala 3 on the JVM, beyond the erased types of D4:
 
@@ -516,6 +553,9 @@ What differs from Scala 3 on the JVM, beyond the erased types of D4:
 - **`super[T].m` accepts any ancestor** (D76), **extensions are global** (D82,
   D83), **templates nest only in an `object`** (D80) and **constructor parameter
   lists concatenate** (D84) — §6.7 to §6.9 above.
+- **A `type` alias is file-wide** (D109), not scoped to its template, and an
+  **`override val` parameter is invisible to an ancestor that declares the member
+  in its body** (D108) — §6.10 and the note in §6.4.
 
 Everything else in this chapter — the linearization algorithm, the
 right-to-left rule, stackable `super`, trait parameters, trait initialisation
