@@ -132,7 +132,11 @@ else()
             "    cmake -S ../protoCore -B ../protoCore/build_release "
             "-DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=<prefix>\n"
             "    cmake --build ../protoCore/build_release --target protoCore\n"
-            "    cmake --install ../protoCore/build_release --component protoCore")
+            "    cmake --install ../protoCore/build_release\n"
+            "  (a full install, not --component protoCore: the exported "
+            "protoCore::protoCoreConformance target's .a lives in a different "
+            "component, and a component-scoped install leaves find_package "
+            "broken for every consumer.)")
     endif()
     unset(_protoCore_where)
     message(WARNING
