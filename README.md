@@ -6,7 +6,7 @@ protoScala is a language runtime of the [protoCore](https://github.com/numaes/pr
 
 It is **not** a JVM replacement: there is no JVM, no sbt/Maven, no Java interop and no static typechecker. It runs Scala 3 source — braces or significant indentation — with types parsed and erased, on a runtime that aims to:
 
-- **start fast and small** — a < 25 ms, ~20 MB RSS *target*, so Scala is viable for scripts and REPL-driven work. The start-up target is currently **missed**: the latest measurement is 26.38 ms script / 25.43 ms REPL, and `benchmarks/cold-start.sh` exits 1 ([Performance](#performance));
+- **start fast and small** — a < 25 ms, ~20 MB RSS *target*, so Scala is viable for scripts and REPL-driven work. The **time half is met by median and straddles by worst sample**; the **memory half is not met**. `cold-start.sh` exits 0: 23.32 ms script / 23.72 ms REPL on the installed 0.6.0 binary at load ≈ 1.9 (31 runs, all verified, 2026-09-27), and 21.63 / 22.32 ms in the quiet-window run of 2026-09-26 (378 runs at 0.55 busy CPUs). But the tail is wide — the slowest of those 31 runs was 37.9 ms — and `run_benchmarks.py`, which judges per sample rather than per median, still reads **script STRADDLES**. RSS measures **≈ 24.1 MB** against the ~20 MB target. See [Performance](#performance);
 - map **case classes and functional collections** onto protoCore's persistent, structurally shared data;
 - run **native actors without a GIL**: messages are pointers to immutable data, mailboxes are lock-free with three priority bands, and `await` inside an actor suspends cooperatively instead of blocking a thread;
 - **load modules through protoCore's Unified Module Discovery.** `import util.Shapes` loads a `.scala` module and its classes are usable as *types* — `new Point(1, 2)`, `case Point(x, y)` — because an import is resolved when the file is compiled. protoScala also *registers itself* as a UMD provider (`provider:scala`), and the four family prefixes `py.`, `js.`, `st.` and `clj.` route to their providers. Across that boundary there is no serialization and no adapter, by construction: a value is a protoCore object on both sides, and a named argument arrives in the callee's `keywordParameters` unchanged — and `import st.<module>` now proves it across a real runtime boundary, with the same object's address printed from both runtimes. **What no runtime in the family registers is a `py`, `js` or `clj` provider**, so `import py.numpy as np` compiles, routes, and reports `ImportError: no provider registered for 'py'` — see [What polyglot interop does and does not do today](#what-polyglot-interop-does-and-does-not-do-today).
@@ -865,6 +865,16 @@ measured **28.37 / 27.97 ms** there and **22.16 / 22.02 ms** here. Five
 independently built binaries now land in **21.34–22.32 ms**. Load was the
 variable all along, so the earlier "did not reproduce, cause unidentified" is
 withdrawn.
+
+**The memory half of the target is not met, and had never been measured.**
+DESIGN §1 states the goal as "< 25 ms, ~20 MB RSS", but every cold-start run
+recorded above measures only time. Measured on 2026-09-27 against the installed
+0.6.0 binary (`/usr/bin/protoscala examples/hello.scala`, three runs,
+`/usr/bin/time -f %M`): **24 088 / 24 184 / 24 092 KB max RSS**, so ≈ **24.1 MB**
+against a ~20 MB target — over by about 20 %. The figure is reported here rather
+than folded into the verdict above because it is a different target with a
+different instrument, and a `MET` on time says nothing about it. No attempt has
+been made yet to find where those 4 MB are.
 
 Two operands belong beside that number, because they change what it means:
 
