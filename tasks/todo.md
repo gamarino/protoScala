@@ -131,18 +131,31 @@ Scratch, baselines and measurements: `../.agent_scratch/phase7-transpiler/`.
 
 ## Not done, in the order they should be taken
 
-- [ ] **Classes, traits and objects (D118).** 305 of the 500 excluded fixtures and
-      179 of the 186 corpus refusals. Nothing else moves the corpus number by more
-      than a handful, so this is not one item among several: it is the item.
-- [ ] **Task 8 — the frame's retry loop (D120).** `try`/`catch`/`finally`. The
-      `switch` must be inside the `try`, and the frame must be able to catch a
-      second exception; getting that wrong was measured at 11 red fixtures.
-- [ ] **Task 9 Step 4 — load-time import resolution (D123).**
+- [x] **Classes, traits and objects (D118), and `super` (D122).** Done 2026-09-27.
+      The prediction held exactly: fixtures 360 -> **626** run, 500 -> **235**
+      excluded; corpus 5 -> **158** of the 191 the interpreter passes, of which
+      **91** checkfile-verified (was 1), still **0** divergences. `object Main
+      extends App` needed `gen::runApp` — four fixtures had been running the top
+      level and printing nothing.
+- [x] **Task 10 Step 6 — the cross-runtime call.** Done 2026-09-27, as
+      `interop/foreign-call`: a grepped, protoScala-free caller; four answers
+      checked against the interpreter's; red under four mutations. The two limits
+      are on the record in INTEROP §8 — one `Session` per process while exported
+      cells are in use, and no other runtime has taken the call up yet.
+- [ ] **Task 8 — the frame's retry loop (D120).** `try`/`catch`/`finally`. Now the
+      largest remaining gap by both measures: **86** excluded fixtures and **18** of
+      the 33 remaining corpus refusals. The `switch` must be inside the `try`, and
+      the frame must be able to catch a second exception; getting that wrong was
+      measured at 11 red fixtures.
+- [ ] **Task 9 Step 4 — load-time import resolution (D123).** 87 fixtures.
 - [ ] **Task 9 Step 2 — `emitExports`**, so a compiled module keeps early type
-      binding instead of degrading to a foreign module.
-- [ ] **Task 10 Steps 1–4, 6 — `CompiledModuleProvider`** and the
-      **cross-runtime-call demonstration**. The second is the phase's headline
-      capability: argued, artefact in hand, **not demonstrated**.
+      binding instead of degrading to a foreign module. **Deliberately last of the
+      three code items**, on a measured basis: no fixture and no corpus test depends
+      on it, where D120 is 86 fixtures and 18 corpus tests. Recorded as T0-18.
+- [x] **Task 10 Steps 1–4 — `CompiledModuleProvider`.** Done 2026-09-27. `import
+      util.Strings` reaches `util/Strings.so`; after `provider:scala` so source still
+      wins; D8 refusal in D91's wording; one module object per process. It binds a
+      FOREIGN module, so early type binding is still the `emitExports` item below.
 - [ ] **Task 14 — packaging verified end to end in a scratch prefix** with
       `env -u LD_LIBRARY_PATH`.
 - [ ] **Task 15 — measurement.** Start-up (criterion: no regression), load time,
@@ -166,3 +179,23 @@ What I would do differently: measure the corpus differential **first**. It says 
 one table that the fixture corpus is not shaped like real Scala, and it would have
 put classes at the top of the task list on day one instead of after the emitter was
 written.
+
+## Review — the second pass (2026-09-27)
+
+Two of the three things the first review put at the top are done, and the order it
+recommended was right for a measurable reason. D118 moved the fixture count 1.7x and
+the corpus count 31x, from one change; nothing on the remaining list will do that
+again. The largest single item left is the retry loop at 18 corpus tests.
+
+What the cross-runtime call cost, and it is worth recording because it was not in the
+plan: the call needs an active protoScala context, and a foreign caller cannot install
+one without a protoScala header — which would forfeit the whole claim. So the module
+remembers the host that linked it and `gen::enterMethod` installs it. That buys the
+capability and costs a real constraint, one `Session` per process, which is refused at
+link time rather than left to surface as a wrong prelude. Both halves are in INTEROP
+§8; neither is in the plan.
+
+What I nearly got wrong: the first version of the test kept the host's
+`ActiveCallGuard` open around the callback. It passed, and it proved nothing — the
+call would have been running inside protoScala. Mutation X2 exists because of that
+near miss, and it is the mutation that would have caught it.

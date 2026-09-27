@@ -274,39 +274,49 @@ not speed and not start-up: **a protoScala function becomes a `proto::ProtoMetho
 and a `proto::ProtoMethod` is callable by any runtime in the family, which protoScala
 bytecode is not.
 
-**Done when — and where the first cut stands against it:**
+**Done when — and where the work stands against it (2026-09-27):**
 
 | criterion | status |
 |---|---|
 | `protoscalac` emits C++ that builds to a `.so` | ✅ |
 | the `.so` loads and runs | ✅ via `protoscala --run-module` |
-| `CompiledModuleProvider` loads it as an importable module | ❌ **not built** |
-| the differential harness runs the fixture corpus green | ✅ 921 pass, 0 fail (360 ran, 61 rejected at compile time, 500 refused) |
-| every differential case red under a named mutation | ⚠️ partial — the emitter matrix is measured, and four of the plan's twelve mutations cannot be applied because the code they mutate does not exist in this cut |
-| the cross-runtime-call test passes while naming no protoScala symbol | ❌ **not built** — the phase's headline capability is argued, not yet demonstrated |
+| `CompiledModuleProvider` loads it as an importable module | ✅ alias `compiled`, GUID `protoScala-compiled-v1`; `PROTOSCALA_MODULE_PATH`, printed by `--version`; after `provider:scala` so a `.scala` still wins. It binds a **foreign** module: the `ExportsRec` tables that would keep early type binding are not built |
+| the differential harness runs the fixture corpus green | ✅ 922 pass, 0 fail (626 ran, 61 rejected at compile time, 235 refused) |
+| every differential case red under a named mutation | ⚠️ partial — the emitter matrix is measured and the cross-runtime call has four of its own; three of the plan's twelve still cannot be applied because the code they mutate does not exist |
+| the cross-runtime-call test passes while naming no protoScala symbol | ✅ `interop/foreign-call`: a translation unit that includes `protoCore.h` and one shim header, **grepped** for the name, calls four exported functions through `asMethod`; checked against the interpreter's own answers and red under four mutations. No *other runtime* has taken the call up yet — that needs a change in that runtime's repository (INTEROP §8.2) |
 | start-up shows no regression | ❌ **not measured** |
 | `PROTOSCALAC_SPECIFICATION.md` exists | ✅ |
 
 **Added beyond the plan, because the maintainer changed the verification
 requirement:** a **corpus** differential over the Scala 3 `tests/run` corpus, on the
 rule *every corpus test the interpreter passes must also pass transpiled*. Result:
-**0 divergences and almost no coverage** — of the 191 in-scope tests the interpreter
-passes, the transpiler refuses 186 and runs 5. The corpus is made of
-`object X { def main … }`, and a class is what the first cut refuses. That measurement
-is why the fixture differential's 360 must not be read as language coverage.
+**0 divergences**, in either direction and at every stage. Coverage: the first cut ran
+**5** of the 191 the interpreter passes and refused 186, because the corpus is made of
+`object X { def main … }` and a class is what it refused; after D118 it runs **158**, of
+which **91** are verified against the corpus's own checkfile. The same change moved the
+fixture count 1.7× and the corpus count 31×, which is exactly why the fixture
+differential's count must not be read as language coverage.
 
 **What it deliberately did not do.** `await` in transpiled code (D113), the REPL
 (D115), `--pure` emission (§D2), and a cross-**space** call (R5's open question:
 a `proto::ProtoMethod` is a raw code pointer, the arguments and result are cells, and
 cells belong to the space that allocated them).
 
-**What it did not get to, and is the next work, in order.** Classes, traits and
-objects (**D118** — 305 of the 500 excluded fixtures and 179 of the 186 corpus
-refusals; nothing else on the list moves the corpus number by more than a handful);
-the frame's retry loop, i.e. `try`/`catch`/`finally` (**D120**); load-time import
-resolution (**D123**); `CompiledModuleProvider` and the `ExportsRec` tables that keep
-early type binding; the cross-runtime-call demonstration; packaging verification in a
-scratch prefix; and the measurement task.
+**Landed after the first cut (2026-09-27).** Classes, traits and objects (**D118** —
+305 of the 500 excluded fixtures and 179 of the 186 corpus refusals) and `super`
+(**D122**), with `object Main extends App` through `gen::runApp`; and the
+**cross-runtime call**, which is the phase's headline capability and is now a test
+rather than an argument.
+
+**Also landed (2026-09-27): `CompiledModuleProvider`**, so an `import` reaches a `.so`.
+
+**What is still open, in order.** The frame's retry loop, i.e.
+`try`/`catch`/`finally` (**D120** — 86 excluded fixtures and the largest remaining
+corpus group at 18); load-time import resolution (**D123** — 87 fixtures); the
+`ExportsRec` tables that would give an imported compiled module **early type binding**
+instead of foreign, late binding; packaging verification in a scratch prefix; and the
+measurement task. The exports tables are last of the three code items on a measured
+basis: no fixture and no corpus test depends on them, where D120 is 86 and 18.
 
 ## Documentation track (every phase)
 
@@ -399,10 +409,13 @@ must re-key the module namespace in the caller's space (and a short name matchin
 by pointer-word accident is the trap); and a module's top level must run in the
 provider's own space, or its literals intern in the wrong symbol table.
 
-Still not demonstrated, and stated so nobody infers more: a cross-runtime **call**
-(a protoST method is `__bc_ptr__` + protoST's engine, not a `proto::ProtoMethod`),
-imports from more than one thread, more than one protoST runtime per process, and a
-namespace that changes after import. **R5 itself remains a maintainer ruling**;
+Still not demonstrated by Track Y itself, and stated so nobody infers more: a
+cross-runtime **call** (a protoST method is `__bc_ptr__` + protoST's engine, not a
+`proto::ProtoMethod`), imports from more than one thread, more than one protoST runtime
+per process, and a namespace that changes after import. Phase 7 answered the first for a
+**transpiled protoScala** module, whose functions *are* `proto::ProtoMethod`s
+(`interop/foreign-call`, [INTEROP.md](INTEROP.md) §8); Track Y's own finding about a
+protoST method stands unchanged, and no other runtime has taken the call up. **R5 itself remains a maintainer ruling**;
 this is evidence for it.
 
 The maintainer has since ruled on the reachability half: a module is a

@@ -1036,10 +1036,38 @@ function object (values cross a runtime boundary with no copy) and still cannot 
 it. The generated C++ calls the runtime dynamically, exactly as `protopyc`'s does, so
 arithmetic is not faster and a send costs what it cost.
 
-`protoscalac` is a **first cut**: it refuses classes, `import`, `try`/`catch`,
-`await`, named arguments and `super`, each at transpile time with a named message and
-a source position, and never mistranslates. What it refuses, why, and the two
-differentials that measure it are in
+**That call is demonstrated, not argued.** `proto_module_init` returns a module object
+carrying one `proto::ProtoMethod` cell per exported top-level `def`, and a caller needs
+three protoCore calls and no protoScala anything:
+
+```cpp
+const proto::ProtoObject* fn = module->getAttribute(ctx, proto::ProtoString::createSymbol(ctx, "add"));
+const proto::ProtoObject*  r = fn->asMethod(ctx)(ctx, fn->asMethodSelf(ctx), nullptr, args, nullptr);
+```
+
+`ctest -R interop/foreign-call` runs it. The caller includes `protoCore.h` and one shim
+header, and the harness **greps** it for the name `protoScala` and fails if it appears;
+its four answers are checked against what the interpreter prints from the same source,
+and four named mutations each turn it red. The honest boundary is in
+[docs/INTEROP.md](docs/INTEROP.md) §8: the call needs protoCore alone, exported cells
+mean one `Session` per process, and no other runtime has taken it up yet — that needs a
+change in that runtime's repository.
+
+**And a compiled module is importable.** `import util.Strings` finds `util/Strings.so`
+under `PROTOSCALA_MODULE_PATH` (and then the installed module directory — `--version`
+prints the list). It is searched *after* source, so a `.scala` beside a `.so` still wins
+and installing a compiled module cannot change an import that already resolved. What it
+binds is a **foreign** module, with late binding: the tables that would carry a class
+across and keep early type binding are not built, so a pattern match against a compiled
+module's class does not compile.
+
+`protoscalac` is still **incomplete**: it refuses `import`, `try`/`catch`/`finally`,
+`await` and named arguments and defaults, each at transpile time with a named message
+and a source position, and never mistranslates. Classes, traits, objects, case classes,
+enums and `super` are supported. Of 922 conformance fixtures, **626** run transpiled;
+of the 191 Scala 3 `tests/run` corpus tests the interpreter passes, **158** pass
+transpiled with **zero** divergences in either direction. What it refuses, why, and the
+two differentials that measure it are in
 [docs/PROTOSCALAC_SPECIFICATION.md](docs/PROTOSCALAC_SPECIFICATION.md).
 
 **And it is measurably not a speed-up.** The same source down both paths, interleaved

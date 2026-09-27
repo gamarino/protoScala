@@ -206,3 +206,37 @@ entry **and** exit found 2 firings in 6 runs.
 reports a suspiciously clean zero over a large number of opportunities, the first
 hypothesis is the detector, not the code — and the cheapest test is to make the
 detector cover more of the operation and see whether the zero survives.
+
+## A demonstration that leaves the scaffolding in place demonstrates the scaffolding
+
+**2026-09-27.** The cross-runtime-call test is supposed to prove that a foreign runtime
+needs nothing but protoCore to call a transpiled protoScala function. My first version
+loaded the module and called the function with the host's `ExecutionEngine::ActiveCallGuard`
+still open around the callback. It passed on the first run. It proved nothing: with that
+guard open, the call *is* running inside protoScala, which is exactly the situation the
+test exists to rule out. The same shape had already appeared twice in this project — the
+corpus differential's `full` shim mode reads 0 because the shim's own Predef declaration
+is refused, so that row measures the shim and not the corpus.
+
+**Rule.** When a test is supposed to prove that something is *not needed*, remove it and
+watch the test fail before removing anything else. State the property as a mutation
+(`X2`: delete the fallback that makes the call work without a guard) and require the red
+run. And when a harness prepends its own scaffolding to every case, check what the
+scaffolding alone does before reading any number the harness reports.
+
+## A green mutation names the test you did not write
+
+**2026-09-27.** Four mutations of `CompiledModuleProvider`; three turned
+`cli/compiled-provider` red and one — reversing the resolution-chain order so a
+compiled module would win over a source module — left it **green**. The test does cover
+"a `.scala` beside a `.so` wins", so the property looked tested. It was not: `Session::load`
+asks the source loader itself and reaches the chain only on a miss, so protoScala's own
+importer never observes the order at all. The order decides for every *other* runtime,
+which arrives through protoCore's `getImportModule` — a path no protoScala test
+exercised.
+
+**Rule.** Treat a mutation that stays green as a finding, not a dud: it has located a
+claim whose test goes through a different code path than the claim. Fix it by asserting
+the invariant where it lives — here, on the chain contents — rather than by deleting the
+mutation or weakening the claim. And when a documented ordering is consumed by a
+*foreign* caller, no test driven through our own front door will ever see it.

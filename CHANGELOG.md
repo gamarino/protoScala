@@ -8,6 +8,91 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **The cross-runtime call, demonstrated rather than argued.** `proto_module_init` now
+  returns a **module object** carrying one `proto::ProtoMethod` cell per exported
+  top-level function, so another runtime on the same object kernel calls into a
+  transpiled protoScala module with three protoCore calls and no protoScala anything:
+  `createSymbol`, `getAttribute`, `asMethod`. `tests/interop/foreign_caller.cpp` is that
+  caller — it includes `protoCore.h` and one shim header whose only `#include` is
+  `protoCore.h`, and the harness **greps** it for the name `protoScala` and fails if it
+  appears, so its independence is checked and not described. The host side is
+  `Session::withModule`, which closes its guards **before** handing the object over: a
+  caller that needed a protoScala guard must fail rather than pass for the wrong reason,
+  and `gen::enterMethod` installs the linking host itself for the duration of each call.
+
+  The exported cells are a *second* view of the same block, not a replacement — the
+  function objects the module's own top level binds still carry the arity, method-ness
+  and capture slots that nineteen places inside the runtime read. Only a `def` that
+  captures nothing is exported, because a bare cell is called with no `self` and a
+  capturing block reads its captures from `self`; a top-level `def` captures nothing by
+  construction. Four calls are checked end to end — two `Int` returns, a `String`, and
+  one that raises and crosses the boundary as a catchable C++ exception — against the
+  values the **interpreter** produces from the same source, and four mutations
+  (`tests/mutations/apply.py X1`–`X4`) each turn the case red.
+
+  Two limits are on the record rather than left to be discovered. Exported cells mean
+  **one `Session` per process**: a cell is a bare function pointer with nowhere to carry
+  its host, so `gen::linkModule` refuses a second host instead of choosing between two
+  preludes. And no *other runtime* has taken the call up yet — protoPython, protoJS and
+  protoST would each need a change in their own repository. What is proven is the claim
+  the phase set out to prove: the call needs protoCore and nothing else.
+  ([`docs/INTEROP.md`](docs/INTEROP.md) §8)
+
+- **A compiled module is importable: `CompiledModuleProvider` (alias `compiled`, GUID
+  `protoScala-compiled-v1`).** `import util.Strings` finds `util/Strings.so` under
+  `PROTOSCALA_MODULE_PATH` and then `<prefix>/<libdir>/protoscala/modules`, and
+  `protoscala --version` prints the list it searched, because that list is the whole
+  surface and without it a missing module and a mis-set path look the same.
+
+  It is installed **after** `provider:scala`, so a `.scala` beside a `.so` still wins and
+  installing a compiled module cannot change the meaning of an import that already
+  resolved. It loads any conforming `.so`, generated or hand-written — only
+  `proto_module_init` is required, the version accessor is optional — and refuses one that
+  exports `proto_module_main`, because a script is not a module (D8), with the wording D91
+  already uses on the source path. Under P3 its own GUID makes a compiled `util.Strings`
+  and a source `util.Strings` two modules rather than two names for one.
+
+  Two things it needed that the plan did not foresee. `proto_module_init` reaches
+  `gen::currentContext`, which needs an active protoScala call context, and a compiled
+  module is loaded from two places that have none — the **compiler**, while resolving an
+  `import`, and protoCore's own resolver, when another runtime asks. The provider
+  therefore carries its host's engine and layout and installs them for the initializer,
+  which is the same handover `gen::enterMethod` makes for a foreign call and carries the
+  same consequence: one protoScala Session per process while compiled modules are in use.
+  And the handles are never `dlclose`d, because a module object published under P3 is
+  rooted for the life of the process and its methods are code inside those libraries.
+
+  **What it binds is a foreign module: late binding.** The `ExportsRec` tables that would
+  carry a `ClassInfo` across and keep early type binding are **not built**, so a pattern
+  match or a `new` against a compiled module's class does not compile. That is the one
+  respect in which a compiled module is less than a source module, and it is in
+  `PROTOSCALAC_SPECIFICATION` §8 rather than left to be discovered.
+
+  Six behaviours in `cli/compiled-provider`, five in `unit/Provider.*`, and four
+  mutations (`apply.py P1`–`P4`). One of the four is on the record because it found a
+  hole: reversing the chain order left the shell test green, since `Session::load`
+  consults the source loader itself and reaches the chain only on a miss — so the order,
+  which decides for every *other* runtime, was untested until
+  `Provider.CompiledComesAfterSourceInTheChain` asserted it on the chain's contents.
+
+- **Classes, traits, objects, case classes and enums transpile (D118), and `super`
+  with them (D122).** `gen::constFrom` rebuilds a `ClassSpec` from the generated static
+  tables and the interpreter's own `makeClass`, `instantiate` and `superSend` do the
+  work, so "one implementation, two consumers" still holds — nothing about class
+  semantics is written twice. `object Main extends App` is supported through
+  `gen::runApp`: for such a unit the program **is** the object's initialisation (D104),
+  and calling an `@main` that does not exist had made four fixtures run their top level
+  and print nothing.
+
+  The effect on the two differentials is the reason this was the next task and not one
+  of several. Fixtures: **626** of 922 now transpile, compile and run (was 360), with
+  235 excluded (was 500). Corpus: of the 191 in-scope Scala 3 `tests/run` tests the
+  interpreter passes, **158** pass transpiled (was 5) and **91** of those are verified
+  against the corpus's own checkfile (was 1) — with **zero** divergences, in either
+  direction, before and after. One change moved the fixture count 1.7× and the corpus
+  count 31×, which is the clearest statement available that a fixture-only differential
+  measures the fixtures.
+
 - **`protoscalac`, a transpiler from protoScala to C++, and `libprotoScala.so` for
   it to link against (Phase 7, first cut — NOT the whole phase; see *Known
   limitations* below).** `protoscalac foo.scala --build-so` runs protoScala's own
@@ -226,21 +311,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Known limitations
 
-- **Phase 7 is a FIRST CUT, and what it does not do is a longer list than what it
-  does.** `protoscalac` refuses six things at transpile time, each with a named
-  message and a source position, and never mistranslates: classes / traits / objects
-  (**D118**), `import` (**D123**), `try`/`catch`/`finally` (**D120**), `await`
-  (**D113**), named arguments and defaults (**D121**), and `super` (**D122**). D118 is
-  the one that matters: it is 305 of the 500 excluded fixtures and 179 of the 186
-  refusals among the corpus tests the interpreter passes.
+- **Phase 7 is incomplete, and what it does not do is still a list.** `protoscalac`
+  refuses four things at transpile time, each with a named message and a source
+  position, and never mistranslates: `import` (**D123**, 87 excluded fixtures),
+  `try`/`catch`/`finally` (**D120**, 86 fixtures and the largest remaining corpus group
+  at 18), `await` (**D113**, 31) and named arguments and default values (**D121**, 31).
+  The first cut also refused classes (**D118**) and `super` (**D122**); both are now
+  supported.
 
-  Four parts of the phase are **not built**: `CompiledModuleProvider` (so `import` of
-  a compiled module is not available and `--run-module` is the whole loading surface),
-  the `ExportsRec` tables that would let a compiled module be imported with early type
-  binding, the cross-runtime-call demonstration from a caller that names no protoScala
-  symbol — which is the phase's headline capability, argued but **not yet
-  demonstrated** — and the measurement task. The version is deliberately **not** bumped
-  to 0.7.0: the phase has not shipped.
+  Two parts of the phase are **not built**: the `ExportsRec` tables that would let a
+  compiled module be imported with **early type binding** rather than as a foreign
+  module, and the measurement task. The exports tables were deprioritised on a measured
+  basis and the basis is stated: no fixture and no corpus test depends on them, where the
+  retry loop (D120) is 86 fixtures and 18 corpus tests. The version is deliberately **not** bumped to
+  0.7.0: the phase has not shipped.
 
 ### Changed
 

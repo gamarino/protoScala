@@ -36,6 +36,29 @@ route by prefix.
 - The provider finds its runtime through a registry keyed by `ProtoSpace`
   (protoST pattern), so imports work from any thread.
 
+protoScala registers a **second** provider since Phase 7:
+
+- `CompiledModuleProvider`, alias `compiled`, GUID `protoScala-compiled-v1`.
+- Resolves `a.b.C` to `<base>/a/b/C.so` under `PROTOSCALA_MODULE_PATH`
+  (`:`-separated) and then `<prefix>/<libdir>/protoscala/modules`.
+  `protoscala --version` prints the list.
+- Installed **after** `provider:scala` in the resolution chain, so a `.scala` beside a
+  `.so` still wins and installing a compiled module cannot change an import that already
+  resolved.
+- It loads **any** conforming `.so`, generated or hand-written: only
+  `proto_module_init` is required, and the version accessor is optional. A `.so` that
+  exports `proto_module_main` is refused, because a script is not a module (D8).
+- It carries its own state — base paths, handle map, and the host runtime whose call
+  context `proto_module_init` needs — rather than looking anything up by `ctx->space`.
+  That is §6's rule applied from the first line, and the host it carries is why a
+  process runs one protoScala Session while compiled modules are in use.
+- Under P3 its GUID makes a compiled `util.Strings` and a source `util.Strings` **two**
+  modules, with two identities and two module objects.
+- What an import of it binds is a **foreign** module: late binding, members resolved by
+  name at run time. The `ExportsRec` tables that would keep early type binding are not
+  built, so a pattern match against a compiled module's class does not compile. This is
+  the one respect in which a compiled module is less than a source one.
+
 ## 3. Prefix routing (protoScala convention)
 
 | Prefix | Provider spec | Example |
@@ -74,7 +97,7 @@ Current provider availability in the family, re-verified 2026-09-24 (Track Y):
 | protoST | `st` | **yes**, in a process that also constructs an `STRuntime`, from the thread that constructed it (§6) |
 | protoJS | none | no |
 | protoClojure | none | no |
-| protoScala | `scala` | yes |
+| protoScala | `scala`, `compiled` | yes |
 
 The shipped `protoscala` binary links libprotoCore and libreadline and nothing
 else of the family, so "in a process that also constructs an `STRuntime`" means an
@@ -396,7 +419,77 @@ function is an object carrying a bytecode-module address, and only
 
 **A transpiled module's functions are `proto::ProtoMethod`s**, reached through
 `ProtoObject::asMethod`, so any runtime that holds the object can call it with no
-knowledge of protoScala. Two limits, stated so nobody infers more:
+knowledge of protoScala.
+
+### 8.1 How a foreign runtime reaches them
+
+`proto_module_init` returns a **module object** that carries one `proto::ProtoMethod`
+cell per exported top-level function, under the function's own Scala name. A caller
+needs three protoCore calls and nothing else:
+
+```cpp
+const proto::ProtoString* key = proto::ProtoString::createSymbol(ctx, "add");
+const proto::ProtoObject*  fn = module->getAttribute(ctx, key);
+const proto::ProtoObject*   r = fn->asMethod(ctx)(ctx, fn->asMethodSelf(ctx), nullptr, args, nullptr);
+```
+
+What is exported is every top-level `def` **that captures nothing**. A capturing block
+reads its captures from the `self` argument, and a bare cell is called with no `self`,
+so exporting one would publish a function that reads a null environment; a top-level
+`def` captures nothing by construction, so the restriction removes nothing a reader
+would expect. Names the module does not export read as `PROTO_NONE`, like any absent
+attribute.
+
+The cells are a **second view** of the same block, not a replacement. The globals the
+module's own top level binds still hold ordinary protoScala function objects, whose
+`__code__` carries the arity, method-ness and capture slots that the nineteen places
+inside the runtime read (`Try.apply`, a by-name `FORCE_THUNK`, eta-expansion, …).
+Publishing only the bare cells would lose that metadata; publishing only the function
+objects would leave a foreign runtime nothing it can call.
+
+The host side is one call, `Session::withModule`, which loads the module and hands the
+object to a callback. The callback runs with **no protoScala call context active** — the
+guards are closed before it is entered — because a foreign runtime cannot install one
+without a protoScala header, so a demonstration that left the guard open would prove
+nothing. `gen::enterMethod` notices the absence and installs the engine and layout of
+the host that linked the module, for the duration of that call.
+
+That fallback carries its own limit, and it is the reason `linkModule` refuses a second
+host: an exported cell is a bare function pointer with nowhere to carry its host, so
+**one `Session` per process** while exported cells are in use. Two would be a choice
+between two preludes with no way to make it, which is a wrong answer rather than an
+error, so it is refused at link time with a message that says so.
+
+### 8.2 Demonstrated
+
+`tests/interop/foreign-call.sh` (CTest case `interop/foreign-call`) is the test, and it
+is a differential, not a self-assertion:
+
+1. `tests/interop/foreign_caller.cpp` includes `protoCore.h` and one shim header whose
+   only `#include` is `protoCore.h`. The harness **greps** the file and fails if the
+   string `protoScala` appears in it below the banner comment, so its independence is
+   checked rather than described. The host half is a separate translation unit.
+2. The same four functions are run **through the interpreter** from the same
+   `Exports.scala`, and their output is compared with the values the caller asserts.
+   Neither path is trusted to define the answer.
+3. The foreign caller then calls all four through `asMethod`: two `Int` returns (one of
+   them a `while` loop over a local), a `String` return read back as bytes, and one that
+   raises — the exception crosses the boundary as a C++ exception the caller catches,
+   rather than ending the process.
+
+Four mutations (`tests/mutations/apply.py X1`–`X4`) each turn that case red: dropping
+the export scan, dropping the host fallback in `enterMethod`, never attaching the cells
+to the module object, and changing `add` so the pinned values disagree.
+
+**What is not demonstrated.** The caller stands in for another runtime; it is not
+protoPython, protoJS or protoST. Wiring one of those up needs a change in *that*
+repository — each would call `Session::withModule` (or its own equivalent of the two
+guards) and then exactly the three protoCore calls above — and no such change has been
+made or measured. The claim proven here is the one the phase set out to prove: the call
+needs protoCore and nothing else. Which runtimes have taken it up is a separate,
+currently empty, list.
+
+Two further limits, stated so nobody infers more:
 
 - **Within one `ProtoSpace`.** A `proto::ProtoMethod` is a raw code pointer; the
   arguments and the result are cells, and cells belong to the space that allocated
@@ -410,7 +503,5 @@ knowledge of protoScala. Two limits, stated so nobody infers more:
   the module brings a runtime, and therefore one `ProtoSpace` term in protoCore's
   process sizing rule.
 
-**Demonstrated?** Not yet. The argument above is sound and the artefact exists, but the
-test that would prove it — a caller that includes `protoCore.h` only, names no
-protoScala symbol, and calls the exported function through `asMethod` — is **not
-built**. Until it is, this section is a claim, not a result.
+Both limits are unchanged by §8.2: what that test proves is the *call*, not
+co-residency across spaces and not freedom from the runtime the module links.

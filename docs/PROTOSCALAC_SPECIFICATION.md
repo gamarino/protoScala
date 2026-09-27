@@ -105,15 +105,41 @@ C++ UMD module obeys and Phase 7 must load such a module unchanged. protoScala h
 `std::logic_error` when no guard is open — a module initialised outside a protoScala
 call context is a host defect, and D74 keeps a defect uncatchable.
 
+`proto_module_init` returns the **module object**, which carries one
+`proto::ProtoMethod` cell per exported top-level function — every top-level `def` that
+captures nothing — under the function's own Scala name. That is what lets another
+runtime call into a transpiled module with protoCore alone; `docs/INTEROP.md` §8 has the
+three-call recipe, the limits and the test. `Session::withModule` is the host side, and
+it closes its guards before handing the object over, so a caller that needed a
+protoScala guard would fail rather than pass for the wrong reason.
+
 `protoscala --run-module <path.so> [args...]` loads a module and runs it:
 `proto_module_init`, then `proto_module_main` when present. Without
 `proto_module_main` it returns 0 and prints nothing; a module has no output of its
 own. A `.so` that defines neither reports
 `not a protoScala module: proto_module_init not found`.
 
-**Not yet shipped:** `CompiledModuleProvider` (alias `compiled`, GUID
-`protoScala-compiled-v1`) and `PROTOSCALA_MODULE_PATH`, so `import` of a compiled
-module is not available. `--run-module` is the whole loading surface today. See §8.
+**Importing a compiled module.** `CompiledModuleProvider` (alias `compiled`, GUID
+`protoScala-compiled-v1`) resolves `a.b.C` to `<base>/a/b/C.so` under each base path in
+order: `PROTOSCALA_MODULE_PATH` (`:`-separated) first, then
+`<prefix>/<libdir>/protoscala/modules`. `protoscala --version` prints the list, because
+that list is the whole surface and a reader who cannot see it cannot tell a missing
+module from a mis-set path.
+
+It is installed **after** `provider:scala` in the resolution chain, so a `.scala` beside
+a `.so` still wins: installing a compiled module cannot change the meaning of an import
+that already resolved. A `.so` that exports `proto_module_main` is refused — a script is
+not a module (D8) — with the wording D91 uses on the source path, so one fixture covers
+both. The identity is the provider's own GUID, so under P3 a compiled `util.Strings` and
+a source `util.Strings` are **two** modules, not two names for one.
+
+**What an imported compiled module binds is a FOREIGN module: late binding.** Its
+members resolve by name at run time, exactly as any other foreign module's do. The
+`ExportsRec` tables that would carry `ClassInfo` across and keep **early type binding**
+are **not built**, so `import util.Shapes` of a `.so` does not make `case Point(x, y) =>`
+compile. That is the one place a compiled module is less than a source module, it is the
+reason `ModuleLoader.h` binds imports early at all, and it is recorded in §8 rather than
+left to be discovered.
 
 ## 3. Module identity and version
 
@@ -321,17 +347,25 @@ compiles into something is worse than none.
 | code | refused | why |
 |---|---|---|
 | **D113** | `await` in transpiled code | cooperative suspension snapshots a *bytecode* frame (`__mod__`, `__ip__`, `__fbase__`, `__fslots__`), and `nativeReentryDepth()` already refuses to suspend above depth 1 (D43). A transpiled frame has no `ip` and its C++ frame cannot be rebuilt. Detected by **send-site name**, so a user method named `await` is refused too — the safe direction |
-| **D118** | classes, traits, objects, case classes, enums | `MAKE_CLASS`, `NEW`, `NEW_SPREAD`, `INVOKE_INIT`, `STORE_FIELD`, `STORE_FIELD_IF_NEW`, `SET_FIELD`: the `ClassSpec` must be rebuilt from the static tables, which this cut does not do |
 | **D120** | `try` / `catch` / `finally` | the generated frame has no retry loop (§5) |
 | **D121** | named arguments and default values | both are bound by the **callee's** prologue, which a transpiled frame does not run; a transpiled callee would silently see an unbound parameter |
-| **D122** | `super`, `super[T].m` | the super-site search needs the defining template's key |
 | **D123** | `import` | an import is resolved at transpile time by loading (D90) and leaves no trace in the emitted code — the imported names become ordinary global keys — so a generated module would push globals nothing had filled. Detected on the **source**, an over-approximation: a line beginning with `import` inside a triple-quoted string is refused too |
 | **D115** | the REPL | `protoscalac` compiles files. `UnitMode::Repl` is not offered and there is no `res0` echo |
 | — | a `--pure` emission mode | §7 |
 | — | static type inference | the transpiler performs **none**: the bytecode it consumes has none |
 | — | a `py::`-style C++ abstraction layer | values are `const proto::ProtoObject*` and nothing wraps them |
 | — | C++ namespaces mirroring the module hierarchy | every generated symbol is `static` in one translation unit |
-| — | `CompiledModuleProvider`, `PROTOSCALA_MODULE_PATH` | §2; `--run-module` is the loading surface today |
+| — | `emitExports` / `ExportsRec`: **early type binding** for an imported compiled module | §2. The provider ships and `import` of a `.so` works, but it binds LATE, like any foreign module. A `ClassInfo` is not carried across, so a pattern match or a `new` against a compiled module's class does not compile |
+
+**Closed on 2026-09-27, and named here because a specification that quietly drops a
+refusal is the failure `PROTOPYC_SPECIFICATION.md` §5 exists to retract.** **D118** —
+classes, traits, objects, case classes and enums — and **D122** — `super` and
+`super[T].m` — are **supported**. `gen::constFrom` rebuilds a `ClassSpec` from the
+static tables and the interpreter's own `makeClass`, `instantiate` and `superSend` do
+the work, so §5's "one implementation, two consumers" still holds. `object Main extends
+App` is supported through `gen::runApp`, because for such a unit the program *is* the
+object's initialisation (D104) and calling an `@main` that does not exist printed
+nothing.
 
 **D114** is not a refusal but a difference: a transpiled program's
 `StackOverflowError` fires at a different recursion depth than the interpreter's,
@@ -348,15 +382,18 @@ fixture through transpile → `make` → `--run-module` and judges it against th
 fixture's own first-line directive. The directive parser is copied verbatim from
 `run.sh`, so the two harnesses cannot disagree about what a fixture asks for.
 
-Measured over all **921** registered fixtures:
+Measured over all **922** registered fixtures (2026-09-27, after D118):
 
 | | count |
 |---|---:|
-| pass | **921** |
+| pass | **922** |
 | fail | **0** |
-| of which transpiled, compiled and ran | **360** |
+| of which transpiled, compiled and ran | **626** |
 | of which correctly rejected at compile time (an `EXPECT-ERROR` fixture) | **61** |
-| excluded, each a refusal with a reason code | **500** |
+| excluded, each a refusal with a reason code | **235** |
+
+By code: D123 **87**, D120 **86**, D113 **31**, D121 **31**. The first cut's figures
+were 360 run and 500 excluded, of which D118 alone was 305.
 
 Three anti-rot guards, each present because its absence is a way for the harness to
 pass while proving nothing:
@@ -376,10 +413,9 @@ place the two paths are guaranteed to share an implementation.
 
 The **benchmark workloads** are covered too, by the same rule: twelve
 `benchmarks-transpiled/<workload>` cases run each `benchmarks/comparable/*.scala`
-through the pipeline and verify the result its `// EXPECT:` line states. Ten transpile;
-`attr_lookup` and `object_tree` are refused (D118 — both declare a class) and are on the
-exclusion list, so the bidirectional guard will fail them the day classes are
-transpiled. **No timing is asserted in any gate**: the host is not reliably quiet and a
+through the pipeline and verify the result its `// EXPECT:` line states. All twelve
+transpile; `attr_lookup` and `object_tree` were refused under D118 and the bidirectional
+guard duly failed them the day classes landed, which is the guard doing its job. **No timing is asserted in any gate**: the host is not reliably quiet and a
 timing assertion in a gate is a false failure waiting to happen. The comparison lives in
 `benchmarks/run_transpiled_benchmarks.py`, whose finding is that the transpiled path is
 **slower** — geomean 1.244×, up to 2.57× on a call-bound workload — because a
@@ -389,12 +425,20 @@ one per call.
 **The corpus differential** (`.agent_scratch/phase7-transpiler/corpus/`) runs the
 Scala 3 `tests/run` corpus down both paths. The rule is *not* "does protoScala agree
 with Scala"; it is **every corpus test the interpreter passes must also pass
-transpiled**. Over the 601 in-scope tests: the interpreter passes **191 (31.8 %)**,
-**0 divergences** in either direction — and the transpiler **refuses 186** of those
-191 and runs **5**, of which **one** is checkfile-verified. The reason is one code:
-a `tests/run` test is `object X { def main … }`, and D118 refuses a class. **The
-fixture differential's 360 is what our fixtures are made of, not a third of Scala**,
-and that is a finding the fixture harness could not have produced.
+transpiled**. Over the 601 in-scope tests the interpreter passes **191 (31.8 %)**, with
+**0 divergences** in either direction, before and after D118. What changed is the
+coverage: the first cut ran **5** of the 191 and refused 186 — one code, because a
+`tests/run` test is `object X { def main … }` — and after D118 it runs **158**, of which
+**91** are verified against the corpus's own checkfile (it was 1). What still refuses is
+D120 **18**, D121 **9**, D123 **6**.
+
+Two readings this measurement is kept for. **The fixture count is what our fixtures are
+made of**: the same change moved it 1.7× and moved the corpus 31×, which is a blind spot
+the fixture harness could not have reported on itself. And the harness's `full`-shim
+configuration reports **0**, not because of the transpiler but because the shim itself
+declares `def assert(cond: Boolean, msg: Any = "assertion failed")` — a default value,
+D121 — so every test refuses at the scaffolding's first line. The raw-body row is the one
+that measures the corpus.
 
 ## 10. The mutation matrix
 
@@ -403,6 +447,21 @@ generator.** A code-generator suite that has never been red is a suite whose cov
 is unknown. `tests/mutations/` holds the patches; the measured red sets are in
 `.agent_scratch/phase7-transpiler/mutations-emitter.md`, together with the mutations
 the plan listed that **cannot** be applied to this cut because the code they mutate
-does not exist yet (`MAKE_CLASS`'s parent order, the handler-entry stack depth,
-`materialise` held in a C++ local, `emitExports`'s `TypeRec` table). Listing them as
-inapplicable is the honest form; listing them as passed would not be.
+does not exist yet (the handler-entry stack depth, `materialise` held in a C++ local,
+`emitExports`'s `TypeRec` table). Listing them as inapplicable is the honest form;
+listing them as passed would not be.
+
+`CompiledModuleProvider` has four of its own (`P1`–`P4`), and one of them earned its
+place by staying **green**: reversing the resolution-chain order left
+`cli/compiled-provider` passing, because `Session::load` consults the source loader itself
+and reaches the chain only on a miss — so the order, which is what decides for every other
+runtime arriving through `getImportModule`, was untested. It is now asserted on the
+chain's contents in `Provider.CompiledComesAfterSourceInTheChain`, which `P2` reds. A
+mutation that stays green locates a missing test; it is not a dud.
+
+The cross-runtime call has its own four (`tests/mutations/apply.py X1`–`X4`), and each
+turns `interop/foreign-call` red: the export scan finding nothing, `gen::enterMethod`
+losing its host fallback, the cells never being attached to the module object, and `add`
+changed so the harness's pinned values disagree. The last one is the check on the
+*expectations* rather than the code: it fails on both paths, because the interpreted run
+and the transpiled run are compared against the same three lines.

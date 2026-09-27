@@ -2,13 +2,13 @@
 
 > **Implementation status.** `protoscalac` exists and works: it turns a `.scala`
 > file into C++, `make` builds that into `module.so`, and
-> `protoscala --run-module ./module.so` runs it. It is a **first cut**, and it
-> refuses more than it accepts: classes, traits and objects (D118), `import`
-> (D123), `try`/`catch`/`finally` (D120), `await` (D113), named arguments and
-> default values (D121), and `super` (D122) are each refused **at transpile time**,
-> with a message and a line number, and never mistranslated. `import`ing a compiled
-> module is not available yet either — the provider that would do it is specified
-> and not built — so `--run-module` is the whole loading surface today. Everything
+> `protoscala --run-module ./module.so` runs it. Classes, traits, objects, case
+> classes, enums and `super` transpile; four things are still refused **at transpile
+> time**, with a message and a line number, and never mistranslated: `import` (D123),
+> `try`/`catch`/`finally` (D120), `await` (D113), and named arguments and default
+> values (D121). A compiled module **is** importable — `import util.Strings` finds
+> `util/Strings.so` on `PROTOSCALA_MODULE_PATH` — but it binds *late*, like any foreign
+> module, so a pattern match against one of its classes does not compile. Everything
 > below either runs or says plainly that it does not.
 
 Chapters 1–16 are about writing Scala. This one is about what happens to it
@@ -83,14 +83,21 @@ therefore one ProtoSpace term to the process sizing rule (protoCore MemoryModel.
 
 ## 17.3 What it refuses, and why that is the good news
 
-Ask it to compile a class today and it says so:
+A class transpiles:
 
-Fixture: [`tests/conformance/tutorial/17-compiled-a-class-is-refused.scala`](../../tests/conformance/tutorial/17-compiled-a-class-is-refused.scala)
+Fixture: [`tests/conformance/tutorial/17-compiled-a-class-runs.scala`](../../tests/conformance/tutorial/17-compiled-a-class-runs.scala)
 
 ```text
-$ protoscalac shapes.scala
-shapes.scala:1: error: a class, trait or object is not supported by protoscalac yet
-(D118): MAKE_CLASS needs the ClassSpec rebuilt from the static tables
+$ protoscalac shapes.scala --build-so && protoscala --run-module ./module.so
+25.0
+```
+
+Ask it for something it does not do yet, and it says so instead of guessing:
+
+```text
+$ protoscalac uses-try.scala
+uses-try.scala:2: error: try/catch/finally is not supported by protoscalac yet (D120):
+the generated frame has no retry loop
 ```
 
 It writes **no `.cpp` at all** when it refuses. That is deliberate: a half-written
@@ -99,10 +106,91 @@ refusal is always a refusal — the one thing a transpiler must never do is prod
 a program that runs and gives a different answer, so every gap is a message and
 never a guess.
 
-If you are wondering how the gaps were found: by running protoScala's own 919
+If you are wondering how the gaps were found: by running protoScala's own 922
 conformance fixtures down both paths and comparing, and then by running the Scala
-3 compiler's own test corpus down both paths as well. Four of the six refusals
-exist because that comparison caught a wrong answer.
+3 compiler's own test corpus down both paths as well. Most of the refusals exist
+because that comparison caught a wrong answer, not because anyone predicted them.
+
+That second harness is also what says how far this has got, and it is worth the
+two numbers. Of the 191 corpus tests the **interpreter** passes, **158** pass
+transpiled, with **no** case where the two paths disagree. Of our own 922
+fixtures, 626 run transpiled. The gap between those two ratios is the honest
+reason the corpus run exists: our fixtures are full of top-level `def`s, and real
+Scala is full of `object X { def main … }`.
+
+## 17.4 Importing one
+
+A `.so` is not only something you run; it is something you `import`. Put it where the
+runtime looks and the ordinary import finds it:
+
+```bash
+mkdir -p modules/util
+protoscalac Strings.scala --build-so --module-name util.Strings -o build
+cp build/module.so modules/util/Strings.so
+PROTOSCALA_MODULE_PATH=./modules protoscala importer.scala
+```
+
+```scala
+import util.Strings
+@main def run(): Unit = println(Strings.shout("hello"))
+```
+
+`protoscala --version` prints the directories it searches, which is the answer to "why
+did my import miss?".
+
+Three rules worth knowing before you rely on it.
+
+**A `.scala` beside the `.so` wins.** Compiled modules are searched *after* source ones,
+so dropping one in cannot change the meaning of an import that already worked. If you
+want the compiled one, remove the source from the path.
+
+**A module cannot be a program.** A `.so` built from a file with an `@main` is refused as
+an import, with the same message a source module gets: `a module may not define an @main
+method`. Run it with `--run-module` instead.
+
+**The import binds late.** Members work — `Strings.shout("hello")` is an ordinary send —
+but the *types* do not come across. `import util.Shapes` of a compiled module will not let
+you write `case Point(x, y) =>`, because a compiled module hands over an object, not a
+description of its classes. A source module does both. This is the one place where
+compiling a module costs you something.
+
+## 17.5 The reason any of this exists: calling in from another language
+
+Everything so far has been about producing the same artefact. This is the part you
+cannot get any other way.
+
+A transpiled module's top-level `def`s are `proto::ProtoMethod`s — plain function
+pointers in protoCore's own calling convention — and `proto_module_init` returns a
+module object carrying one per exported function, under its Scala name. So a
+program that knows **protoCore and nothing about protoScala** can call your Scala
+code:
+
+```cpp
+// The whole recipe. No protoScala header, no ExecutionEngine, no bytecode.
+const proto::ProtoString* key = proto::ProtoString::createSymbol(ctx, "add");
+const proto::ProtoObject*  fn = module->getAttribute(ctx, key);
+const proto::ProtoObject*   r = fn->asMethod(ctx)(ctx, fn->asMethodSelf(ctx), nullptr, args, nullptr);
+```
+
+Compare that with what it replaces. A value could already cross a runtime boundary
+with no copy — Track Y measured one cell, two runtimes, the same hash printed from
+both. A **function** could not be *called* across, because a bytecode-backed
+function is a module address plus the engine that walks it, and the foreign side
+has neither. Compiling the module is what turns the second into the first.
+
+Two things to know before you rely on it. Only a top-level `def` is exported, and
+only one that captures nothing: a bare cell is called with no receiver, so a
+closure would read an empty environment, and refusing to export it is better than
+publishing one that misbehaves. And because a cell has nowhere to record which
+runtime owns it, a process may run **one** protoScala session while exported cells
+are in use; a second one is refused when the module links, with a message saying
+why.
+
+`ctest -R interop/foreign-call` is the test, and it is worth reading rather than
+trusting: the caller file is *grepped* for the string `protoScala` and the test
+fails if it appears, its four answers are compared with what the interpreter
+prints from the same source file, and four deliberate sabotages of the machinery
+each turn it red. [`docs/INTEROP.md`](../INTEROP.md) §8 has the limits.
 
 ---
 
@@ -144,6 +232,10 @@ you have written a Python C extension so that a Python library could be used fro
 C, this is the same move, made once for every language in the family.
 
 Honest caveat, because it is easy to over-read: **within one address space and one
-`ProtoSpace`.** A cross-*space* call is not demonstrated, and neither, yet, is the
-cross-runtime call itself — the argument is sound, the artefact exists, and the
-test that would prove it is not written.
+`ProtoSpace`.** The call itself is demonstrated (§17.5, `ctest -R
+interop/foreign-call`). A cross-*space* call is not, and it is a real open question
+rather than a missing test: a `proto::ProtoMethod` is a raw code pointer, while the
+arguments and the result are cells that belong to the space that allocated them. Nor
+has any *other* runtime taken the call up — protoPython, protoJS and protoST would
+each need a change of their own — so what is proven is that the call needs protoCore
+and nothing else, not that anyone is making it yet.

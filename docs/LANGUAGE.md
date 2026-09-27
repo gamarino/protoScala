@@ -634,18 +634,32 @@ dynamically, so **nothing about the language changes** — the same prelude, the
 numeric semantics, the same sends — and one implementation of every opcode serves both
 paths.
 
-What changes is what the **first cut accepts**. It refuses, at transpile time, with a
+What changes is what the transpiler **accepts**. It refuses, at transpile time, with a
 named message and a source position, and never mistranslates:
 
 | code | refused |
 |---|---|
 | **D113** | `await` inside a transpiled module (detected by send-site name, so a user method called `await` is refused too) |
 | **D115** | REPL input: `protoscalac` compiles files |
-| **D118** | classes, traits, objects, case classes, enums |
 | **D120** | `try` / `catch` / `finally` |
 | **D121** | named arguments and default parameter values |
-| **D122** | `super` and `super[T].m` |
 | **D123** | `import` |
+
+Classes, traits, objects, case classes and enums (**D118**) and `super` (**D122**) were
+refused by the first cut and are **supported** since 2026-09-27, `object Main extends
+App` included. Of the 922 registered fixtures, 626 now run transpiled and 235 are
+excluded; of the 191 Scala 3 `tests/run` corpus tests the interpreter passes, 158 pass
+transpiled with no divergence in either direction.
+
+A compiled module is **importable**: `import util.Strings` finds `util/Strings.so` under
+`PROTOSCALA_MODULE_PATH`, searched after source modules so a `.scala` beside it still
+wins. What it binds is a **foreign** module — late binding — so its members work and its
+types do not come across: a pattern match against a compiled module's class does not
+compile. That is the one respect in which compiling a module costs something.
+
+A transpiled module also does something the interpreter cannot: its top-level `def`s are
+`proto::ProtoMethod`s, so **another runtime on protoCore can call them** with no
+knowledge of protoScala — [`INTEROP.md`](INTEROP.md) §8.
 
 **D114** is a difference rather than a refusal: a transpiled program's
 `StackOverflowError` fires at a different recursion depth, because the native frame
