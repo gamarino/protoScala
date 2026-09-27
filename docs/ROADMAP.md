@@ -281,7 +281,7 @@ bytecode is not.
 | `protoscalac` emits C++ that builds to a `.so` | ✅ |
 | the `.so` loads and runs | ✅ via `protoscala --run-module` |
 | `CompiledModuleProvider` loads it as an importable module | ✅ alias `compiled`, GUID `protoScala-compiled-v1`; `PROTOSCALA_MODULE_PATH`, printed by `--version`; after `provider:scala` so a `.scala` still wins. It binds a **foreign** module: the `ExportsRec` tables that would keep early type binding are not built |
-| the differential harness runs the fixture corpus green | ✅ 922 pass, 0 fail (626 ran, 61 rejected at compile time, 235 refused) |
+| the differential harness runs the fixture corpus green | ✅ 922 pass, 0 fail (704 ran, 61 rejected at compile time, 157 refused) |
 | every differential case red under a named mutation | ⚠️ partial — the emitter matrix is measured and the cross-runtime call has four of its own; three of the plan's twelve still cannot be applied because the code they mutate does not exist |
 | the cross-runtime-call test passes while naming no protoScala symbol | ✅ `interop/foreign-call`: a translation unit that includes `protoCore.h` and one shim header, **grepped** for the name, calls four exported functions through `asMethod`; checked against the interpreter's own answers and red under four mutations. No *other runtime* has taken the call up yet — that needs a change in that runtime's repository (INTEROP §8.2) |
 | start-up shows no regression | ❌ **not measured** |
@@ -308,15 +308,24 @@ cells belong to the space that allocated them).
 **cross-runtime call**, which is the phase's headline capability and is now a test
 rather than an argument.
 
-**Also landed (2026-09-27): `CompiledModuleProvider`**, so an `import` reaches a `.so`.
+**Also landed (2026-09-27):** `CompiledModuleProvider`, so an `import` reaches a `.so`;
+the frame's **retry loop** (**D120**), so `try`/`catch`/`finally` transpiles; and
+**packaging verified end to end** in a scratch prefix, which found two real defects — the
+shared library was in CMake's `Unspecified` install component, and `protoscalac` compiled
+against `/usr/local`'s stale `protoCore.h` when the prefix held none, producing a module
+that linked and segfaulted.
 
-**What is still open, in order.** The frame's retry loop, i.e.
-`try`/`catch`/`finally` (**D120** — 86 excluded fixtures and the largest remaining
-corpus group at 18); load-time import resolution (**D123** — 87 fixtures); the
-`ExportsRec` tables that would give an imported compiled module **early type binding**
-instead of foreign, late binding; packaging verification in a scratch prefix; and the
-measurement task. The exports tables are last of the three code items on a measured
-basis: no fixture and no corpus test depends on them, where D120 is 86 and 18.
+Where that leaves the two differentials: fixtures **704** of 922 run (was 360 in the first
+cut), 157 excluded (was 500); corpus **176** of the 191 the interpreter passes (was 5),
+**95** of those checkfile-verified (was 1), **0** divergences throughout.
+
+**What is still open, in order.** Named arguments and default values (**D121** — 31
+fixtures, 9 corpus tests, and the whole `full`-shim corpus row, which reads 0 solely
+because the harness's own Predef shim declares a default); load-time import resolution
+(**D123** — 87 fixtures, 6 corpus tests); the `ExportsRec` tables that would give an
+imported compiled module **early type binding** instead of foreign, late binding; and the
+measurement task. The exports tables stay last of the three code items on a measured
+basis: no fixture and no corpus test depends on them.
 
 ## Documentation track (every phase)
 

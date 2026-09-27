@@ -142,12 +142,18 @@ Scratch, baselines and measurements: `../.agent_scratch/phase7-transpiler/`.
       checked against the interpreter's; red under four mutations. The two limits
       are on the record in INTEROP §8 — one `Session` per process while exported
       cells are in use, and no other runtime has taken the call up yet.
-- [ ] **Task 8 — the frame's retry loop (D120).** `try`/`catch`/`finally`. Now the
-      largest remaining gap by both measures: **86** excluded fixtures and **18** of
-      the 33 remaining corpus refusals. The `switch` must be inside the `try`, and
-      the frame must be able to catch a second exception; getting that wrong was
-      measured at 11 red fixtures.
-- [ ] **Task 9 Step 4 — load-time import resolution (D123).** 87 fixtures.
+- [x] **Task 8 — the frame's retry loop (D120).** Done 2026-09-27. One loop per block,
+      the resume `switch` inside the `try`, the classification in `gen::handleCaught`,
+      `pc` before every instruction that can raise. Fixtures 626 -> **704** run, 235 ->
+      **157** excluded; corpus 158 -> **176** of 191, 91 -> **95** checkfile-verified,
+      still **0** divergences. Four mutations (R1-R4). The plan's own three-arm catch
+      sketch would have diverged on three of the four `std::` errors the interpreter
+      names -- recorded as T0-19.
+- [ ] **D121 — named arguments and default values.** 31 fixtures, 9 corpus tests, and
+      the whole `full`-shim corpus row, which reads 0 solely because the harness's own
+      Predef shim declares a default. That last operand makes it the most valuable
+      remaining item, ahead of its fixture count.
+- [ ] **Task 9 Step 4 — load-time import resolution (D123).** 87 fixtures, 6 corpus.
 - [ ] **Task 9 Step 2 — `emitExports`**, so a compiled module keeps early type
       binding instead of degrading to a foreign module. **Deliberately last of the
       three code items**, on a measured basis: no fixture and no corpus test depends
@@ -156,8 +162,14 @@ Scratch, baselines and measurements: `../.agent_scratch/phase7-transpiler/`.
       util.Strings` reaches `util/Strings.so`; after `provider:scala` so source still
       wins; D8 refusal in D91's wording; one module object per process. It binds a
       FOREIGN module, so early type binding is still the `emitExports` item below.
-- [ ] **Task 14 — packaging verified end to end in a scratch prefix** with
-      `env -u LD_LIBRARY_PATH`.
+- [x] **Task 14 — packaging verified end to end in a scratch prefix.** Done
+      2026-09-27. The installed `protoscalac` builds a module with no
+      `LD_LIBRARY_PATH`, `--run-module` prints `Hello, protoScala!`, and `ldd`
+      resolves both libraries from inside the prefix. It found **two real defects**:
+      `libprotoScala.so*` was in the `Unspecified` install component, so
+      `cmake --install --component protoScala` never installed it; and `protoscalac`
+      compiled against `/usr/local`'s stale `protoCore.h` when the prefix had none,
+      producing a module that linked and segfaulted. Both fixed; the second is T0-21.
 - [ ] **Task 15 — measurement.** Start-up (criterion: no regression), load time,
       throughput with the expectation written first, and the compile-cost table that
       justifies `-O2` or overturns it.
@@ -199,3 +211,28 @@ What I nearly got wrong: the first version of the test kept the host's
 `ActiveCallGuard` open around the callback. It passed, and it proved nothing — the
 call would have been running inside protoScala. Mutation X2 exists because of that
 near miss, and it is the mutation that would have caught it.
+
+## Review — the third pass (2026-09-27, after D120 and packaging)
+
+Four items closed in one session, and the two that taught the most were not features.
+
+**D120 went as predicted** — 626 -> 704 fixtures, 158 -> 176 corpus — but the plan's own
+sketch of the catch arms would have diverged from the interpreter on three of the four
+`std::` errors it translates. Consuming bytecode saved the semantics; it did not save the
+exception classification, because that lives in `runLoop`'s wrapper and not in any opcode.
+Reading the interpreter rather than the plan is what caught it (T0-19).
+
+**The two defects nobody had seen were both in the seams**: an install component that had
+silently captured only one artifact group, and a `-I` path that adds rather than replaces.
+Neither is reachable from the build tree, and the suite was green through both. The lesson
+is recorded, and the honest summary is that the packaging had never been tested because
+nothing had ever installed and then run the result.
+
+**Two green mutations were findings, not duds.** P2 located a claim tested through a path
+that does not use it; R1 and R2 located a *filter* that selected zero cases. Both are now
+structural: the ordering invariant is asserted on the chain's contents, and each mutation
+carries the ctest expression it must red.
+
+What is left, in order: **D121** (named arguments and defaults — 31 fixtures, 9 corpus
+tests, and the whole `full`-shim corpus row), **D123** (imports — 87 fixtures), the
+`ExportsRec` tables for early type binding, and the measurement task.

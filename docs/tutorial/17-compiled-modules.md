@@ -3,9 +3,9 @@
 > **Implementation status.** `protoscalac` exists and works: it turns a `.scala`
 > file into C++, `make` builds that into `module.so`, and
 > `protoscala --run-module ./module.so` runs it. Classes, traits, objects, case
-> classes, enums and `super` transpile; four things are still refused **at transpile
-> time**, with a message and a line number, and never mistranslated: `import` (D123),
-> `try`/`catch`/`finally` (D120), `await` (D113), and named arguments and default
+> classes, enums, `super` and `try`/`catch`/`finally` transpile; three things are still
+> refused **at transpile time**, with a message and a line number, and never
+> mistranslated: `import` (D123), `await` (D113), and named arguments and default
 > values (D121). A compiled module **is** importable — `import util.Strings` finds
 > `util/Strings.so` on `PROTOSCALA_MODULE_PATH` — but it binds *late*, like any foreign
 > module, so a pattern match against one of its classes does not compile. Everything
@@ -95,9 +95,10 @@ $ protoscalac shapes.scala --build-so && protoscala --run-module ./module.so
 Ask it for something it does not do yet, and it says so instead of guessing:
 
 ```text
-$ protoscalac uses-try.scala
-uses-try.scala:2: error: try/catch/finally is not supported by protoscalac yet (D120):
-the generated frame has no retry loop
+$ protoscalac uses-a-default.scala
+uses-a-default.scala:1: error: a parameter with a default value is not supported by
+protoscalac yet (D121): defaults are bound by the callee's prologue, which a
+transpiled frame does not run
 ```
 
 It writes **no `.cpp` at all** when it refuses. That is deliberate: a half-written
@@ -106,15 +107,20 @@ refusal is always a refusal — the one thing a transpiler must never do is prod
 a program that runs and gives a different answer, so every gap is a message and
 never a guess.
 
+`try`/`catch`/`finally` works, including the case that is easy to get wrong: an
+exception raised *inside* a handler, caught by an enclosing `try` in the same function.
+The frame keeps one retry loop for its whole body, so its handler table is still there
+when the handler itself fails.
+
 If you are wondering how the gaps were found: by running protoScala's own 922
 conformance fixtures down both paths and comparing, and then by running the Scala
 3 compiler's own test corpus down both paths as well. Most of the refusals exist
 because that comparison caught a wrong answer, not because anyone predicted them.
 
 That second harness is also what says how far this has got, and it is worth the
-two numbers. Of the 191 corpus tests the **interpreter** passes, **158** pass
+two numbers. Of the 191 corpus tests the **interpreter** passes, **176** pass
 transpiled, with **no** case where the two paths disagree. Of our own 922
-fixtures, 626 run transpiled. The gap between those two ratios is the honest
+fixtures, 704 run transpiled. The gap between those two ratios is the honest
 reason the corpus run exists: our fixtures are full of top-level `def`s, and real
 Scala is full of `object X { def main … }`.
 

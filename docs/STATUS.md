@@ -991,7 +991,7 @@ emitter walks the whole unit before writing anything, so a refused unit leaves n
 Two things about the numbering. The Phase 7 plan reserved D103–D107; Tracks F, X and S
 consumed D103–D112 before the phase was executed, so the plan's five deviations are
 **D113–D117** here. And six of the rows below (D118–D123) are **not in the plan at
-all** — one of them, D118, has since been closed: each was added because the differential harness produced a wrong answer, and
+all** — two of them, D118 and D120, have since been closed, and D122 with them: each was added because the differential harness produced a wrong answer, and
 the two the plan could not have predicted are **D121** (a default value is bound by
 the callee's prologue, which a transpiled frame does not run, so the callee silently
 saw an unbound parameter) and **D123** (an import is resolved at transpile time and
@@ -1007,7 +1007,7 @@ had filled).
 | D117 | **A transpiled module's version comes from `protoscalac --module-version`, not from the source.** protoScala has no module manifest and this phase did not invent one. Without the option the version is the **empty string**, which P3 fixed as the permanent, first-class "declares no version" value — not a wildcard. `"0.0.0"`, `"unversioned"` and `"latest"` are all unsafe reservations, because each is a value a real module could one day declare | Phase 7 | later |
 | D118 | *(closed 2026-09-27 — classes, traits and objects are supported.)* The first cut refused them, and the measurement said it was not one gap among six: 305 of the 500 excluded fixtures and **179 of the 186** corpus refusals, because a Scala 3 `tests/run` test *is* `object X { def main … }`. `MAKE_CLASS`, `NEW`, `NEW_SPREAD`, `INVOKE_INIT`, `STORE_FIELD`, `STORE_FIELD_IF_NEW` and `SET_FIELD` now rebuild the `ClassSpec` from the static tables (`gen::constFrom`) and call the interpreter's own `makeClass`, `instantiate` and `superSend`, so there is still one implementation of each. The id is kept rather than removed, so the history of the exclusion list reads straight. One wrong answer it exposed on the way: `object Main extends App` ran the module's top level and printed nothing, because the program *is* the object's initialisation (D104) — `gen::runApp` forces the global instead | Phase 7 | (closed) |
 | D119 | *(withdrawn before it shipped)* A capturing closure was going to be refused, because the callable shape it must present looked like an open question. It is not: a transpiled block **is** a `BytecodeModule` with no code and a `nativeEntry`, so a transpiled closure and an interpreted one are the same object shape, captures included. The id is left in place rather than reused, so the exclusion list's history reads straight | Phase 7 | (closed) |
-| D120 | **`try` / `catch` / `finally` is refused.** The generated frame has no retry loop. When one is written, the `switch` that reaches the labels must be **inside** the `try` — C++ forbids jumping *into* a try block and permits jumping within one — and the frame must be able to catch a **second** exception, raised by its own handler body, by a non-matching cascade's `RETHROW` or by a `finally`. Entering the handler from inside the catch abandons the loop and the frame's table is never consulted again: measured, that turns **11** fixtures red | Phase 7 | next |
+| D120 | *(closed 2026-09-27 — `try` / `catch` / `finally` transpiles.)* The frame now has its retry loop, and every warning the entry carried held. The `switch` that reaches the labels is **inside** the `try`, because C++ forbids jumping *into* a try block and permits jumping within one — so the handler body is re-protected by the same table, exactly as the interpreter's `continue` re-protects it, and the frame can catch a **second** exception raised by its own handler body, by a non-matching cascade's `RETHROW` or by a `finally` (`nested-try.scala` transpiled is that case). One retry loop per **block**, not per `try`. The classification lives once, in `gen::handleCaught`, so the generated file writes exactly one `catch (...)` and a block with no protected region writes none | Phase 7 | (closed) |
 | D121 | **A named argument and a default parameter value are refused.** Both are bound by the **callee's** prologue (`bindKeywordsAndDefaults`), which a transpiled frame does not run, so a transpiled callee would silently see an unbound parameter. Found by the differential harness, not predicted by the plan | Phase 7 | later |
 | D122 | *(closed 2026-09-27 — `super` and `super[T].m` are supported.)* The super-site search needs the defining template's key, which the first cut did not carry into the static tables; `gen::constFrom` now rebuilds a `SuperSite` and `ops::Engine::superSend` does the search, as it does for the interpreter | Phase 7 | (closed) |
 | D123 | **`import` is refused.** An import is resolved at transpile time by *loading* (D90) and leaves no trace in the emitted code — the imported names become ordinary global keys — so a generated module would push globals nothing had filled. Re-performing the import at load time is what `gen::importModule` is for and it is not implemented. The check is on the **source**, an over-approximation: a line beginning with `import` inside a triple-quoted string is refused too. Found by the differential harness | Phase 7 | next |
@@ -1019,6 +1019,50 @@ interpreter: there is nothing to drift from. The exception-boundary template app
 exactly two places, both inside `libprotoScala.so`, and the emitter writes no `catch`
 at all — a generator bug cannot drop the `std::logic_error` clause and retire D74 in a
 file no human wrote. Full specification: [`PROTOSCALAC_SPECIFICATION.md`](PROTOSCALAC_SPECIFICATION.md).
+
+### Phase 7 — packaging, 2026-09-27
+
+What an installation now carries for a module author: `bin/protoscalac`,
+`<libdir>/libprotoScala.so.1`, `include/protoScala/GeneratedModule.h`,
+`<libdir>/cmake/protoScala/`, and an empty `<libdir>/protoscala/modules` beside the
+existing `providers`. `protoscalac` carries the same install RPATH `protoscala` does, so
+an installed one finds its own library with no `LD_LIBRARY_PATH`.
+
+`g++` and `make` are a Debian **recommendation**, not a dependency: `--emit-cpp` needs
+neither and only `--build-so` runs them, so a hard dependency would pull a toolchain onto
+every installation of the interpreter.
+
+`cli/package` asserts all five paths. It found the gap the moment it was written: the
+archive in `build_pkg/` predated `protoscalac`, so the check reported
+`the package has no bin/protoscalac` — the check doing its job on its first run rather
+than a regression.
+
+**Two real defects, both found by installing and then RUNNING the result — which nothing
+in this repository had ever done.**
+
+1. **`libprotoScala.so*` was in the `Unspecified` install component.** In
+   `install(TARGETS)` an option after an artifact keyword belongs to *that* artifact
+   group, so a single trailing `COMPONENT protoScala` bound only to `PUBLIC_HEADER` and
+   left the library out. `cmake --install --component protoScala` — the command
+   INSTALLATION.md tells users to run, and the one CPack uses — installed `protoscalac`
+   and the header but **not the library they link against**. The symptom was
+   `protoscalac: error while loading shared libraries: libprotoScala.so.1`. Broken since
+   the library was added, invisible because no test installed.
+2. **`protoscalac` compiled a module against a STALE `protoCore.h` and produced a module
+   that linked, loaded and segfaulted.** The generated `Makefile`'s `-I<prefix>/include`
+   *adds* to the compiler's default search path rather than replacing it, so with no
+   protoCore headers in the prefix `#include <protoCore.h>` resolved to
+   `/usr/local/include/protoCore.h` — a February copy of a different protoCore. The crash
+   was in `ProtoObject::newChild`, from `gen::makeFn`, with no diagnostic of any kind.
+   `protoscalac` now **refuses** when it cannot find `protoCore.h` or
+   `protoScala/GeneratedModule.h` on its own include path, names the directories it
+   searched, and says to set `PROTOSCALAC_INCLUDE_DIRS`. This is the include-path twin of
+   the standing rule about `ldd` and `/usr/local`'s stale library: the same hazard, one
+   step earlier, and it produces a crash rather than a link error.
+
+With both fixed, the end-to-end check passes: the installed `protoscalac` builds a module
+with no `LD_LIBRARY_PATH`, `protoscala --run-module` prints `Hello, protoScala!`, and
+`ldd` resolves `libprotoScala.so.1` and `libprotoCore.so.3` **from inside the prefix**.
 
 ### Phase 7 — importing a compiled module, 2026-09-27
 
@@ -1102,20 +1146,24 @@ repository. What is proven is that the call needs protoCore and nothing else.
 **The fixture differential**, one CTest case per registered fixture, transpile →
 `make` → `--run-module`, judged against the fixture's own directive:
 
-| | first cut | after D118 (2026-09-27) |
-|---|---:|---:|
-| registered fixtures | **921** | **922** |
-| pass | **921** | **922** |
-| fail | **0** | **0** |
-| — of which transpiled, compiled and **ran** | **360** | **626** |
-| — of which correctly rejected at compile time (an `EXPECT-ERROR` fixture) | **61** | **61** |
-| excluded, each a refusal with a reason code | **500** | **235** |
+| | first cut | after D118 | after D120 (2026-09-27) |
+|---|---:|---:|---:|
+| registered fixtures | **921** | **922** | **922** |
+| pass | **921** | **922** | **922** |
+| fail | **0** | **0** | **0** |
+| — of which transpiled, compiled and **ran** | **360** | **626** | **704** |
+| — of which correctly rejected at compile time (an `EXPECT-ERROR` fixture) | **61** | **61** | **61** |
+| excluded, each a refusal with a reason code | **500** | **235** | **157** |
 
-Exclusions by code, after D118: D123 **87**, D120 **86**, D113 **31**, D121 **31**.
-(The D120 and D113 counts *rose* while the total fell by 265, and that is not a
-regression: a fixture that used to be excluded for the class it declares is now
-excluded for the `try` or the `await` inside it, so it moves between codes rather than
-leaving the list. Each code names the **first** refusal found.)
+Exclusions by code now: D123 **87**, D113 **39**, D121 **31**.
+
+Two arithmetic notes, because the per-code numbers do not move the way a reader expects.
+**Each code names the FIRST refusal found**, so a fixture moves between codes rather than
+leaving the list: closing D118 raised D120 and D113 while the total fell by 265, and
+closing D120 then raised **D113 from 31 to 39** — those eight are `await` inside a `try`,
+which D120 had been answering for. The harness found them by failing: they had been taken
+off the list with the rest of D120, and the bidirectional guard reported each one by name
+as "refused and not on the exclusion list".
 `tests/transpile-exclude.txt` carries one line per fixture with its code, and the
 harness checks the list in **both** directions: a listed fixture that transpiles,
 compiles and runs correctly is a **FAIL** naming itself.
@@ -1126,25 +1174,26 @@ with Scala on about a third of the in-scope corpus. The rule measured is *every 
 test the interpreter passes must also pass transpiled*. Over the 601 in-scope
 (bucket 3) tests of the Scala 3 `tests/run` corpus:
 
-| | first cut | after D118 (2026-09-27) |
-|---|---:|---:|
-| interpreter passes | **191** (31.8 %) | **191** (31.8 %) |
-| of those, transpiled **pass** | **5** | **158** |
-| — of which verified against the corpus's own checkfile | **1** | **91** |
-| of those, **refused** | **186** — D118 179, D123 6, D120 1 | **33** — D120 18, D121 9, D123 6 |
-| of those, **diverged** | **0** | **0** |
-| reverse (interpreter fails, transpiled passes) | **0** | **0** |
+| | first cut | after D118 | after D120 (2026-09-27) |
+|---|---:|---:|---:|
+| interpreter passes | **191** (31.8 %) | **191** | **191** (31.8 %) |
+| of those, transpiled **pass** | **5** | **158** | **176** (92.1 %) |
+| — of which verified against the corpus's own checkfile | **1** | **91** | **95** |
+| of those, **refused** | **186** — D118 179, D123 6, D120 1 | **33** — D120 18, D121 9, D123 6 | **15** — D121 9, D123 6 |
+| of those, **diverged** | **0** | **0** | **0** |
+| reverse (interpreter fails, transpiled passes) | **0** | **0** | **0** |
 
-**Zero divergences, in every configuration and in both directions, before and after.**
-What changed is that the rule is no longer satisfied *vacuously*: the first cut ran 5
-of the 191 and refused 186, because the corpus is made of the one thing it refused.
-With classes it runs **158**, and **91** of those are compared against the corpus's own
-expected output rather than merely running.
+**Zero divergences, in every configuration and in both directions, at every stage.**
+What changed is that the rule is no longer satisfied *vacuously*: the first cut ran 5 of
+the 191 and refused 186, because the corpus is made of the one thing it refused. With
+classes it ran 158; with the retry loop it runs **176 of 191 — 92.1 %** — and **95** of
+those are compared against the corpus's own expected output rather than merely running.
+What is left is 9 named-argument-or-default tests (D121) and 6 imports (D123).
 
 Two things this measurement is worth keeping for. It is the finding the fixture
 harness could not have produced — the fixture count moved 1.7x for the same change the
-corpus count moved 31x, which is why **the 626 is what our fixtures are made of, not
-two thirds of Scala**. And the `full`-shim configuration reports **0**, not because of
+corpus count moved 31x, which is why **the fixture count is what our fixtures are made
+of, not a share of Scala**. And the `full`-shim configuration reports **0**, not because of
 the transpiler but because the harness's own Predef shim declares `def assert(cond:
 Boolean, msg: Any = "assertion failed")` — a default parameter value, D121 — so every
 test refuses at the scaffolding's first line. A measurement whose denominator is the

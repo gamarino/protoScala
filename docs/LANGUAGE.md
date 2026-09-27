@@ -641,15 +641,14 @@ named message and a source position, and never mistranslates:
 |---|---|
 | **D113** | `await` inside a transpiled module (detected by send-site name, so a user method called `await` is refused too) |
 | **D115** | REPL input: `protoscalac` compiles files |
-| **D120** | `try` / `catch` / `finally` |
 | **D121** | named arguments and default parameter values |
 | **D123** | `import` |
 
-Classes, traits, objects, case classes and enums (**D118**) and `super` (**D122**) were
-refused by the first cut and are **supported** since 2026-09-27, `object Main extends
-App` included. Of the 922 registered fixtures, 626 now run transpiled and 235 are
-excluded; of the 191 Scala 3 `tests/run` corpus tests the interpreter passes, 158 pass
-transpiled with no divergence in either direction.
+Classes, traits, objects, case classes and enums (**D118**), `super` (**D122**) and
+`try` / `catch` / `finally` (**D120**) were refused by the first cut and are
+**supported** since 2026-09-27, `object Main extends App` included. Of the 922
+registered fixtures, **704** now run transpiled, 61 are correctly rejected at compile
+time and 157 are excluded.
 
 A compiled module is **importable**: `import util.Strings` finds `util/Strings.so` under
 `PROTOSCALA_MODULE_PATH`, searched after source modules so a `.scala` beside it still

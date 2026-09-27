@@ -240,3 +240,71 @@ claim whose test goes through a different code path than the claim. Fix it by as
 the invariant where it lives — here, on the chain contents — rather than by deleting the
 mutation or weakening the claim. And when a documented ordering is consumed by a
 *foreign* caller, no test driven through our own front door will ever see it.
+
+## A test must not encode the machine it was written on
+
+**2026-09-27.** I gave two new test scripts a guard around their `rm -rf "$SCRATCH"`:
+
+```bash
+case "$SCRATCH" in
+    /home/*/Documentos/proyectos/*) rm -rf "$SCRATCH" ;;
+    *) echo "FAIL: refusing to clear '$SCRATCH'"; exit 1 ;;
+esac
+```
+
+It came from a real safety rule — never delete outside the workspace — but it describes
+*where the author works* rather than *what makes a path safe*. On CI the build tree is
+`/home/runner/work/...`, so the guard refused and both scripts exited 1 in 0.00 s having
+done nothing. The two tests that exist to demonstrate the phase's headline capability
+reported failure while the capability worked perfectly, and the red read as "the feature
+is broken on a clean machine" — the most misleading way for a guard to be wrong.
+
+**Rule.** A safety check inside a committed test states a property of the path (absolute,
+no `..`, deep enough that `/` and `/home` cannot be the target, not a symlink), never a
+prefix of one machine's filesystem. A personal safety rule constrains what *I* type in a
+shell; encoding it into a test exports my environment as a requirement. And before
+committing any script that takes a path from the harness, check the decision against a
+path shaped like CI's — a green local suite cannot see this class of bug at all.
+
+## A mutation matrix whose target set is chosen by eye measures the eye
+
+**2026-09-27.** I ran four mutations of the retry loop with
+`ctest -R "Guarded\.|cli/transpiler-cli|transpiled/20-exceptions/..."`. Two came back
+GREEN and looked like holes in the tests. They were not: `Guarded.` matched **no ctest
+case at all**, because `test_generated_support` is registered as the single case
+`unit/generated_support` rather than through `gtest_discover_tests`, so the four cases
+written specifically to cover those two mutations were never run. The mutations were fine
+and the tests were fine; the *filter* was wrong, and a wrong filter reports exactly what a
+missing test reports.
+
+**Rule.** A mutation records, as data, which ctest expression it must turn red —
+`tests/mutations/apply.py` now has a `COVERS` map and a `covers <id>` subcommand, and the
+runner asks it instead of guessing. Before believing any green mutation, check that the
+filter selected a non-zero number of tests (`ctest -N -R <expr>`); a matrix that ran zero
+cases is indistinguishable from a matrix that passed.
+
+## Install it and run it, or the packaging is untested
+
+**2026-09-27.** Task 14 Step 5 — install into a scratch prefix, then run what was
+installed — found **two defects nothing else had noticed**, one of them present since the
+shared library was added:
+
+1. `libprotoScala.so*` was in CMake's `Unspecified` install component, because in
+   `install(TARGETS)` an option after an artifact keyword binds to *that* artifact group
+   and the single trailing `COMPONENT protoScala` had attached itself to `PUBLIC_HEADER`.
+   So `cmake --install --component protoScala` installed the compiler and its header but
+   not the library they link. The whole suite was green throughout, because every test ran
+   from the build tree.
+2. The generated `Makefile`'s `-I<prefix>/include` *adds* to the compiler's default search
+   path rather than replacing it, so with no protoCore headers in the prefix a module
+   compiled against `/usr/local/include/protoCore.h` — a months-old copy of a different
+   protoCore. It linked (the library was right; only the header was wrong) and segfaulted
+   in `ProtoObject::newChild` with no diagnostic.
+
+**Rule.** A green suite that only ever runs from the build tree says nothing about what an
+installation does. Install into a scratch prefix and *execute the installed binaries* with
+`env -u LD_LIBRARY_PATH`, and check with `ldd` that every library resolves inside the
+prefix. And when a tool hands work to a compiler, remember that `-I` and `-L` **add** to
+default paths: the tool must verify the headers it depends on are reachable through its own
+list, because a wrong header that happens to be on the system path fails at run time, not
+at link time.

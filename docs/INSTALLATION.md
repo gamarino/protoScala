@@ -95,16 +95,59 @@ Installed layout, relative to the prefix:
 | Content | Location |
 |---------|----------|
 | `protoscala` | `bin/` |
+| `protoscalac` (the transpiler) | `bin/` |
+| `libprotoScala.so.1` | `<libdir>/` |
+| `protoScala/GeneratedModule.h` (the whole published C++ surface) | `include/` |
+| `find_package(protoScala CONFIG)` files | `<libdir>/cmake/protoScala/` |
+| provider plug-ins (protoScala ships none) | `<libdir>/protoscala/providers/` |
+| compiled modules | `<libdir>/protoscala/modules/` |
 | `LICENSE`, `README.md` | `share/doc/protoScala/` |
+
+The last two directories are installed **empty**, on purpose: `protoscala --version`
+prints both paths, and a printed path that does not exist leaves a user unable to tell
+"nothing is installed here" from "the runtime is looking somewhere else".
 
 **`protoscala` needs no external data file at run time.** `lib/prelude.scala` is
 read at configure time and compiled into the binary as a generated
 `PreludeSource.cpp`, so there is no build-tree / install-tree path that can
 differ and nothing to go missing from a package.
 
-protoScala installs **no** copy of protoCore. `bin/protoscala` carries the
-install RPATH `$ORIGIN/../<libdir>` (`@executable_path/../<libdir>` on macOS), so
-a protoCore installed into the same prefix is found with no `LD_LIBRARY_PATH`.
+protoScala installs **no** copy of protoCore. `bin/protoscala` and `bin/protoscalac`
+carry the install RPATH `$ORIGIN/../<libdir>` (`@executable_path/../<libdir>` on macOS),
+so a protoCore installed into the same prefix is found with no `LD_LIBRARY_PATH`.
+
+### `protoscalac`, the transpiler
+
+**What it needs, and when.** `--emit-cpp` (the default) needs nothing beyond the
+installed files above. `--build-so` runs `make` and a C++ compiler, so those two are a
+package **recommendation** rather than a dependency: most users of the interpreter never
+reach that mode, and a hard dependency would pull a toolchain onto every installation.
+
+**Three environment overrides**, each replacing the corresponding baked-in value:
+
+| Variable | Replaces |
+|---|---|
+| `PROTOSCALAC_CXX` | the C++ compiler the generated `Makefile` invokes |
+| `PROTOSCALAC_INCLUDE_DIRS` | the `-I` directories (`:`-separated) |
+| `PROTOSCALAC_LIBRARY_DIRS` | the `-L` / `-rpath` directories (`:`-separated) |
+
+Without them, `protoscalac` decides between the build tree's directories and the
+installation's by comparing its own location with the build tree's, so a relocated prefix
+keeps working.
+
+**The generated target is always `module.so`.** Rename it to `<module>.so` before putting
+it on a module search path: `CompiledModuleProvider` resolves the logical path `a.b.C` to
+`<base>/a/b/C.so`, so a file still called `module.so` is only reachable through
+`protoscala --run-module ./module.so`.
+
+**Where a compiled module is looked for**, in order:
+
+1. each `:`-separated entry of `PROTOSCALA_MODULE_PATH`;
+2. `<prefix>/<libdir>/protoscala/modules`.
+
+`protoscala --version` prints that list. Compiled modules are searched **after** source
+modules, so a `.scala` beside a `.so` still wins and installing a compiled module cannot
+change the meaning of an `import` that already resolved.
 
 ---
 

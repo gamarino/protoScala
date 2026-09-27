@@ -271,13 +271,74 @@ because `std::logic_error` derives from `std::exception`; **without it, D74 reti
 silently.** The emitter writes none of this: a generator bug that dropped a clause
 would otherwise retire D74 in a file no human wrote.
 
-**The retry loop is not implemented in this cut**, so `try`/`catch`/`finally` is
-refused (§8). When it is written, the `switch` that reaches the labels must be
-**inside** the `try`: C++ forbids jumping *into* a try block and permits jumping
-within one, and the frame must be able to catch a **second** exception — one raised
-by its own handler body, by the `RETHROW` a non-matching cascade emits, or by a
-`finally`. Entering the handler from inside the catch abandons the loop and the
-frame's table is never consulted again: measured, that turns **11** fixtures red.
+### 5.1 The frame's retry loop
+
+A block with a protected region wraps its **whole body** — not each `try` — in one
+retry loop, reproducing `ExecutionEngine::runFrame`:
+
+```cpp
+    std::size_t pc = 0;
+    std::size_t resumePc = kEntry;
+    for (;;) {
+      try {
+        switch (resumePc) {
+            case kEntry: goto L_entry;
+            case 20: goto L20;            // one case per handlerPc
+            default: throw std::logic_error("blk1: unreachable resume pc");
+        }
+      L_entry:
+        pc = 0; /* ... the body, with `pc = n;` before every instruction that can raise */
+      } catch (...) {
+        const gen::HandlerRec* h = gen::handleCaught(C, blk1_rec, pc, S, F.pendingSlot());
+        resumePc = h->handlerPc;
+        continue;
+      }
+    }
+```
+
+Five properties, each deliberate.
+
+**One loop per BLOCK, not per `try`.** `tests/cli/transpiler-cli.sh` counts the
+`catch (...)` clauses of a generated file with a `try` and requires exactly one, and
+requires **zero** in a file without one — so a block that cannot enter a handler pays
+nothing, and the emitter cannot drift into per-`try` loops.
+
+**The `switch` is inside the `try`.** C++ forbids jumping *into* a try block and permits
+jumping within one, so the dispatch and every label it reaches share the try — which is
+what re-protects the handler body under the frame's own table, exactly as the
+interpreter's `continue` re-protects it. The CLI check asserts the two lines' order,
+because a switch placed outside would not compile but would also not be noticed.
+
+**The handler body runs OUTSIDE the C++ catch.** `handleCaught` returns the entry and the
+generated code assigns `resumePc` and `continue`s. Two things depend on it: the body runs
+with no live C++ handler, so it suspends like any other code; and the frame can catch a
+**second** exception — raised by the handler body itself, by a non-matching cascade's
+`RETHROW`, or by a `finally`. `tests/conformance/20-exceptions/nested-try.scala` is that
+case, and it runs transpiled.
+
+**`pc` is assigned before every instruction that can raise, and nowhere else.** The
+handler search reads it, so a stale `pc` would find the wrong region — a wrong answer.
+`canThrow` lists the opcodes that *cannot*, so anything added later is treated as
+throwing until proven otherwise; `JUMP_IF_FALSE`/`JUMP_IF_TRUE` (they call `truthy`) and
+`JUMP_BACK` (a GC safepoint) are on the throwing side despite looking pure.
+
+**The classification lives once, in `gen::handleCaught`.** It re-raises the in-flight
+exception with a bare `throw;` and reproduces what `runLoop` and `runFrame` do together:
+`FutureYield` and `std::logic_error` rethrown; `ScalaThrow`'s value re-rooted into
+`returnValue` and the pending slot before anything allocates (A0-2 / E1); `ScalaError`
+and the `std::` errors the interpreter names — `invalid_argument` →
+`IllegalArgumentException`, `out_of_range` → `IndexOutOfBoundsException`,
+`overflow_error` → `ArithmeticException`, `bad_alloc` → `OutOfMemoryError`, any other
+`runtime_error` → `RuntimeException` — materialised. **The D74 arm comes AFTER
+`invalid_argument` and `out_of_range`**, which derive from `std::logic_error` and *are*
+translated by the interpreter; putting it first would make them escape as defects, which
+is mutation `R1`. And the handler search happens **before** `materialise`, so the
+uncaught path allocates nothing — as an interpreted frame's does not.
+
+The entry for this deviation warned that entering the handler from inside the catch
+abandons the loop and the frame's table is never consulted again, measured at **11**
+fixtures red. That warning is why the shape above is the interpreter's and not a
+simplification of it.
 
 ## 6. The published ABI
 
@@ -347,7 +408,6 @@ compiles into something is worse than none.
 | code | refused | why |
 |---|---|---|
 | **D113** | `await` in transpiled code | cooperative suspension snapshots a *bytecode* frame (`__mod__`, `__ip__`, `__fbase__`, `__fslots__`), and `nativeReentryDepth()` already refuses to suspend above depth 1 (D43). A transpiled frame has no `ip` and its C++ frame cannot be rebuilt. Detected by **send-site name**, so a user method named `await` is refused too — the safe direction |
-| **D120** | `try` / `catch` / `finally` | the generated frame has no retry loop (§5) |
 | **D121** | named arguments and default values | both are bound by the **callee's** prologue, which a transpiled frame does not run; a transpiled callee would silently see an unbound parameter |
 | **D123** | `import` | an import is resolved at transpile time by loading (D90) and leaves no trace in the emitted code — the imported names become ordinary global keys — so a generated module would push globals nothing had filled. Detected on the **source**, an over-approximation: a line beginning with `import` inside a triple-quoted string is refused too |
 | **D115** | the REPL | `protoscalac` compiles files. `UnitMode::Repl` is not offered and there is no `res0` echo |
@@ -358,7 +418,11 @@ compiles into something is worse than none.
 | — | `emitExports` / `ExportsRec`: **early type binding** for an imported compiled module | §2. The provider ships and `import` of a `.so` works, but it binds LATE, like any foreign module. A `ClassInfo` is not carried across, so a pattern match or a `new` against a compiled module's class does not compile |
 
 **Closed on 2026-09-27, and named here because a specification that quietly drops a
-refusal is the failure `PROTOPYC_SPECIFICATION.md` §5 exists to retract.** **D118** —
+refusal is the failure `PROTOPYC_SPECIFICATION.md` §5 exists to retract.** **D120** —
+`try` / `catch` / `finally` — is **supported**: the frame has its retry loop, one per
+**block** rather than one per `try`, with the resume `switch` inside the `try` and the
+classification in `gen::handleCaught` so the generated file writes exactly one
+`catch (...)` and a block with no protected region writes none. **D118** —
 classes, traits, objects, case classes and enums — and **D122** — `super` and
 `super[T].m` — are **supported**. `gen::constFrom` rebuilds a `ClassSpec` from the
 static tables and the interpreter's own `makeClass`, `instantiate` and `superSend` do
@@ -382,18 +446,24 @@ fixture through transpile → `make` → `--run-module` and judges it against th
 fixture's own first-line directive. The directive parser is copied verbatim from
 `run.sh`, so the two harnesses cannot disagree about what a fixture asks for.
 
-Measured over all **922** registered fixtures (2026-09-27, after D118):
+Measured over all **922** registered fixtures (2026-09-27, after D120):
 
 | | count |
 |---|---:|
 | pass | **922** |
 | fail | **0** |
-| of which transpiled, compiled and ran | **626** |
+| of which transpiled, compiled and ran | **704** |
 | of which correctly rejected at compile time (an `EXPECT-ERROR` fixture) | **61** |
-| excluded, each a refusal with a reason code | **235** |
+| excluded, each a refusal with a reason code | **157** |
 
-By code: D123 **87**, D120 **86**, D113 **31**, D121 **31**. The first cut's figures
-were 360 run and 500 excluded, of which D118 alone was 305.
+By code: D123 **87**, D113 **39**, D121 **31**. The progression was 360 run / 500
+excluded in the first cut, 626 / 235 after D118, 704 / 157 after D120.
+
+**Each code names the FIRST refusal found**, which is why the per-code numbers do not
+move monotonically: closing D120 raised **D113 from 31 to 39**, because eight of the 86
+were `await` inside a `try` and D120 had been answering for them. The harness found those
+eight by failing — they had come off the list with the rest of D120, and the bidirectional
+guard named each one as "refused and not on the exclusion list".
 
 Three anti-rot guards, each present because its absence is a way for the harness to
 pass while proving nothing:
@@ -426,30 +496,56 @@ one per call.
 Scala 3 `tests/run` corpus down both paths. The rule is *not* "does protoScala agree
 with Scala"; it is **every corpus test the interpreter passes must also pass
 transpiled**. Over the 601 in-scope tests the interpreter passes **191 (31.8 %)**, with
-**0 divergences** in either direction, before and after D118. What changed is the
-coverage: the first cut ran **5** of the 191 and refused 186 — one code, because a
-`tests/run` test is `object X { def main … }` — and after D118 it runs **158**, of which
-**91** are verified against the corpus's own checkfile (it was 1). What still refuses is
-D120 **18**, D121 **9**, D123 **6**.
+**0 divergences** in either direction at every stage. What changed is the coverage:
 
-Two readings this measurement is kept for. **The fixture count is what our fixtures are
-made of**: the same change moved it 1.7× and moved the corpus 31×, which is a blind spot
-the fixture harness could not have reported on itself. And the harness's `full`-shim
-configuration reports **0**, not because of the transpiler but because the shim itself
-declares `def assert(cond: Boolean, msg: Any = "assertion failed")` — a default value,
-D121 — so every test refuses at the scaffolding's first line. The raw-body row is the one
-that measures the corpus.
+| | first cut | after D118 | after D120 |
+|---|---:|---:|---:|
+| transpiled pass (raw body) | 5 | 158 | **176** (92.1 %) |
+| of those, checkfile-verified | 1 | 91 | **95** |
+| refused | 186 | 33 | **15** — D121 9, D123 6 |
+
+Two readings this measurement is kept for. **A fixture count is not language coverage**:
+D118 moved the fixtures 1.7× and the corpus 31×, a blind spot the fixture harness could
+not have reported on itself; D120 then moved both by about 1.1×, and that agreement is
+itself informative — `try` is as common in our fixtures as in real Scala, and classes were
+not. And the harness's `full`-shim configuration reports **0**, not because of the
+transpiler but because the shim itself declares `def assert(cond: Boolean, msg: Any =
+"assertion failed")` — a default value, D121 — so every test refuses at the scaffolding's
+first line. That is the **third** time in this phase a shim artefact has looked like a
+transpiler limit, and it is the strongest argument for implementing D121 next: nine raw
+tests, and the whole `full` row.
 
 ## 10. The mutation matrix
 
 **Every differential case must be shown to fail under a named mutation of the
 generator.** A code-generator suite that has never been red is a suite whose coverage
-is unknown. `tests/mutations/` holds the patches; the measured red sets are in
+is unknown.
+
+Each mutation records **which ctest expression it must turn red**, in
+`tests/mutations/apply.py`'s `COVERS` map, and the runner asks for it rather than
+choosing by hand. That is not tidiness: choosing by hand reported two retry-loop
+mutations as GREEN when the filter (`Guarded.`) matched **no case at all**, because
+`test_generated_support` is one ctest case named `unit/generated_support` rather than a
+set discovered from gtest. A matrix that ran zero cases is indistinguishable from a matrix
+that passed, so the filter's selection count is checked with `ctest -N` before any green
+result is believed. `tests/mutations/` holds the patches; the measured red sets are in
 `.agent_scratch/phase7-transpiler/mutations-emitter.md`, together with the mutations
 the plan listed that **cannot** be applied to this cut because the code they mutate
 does not exist yet (the handler-entry stack depth, `materialise` held in a C++ local,
 `emitExports`'s `TypeRec` table). Listing them as inapplicable is the honest form;
 listing them as passed would not be.
+
+The retry loop has four (`R1`–`R4`): the D74 arm moved ahead of the two
+`std::logic_error` subclasses the interpreter translates, the re-rooting write dropped,
+the `pc` tracking suppressed, and `handlerFor` ignoring its range. The first and the last
+are the two that would produce a **wrong answer** rather than an error, which is why they
+exist.
+
+`R3`'s expression is `cli/transpiler-cli`, which asserts the property directly. The
+transpiled `20-exceptions` cases go red under it as well, but by **hanging**: with `pc`
+stuck at 0 every exception enters the same handler, and a handler that raises then loops.
+Each such case costs the harness's 90-second timeout, so proving it that way takes half an
+hour and says nothing the direct assertion does not.
 
 `CompiledModuleProvider` has four of its own (`P1`–`P4`), and one of them earned its
 place by staying **green**: reversing the resolution-chain order left

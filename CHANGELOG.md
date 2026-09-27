@@ -38,6 +38,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the phase set out to prove: the call needs protoCore and nothing else.
   ([`docs/INTEROP.md`](docs/INTEROP.md) §8)
 
+- **`try` / `catch` / `finally` transpiles (D120): the frame has its retry loop.** One
+  loop per **block**, not per `try`, with the resume `switch` inside the `try` — C++
+  forbids jumping *into* a try block and permits jumping within one — so the handler body
+  is re-protected by the same table, exactly as `ExecutionEngine::runFrame`'s `continue`
+  re-protects it. That is what lets a frame catch a **second** exception: one raised by
+  its own handler body, by a non-matching cascade's `RETHROW`, or by a `finally`.
+  `20-exceptions/nested-try.scala` is that case and it runs transpiled; the deviation
+  entry had measured the alternative at 11 fixtures red.
+
+  The classification lives once, in `gen::handleCaught`, which re-raises the in-flight
+  exception with a bare `throw;` and reproduces what `runLoop` and `runFrame` do together.
+  So a generated file writes exactly **one** `catch (...)` — and a block with no protected
+  region writes **none**, which `tests/cli/transpiler-cli.sh` checks in both directions.
+  The `std::logic_error` arm that keeps D74 sits **after** `std::invalid_argument` and
+  `std::out_of_range`, which derive from it and *are* translated by the interpreter;
+  putting it first would make them escape as defects, which is mutation `R1`. The handler
+  search runs **before** `materialise`, so the uncaught path allocates nothing, as an
+  interpreted frame's does not. `pc` is assigned before every instruction that can raise
+  and nowhere else, because the search reads it and a stale `pc` finds the wrong region.
+
+  Fixtures: **704** of 922 now run transpiled (was 626), 157 excluded (was 235). Corpus:
+  **176** of the 191 the interpreter passes (was 158), **95** checkfile-verified (was 91),
+  still **0** divergences. What remains is 9 corpus tests for named arguments and defaults
+  (D121) and 6 for imports (D123).
+
+  One arithmetic note, because the numbers do not move monotonically: each reason code
+  names the **first** refusal found, so closing D120 raised **D113 from 31 to 39** — eight
+  of the 86 are `await` inside a `try`. The harness found them by failing, naming each one
+  as "refused and not on the exclusion list", which is the bidirectional guard doing
+  exactly its job.
+
 - **A compiled module is importable: `CompiledModuleProvider` (alias `compiled`, GUID
   `protoScala-compiled-v1`).** `import util.Strings` finds `util/Strings.so` under
   `PROTOSCALA_MODULE_PATH` and then `<prefix>/<libdir>/protoscala/modules`, and
@@ -312,12 +343,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Known limitations
 
 - **Phase 7 is incomplete, and what it does not do is still a list.** `protoscalac`
-  refuses four things at transpile time, each with a named message and a source
-  position, and never mistranslates: `import` (**D123**, 87 excluded fixtures),
-  `try`/`catch`/`finally` (**D120**, 86 fixtures and the largest remaining corpus group
-  at 18), `await` (**D113**, 31) and named arguments and default values (**D121**, 31).
-  The first cut also refused classes (**D118**) and `super` (**D122**); both are now
-  supported.
+  refuses three things at transpile time, each with a named message and a source
+  position, and never mistranslates: `import` (**D123**, 87 excluded fixtures and 6 corpus
+  tests), `await` (**D113**, 39) and named arguments and default values (**D121**, 31
+  fixtures and 9 corpus tests). The first cut also refused classes (**D118**), `super`
+  (**D122**) and `try`/`catch`/`finally` (**D120**); all three are now supported.
+
+  **D121 is the most valuable thing left**, and not because of its 31 fixtures: the
+  corpus differential's `full`-shim row reads **0** solely because the harness's own
+  Predef shim declares `def assert(cond: Boolean, msg: Any = "assertion failed")`.
 
   Two parts of the phase are **not built**: the `ExportsRec` tables that would let a
   compiled module be imported with **early type binding** rather than as a foreign
@@ -377,6 +411,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and still never write into the source tree. Unset, nothing changes.
 
 ### Fixed
+
+- **`cmake --install --component protoScala` did not install `libprotoScala.so`.** In
+  `install(TARGETS)` an option after an artifact keyword belongs to that artifact group,
+  so the single trailing `COMPONENT protoScala` bound only to `PUBLIC_HEADER` and the
+  library landed in the `Unspecified` component. The command `docs/INSTALLATION.md` tells
+  users to run — and the one CPack uses per component — therefore installed `protoscalac`
+  and the header but not the library they link, and an installed `protoscalac` died with
+  `error while loading shared libraries: libprotoScala.so.1`. Broken since the shared
+  library was added, and invisible because nothing in this repository had ever installed
+  and then run the result. `COMPONENT` is now on every artifact clause, with
+  `NAMELINK_COMPONENT` for the development symlink.
+
+- **`protoscalac` could compile a module against a stale `protoCore.h` and produce one
+  that linked, loaded and crashed.** The generated `Makefile`'s `-I<prefix>/include`
+  *adds* to the compiler's default search path rather than replacing it, so on a prefix
+  with no protoCore headers `#include <protoCore.h>` resolved to
+  `/usr/local/include/protoCore.h` — a February copy of a different protoCore. The module
+  built and linked cleanly and then segfaulted in `ProtoObject::newChild`, called from
+  `gen::makeFn`, with no diagnostic. It now **refuses** when `protoCore.h` or
+  `protoScala/GeneratedModule.h` is not on its own include path, prints the directories it
+  searched, and names `PROTOSCALAC_INCLUDE_DIRS`. This is the include-path twin of the
+  standing `ldd` rule about `/usr/local`'s stale library: the same hazard one step
+  earlier, and it produces a crash instead of a link error.
+
+  Both were found by Task 14 Step 5, which installs into a scratch prefix and runs what
+  it installed. The step is the whole reason they are not still there.
 
 - **The actor scheduler's second data race is fixed: `finishTurn` no longer reads
   shared per-actor state after releasing the claim.** Its non-suspended path used to

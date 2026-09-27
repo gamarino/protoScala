@@ -1061,12 +1061,13 @@ binds is a **foreign** module, with late binding: the tables that would carry a 
 across and keep early type binding are not built, so a pattern match against a compiled
 module's class does not compile.
 
-`protoscalac` is still **incomplete**: it refuses `import`, `try`/`catch`/`finally`,
-`await` and named arguments and defaults, each at transpile time with a named message
-and a source position, and never mistranslates. Classes, traits, objects, case classes,
-enums and `super` are supported. Of 922 conformance fixtures, **626** run transpiled;
-of the 191 Scala 3 `tests/run` corpus tests the interpreter passes, **158** pass
-transpiled with **zero** divergences in either direction. What it refuses, why, and the
+`protoscalac` is still **incomplete**: it refuses `import`, `await`, and named arguments
+and default values, each at transpile time with a named message and a source position,
+and never mistranslates. Classes, traits, objects, case classes, enums, `super` and
+`try`/`catch`/`finally` are supported. Of 922 conformance fixtures, **704** run
+transpiled; of the 191 Scala 3 `tests/run` corpus tests the interpreter passes, **176**
+pass transpiled — 95 of them checked against the corpus's own expected output — with
+**zero** divergences in either direction. What it refuses, why, and the
 two differentials that measure it are in
 [docs/PROTOSCALAC_SPECIFICATION.md](docs/PROTOSCALAC_SPECIFICATION.md).
 
