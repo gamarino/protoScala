@@ -183,11 +183,92 @@ which matches protoST and protoClojure.
 
 ### Platform verification status
 
+Last verified 2026-09-27 against protoScala 0.6.0 and protoCore 2.5.0
+(`PROTOCORE_ABI_SOVERSION 3`), built with `-DPROTOCORE_REQUIRE_PACKAGE=ON` so the
+sibling developer fallback was a hard error.
+
 | Platform | Packaging | Status |
 |----------|-----------|--------|
-| Linux | TGZ, DEB (needs `dpkg`), RPM (needs `rpmbuild`) | Built, installed to a scratch prefix and smoke-tested, including the extracted `.deb` payload |
-| macOS | DragNDrop | Configured and reviewed, **never built** — no macOS host |
-| Windows | NSIS, ZIP | Configured and reviewed, **never built** — no Windows host |
+| Linux / Debian-Ubuntu | TGZ, DEB | **VERIFIED.** Installed with `dpkg -i` as root in a throwaway `ubuntu:24.04` container; `protoscala` ran a script and `protoscalac --build-so` compiled, linked and produced a loadable `module.so` there, outside any repository, with no `LD_LIBRARY_PATH` and no `PROTOSCALAC_INCLUDE_DIRS` set. |
+| Linux / Fedora-RHEL | TGZ, RPM | **VERIFIED.** `cpack -G RPM` executed in a throwaway `fedora:41` container (glibc 2.40, `rpm` 4.20.1); the RPM installed with `rpm -i` and `protoscala` ran correctly there. This closes the gap left by decision D-I2. |
+| macOS | DragNDrop | **UNVERIFIED.** Configured and reviewed only; there is no macOS host here. Review is not verification. |
+| Windows | NSIS, ZIP | **UNVERIFIED.** Configured and reviewed only; there is no Windows host here. |
 
-RPM packaging is configured and reviewed but **never executed**: `rpmbuild` is
-not installed on the host this was verified on.
+### T0-21 has a blind spot when protoCore is installed under `/usr`
+
+`protoscalac` refuses to emit a build when it cannot find `protoCore.h` on its
+own include list (T0-21), because compiling a generated module against a
+different `protoCore.h` produces a module that links and then crashes. That
+refusal fires, and was confirmed to fire by removing the header from the prefix.
+
+It does **not** protect the case where protoCore is installed under `/usr` and a
+stale `protoCore.h` remains in `/usr/local/include`:
+
+- GCC's default `<...>` search order puts `/usr/local/include` **before**
+  `/usr/include`, and GCC **ignores** a `-I` that names a standard system
+  directory. So the `-I/usr/include` protoscalac emits for a `/usr` install
+  cannot out-rank `/usr/local/include`.
+- T0-21 sees that `/usr/include/protoCore.h` exists, so nothing looks wrong and
+  the refusal never fires.
+
+Reproduced with the real February 2026 `/usr/local/include/protoCore.h` in place
+and protoCore 2.5.0 installed under `/usr`: `protoscalac` exited 0, the generated
+module compiled against `/usr/local/include/protoCore.h`, linked against the
+correct `libprotoCore.so.3`, and `dlopen` of the result succeeded. Right library,
+wrong header, clean build, no diagnostic — which is exactly the configuration
+T0-21 was written to prevent. (The crash itself was not reproduced: a generated
+module refuses to be entered outside a protoScala runtime, so the precondition
+was demonstrated and the crash was not.)
+
+There is no compiler flag that fixes this, because `-isystem /usr/include`
+breaks the standard C++ header search. The reliable remedies are to remove the
+stale `/usr/local/include/protoCore.h`, or to install protoCore under a prefix
+that is not a default system directory so that `-I` is honoured.
+
+### Known defect: the DEB dependency floor does not encode the ABI
+
+The `Depends` field is a *version range*, and on its own that range is not an ABI
+check. `PROTOCORE_ABI_SOVERSION` went from `2` to `3` in protoCore **2.2.0**, so
+protoCore 2.0.0 and 2.1.0 carry `libprotoCore.so.2` while 2.2.0 and later carry
+`libprotoCore.so.3`. A floor of ``2.1.0`` therefore admits a protoCore whose
+SONAME this package was not linked against.
+
+This was demonstrated, not argued. A decoy `protocore` 2.1.0 package providing
+only `libprotoCore.so.2` was installed in a container; `dpkg -i` then accepted
+this package, and the installed binary failed to start with
+`libprotoCore.so.3: cannot open shared object file`. The install succeeded and
+the program did not run.
+
+Two things limit the damage, and one closes it:
+
+- At **build** time the failure is loud, not silent. `find_package(protoCore …)`
+  alone does accept a SOVERSION-2 protoCore, but `CMakeLists.txt` follows it with
+  an explicit `protoCore_SOVERSION` assertion against `PROTOCORE_ABI_SOVERSION`,
+  which stops configuration with a `FATAL_ERROR` naming both numbers. Verified by
+  configuring against a complete forged 2.1.0 / SOVERSION 2 prefix.
+- The **RPM** does not have this hole. `rpm` generates
+  `Requires: libprotoCore.so.3()(64bit)` automatically from the linked binary, and
+  that requirement is on the SONAME rather than the version. Verified: the decoy
+  protoCore 2.1.0 does not satisfy it and `rpm -i` refuses.
+- Raising the DEB floor to `2.2.0`, the first protoCore that shipped SOVERSION 3,
+  would make the DEB range agree with the ABI. That is a packaging change for the
+  maintainer to take, and it is not made here.
+- `CPACK_DEBIAN_PACKAGE_SHLIBDEPS` is now `ON`, so `dpkg-shlibdeps` runs and is
+  meant to add a SONAME-derived dependency alongside the range above. Verified
+  it does not: `dpkg -S` resolves `libprotoCore.so.3` to the `protocore`
+  package, but that package ships no `shlibs`/`symbols` control file, so
+  `dpkg-shlibdeps` has no version data to emit for it, and CPack's default
+  `--ignore-missing-info` drops the entry silently rather than failing the
+  build. The flag stays on because it is harmless and does add real
+  transitive dependencies (`libc6`, `libstdc++6`, ...); it does not close this
+  defect on its own — that would need a `shlibs` or `symbols` file in
+  protoCore's own package.
+
+### Known defect: the DEB does not refresh the shared-library cache
+
+Neither this package nor protoCore's carries a `postinst` or an `ldconfig`
+trigger, so `ldconfig -p` does not list `libprotoCore.so.3` after `dpkg -i`.
+Programs still start, because each binary carries
+`RUNPATH $ORIGIN/../${CMAKE_INSTALL_LIBDIR}` and because the library lands in a
+directory the dynamic loader searches by default, but the cache is misleading.
+Run `ldconfig` after installing. The RPM has no such defect.
