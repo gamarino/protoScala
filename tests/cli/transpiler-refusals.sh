@@ -51,9 +51,6 @@ refuse await_in_a_body "await is not supported in a transpiled module (D113)" \
     '@main def run(): Unit =' \
     '  val f = Future { 1 }' \
     '  println(f.await)'
-refuse a_class "a class, trait or object is not supported by protoscalac yet (D118)" \
-    'class Point(val x: Int)' \
-    '@main def run(): Unit = println(new Point(1).x)'
 refuse a_try "try/catch/finally is not supported by protoscalac yet (D120)" \
     '@main def run(): Unit =' \
     '  try println(1) catch case e: Throwable => println(2)'
@@ -63,6 +60,56 @@ refuse a_default "a parameter with a default value is not supported by protoscal
 refuse an_import "an import is not supported by protoscalac yet (D123)" \
     'import util.Strings' \
     '@main def run(): Unit = println(1)'
+
+# The counterpart of `refuse`: a construct the transpiler SUPPORTS must produce a .so
+# that prints what the interpreter prints. Without this the file would only ever say
+# what protoscalac cannot do, and a refusal added by mistake would read as correct.
+accept() {  # accept <name> <expected-stdout> <source...>
+    local name="$1" want="$2"; shift 2
+    printf '%s\n' "$@" > "$SCRATCH/src/$name.scala"
+    local dir="$SCRATCH/$name"
+    mkdir -p "$dir"
+    if ! "$PROTOSCALAC" "$SCRATCH/src/$name.scala" -o "$dir" --build-so \
+            >"$dir/build.out" 2>&1; then
+        echo "FAIL: $name was refused; it must be accepted:"
+        sed 's/^/  /' "$dir/build.out"
+        fails=$((fails + 1))
+        return
+    fi
+    local got
+    got=$("$PROTOSCALA" --run-module "$dir/module.so" 2>&1)
+    if [[ "$got" != "$want" ]]; then
+        echo "FAIL: $name printed '$got', expected '$want'"
+        fails=$((fails + 1))
+        return
+    fi
+    # And the interpreter agrees, so the expectation above is not this file's opinion.
+    got=$("$PROTOSCALA" "$SCRATCH/src/$name.scala" 2>&1)
+    if [[ "$got" != "$want" ]]; then
+        echo "FAIL: $name interpreted printed '$got', expected '$want'"
+        fails=$((fails + 1))
+    fi
+}
+
+# D118 was closed on 2026-09-27. The case that used to assert the refusal is kept as
+# its positive counterpart, deliberately: the exclusion list's anti-rot guard treats a
+# listed exclusion that now works as a FAIL, and this is the same rule applied by hand
+# to the one message that was removed.
+accept a_class "1" \
+    'class Point(val x: Int)' \
+    '@main def run(): Unit = println(new Point(1).x)'
+accept an_object_with_a_trait "hello from Greeter" \
+    'trait Greeter:' \
+    '  def name: String' \
+    '  def greet: String = "hello from " + name' \
+    'object G extends Greeter:' \
+    '  def name = "Greeter"' \
+    '@main def run(): Unit = println(G.greet)'
+accept a_case_class "Point(1,2) 3" \
+    'case class Point(x: Int, y: Int)' \
+    '@main def run(): Unit =' \
+    '  val p = Point(1, 2)' \
+    '  println(p.toString + " " + (p.x + p.y))'
 
 # --report-purity classifies, and both classes have a passing case: a report that
 # only ever said "not pure" would not be a classification.

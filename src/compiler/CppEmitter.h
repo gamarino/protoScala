@@ -38,6 +38,10 @@ struct EmitOptions {
     std::string logicalPath;     // the module's declared logical path
     std::string moduleVersion;   // "" when none (D4)
     bool asScript = false;       // emit proto_module_main (D8)
+    // `object Main extends App` (D104): the object's initialisation is the program,
+    // so the entry point forces this global instead of calling an @main. Empty when
+    // the unit declares none.
+    std::string appKey;
 };
 
 /** One construct the first cut refuses, with the position to report it at. */
@@ -88,6 +92,23 @@ private:
     static std::vector<int> depths(const BytecodeModule& mod);
     /** The stack effect of one decoded instruction, or kTerminal. */
     static int effect(const BytecodeModule& mod, const Decoded& d);
+
+    /** One exported top-level function: its Scala name and its flat block index. */
+    struct Export {
+        std::string name;
+        std::size_t block;
+    };
+    /**
+     * The top-level `def`s a foreign runtime may call: every `MAKE_FN b;
+     * STORE_GLOBAL k` pair in the root block whose block `b` captures nothing.
+     *
+     * A capturing block reads its captures from the `self` argument, and a bare
+     * `proto::ProtoMethod` cell is called with no `self`, so exporting one would
+     * publish a function that reads a null environment. Excluding it is a
+     * correctness requirement, not a simplification; a top-level `def` captures
+     * nothing by construction, so nothing a reader would expect is lost.
+     */
+    std::vector<Export> exportsOf(const BytecodeModule& root) const;
 
     void collect(const BytecodeModule& mod, std::vector<Refusal>& out) const;
     bool emitBlock(std::size_t index, const GlobalTable& globals);

@@ -93,4 +93,25 @@ if [[ "$truth_default" == "1" ]]; then
         echo "FAIL: this build HAS an image, so the disabled line must say so: $line_disabled"
         exit 1; }
 fi
+
+# The compiled-module search path. Its oracle is PROTOSCALA_MODULE_PATH: whatever the
+# line says, the directories the variable names must be in it, in order and before the
+# installed one -- because that order IS the resolution order, and a reader who cannot
+# see the list has no way to tell a missing module from a mis-set path.
+mods_line() { env "$@" "$PROTOSCALA" --version 2>&1 | grep '^compiled modules searched:'; }
+line=$(mods_line)
+if [[ -z "$line" ]]; then
+    echo "FAIL: --version printed no 'compiled modules searched:' line"
+    exit 1
+fi
+grep -q 'protoscala/modules' <<<"$line" || {
+    echo "FAIL: the installed module directory is not in the list: $line"; exit 1; }
+
+line=$(mods_line PROTOSCALA_MODULE_PATH="/nonexistent/aaa:/nonexistent/bbb")
+# In order, and both before the installed directory.
+if ! grep -qE 'searched: /nonexistent/aaa /nonexistent/bbb .*protoscala/modules' <<<"$line"; then
+    echo "FAIL: PROTOSCALA_MODULE_PATH is not reported in order, ahead of the install:"
+    echo "  $line"
+    exit 1
+fi
 echo OK

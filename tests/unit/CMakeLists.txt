@@ -25,6 +25,7 @@ add_executable(protoscala_unit_tests
     test_prelude_image.cpp
     test_opcode_ops.cpp
     test_cpp_tables.cpp
+    test_compiled_provider.cpp
 )
 
 target_link_libraries(protoscala_unit_tests

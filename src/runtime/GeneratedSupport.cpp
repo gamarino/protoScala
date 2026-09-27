@@ -82,11 +82,63 @@ std::map<const BlockRec* const*, proto::ProtoSpace*> g_linked;
 // is in the place all nineteen of them already look.
 std::vector<std::unique_ptr<BytecodeModule>> g_shims;
 
+// The host that linked a generated module.
+//
+// A call arriving from a FOREIGN runtime through an exported proto::ProtoMethod cell
+// has no protoScala call context on its thread, and that is the point of the cell: the
+// caller holds protoCore and nothing else, so it cannot install one -- installing one
+// needs `ExecutionEngine::ActiveCallGuard`, which lives in a header the caller must not
+// have to include. The module therefore remembers the host that linked it, and
+// `enterMethod` installs that host for the duration of the call.
+//
+// It is recorded per PROCESS, not per module, because a proto::ProtoMethod is a bare
+// function pointer with no room for a closure and `enterMethod` is reached through one.
+// Two different hosts in one process is REFUSED rather than resolved by guessing, for
+// the same reason linkModule refuses a second space: a wrong engine would run the call
+// with another Session's prelude, which is a wrong answer, not an error.
+std::mutex g_hostMutex;
+ExecutionEngine* g_hostEngine = nullptr;
+const RuntimeLayout* g_hostLayout = nullptr;
+
 // The context a module entry point runs in, installed by ModuleEntryGuard. See
 // src/runtime/GeneratedModuleEntry.h for why the handover is a thread-local and
 // not a parameter.
 thread_local proto::ProtoContext* tl_entryContext = nullptr;
 
+
+// Rebuilds one `BytecodeModule::Const` from a generated block's static tables, so the
+// interpreter's own `makeClass`, `instantiate` and `superSend` can be called with the
+// value they expect. This is the alternative to reimplementing any of the three, which
+// is what §D1's "one semantics, two consumers" forbids: a ClassSpec is a description,
+// and the description travels as PODs and C strings while the behaviour stays where it
+// was.
+//
+// The vectors are filled only for the kinds that need them, so a SendSite or a
+// SuperSite costs no heap allocation beyond its two short strings.
+BytecodeModule::Const constFrom(const BlockRec& blk, std::size_t idx) {
+    const ConstRec& c = blk.consts[idx];
+    BytecodeModule::Const out;
+    out.kind = static_cast<BytecodeModule::ConstKind>(c.kind);
+    out.ival = c.ival;
+    out.dval = c.dval;
+    out.base = c.base;
+    out.argc = c.argc;
+    out.flags = c.flags;
+    out.exact = c.exact;
+    out.symbol = blk.symbols[idx];
+    out.keySymbol = blk.keySymbols[idx];
+    if (c.sval) out.sval.assign(c.sval, c.slen);
+    if (c.key) out.key.assign(c.key);
+    for (int k = 0; k < c.namesCount; ++k) {
+        out.names.emplace_back(blk.strings[c.namesFirst + k]);
+        out.nameSymbols.push_back(blk.stringSymbols[c.namesFirst + k]);
+    }
+    for (int k = 0; k < c.fieldsCount; ++k) {
+        out.fields.emplace_back(blk.strings[c.fieldsFirst + k]);
+        out.fieldSymbols.push_back(blk.stringSymbols[c.fieldsFirst + k]);
+    }
+    return out;
+}
 }  // namespace
 
 ModuleEntryGuard::ModuleEntryGuard(proto::ProtoContext* ctx) : saved_(tl_entryContext) {
@@ -118,6 +170,20 @@ void linkModule(proto::ProtoContext* ctx, const BlockRec* const* blocks, std::si
             return;  // idempotent
         }
         g_linked.emplace(blocks, ctx->space);
+    }
+    // Remember the host, so a call that arrives later from a foreign runtime can be
+    // given the engine and layout it cannot install for itself.
+    {
+        ExecutionEngine& e = engineOf("linkModule");
+        const RuntimeLayout& l = layoutOf("linkModule");
+        std::lock_guard<std::mutex> g(g_hostMutex);
+        if (g_hostEngine && (g_hostEngine != &e || g_hostLayout != &l))
+            throw std::logic_error(
+                "linkModule: a second protoScala host appeared in this process. An exported "
+                "function is a bare proto::ProtoMethod with nowhere to carry its host, so which "
+                "of the two to run it in cannot be decided; run one Session per process.");
+        g_hostEngine = &e;
+        g_hostLayout = &l;
     }
     // The shims first, so a MAKE_FN in the module body already has one to point at.
     {
@@ -172,23 +238,55 @@ const proto::ProtoObject* enterMethod(proto::ProtoMethod body, proto::ProtoConte
     // §D6 site 2: a transpiled function is a proto::ProtoMethod, so from the VM's
     // point of view it is a foreign callable and presents the same boundary every
     // other native method does.
-    return translateForeignException([&] { return body(ctx, self, pl, args, kwargs); });
+    return translateForeignException([&]() -> const proto::ProtoObject* {
+        if (activeCallContext()) return body(ctx, self, pl, args, kwargs);
+        // No context: the call came from a foreign runtime through an exported cell.
+        // Install the linking host for its duration. A module that was never linked
+        // cannot be entered at all, and saying so names a host defect (D74).
+        ExecutionEngine* engine = nullptr;
+        const RuntimeLayout* layout = nullptr;
+        {
+            std::lock_guard<std::mutex> g(g_hostMutex);
+            engine = g_hostEngine;
+            layout = g_hostLayout;
+        }
+        if (!engine || !layout) noActiveContext("enterMethod");
+        ExecutionEngine::ActiveCallGuard active(engine, layout);
+        return body(ctx, self, pl, args, kwargs);
+    });
 }
 
 const proto::ProtoObject* runModuleBody(proto::ProtoContext* ctx, proto::ProtoMethod body,
-                                        const char* logicalPath, const char* version) {
-    (void)logicalPath;
+                                        const char* logicalPath, const char* version,
+                                        const ExportRec* exports, std::size_t exportCount) {
     (void)version;
     // §D6 site 1: proto_module_init is called across a dlopen boundary, and an
     // exception escaping a dlopen'd initializer must be translated exactly once,
     // by the same template every other foreign entry uses.
     return translateForeignException([&]() -> const proto::ProtoObject* {
         proto::ProtoContext scope(ctx->space, ctx);
-        const proto::ProtoList* none = scope.newList();
-        const proto::ProtoObject* r = body(&scope, nullptr, nullptr, none, nullptr);
-        if (!r) r = PROTO_NONE;
-        scope.returnValue = r;
-        return r;
+        const RuntimeLayout& L = layoutOf("runModuleBody");
+        {
+            // The top level runs FIRST: it is what binds the module's globals, and an
+            // exported function may read one on its first call.
+            const proto::ProtoList* none = scope.newList();
+            const proto::ProtoObject* r = body(&scope, nullptr, nullptr, none, nullptr);
+            scope.returnValue = r ? r : PROTO_NONE;
+        }
+        // The module object: one object carrying a proto::ProtoMethod cell per exported
+        // top-level function, so a foreign runtime can call one with protoCore alone.
+        // Mutable because it is built attribute by attribute, and its identity is what
+        // the provider registers.
+        const proto::ProtoObject* mod = L.anyProto->newChild(&scope, /*isMutable=*/true);
+        scope.resizeAutomaticLocals(1);
+        scope.setAutomaticLocal(0, mod);
+        mod->setAttribute(&scope, L.nameKey, makeString(&scope, logicalPath));
+        for (std::size_t k = 0; k < exportCount; ++k) {
+            const auto* key = proto::ProtoString::createSymbol(&scope, exports[k].name);
+            mod->setAttribute(&scope, key, scope.fromMethod(nullptr, exports[k].entry));
+        }
+        scope.returnValue = mod;
+        return mod;
     });
 }
 
@@ -235,6 +333,41 @@ int runMain(proto::ProtoContext* ctx, const char* mainKey, bool takesArgs, int a
 }
 
 // --- the frame -------------------------------------------------------------
+
+int runApp(proto::ProtoContext* ctx, const char* appKey) {
+    ExecutionEngine& eng = engineOf("runApp");
+    const RuntimeLayout& L = layoutOf("runApp");
+    const auto* key = proto::ProtoString::createSymbol(ctx, appKey);
+    proto::ProtoContext scope(ctx->space, ctx);
+    const proto::ProtoObject* holder = L.globals->getOwnAttributeDirect(&scope, key);
+    if (!holder || holder == PROTO_NONE) {
+        std::fflush(stdout);
+        std::fprintf(stderr, "protoscala: the module declares no App object named '%s'\n", appKey);
+        return 1;
+    }
+    scope.returnValue = holder;
+    try {
+        // Forcing the lazy holder runs the object's body, which is the program.
+        eng.force(&scope, holder);
+    } catch (const ScalaThrow& t) {
+        std::fflush(stdout);
+        std::string text;
+        try {
+            proto::ProtoContext show(ctx->space, ctx);
+            text = eng.showTopLevel(&show, t.value);
+        } catch (...) {
+            text = "<exception whose toString failed>";
+        }
+        std::fprintf(stderr, "<module>:%d: error: %s\n", t.line, text.c_str());
+        return 1;
+    } catch (const ScalaError& e) {
+        std::fflush(stdout);
+        std::fprintf(stderr, "<module>:%d: error: %s\n", e.line, e.what());
+        return 1;
+    }
+    std::fflush(stdout);
+    return 0;
+}
 
 Frame::Frame(proto::ProtoContext* parent, const BlockRec& blk, const proto::ProtoObject* self,
              const proto::ProtoList* args, const proto::ProtoSparseList* kwargs)
@@ -567,25 +700,62 @@ const proto::ProtoObject* sendKw(proto::ProtoContext*, const BlockRec&, std::siz
                                  const proto::ProtoObject**) {
     notInThisCut("sendKw", "keyword and default binding for a transpiled callee");
 }
-const proto::ProtoObject* sendSuper(proto::ProtoContext*, const BlockRec&, std::size_t,
-                                    const proto::ProtoObject**) {
-    notInThisCut("sendSuper", "the super-site search needs the defining template's key");
+const proto::ProtoObject* sendSuper(proto::ProtoContext* ctx, const BlockRec& blk,
+                                    std::size_t siteIdx, const proto::ProtoObject** base) {
+    const BytecodeModule::Const site = constFrom(blk, siteIdx);
+    return ops::Engine::superSend(engineOf("sendSuper"), ctx, base, site);
 }
-const proto::ProtoObject* makeClass(proto::ProtoContext*, const BlockRec&, std::size_t,
-                                    const proto::ProtoObject**) {
-    notInThisCut("makeClass", "a ClassSpec must be rebuilt from the static tables");
+
+const proto::ProtoObject* makeClass(proto::ProtoContext* ctx, const BlockRec& blk,
+                                    std::size_t specIdx, const proto::ProtoObject** base) {
+    // The linearization was computed by `Linearizer` at transpile time and travels in
+    // the ClassSpec, so none runs here and none can differ from the interpreter's.
+    const BytecodeModule::Const spec = constFrom(blk, specIdx);
+    return ops::Engine::makeClass(engineOf("makeClass"), ctx, spec, base);
 }
-const proto::ProtoObject* construct(proto::ProtoContext*, const BlockRec&, std::size_t,
-                                    const proto::ProtoObject**) {
-    notInThisCut("construct", "it depends on makeClass");
+
+const proto::ProtoObject* construct(proto::ProtoContext* ctx, const BlockRec& blk,
+                                    std::size_t siteIdx, const proto::ProtoObject** base) {
+    const ConstRec& c = blk.consts[siteIdx];
+    if (c.namesCount != 0)
+        throw std::logic_error("construct: `new C(x = 1)` is refused at transpile time (D121); "
+                               "reaching it is a generator defect");
+    return ops::Engine::instantiate(engineOf("construct"), ctx, base, blk.symbols[siteIdx], c.argc,
+                                    nullptr);
 }
-const proto::ProtoObject* constructSpread(proto::ProtoContext*, const BlockRec&, std::size_t,
-                                          const proto::ProtoObject**, const proto::ProtoObject*) {
-    notInThisCut("constructSpread", "it depends on makeClass");
+
+const proto::ProtoObject* constructSpread(proto::ProtoContext* ctx, const BlockRec& blk,
+                                          std::size_t siteIdx, const proto::ProtoObject** base,
+                                          const proto::ProtoObject* rest) {
+    const RuntimeLayout& L = layoutOf("constructSpread");
+    const ConstRec& c = blk.consts[siteIdx];
+    if (!isListFast(rest))
+        throw ScalaError("ClassCastException",
+                         typeName(ctx, L, rest) + " cannot be spliced as arguments");
+    const proto::ProtoList* list = rest->asList(ctx);
+    const unsigned extra = static_cast<unsigned>(list->getSize(ctx));
+    proto::ProtoContext scope(ctx->space, ctx);
+    scope.resizeAutomaticLocals(c.argc + extra + 1);
+    const proto::ProtoObject** a = scope.getAutomaticLocals();
+    for (unsigned k = 0; k <= c.argc; ++k) a[k] = base[k];   // [cls a1..an]
+    for (unsigned k = 0; k < extra; ++k)
+        a[c.argc + 1 + k] = list->getAt(&scope, static_cast<int>(k));
+    const proto::ProtoObject* r = ops::Engine::instantiate(
+        engineOf("constructSpread"), &scope, a, blk.symbols[siteIdx], c.argc + extra, nullptr);
+    scope.returnValue = r;
+    return r;
 }
-const proto::ProtoObject* invokeInit(proto::ProtoContext*, const BlockRec&, std::size_t,
-                                     const proto::ProtoObject**) {
-    notInThisCut("invokeInit", "it depends on makeClass");
+
+const proto::ProtoObject* invokeInit(proto::ProtoContext* ctx, const BlockRec& blk,
+                                     std::size_t siteIdx, const proto::ProtoObject** base) {
+    // base is [cls this a1..an]: the initialiser is a member of the class, and it runs
+    // on `this`, which is base[1].
+    const ConstRec& c = blk.consts[siteIdx];
+    const proto::ProtoObject* init = base[0]->getOwnAttributeDirect(ctx, blk.symbols[siteIdx]);
+    if (!init)
+        throw std::logic_error(std::string("INVOKE_INIT: no initialiser ") +
+                               (c.sval ? c.sval : "<unnamed>"));
+    return ops::Engine::callWithReceiver(engineOf("invokeInit"), ctx, init, base + 1, c.argc);
 }
 const proto::ProtoObject* importModule(proto::ProtoContext*, const char*, const char*,
                                        const char*) {

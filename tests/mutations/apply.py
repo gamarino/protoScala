@@ -5,7 +5,8 @@ import pathlib, sys, shutil
 ROOT = pathlib.Path('/home/gamarino/Documentos/proyectos/protoScala')
 BAK = pathlib.Path('/home/gamarino/Documentos/proyectos/.agent_scratch/phase7-transpiler/mutbak')
 FILES = ['src/compiler/CppEmitter.cpp', 'src/runtime/GeneratedSupport.cpp',
-         'src/umd/ForeignBoundary.h', 'src/compiler/CppTables.cpp']
+         'src/umd/ForeignBoundary.h', 'src/compiler/CppTables.cpp',
+         'tests/interop/Exports.scala', 'src/umd/CompiledModuleProvider.cpp']
 
 MUTS = {
  # id: (file, old, new)
@@ -61,6 +62,54 @@ MUTS = {
  'E16': ('src/compiler/CppEmitter.cpp',
         '''                out_ << "if (!gen::truthy(C, " << st(dep - 1) << ")) goto L"''',
         '''                out_ << "if (gen::truthy(C, " << st(dep - 1) << ")) goto L"'''),
+
+ # --- the cross-runtime call (interop/foreign-call) ------------------------------
+ # The claim under test is that a foreign runtime can call a transpiled function with
+ # protoCore alone. Each of these four breaks one link of that chain, and each must
+ # turn interop/foreign-call red; a green run here would mean the test asserts
+ # nothing.
+ 'X1': ('src/compiler/CppEmitter.cpp',   # no exports are found at all
+        '''        if (fn.captureCount() != 0) continue;   // see the declaration''',
+        '''        if (fn.captureCount() != 0) continue;   // see the declaration
+        if (true) continue;'''),
+ 'X2': ('src/runtime/GeneratedSupport.cpp',   # the host fallback for a foreign entry
+        '''        if (!engine || !layout) noActiveContext("enterMethod");
+        ExecutionEngine::ActiveCallGuard active(engine, layout);
+        return body(ctx, self, pl, args, kwargs);''',
+        '''        if (!engine || !layout) noActiveContext("enterMethod");
+        return body(ctx, self, pl, args, kwargs);'''),
+ 'X3': ('src/runtime/GeneratedSupport.cpp',   # the cells are never attached
+        '''        for (std::size_t k = 0; k < exportCount; ++k) {
+            const auto* key = proto::ProtoString::createSymbol(&scope, exports[k].name);
+            mod->setAttribute(&scope, key, scope.fromMethod(nullptr, exports[k].entry));
+        }''',
+        '''        (void)exports; (void)exportCount;'''),
+ 'X4': ('tests/interop/Exports.scala',   # the pinned values bite, on BOTH paths
+        '''def add(a: Int, b: Int): Int = a + b''',
+        '''def add(a: Int, b: Int): Int = a + b + 1'''),
+
+ # --- CompiledModuleProvider (cli/compiled-provider) -----------------------------
+ # Four properties, four mutations. Each must turn cli/compiled-provider red.
+ 'P1': ('src/umd/CompiledModuleProvider.cpp',   # the provider never finds anything
+        '''    if (found.empty()) return PROTO_NONE;''',
+        '''    if (found.empty()) return PROTO_NONE;
+    return PROTO_NONE;'''),
+ # P2 is the one that found a hole, and the hole is worth keeping in view: it left
+ # cli/compiled-provider GREEN, because `Session::load` consults the source loader
+ # itself and reaches the resolution chain only on a miss -- so protoScala's own
+ # importer never observes the order. The order still decides for every OTHER runtime,
+ # which arrives through protoCore's getImportModule, and
+ # Provider.CompiledComesAfterSourceInTheChain now asserts it on the data. That test is
+ # what this mutation reds.
+ 'P2': ('src/umd/CompiledModuleProvider.cpp',   # chain order: source must still win
+        '''            if (s == "provider:scala") at = i + 1;''',
+        '''            if (s == "provider:scala") at = 0;'''),
+ 'P3': ('src/umd/CompiledModuleProvider.cpp',   # D8: a script is not a module
+        '''        if (::dlsym(handle, "proto_module_main")) {''',
+        '''        if (false) {'''),
+ 'P4': ('src/umd/CompiledModuleProvider.cpp',   # a logical path is not a file path
+        '''    std::replace(out.begin(), out.end(), '.', '/');''',
+        '''    // mutated: the dots are left alone'''),
 }
 
 

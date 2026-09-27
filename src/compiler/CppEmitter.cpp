@@ -35,6 +35,9 @@ bool isSupported(Op op) {
         case Op::TEST_TYPE: case Op::TEST_PROTO: case Op::UNAPPLY_FIELDS: case Op::UNCONS:
         case Op::MATCH_ERROR: case Op::CAST_FAIL: case Op::MAKE_TUPLE:
         case Op::THROW:
+        case Op::MAKE_CLASS: case Op::NEW: case Op::NEW_SPREAD: case Op::INVOKE_INIT:
+        case Op::STORE_FIELD: case Op::STORE_FIELD_IF_NEW: case Op::SET_FIELD:
+        case Op::SEND_SUPER:
             return true;
         default:
             return false;
@@ -43,14 +46,6 @@ bool isSupported(Op op) {
 
 std::string refusalFor(Op op) {
     switch (op) {
-        case Op::MAKE_CLASS: case Op::NEW: case Op::NEW_SPREAD: case Op::INVOKE_INIT:
-        case Op::STORE_FIELD: case Op::STORE_FIELD_IF_NEW: case Op::SET_FIELD:
-            return std::string("a class, trait or object is not supported by protoscalac yet "
-                               "(D118): ") + opName(op) +
-                   " needs the ClassSpec rebuilt from the static tables";
-        case Op::SEND_SUPER:
-            return "super is not supported by protoscalac yet (D122): the super-site search "
-                   "needs the defining template's key";
         case Op::SEND_KW: case Op::CALL_KW:
             return "a named or default argument is not supported by protoscalac yet (D121): "
                    "keyword binding for a transpiled callee is not implemented";
@@ -252,6 +247,15 @@ void CppEmitter::collect(const BytecodeModule& mod, std::vector<Refusal>& out) c
                                       "cooperative suspension snapshots a bytecode frame, and a "
                                       "transpiled frame has no ip to record",
                                       mod.lineAt(d.pc)});
+            continue;
+        }
+        if (d.op == Op::NEW && !mod.constAt(d.operand).names.empty()) {
+            // `new C(x = 1)`: the constructor's own prologue binds the keywords, and a
+            // transpiled frame does not run that prologue (D121).
+            out.push_back(Refusal{"a named argument in `new` is not supported by protoscalac yet "
+                                  "(D121): keywords are bound by the callee's prologue, which a "
+                                  "transpiled frame does not run",
+                                  mod.lineAt(d.pc)});
             continue;
         }
         if (!isSupported(d.op)) out.push_back(Refusal{refusalFor(d.op), mod.lineAt(d.pc)});
@@ -551,6 +555,51 @@ bool CppEmitter::emitBlock(std::size_t index, const GlobalTable&) {
             case Op::THROW:
                 out_ << "gen::throwValue(C, " << st(dep - 1) << ");";
                 break;
+            case Op::MAKE_CLASS: {
+                const BytecodeModule::Const& c = mod.constAt(d.operand);
+                const int n = static_cast<int>(c.argc + c.names.size());
+                out_ << st(dep - n) << " = gen::makeClass(C, " << rec << ", " << d.operand << ", &"
+                     << st(dep - n) << ");";
+                break;
+            }
+            case Op::NEW: {
+                const BytecodeModule::Const& c = mod.constAt(d.operand);
+                const int n = static_cast<int>(c.argc + c.names.size()) + 1;  // [cls a.. k..]
+                out_ << st(dep - n) << " = gen::construct(C, " << rec << ", " << d.operand << ", &"
+                     << st(dep - n) << ");";
+                break;
+            }
+            case Op::NEW_SPREAD: {
+                const int n = static_cast<int>(mod.constAt(d.operand).argc) + 2;  // [cls a.. list]
+                out_ << st(dep - n) << " = gen::constructSpread(C, " << rec << ", " << d.operand
+                     << ", &" << st(dep - n) << ", " << st(dep - 1) << ");";
+                break;
+            }
+            case Op::INVOKE_INIT: {
+                const int n = static_cast<int>(mod.constAt(d.operand).argc) + 2;  // [cls this a..]
+                out_ << st(dep - n) << " = gen::invokeInit(C, " << rec << ", " << d.operand
+                     << ", &" << st(dep - n) << ");";
+                break;
+            }
+            case Op::STORE_FIELD:
+                // In a constructor `this` is slot 0, and the store yields a new `this`.
+                out_ << "S[0] = gen::storeField(C, " << rec << ", " << d.operand << ", S[0], "
+                     << st(dep - 1) << ");";
+                break;
+            case Op::STORE_FIELD_IF_NEW:
+                out_ << "S[0] = gen::storeFieldIfNew(C, " << rec << ", " << d.operand << ", S[0], "
+                     << st(dep - 1) << ");";
+                break;
+            case Op::SET_FIELD:
+                out_ << "gen::setField(C, " << rec << ", " << d.operand << ", " << st(dep - 2)
+                     << ", " << st(dep - 1) << ");";
+                break;
+            case Op::SEND_SUPER: {
+                const int argc = static_cast<int>(mod.constAt(d.operand).argc);
+                out_ << st(dep - argc - 1) << " = gen::sendSuper(C, " << rec << ", " << d.operand
+                     << ", &" << st(dep - argc - 1) << ");";
+                break;
+            }
             default:
                 // check() refused it, so reaching here is a generator defect.
                 throw std::logic_error("CppEmitter: opcode " + std::string(opName(d.op)) +
@@ -565,6 +614,25 @@ bool CppEmitter::emitBlock(std::size_t index, const GlobalTable&) {
     out_ << "    return F.finish(gen::unitValue(C));\n"
          << "}\n\n";
     return true;
+}
+
+std::vector<CppEmitter::Export> CppEmitter::exportsOf(const BytecodeModule& root) const {
+    std::vector<Export> out;
+    const std::vector<Decoded> code = decode(root);
+    for (std::size_t i = 0; i + 1 < code.size(); ++i) {
+        if (code[i].op != Op::MAKE_FN || code[i + 1].op != Op::STORE_GLOBAL) continue;
+        const BytecodeModule& fn = root.block(code[i].operand);
+        if (fn.captureCount() != 0) continue;   // see the declaration
+        // The flat index is what linkModule and the thunk table are keyed by, and
+        // flatten() has already checked that the order round-trips.
+        std::size_t flatIdx = 0;
+        for (; flatIdx < flat_.size(); ++flatIdx)
+            if (flat_[flatIdx].mod == &fn) break;
+        if (flatIdx == flat_.size())
+            throw std::logic_error("CppEmitter: a MAKE_FN target is not in the flattened tree");
+        out.push_back({GlobalTable::nameOfKey(root.constAt(code[i + 1].operand).sval), flatIdx});
+    }
+    return out;
 }
 
 bool CppEmitter::emit(const CompiledUnit& unit, const GlobalTable& globals) {
@@ -610,6 +678,24 @@ bool CppEmitter::emit(const CompiledUnit& unit, const GlobalTable& globals) {
     out_ << " };\n"
          << "static const std::size_t kAllBlockCount = " << flat_.size() << ";\n\n";
 
+    // The exports: the module object publishes each of these as a bare
+    // proto::ProtoMethod cell, which is what a foreign runtime holding nothing but
+    // protoCore can call. The thunk is the entry, not the body, because the thunk is
+    // where the D6 boundary and the frame prologue are.
+    // A zero-length array is ill-formed in C++, and a unit with no top-level def is
+    // ordinary (a script), so the empty case is a null pointer rather than an array.
+    const std::vector<Export> exports = exportsOf(*unit.module);
+    if (exports.empty()) {
+        out_ << "static const protoScala::gen::ExportRec* const kExports = nullptr;\n";
+    } else {
+        out_ << "static const protoScala::gen::ExportRec kExports[] = {";
+        for (const Export& e : exports)
+            out_ << "\n    { " << tables::quoted(e.name) << ", &" << flat_[e.block].cppName
+                 << " },";
+        out_ << "\n};\n";
+    }
+    out_ << "static const std::size_t kExportCount = " << exports.size() << ";\n\n";
+
     // The extern "C" entry points come BEFORE the bodies, and deliberately: the
     // bodies carry `#line` directives pointing into the .scala file, and a
     // `#line` cannot be un-set (a directive of 0 is not valid). Emitting the
@@ -623,14 +709,24 @@ bool CppEmitter::emit(const CompiledUnit& unit, const GlobalTable& globals) {
          << "    gen::linkModule(ctx, kAllBlocks, kAllBlockCount);\n"
          << "    return const_cast<void*>(static_cast<const void*>(\n"
          << "        gen::runModuleBody(ctx, &blk0, " << tables::quoted(opts_.logicalPath) << ", "
-         << tables::quoted(opts_.moduleVersion) << ")));\n"
+         << tables::quoted(opts_.moduleVersion) << ", kExports, kExportCount)));\n"
          << "}\n";
     if (opts_.asScript) {
         out_ << "\nextern \"C\" int proto_module_main(int argc, char** argv) {\n"
-             << "    proto::ProtoContext* ctx = gen::currentContext(\"proto_module_main\");\n"
-             << "    return gen::runMain(ctx, " << tables::quoted(unit.mainKey) << ", "
-             << (unit.mainTakesArgs ? "true" : "false") << ", argc, argv);\n"
-             << "}\n";
+             << "    proto::ProtoContext* ctx = gen::currentContext(\"proto_module_main\");\n";
+        if (unit.mainKey.empty() && !opts_.appKey.empty()) {
+            // `object Main extends App`: the program is the object's initialisation,
+            // so the entry point forces the global rather than calling a method
+            // (D104). Without this the module loaded, ran its top level and printed
+            // nothing -- a wrong answer, which the differential harness caught on four
+            // fixtures.
+            out_ << "    (void)argc; (void)argv;\n"
+                 << "    return gen::runApp(ctx, " << tables::quoted(opts_.appKey) << ");\n";
+        } else {
+            out_ << "    return gen::runMain(ctx, " << tables::quoted(unit.mainKey) << ", "
+                 << (unit.mainTakesArgs ? "true" : "false") << ", argc, argv);\n";
+        }
+        out_ << "}\n";
     }
     out_ << '\n';
 

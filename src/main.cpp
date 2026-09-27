@@ -11,6 +11,7 @@
 #include "runtime/Errors.h"
 #include "runtime/Mailbox.h"
 #include "repl/Session.h"
+#include "umd/CompiledModuleProvider.h"
 #include "umd/ProviderPlugins.h"
 #include "runtime/StackGuard.h"
 
@@ -62,6 +63,13 @@ void printVersion() {
                 protoScala::providerPluginDirectory().c_str());
     std::printf("import prefixes routed: py, js, st, clj (a prefix with no "
                 "registered provider reports it)\n");
+    // Where a COMPILED module is looked for. Printed because the whole surface of
+    // `import util.Strings` finding a `.so` is this list: a reader who cannot see it
+    // has no way to tell a missing module from a mis-set path.
+    std::printf("compiled modules searched:");
+    for (const std::string& dir : protoScala::compiledModuleBasePaths())
+        std::printf(" %s", dir.c_str());
+    std::printf("\n  (set PROTOSCALA_MODULE_PATH to add directories, ':'-separated)\n");
 }
 
 void printHelp() {

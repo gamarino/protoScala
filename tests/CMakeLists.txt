@@ -29,7 +29,7 @@ endforeach()
 
 # The transpiler's CLI checks take the tests directory, protoscalac and a private
 # scratch directory in the build tree -- never /tmp, and never the source tree.
-foreach(cli_test transpiler-cli transpiler-refusals run-module)
+foreach(cli_test transpiler-cli transpiler-refusals run-module compiled-provider)
     add_test(NAME cli/${cli_test}
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/cli/${cli_test}.sh" "$<TARGET_FILE:protoscala>"
                 "${CMAKE_CURRENT_SOURCE_DIR}" "$<TARGET_FILE:protoscalac>"
@@ -334,3 +334,28 @@ foreach(slow_fixture 20-exceptions/finally-in-a-loop.scala
         set_tests_properties("conformance/${slow_fixture}" PROPERTIES TIMEOUT 600)
     endif()
 endforeach()
+
+# --- The cross-runtime call (Phase 7 §D3, docs/INTEROP.md §8) --------------------
+# The headline capability of the phase, as a test a reader can run rather than a
+# claim: `tests/interop/foreign_caller.cpp` includes protoCore.h and one shim
+# header, names nothing of protoScala, and calls four functions of a transpiled
+# module through the proto::ProtoMethod cells its module object publishes. The
+# host half is a SEPARATE translation unit, which is what lets the foreign half be
+# checked for independence instead of merely described as independent.
+if(PROTOSCALA_TRANSPILED_TESTS)
+    add_executable(protoscala-foreign-caller
+        interop/foreign_caller.cpp
+        interop/ForeignHost.cpp)
+    target_link_libraries(protoscala-foreign-caller PRIVATE protoScala)
+    target_include_directories(protoscala-foreign-caller PRIVATE "${CMAKE_SOURCE_DIR}/src")
+    target_compile_options(protoscala-foreign-caller PRIVATE -Wall -Wextra -Wpedantic)
+
+    add_test(NAME interop/foreign-call
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/interop/foreign-call.sh"
+                "$<TARGET_FILE:protoscala>"
+                "$<TARGET_FILE:protoscalac>"
+                "$<TARGET_FILE:protoscala-foreign-caller>"
+                "${CMAKE_CURRENT_SOURCE_DIR}/interop"
+                "${CMAKE_CURRENT_BINARY_DIR}/interop-scratch")
+    set_tests_properties(interop/foreign-call PROPERTIES TIMEOUT 300)
+endif()

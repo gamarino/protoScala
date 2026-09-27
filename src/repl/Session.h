@@ -65,6 +65,26 @@ public:
     // and prints nothing: a module has no output of its own.
     int runModule(const std::string& soPath, const std::vector<std::string>& args);
 
+    /**
+     * The embedder's entry point for a CROSS-RUNTIME CALL (Phase 7 §D3).
+     *
+     * Loads a transpiled module and hands its module object to `fn`, which receives a
+     * `proto::ProtoContext` of this session and nothing else. The module object carries
+     * one `proto::ProtoMethod` cell per exported top-level function, so `fn` can call
+     * one with protoCore alone -- no protoScala header, no `ExecutionEngine`, no
+     * knowledge of protoScala's bytecode.
+     *
+     * `fn` deliberately runs with **no protoScala call context active**: the guards are
+     * closed before it is entered. A foreign runtime cannot install one, because
+     * installing one needs a protoScala header, so a demonstration that left the guard
+     * open would prove nothing. `gen::enterMethod` installs the linking host itself for
+     * the duration of each call.
+     *
+     * Returns `fn`'s result, or 1 with a diagnostic when the module cannot be loaded.
+     */
+    int withModule(const std::string& soPath,
+                   int (*fn)(proto::ProtoContext*, const proto::ProtoObject*, void*), void* ud);
+
     // --- ModuleLoader (compiler side; no ProtoObject* crosses it) ----------
     const ModuleExports& load(const std::string& providerSpec, const std::string& logicalPath,
                               const std::string& importerDir, SourcePos pos) override;

@@ -232,13 +232,18 @@ TEST_F(Facade, TheUnimplementedOperationsRefuseLoudly) {
     // mistranslation. `protoscalac` refuses the unit at transpile time, so
     // reaching one of these is a GENERATOR defect -- a std::logic_error, which
     // D74 keeps uncatchable.
+    //
+    // This list SHRINKS as the transpiler grows, and shrinking it is the point:
+    // `makeClass`, `construct`, `invokeInit` and `sendSuper` were here until D118
+    // closed on 2026-09-27 and are now implemented, so asserting that they still
+    // refuse would be asserting a regression. They are covered end to end instead --
+    // by `tests/cli/transpiler-refusals.sh`'s `accept` cases and by the 626 fixtures
+    // of the differential harness -- because a unit test would have to hand-build a
+    // ClassSpec's static tables, and a hand-built table proves less than a fixture
+    // the compiler wrote.
     gen::BlockRec blk{};
     blk.name = "blk0";
     const proto::ProtoObject* base[1] = {PROTO_NONE};
-    EXPECT_THROW(gen::makeClass(c(), blk, 0, base), std::logic_error);
-    EXPECT_THROW(gen::construct(c(), blk, 0, base), std::logic_error);
-    EXPECT_THROW(gen::invokeInit(c(), blk, 0, base), std::logic_error);
-    EXPECT_THROW(gen::sendSuper(c(), blk, 0, base), std::logic_error);
     EXPECT_THROW(gen::sendKw(c(), blk, 0, base), std::logic_error);
     EXPECT_THROW(gen::callKw(c(), blk, 0, base), std::logic_error);
     EXPECT_THROW(gen::importModule(c(), "", "util.Strings", "/var/empty"), std::logic_error);

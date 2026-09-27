@@ -328,6 +328,7 @@ add_library(protoscala_runtime OBJECT
     src/runtime/Prelude.cpp
     src/runtime/PreludeImage.cpp
     src/umd/ScalaModuleProvider.cpp
+    src/umd/CompiledModuleProvider.cpp
     src/umd/ProviderPlugins.cpp
     src/runtime/GeneratedSupport.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/generated/PreludeSource.cpp

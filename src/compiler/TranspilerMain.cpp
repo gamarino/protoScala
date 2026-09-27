@@ -242,7 +242,10 @@ int transpile(const Options& opt) {
             compiler.setModuleLoader(&session.moduleLoader());
             compiler.setSourceDir(abs.parent_path().string());
             cu = compiler.compileUnit(*unit, UnitMode::Script, 0);
-            asScript = !cu.mainName.empty();
+            // An `object Main extends App` unit is a PROGRAM even though it declares
+            // no @main (D104), so it is a script: module mode would emit no entry
+            // point and the module would run its top level and print nothing.
+            asScript = !cu.mainName.empty() || !cu.appKey.empty();
         } else if (opt.forceScript) {
             desugar(*unit);
             Compiler compiler(session.globals());
@@ -293,6 +296,7 @@ int transpile(const Options& opt) {
     eo.logicalPath = logical;
     eo.moduleVersion = opt.moduleVersion;
     eo.asScript = asScript;
+    eo.appKey = cu.appKey;
 
     // check() walks first and emits NOTHING: a partially written .cpp that a
     // later `make` compiles into something is worse than no output (§D5).

@@ -152,6 +152,13 @@ void linkModule(proto::ProtoContext* ctx, const BlockRec* const* blocks, std::si
 int runMain(proto::ProtoContext* ctx, const char* mainKey, bool takesArgs, int argc, char** argv);
 
 /**
+ * `object Main extends App` (D104): the object's initialisation IS the program, so
+ * running it means FORCING its global rather than calling a method. Reports an
+ * uncaught Scala exception in the same shape `runMain` does and returns the exit code.
+ */
+int runApp(proto::ProtoContext* ctx, const char* appKey);
+
+/**
  * §D6 site 2: the boundary every generated block's thunk presents to the VM.
  * Calls `body` inside `translateForeignException`, whose six clauses are in
  * `src/umd/ForeignBoundary.h`. The emitter writes the thunk; the clauses live
@@ -163,12 +170,42 @@ const proto::ProtoObject* enterMethod(proto::ProtoMethod body, proto::ProtoConte
                                       const proto::ProtoList* args,
                                       const proto::ProtoSparseList* kwargs);
 
+/** One exported top-level function: its Scala name and the block that is its body. */
+struct ExportRec {
+    const char* name;
+    proto::ProtoMethod entry;
+};
+
 /**
- * Runs the module body through `translateForeignException` (§D6 site 1) and
- * returns the module object the provider publishes.
+ * Runs the module body through `translateForeignException` (§D6 site 1) and returns
+ * the module object the provider publishes.
+ *
+ * **The module object carries each exported top-level function as a
+ * `proto::ProtoMethod` cell**, under the function's own Scala name. That is the
+ * capability this phase exists for, made reachable: a holder of the module object needs
+ * nothing but protoCore to call one —
+ *
+ * ```cpp
+ * const auto* key = proto::ProtoString::createSymbol(ctx, "add");
+ * const proto::ProtoObject* f = mod->getAttribute(ctx, key);
+ * const proto::ProtoObject* r = f->asMethod()(ctx, nullptr, nullptr, args, nullptr);
+ * ```
+ *
+ * — with no protoScala header, no knowledge of protoScala's bytecode and no access to
+ * its `ExecutionEngine`. A protoScala function that is bytecode cannot be called this
+ * way, because it is a `BytecodeModule*` in `__code__` plus the engine that walks it;
+ * that is the difference the phase adds.
+ *
+ * The exported cells are a SECOND view of the same block, not a replacement: the
+ * globals the module's own top level binds still hold ordinary protoScala function
+ * objects, whose `__code__` carries the arity, method-ness and capture slots every
+ * caller inside the runtime reads. Publishing only the bare cells would lose that
+ * metadata; publishing only the function objects would leave a foreign runtime nothing
+ * it can call.
  */
 const proto::ProtoObject* runModuleBody(proto::ProtoContext* ctx, proto::ProtoMethod body,
-                                        const char* logicalPath, const char* version);
+                                        const char* logicalPath, const char* version,
+                                        const ExportRec* exports, std::size_t exportCount);
 
 // --- the frame -------------------------------------------------------------
 

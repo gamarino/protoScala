@@ -11,6 +11,7 @@
 #include "umd/ForeignBoundary.h"
 #include "umd/Prefixes.h"
 #include "umd/ProviderPlugins.h"
+#include "umd/CompiledModuleProvider.h"
 #include "umd/ScalaModuleProvider.h"
 
 #include <algorithm>
@@ -81,6 +82,10 @@ Session::Session() : runtime_(space_), engine_(runtime_.layout()) {
     // thread-local would answer "module not found" on every worker.
     registerModuleHost(&space_, this);
     installScalaProvider(&ctx);
+    // AFTER the source provider, so a `.scala` beside a `.so` still wins: the chain
+    // is searched in order, and an existing fixture must not change meaning because
+    // a compiled module happens to be installed under the same logical path.
+    installCompiledProvider(&ctx, compiledModuleBasePaths(), &engine_, &runtime_.layout());
     pluginPaths_ = loadProviderPlugins(&ctx);
 }
 
@@ -290,6 +295,42 @@ int Session::runModule(const std::string& soPath, const std::vector<std::string>
     }
     std::fflush(stdout);
     return rc;
+}
+
+int Session::withModule(const std::string& soPath,
+                        int (*fn)(proto::ProtoContext*, const proto::ProtoObject*, void*),
+                        void* ud) {
+    void* handle = dlopen(soPath.c_str(), RTLD_NOW | RTLD_GLOBAL);
+    if (!handle) {
+        std::fprintf(stderr, "protoscala: cannot load '%s': %s\n", soPath.c_str(), dlerror());
+        return 1;
+    }
+    using InitFn = void* (*)();
+    auto init = reinterpret_cast<InitFn>(dlsym(handle, "proto_module_init"));
+    if (!init) {
+        std::fprintf(stderr, "protoscala: not a protoScala module: proto_module_init not found "
+                             "in '%s'\n", soPath.c_str());
+        return 1;
+    }
+    proto::ProtoContext ctx(&space_, runtime_.rootContext());
+    try {
+        // The guards are open only for initialisation, and CLOSED before `fn` runs.
+        {
+            ExecutionEngine::ActiveCallGuard active(&engine_, &runtime_.layout());
+            gen::ModuleEntryGuard entry(&ctx);
+            ctx.returnValue = static_cast<const proto::ProtoObject*>(init());
+        }
+        return fn(&ctx, ctx.returnValue, ud);
+    } catch (const ScalaThrow& t) {
+        std::fflush(stdout);
+        std::fprintf(stderr, "%s:%d: error: %s\n", soPath.c_str(), t.line,
+                     showThrown(&ctx, t.value).c_str());
+        return 1;
+    } catch (const ScalaError& e) {
+        std::fflush(stdout);
+        std::fprintf(stderr, "%s:%d: error: %s\n", soPath.c_str(), e.line, e.what());
+        return 1;
+    }
 }
 
 int Session::runScript(const std::string& path, const std::vector<std::string>& args) {
@@ -513,10 +554,24 @@ const ModuleExports& Session::load(const std::string& providerSpec, const std::s
     if (!providerSpec.empty()) return loadForeign(providerSpec, logicalPath, pos);
     proto::ProtoContext ctx(&space_, runtime_.rootContext());
     const std::string abs = findModuleFile(logicalPath, importerDir);
-    if (abs.empty())
+    if (abs.empty()) {
+        // A source miss may fall through to a COMPILED module (Phase 7 Task 10). The
+        // order is deliberate and is what INTEROP §3 already documented for a
+        // prefix-less import: the resolution chain, with `provider:scala` first. A
+        // `.scala` beside a `.so` therefore still wins, so installing a compiled
+        // module cannot change the meaning of an import that already resolved.
+        //
+        // What it binds is a FOREIGN module -- late binding. The `ExportsRec` tables
+        // that would keep early type binding are not built, so `case Point(x, y) =>`
+        // against a compiled module's class does not compile, exactly as it does not
+        // for any other foreign module. That is a known gap, not a silent one:
+        // PROTOSCALAC_SPECIFICATION §8 records it.
+        if (!findCompiledModuleFile(logicalPath).empty())
+            return loadForeign("provider:compiled", logicalPath, pos);
         throw CompileError("ImportError: no module found for '" + logicalPath + "' (tried " +
                                triedPathsOf(logicalPath, importerDir) + ")",
                            pos);
+    }
     try {
         return loadModuleFile(&ctx, abs, logicalPath).exports;
     } catch (const ScalaThrow& t) {
