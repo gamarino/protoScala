@@ -30,6 +30,22 @@ tar -xzf "$archive" -C "$work" --strip-components=1 || { echo "FAIL: cannot extr
 [[ -d "$work/lib/protoscala/providers" ]] || {
     echo "FAIL: the package has no lib/protoscala/providers directory"; exit 1; }
 
+# What a MODULE AUTHOR needs (Phase 7 Task 14 Step 4). Each of these is a separate
+# install rule, and any one of them missing leaves `protoscalac` installed but unable to
+# build anything -- a failure a user would meet at their first `--build-so`, not here.
+for needed in \
+    bin/protoscalac \
+    lib/libprotoScala.so.1 \
+    include/protoScala/GeneratedModule.h \
+    lib/cmake/protoScala/protoScalaConfig.cmake
+do
+    [[ -e "$work/$needed" ]] || { echo "FAIL: the package has no $needed"; exit 1; }
+done
+# And the directory CompiledModuleProvider searches, for the same reason `providers`
+# is checked: `protoscala --version` prints the path, so it has to exist.
+[[ -d "$work/lib/protoscala/modules" ]] || {
+    echo "FAIL: the package has no lib/protoscala/modules directory"; exit 1; }
+
 # The packaged binary must find libprotoCore through its own RUNPATH. protoCore
 # is not in the archive (it is a package dependency), so it is copied in beside
 # the binary exactly as an installed system would have it.

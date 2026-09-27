@@ -319,11 +319,53 @@ void uncons(proto::ProtoContext*, const proto::ProtoObject* list, const proto::P
 const proto::ProtoObject* makeTuple(proto::ProtoContext*, const proto::ProtoObject** elems, unsigned n);
 
 [[noreturn]] void throwValue(proto::ProtoContext*, const proto::ProtoObject* v);
-[[noreturn]] void rethrow(proto::ProtoContext*, const proto::ProtoObject* v);
+/**
+ * RETHROW: re-raise the value the handler saved in a local slot. Takes the block so the
+ * "RETHROW with no saved exception in <name>" defect message names it, as the
+ * interpreter's does; a message that said "generated block" would not tell a reader
+ * which one.
+ */
+[[noreturn]] void rethrow(proto::ProtoContext*, const BlockRec& blk, const proto::ProtoObject* v);
 /** The handler entry for `pc`, or nullptr. Same search order as the VM's table. */
 const HandlerRec* handlerFor(const BlockRec&, std::size_t pc);
 /** A ScalaError as a prelude Throwable instance, for the retry loop's catch. */
 const proto::ProtoObject* materialise(proto::ProtoContext*, const char* cls, const char* msg);
+
+/**
+ * The frame's retry loop, all of it that is not control flow. Called from the ONE
+ * `catch (...)` a generated block with a protected region writes, and from nowhere else.
+ *
+ * It re-raises the in-flight exception internally and reproduces, in one place, the
+ * classification `ExecutionEngine::runLoop` and `runFrame` perform together:
+ *
+ *  - `FutureYield` and `std::logic_error` are **rethrown**. The first is a cooperative
+ *    suspension and never a Scala exception; the second is a VM or compiler defect and
+ *    D74 keeps it uncatchable. Note the order — `std::invalid_argument` and
+ *    `std::out_of_range` derive from `std::logic_error` and ARE translated, exactly as
+ *    the interpreter translates them, so they must be caught before it.
+ *  - `ScalaThrow` yields its value; `ScalaError` and the `std::` errors the interpreter
+ *    names — `invalid_argument` → `IllegalArgumentException`, `out_of_range` →
+ *    `IndexOutOfBoundsException`, `overflow_error` → `ArithmeticException`, `bad_alloc`
+ *    → `OutOfMemoryError`, any other `runtime_error` → `RuntimeException` — yield a
+ *    materialised prelude `Throwable`.
+ *  - **If `blk` has no handler covering `pc`, it rethrows** rather than returning
+ *    nullptr, and it rethrows the TRANSLATED exception, because that is what an
+ *    interpreted frame propagates. The search happens before `materialise`, so the
+ *    uncaught path allocates nothing.
+ *
+ * On a match it writes the value into `slots[pendingSlot]` **and then** into
+ * `slots[h->slot]`, and sets `ctx->returnValue`. The double write is the rule, not
+ * redundancy: `materialise` allocates, and a `ProtoObject*` may not be held in a C++
+ * local across an allocation (P1, P4 rule 3).
+ *
+ * Returning the entry rather than jumping is what keeps the handler body OUTSIDE the
+ * C++ catch: the generated code assigns `resumePc` and `continue`s, so the body runs
+ * with no live C++ handler and is re-protected by the same table — which is how a frame
+ * catches a SECOND exception, raised by its own handler body, by a non-matching
+ * cascade's `RETHROW`, or by a `finally`.
+ */
+const HandlerRec* handleCaught(proto::ProtoContext* ctx, const BlockRec& blk, std::size_t pc,
+                               const proto::ProtoObject** slots, unsigned pendingSlot);
 
 /** JUMP_BACK's GC obligation (P4 rule 1). Inlined to one call. */
 void safepoint(proto::ProtoContext*);

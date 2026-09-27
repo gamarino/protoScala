@@ -9,9 +9,12 @@
 #include <protoScala/GeneratedModule.h>
 
 #include "EvalHarness.h"
+#include "runtime/Errors.h"
 #include "runtime/GeneratedModuleEntry.h"
 
 #include <gtest/gtest.h>
+
+#include <stdexcept>
 
 namespace gen = protoScala::gen;
 using protoScala::test::EvalHarness;
@@ -257,5 +260,107 @@ TEST_F(Facade, TheUnimplementedOperationsRefuseLoudly) {
     const proto::ProtoObject* caps[1] = {PROTO_NONE};
     EXPECT_THROW(gen::makeFn(c(), blk, 0, caps, 1), std::logic_error);
 }
+
+
+// --- the retry loop's one catch (Phase 7 Task 8) ---------------------------
+
+// A BlockRec with one Catch entry covering pc 0..10, whose body is at 20 and whose
+// bound value goes to local slot 1. Enough for handleCaught; the control flow around it
+// is the emitter's, and `transpiled/20-exceptions/*` is what exercises that.
+gen::HandlerRec oneHandler[] = {{0, 10, 20, 0, 1, 0}};
+gen::BlockRec guardedRec{};
+
+struct Guarded : Facade {
+    void SetUp() override {
+        Facade::SetUp();
+        guardedRec = gen::BlockRec{};
+        guardedRec.name = "guarded";
+        guardedRec.handlers = oneHandler;
+        guardedRec.handlerCount = 1;
+    }
+    // Calls handleCaught the way a generated frame does: from inside catch (...).
+    const gen::HandlerRec* caught(std::size_t pc, const proto::ProtoObject** slots) {
+        return gen::handleCaught(c(), guardedRec, pc, slots, /*pendingSlot=*/4);
+    }
+};
+
+TEST_F(Guarded, ALogicErrorIsRethrownEVENWhenAHandlerCovers) {
+    // D74 on the generated path: a VM or compiler defect must not become a Scala
+    // exception, so `catch { case e: Throwable => }` cannot see it. The handler DOES
+    // cover pc 0, which is what makes this a real test rather than a miss.
+    const proto::ProtoObject* slots[8] = {};
+    try {
+        try {
+            throw std::logic_error("a generator defect");
+        } catch (...) {
+            caught(0, slots);
+            FAIL() << "handleCaught swallowed a std::logic_error";
+        }
+    } catch (const std::logic_error& e) {
+        EXPECT_STREQ(e.what(), "a generator defect");
+    }
+}
+
+TEST_F(Guarded, TheStdErrorsTheInterpreterNamesAreTranslatedNotRethrown) {
+    // The two that derive from std::logic_error are the point: the interpreter
+    // translates them, so the D74 arm must come AFTER them. If the order were reversed
+    // these would escape as defects and a Scala `catch` would never see them.
+    const proto::ProtoObject* slots[8] = {};
+    auto run = [&](auto&& thrower, const char* expectClass) {
+        try {
+            thrower();
+            FAIL() << "the thrower did not throw";
+        } catch (...) {
+            const gen::HandlerRec* h = caught(0, slots);
+            ASSERT_NE(h, nullptr);
+            // The value is in BOTH the pending slot and the handler's slot, and it is
+            // the class the interpreter would have materialised.
+            ASSERT_NE(slots[1], nullptr);
+            EXPECT_EQ(slots[1], slots[4]);
+            EXPECT_NE(str(slots[1]).find(expectClass), std::string::npos) << str(slots[1]);
+        }
+    };
+    run([] { throw std::invalid_argument("bad arg"); }, "IllegalArgumentException");
+    run([] { throw std::out_of_range("past the end"); }, "IndexOutOfBoundsException");
+    run([] { throw std::overflow_error("too big"); }, "ArithmeticException");
+    run([] { throw std::runtime_error("a protoCore error"); }, "RuntimeException");
+}
+
+TEST_F(Guarded, AScalaThrowValueIsReRootedAndDelivered) {
+    const proto::ProtoObject* slots[8] = {};
+    const proto::ProtoObject* v = gen::materialise(c(), "IllegalStateException", "nope");
+    ctx->returnValue = v;
+    try {
+        throw protoScala::ScalaThrow(v);
+    } catch (...) {
+        const gen::HandlerRec* h = caught(0, slots);
+        ASSERT_NE(h, nullptr);
+        EXPECT_EQ(h->handlerPc, 20u);
+        EXPECT_EQ(slots[1], v);      // the handler's bound slot
+        EXPECT_EQ(slots[4], v);      // and the frame's pending slot
+        EXPECT_EQ(c()->returnValue, v);   // re-rooted before anything could allocate
+    }
+}
+
+TEST_F(Guarded, NoHandlerForThisPcRethrows) {
+    // pc 50 is outside [0, 10): the value must propagate, and as a ScalaError rather
+    // than the raw std:: error, because that is what an interpreted frame propagates.
+    const proto::ProtoObject* slots[8] = {};
+    try {
+        try {
+            throw std::runtime_error("nothing catches this");
+        } catch (...) {
+            caught(50, slots);
+            FAIL() << "handleCaught returned an entry for an uncovered pc";
+        }
+    } catch (const protoScala::ScalaError& e) {
+        EXPECT_EQ(e.className(), "RuntimeException");
+        EXPECT_EQ(e.message(), "nothing catches this");
+    }
+    // And nothing was written: the uncaught path allocates nothing.
+    EXPECT_EQ(slots[1], nullptr);
+    EXPECT_EQ(slots[4], nullptr);
+}
+
 
 }  // namespace

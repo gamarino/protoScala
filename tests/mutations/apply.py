@@ -110,6 +110,54 @@ MUTS = {
  'P4': ('src/umd/CompiledModuleProvider.cpp',   # a logical path is not a file path
         '''    std::replace(out.begin(), out.end(), '.', '/');''',
         '''    // mutated: the dots are left alone'''),
+
+ # --- the frame's retry loop, D120 (Task 8) --------------------------------------
+ # Four properties whose order or presence is load-bearing, and each has a test that
+ # reds. R1 and R4 are the two that would otherwise produce a WRONG ANSWER rather than
+ # an error, which is why they exist.
+ 'R1': ('src/runtime/GeneratedSupport.cpp',   # the D74 arm swallows its own subclasses
+        '''    } catch (const std::invalid_argument& e) {''',
+        '''    } catch (const std::logic_error&) {
+        throw;   // mutated: moved AHEAD of the two subclasses the interpreter translates
+    } catch (const std::invalid_argument& e) {'''),
+ 'R2': ('src/runtime/GeneratedSupport.cpp',   # the value is not re-rooted before use
+        '''        ctx->returnValue = t.value;
+        slots[pendingSlot] = t.value;
+        slots[h->slot] = t.value;''',
+        '''        slots[h->slot] = t.value;'''),
+ 'R3': ('src/compiler/CppEmitter.cpp',   # no pc tracking: the search reads a stale pc
+        '''        if (guarded && canThrow(d.op)) out_ << "    pc = " << d.pc << ";\\n";''',
+        '''        if (false) out_ << "    pc = " << d.pc << ";\\n";'''),
+ 'R4': ('src/runtime/GeneratedSupport.cpp',   # the range is ignored: the first entry wins
+        '''        if (pc >= h.startPc && pc < h.endPc) return &h;''',
+        '''        (void)pc; return &h;'''),
+}
+
+
+# The ctest expression that MUST go red for each mutation.
+#
+# This map exists because choosing the filter by hand went wrong: `Guarded.` matched
+# nothing, since `test_generated_support` is registered as the single ctest case
+# `unit/generated_support` rather than through gtest_discover_tests, so two mutations
+# reported GREEN while the tests that cover them were never run. A mutation matrix whose
+# target set is chosen by eye measures the eye. `apply.py covers <id>` prints the
+# expression; the runner uses it instead of guessing.
+COVERS = {
+ 'E1': 'transpiled/', 'E2': 'transpiled/', 'E3': 'transpiled/', 'E6': 'transpiled/',
+ 'E7': 'transpiled/', 'E9': 'transpiled/', 'E10': 'transpiled/', 'E11': 'transpiled/',
+ 'E13': 'transpiled/', 'E14': 'transpiled/', 'E15': 'transpiled/', 'E16': 'transpiled/',
+ 'X1': 'interop/foreign-call', 'X2': 'interop/foreign-call',
+ 'X3': 'interop/foreign-call', 'X4': 'interop/foreign-call',
+ 'P1': 'cli/compiled-provider', 'P2': 'unit/Provider|Provider\\.',
+ 'P3': 'cli/compiled-provider', 'P4': 'cli/compiled-provider',
+ 'R1': 'unit/generated_support', 'R2': 'unit/generated_support',
+ # `cli/transpiler-cli` asserts the property directly (a guarded block must emit
+ # `pc = n;`), which is why it is the expression. The transpiled 20-exceptions cases go
+ # red too, but by HANGING -- with `pc` stuck at 0 every exception enters the same
+ # handler and a handler that raises loops -- so each costs the harness's 90 s timeout
+ # and proving it that way takes half an hour for no extra information.
+ 'R3': 'cli/transpiler-cli',
+ 'R4': 'unit/generated_support|transpiled/20-exceptions/nested-try',
 }
 
 
@@ -130,7 +178,9 @@ def restore():
         (ROOT / f).touch()
 
 
-if sys.argv[1] == 'backup':
+if sys.argv[1] == 'covers':
+    print(COVERS[sys.argv[2]])
+elif sys.argv[1] == 'backup':
     backup(); print('backed up')
 elif sys.argv[1] == 'restore':
     restore(); print('restored')

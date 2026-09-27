@@ -51,9 +51,6 @@ refuse await_in_a_body "await is not supported in a transpiled module (D113)" \
     '@main def run(): Unit =' \
     '  val f = Future { 1 }' \
     '  println(f.await)'
-refuse a_try "try/catch/finally is not supported by protoscalac yet (D120)" \
-    '@main def run(): Unit =' \
-    '  try println(1) catch case e: Throwable => println(2)'
 refuse a_default "a parameter with a default value is not supported by protoscalac yet (D121)" \
     'def f(a: Int, b: Int = 2) = a + b' \
     '@main def run(): Unit = println(f(1))'
@@ -105,6 +102,27 @@ accept an_object_with_a_trait "hello from Greeter" \
     'object G extends Greeter:' \
     '  def name = "Greeter"' \
     '@main def run(): Unit = println(G.greet)'
+# D120 was closed on 2026-09-27, and the `a_try` refusal case becomes three positive
+# ones -- the same hand-applied version of the exclusion list's anti-rot rule that
+# retired `a_class`. The third is the case that is easy to get wrong and was worth 11
+# fixtures: an exception raised inside a handler, caught by an ENCLOSING try in the same
+# frame, which only works because the frame keeps ONE retry loop for its whole body.
+accept a_try "1" \
+    '@main def run(): Unit =' \
+    '  try println(1) catch case e: Throwable => println(2)'
+accept a_finally "body cleanup" \
+    '@main def run(): Unit =' \
+    '  try print("body ") finally println("cleanup")'
+accept a_second_exception "inner outer" \
+    '@main def run(): Unit =' \
+    '  try' \
+    '    try throw new RuntimeException("a")' \
+    '    catch' \
+    '      case e: RuntimeException =>' \
+    '        print("inner ")' \
+    '        throw new IllegalStateException("b")' \
+    '  catch' \
+    '    case e: IllegalStateException => println("outer")'
 accept a_case_class "Point(1,2) 3" \
     'case class Point(x: Int, y: Int)' \
     '@main def run(): Unit =' \

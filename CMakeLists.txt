@@ -463,13 +463,16 @@ message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 # --- Installation ---------------------------------------------------------------
 # An installed bin/protoscala finds libprotoCore under <prefix>/lib without
 # LD_LIBRARY_PATH.
+# `protoscalac` needs the same treatment as `protoscala`: it links libprotoScala and
+# creates a Session, so an installed one that could not find its own library would fail
+# at exec time with a message about a missing .so rather than anything actionable.
 if(UNIX)
     if(APPLE)
-        set_target_properties(protoscala PROPERTIES
+        set_target_properties(protoscala protoscalac PROPERTIES
             INSTALL_RPATH "@executable_path/../${CMAKE_INSTALL_LIBDIR}")
         set_target_properties(protoScala PROPERTIES INSTALL_RPATH "@loader_path")
     else()
-        set_target_properties(protoscala PROPERTIES
+        set_target_properties(protoscala protoscalac PROPERTIES
             INSTALL_RPATH "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
         set_target_properties(protoScala PROPERTIES INSTALL_RPATH "\$ORIGIN")
     endif()
@@ -479,11 +482,21 @@ install(TARGETS protoscala protoscalac
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     COMPONENT protoScala)
 # Phase 7 D3: the library and its ONE header are what a module author needs.
+#
+# COMPONENT is repeated on EVERY artifact clause, and that is not redundancy. In
+# `install(TARGETS)` an option after an artifact keyword belongs to THAT artifact group,
+# so a single trailing `COMPONENT protoScala` bound only to PUBLIC_HEADER and left
+# `libprotoScala.so*` in the Unspecified component -- which meant
+# `cmake --install --component protoScala`, the command INSTALLATION.md tells users to
+# run and the one CPack uses, installed `protoscalac` and the header but NOT the library
+# they link against. Found by Task 14 Step 5's end-to-end check, which is the first thing
+# in this repository ever to install and then run the result:
+# `protoscalac: error while loading shared libraries: libprotoScala.so.1`.
 install(TARGETS protoScala
     EXPORT protoScalaTargets
-    LIBRARY       DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/protoScala
-    COMPONENT protoScala)
+    LIBRARY       DESTINATION ${CMAKE_INSTALL_LIBDIR}              COMPONENT protoScala
+                  NAMELINK_COMPONENT protoScala
+    PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/protoScala COMPONENT protoScala)
 install(EXPORT protoScalaTargets
     FILE protoScalaTargets.cmake NAMESPACE protoScala::
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/protoScala
@@ -508,6 +521,12 @@ install(FILES LICENSE README.md
 # (Phase 6 A0-13). The directory is created so the path `--version` prints
 # actually exists on an installed system.
 install(DIRECTORY DESTINATION "${CMAKE_INSTALL_LIBDIR}/protoscala/providers"
+    COMPONENT protoScala)
+# Compiled modules (Phase 7): `CompiledModuleProvider` searches PROTOSCALA_MODULE_PATH
+# and then this directory, and `protoscala --version` prints both. The directory is
+# created for the same reason `providers` is: a path the runtime prints must exist, or a
+# user cannot tell "nothing installed here" from "looking in the wrong place".
+install(DIRECTORY DESTINATION "${CMAKE_INSTALL_LIBDIR}/protoscala/modules"
     COMPONENT protoScala)
 
 # --- CPack configuration ---------------------------------------------------
@@ -561,6 +580,11 @@ elseif(UNIX)
     set(CPACK_DEBIAN_PACKAGE_SECTION "interpreters")
     set(CPACK_DEBIAN_PACKAGE_DEPENDS
         "protocore (>= ${PROTOCORE_MIN_VERSION_FULL}), protocore (<< ${PROTOCORE_NEXT_MAJOR})")
+    # RECOMMENDS, not DEPENDS: `protoscalac --emit-cpp` needs neither a compiler nor
+    # make, and only `--build-so` runs them. A hard dependency would make every
+    # installation of the interpreter pull in a toolchain for a mode most users never
+    # reach (Phase 7 Task 14 Step 3).
+    set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "g++, make")
     # CPACK_DEBIAN_PACKAGE_SHLIBDEPS is deliberately NOT enabled. It would let
     # dpkg-shlibdeps name libreadline's and libstdc++'s packages instead of
     # hardcoding per-distribution SONAME packages, but dpkg-shlibdeps resolves

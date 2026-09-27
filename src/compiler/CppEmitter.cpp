@@ -34,7 +34,7 @@ bool isSupported(Op op) {
         case Op::CONCAT:
         case Op::TEST_TYPE: case Op::TEST_PROTO: case Op::UNAPPLY_FIELDS: case Op::UNCONS:
         case Op::MATCH_ERROR: case Op::CAST_FAIL: case Op::MAKE_TUPLE:
-        case Op::THROW:
+        case Op::THROW: case Op::RETHROW:
         case Op::MAKE_CLASS: case Op::NEW: case Op::NEW_SPREAD: case Op::INVOKE_INIT:
         case Op::STORE_FIELD: case Op::STORE_FIELD_IF_NEW: case Op::SET_FIELD:
         case Op::SEND_SUPER:
@@ -49,12 +49,32 @@ std::string refusalFor(Op op) {
         case Op::SEND_KW: case Op::CALL_KW:
             return "a named or default argument is not supported by protoscalac yet (D121): "
                    "keyword binding for a transpiled callee is not implemented";
-        case Op::RETHROW:
-            return "try/catch/finally is not supported by protoscalac yet (D120): the frame's "
-                   "retry loop is not implemented";
         default:
             return std::string("opcode ") + std::to_string(static_cast<unsigned>(op)) + " (" +
                    opName(op) + ") is not supported by protoscalac";
+    }
+}
+
+// Can this opcode raise? Only a frame with a protected region asks, and only to decide
+// whether to emit a `pc` assignment before it. The list below is the opcodes that CANNOT
+// -- pure slot moves, the constant pushes, and an unconditional jump -- so anything added
+// to the instruction set later is treated as throwing until someone proves otherwise.
+// That is the safe direction: an unnecessary `pc =` is dead, a missing one leaves a STALE
+// pc and the handler search reads the wrong region.
+//
+// Two that look pure and are not: JUMP_IF_FALSE / JUMP_IF_TRUE call `truthy`, which
+// raises ClassCastException on a non-Boolean, and JUMP_BACK takes a GC safepoint.
+bool canThrow(Op op) {
+    switch (op) {
+        case Op::NOP: case Op::EXTEND:
+        case Op::PUSH_UNIT: case Op::PUSH_NULL: case Op::PUSH_TRUE: case Op::PUSH_FALSE:
+        case Op::POP: case Op::DUP:
+        case Op::PUSH_LOCAL: case Op::STORE_LOCAL:
+        case Op::JUMP:
+        case Op::RETURN:
+            return false;
+        default:
+            return true;
     }
 }
 
@@ -232,10 +252,6 @@ void CppEmitter::collect(const BytecodeModule& mod, std::vector<Refusal>& out) c
                               "yet (D121): defaults are bound by the callee's prologue, which a "
                               "transpiled frame does not run",
                               mod.lineAt(0)});
-    if (!mod.handlers().empty())
-        out.push_back(Refusal{"try/catch/finally is not supported by protoscalac yet (D120): "
-                              "the frame's retry loop is not implemented",
-                              mod.lineAt(mod.handlers().front().startPc)});
     for (const Decoded& d : decode(mod)) {
         if (d.op == Op::SEND || d.op == Op::SEND_APPLY) {
             // `await` is detected by SEND-site name, which is an
@@ -374,6 +390,24 @@ bool CppEmitter::emitBlock(std::size_t index, const GlobalTable&) {
     const std::vector<Decoded> ins = decode(mod);
     const std::set<std::size_t> labels = labelTargets(mod);
     const std::vector<int> depth = depths(mod);
+    // Step 5's assertion. `depths()` seeds each handler body at its entry's stackDepth
+    // and throws when two paths disagree, so this is the second half: that the depth the
+    // emitter will USE at handlerPc is the one `enterHandler` would set. A disagreement
+    // is a generator bug that would otherwise surface as a wrong value, not an error.
+    for (const BytecodeModule::Handler& h : mod.handlers()) {
+        std::size_t at = ins.size();
+        for (std::size_t i = 0; i < ins.size(); ++i)
+            if (ins[i].pc == h.handlerPc) { at = i; break; }
+        if (at == ins.size())
+            throw std::logic_error("a handler of " + mod.name() + " enters at word " +
+                                   std::to_string(h.handlerPc) +
+                                   ", which is not an instruction boundary");
+        if (depth[at] != h.stackDepth)
+            throw std::logic_error("the handler entering " + mod.name() + " at word " +
+                                   std::to_string(h.handlerPc) + " expects operand-stack depth " +
+                                   std::to_string(h.stackDepth) + ", but the emitter reaches it at " +
+                                   std::to_string(depth[at]));
+    }
 
     // Two functions per block: a thunk that is the proto::ProtoMethod stored in
     // the tables and reached by every caller, and a body that carries the code.
@@ -399,6 +433,38 @@ bool CppEmitter::emitBlock(std::size_t index, const GlobalTable&) {
          << "    (void)C; (void)S; (void)B;\n";
 
     const std::string rec = n + "_rec";
+    // The frame's retry loop, and ONE per block rather than one per `try`. The shape is
+    // `ExecutionEngine::runFrame`'s, and the reason it is that shape is load-bearing: a
+    // handler body must run with NO live C++ handler, so that it suspends like any other
+    // code and so that the frame can catch a SECOND exception -- raised by the handler
+    // body itself, by a non-matching cascade's RETHROW, or by a `finally`. Entering the
+    // handler from inside the catch would abandon the loop and never consult the table
+    // again.
+    //
+    // A block with no protected region emits none of this: no `pc`, no loop, no `catch`.
+    // That keeps the zero-cost property, and `tests/cli/transpiler-cli.sh` asserts that
+    // such a file contains no `catch` at all.
+    const bool guarded = !mod.handlers().empty();
+    if (guarded) {
+        // The switch is INSIDE the try, deliberately: C++ forbids jumping into a try
+        // block and permits jumping within one, so the dispatch and every label it
+        // reaches must share the try -- which is exactly what re-protects the handler
+        // body under the same table.
+        out_ << "    std::size_t pc = 0;\n"
+             << "    std::size_t resumePc = kEntry;\n"
+             << "    for (;;) {\n"
+             << "      try {\n"
+             << "        switch (resumePc) {\n"
+             << "            case kEntry: goto L_entry;\n";
+        std::set<std::size_t> seen;
+        for (const BytecodeModule::Handler& h : mod.handlers())
+            if (seen.insert(h.handlerPc).second)
+                out_ << "            case " << h.handlerPc << ": goto L" << h.handlerPc << ";\n";
+        out_ << "            default: throw std::logic_error(\"" << n
+             << ": unreachable resume pc\");\n"
+             << "        }\n"
+             << "      L_entry:\n";
+    }
     for (std::size_t i = 0; i < ins.size(); ++i) {
         const Decoded& d = ins[i];
         const int dep = depth[i];
@@ -407,6 +473,10 @@ bool CppEmitter::emitBlock(std::size_t index, const GlobalTable&) {
         auto st = [&](int k) { return "S[B + " + std::to_string(k) + "]"; };
         if (labels.count(d.pc)) out_ << "  L" << d.pc << ":\n";
         line(mod, d.pc);
+        // The handler search reads `pc`, so it must hold the word index of the
+        // instruction in flight -- and only for an instruction that can raise. A `pc`
+        // assignment before an opcode that cannot throw is dead, and is not emitted.
+        if (guarded && canThrow(d.op)) out_ << "    pc = " << d.pc << ";\n";
         out_ << "    ";
         switch (d.op) {
             case Op::NOP: case Op::EXTEND:
@@ -555,6 +625,12 @@ bool CppEmitter::emitBlock(std::size_t index, const GlobalTable&) {
             case Op::THROW:
                 out_ << "gen::throwValue(C, " << st(dep - 1) << ");";
                 break;
+            case Op::RETHROW:
+                // A non-matching `catch` cascade, and the end of every `finally`. The
+                // operand is a LOCAL slot -- the one the handler's entry named -- not a
+                // stack offset, so it is `S[n]` and not `st(...)`.
+                out_ << "gen::rethrow(C, " << rec << ", S[" << d.operand << "]);";
+                break;
             case Op::MAKE_CLASS: {
                 const BytecodeModule::Const& c = mod.constAt(d.operand);
                 const int n = static_cast<int>(c.argc + c.names.size());
@@ -611,8 +687,18 @@ bool CppEmitter::emitBlock(std::size_t index, const GlobalTable&) {
     // instruction is a jump would otherwise fall off the end of a function that
     // must return a value. `unitValue` is what `PUSH_UNIT; RETURN` would have
     // produced, and reaching it is not an error.
-    out_ << "    return F.finish(gen::unitValue(C));\n"
-         << "}\n\n";
+    out_ << "    return F.finish(gen::unitValue(C));\n";
+    if (guarded)
+        // handleCaught rethrows when no entry covers `pc`, so reaching `continue` means
+        // an entry matched and its body is now re-protected by the same table.
+        out_ << "      } catch (...) {\n"
+             << "        const gen::HandlerRec* h =\n"
+             << "            gen::handleCaught(C, " << rec << ", pc, S, F.pendingSlot());\n"
+             << "        resumePc = h->handlerPc;\n"
+             << "        continue;\n"
+             << "      }\n"
+             << "    }\n";
+    out_ << "}\n\n";
     return true;
 }
 
@@ -653,7 +739,14 @@ bool CppEmitter::emit(const CompiledUnit& unit, const GlobalTable& globals) {
          << "// not spell the keyword.\n"
          << "#include <protoScala/GeneratedModule.h>\n"
          << "#include <protoCore.h>\n\n"
-         << "namespace gen = protoScala::gen;\n\n";
+         << "#include <cstddef>\n"
+         << "#include <stdexcept>\n\n"
+         << "namespace gen = protoScala::gen;\n\n"
+         // The retry loop's "run the body from the top" sentinel. A distinct value
+         // rather than 0, because 0 is a valid handlerPc and `case 0:` would then
+         // appear twice.
+         << "static constexpr std::size_t kEntry = static_cast<std::size_t>(-1);\n"
+         << "[[maybe_unused]] static const std::size_t kEntryUsed = kEntry;\n\n";
 
     // Forward declarations first: a block's record names its own thunk and its
     // children's, and a body names its own record.

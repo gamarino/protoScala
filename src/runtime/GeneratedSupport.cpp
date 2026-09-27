@@ -20,6 +20,7 @@
 #include "compiler/BytecodeModule.h"
 #include "compiler/Opcodes.h"
 #include "runtime/Errors.h"
+#include "runtime/FutureYield.h"
 #include "runtime/ExecutionEngine.h"
 #include "runtime/GeneratedModuleEntry.h"
 #include "runtime/OpcodeOps.h"
@@ -655,8 +656,8 @@ void throwValue(proto::ProtoContext* ctx, const proto::ProtoObject* v) {
     ops::throwValue(ctx, layoutOf("throwValue"), v);
 }
 
-void rethrow(proto::ProtoContext*, const proto::ProtoObject* v) {
-    ops::rethrow(v, "generated block");
+void rethrow(proto::ProtoContext*, const BlockRec& blk, const proto::ProtoObject* v) {
+    ops::rethrow(v, blk.name ? blk.name : "a generated block");
 }
 
 const HandlerRec* handlerFor(const BlockRec& blk, std::size_t pc) {
@@ -668,6 +669,96 @@ const HandlerRec* handlerFor(const BlockRec& blk, std::size_t pc) {
         if (pc >= h.startPc && pc < h.endPc) return &h;
     }
     return nullptr;
+}
+
+namespace {
+
+// One arm of handleCaught: find the handler, then materialise. In that order, because
+// the uncaught path must allocate nothing -- an interpreted frame's does not either.
+const HandlerRec* deliver(proto::ProtoContext* ctx, const BlockRec& blk, std::size_t pc,
+                          const proto::ProtoObject** slots, unsigned pendingSlot,
+                          const char* cls, const char* msg) {
+    const HandlerRec* h = handlerFor(blk, pc);
+    if (!h) return nullptr;
+    // pendingSlot FIRST: materialise allocates, and the value may not live in a C++
+    // local across the allocation that follows (P1, P4 rule 3).
+    slots[pendingSlot] = materialise(ctx, cls, msg);
+    ctx->returnValue = slots[pendingSlot];
+    slots[h->slot] = slots[pendingSlot];
+    return h;
+}
+
+}  // namespace
+
+const HandlerRec* handleCaught(proto::ProtoContext* ctx, const BlockRec& blk, std::size_t pc,
+                               const proto::ProtoObject** slots, unsigned pendingSlot) {
+    // `throw;` re-raises the exception the caller's `catch (...)` is handling, so the
+    // whole classification lives here rather than in a file no human wrote (§D6).
+    try {
+        throw;
+    } catch (FutureYield&) {
+        // A cooperative suspension, not an error. It must never reach a Scala `catch`,
+        // and no `finally` runs, because the frame will be resumed rather than
+        // abandoned. FIRST, as it is in runLoop, because the order is what a reader
+        // checks -- though FutureYield is not a std::exception, so it could not be
+        // caught by any arm below.
+        throw;
+    } catch (ScalaThrow& t) {
+        const HandlerRec* h = handlerFor(blk, pc);
+        if (!h) throw;
+        // Re-root before anything can allocate: the frames below this one are already
+        // destroyed, so this context is the only thing the collector sees the payload
+        // through (plan A0-2, escalation E1).
+        ctx->returnValue = t.value;
+        slots[pendingSlot] = t.value;
+        slots[h->slot] = t.value;
+        return h;
+    } catch (const ScalaError& e) {
+        // Before the std:: arms: ScalaError IS a std::runtime_error, and translating it
+        // again would replace a precise class name with RuntimeException.
+        const HandlerRec* h = deliver(ctx, blk, pc, slots, pendingSlot, e.className().c_str(),
+                                      e.message().c_str());
+        if (!h) throw;
+        return h;
+    } catch (const std::invalid_argument& e) {
+        // The three std:: arms the interpreter names, in its order. invalid_argument and
+        // out_of_range derive from std::logic_error and are translated, so they must
+        // precede the logic_error arm below -- which is what keeps D74 from swallowing
+        // them and what keeps them from escaping as defects.
+        const HandlerRec* h =
+            deliver(ctx, blk, pc, slots, pendingSlot, "IllegalArgumentException", e.what());
+        if (!h) throw ScalaError("IllegalArgumentException", e.what());
+        return h;
+    } catch (const std::out_of_range& e) {
+        const HandlerRec* h =
+            deliver(ctx, blk, pc, slots, pendingSlot, "IndexOutOfBoundsException", e.what());
+        if (!h) throw ScalaError("IndexOutOfBoundsException", e.what());
+        return h;
+    } catch (const std::overflow_error& e) {
+        const HandlerRec* h =
+            deliver(ctx, blk, pc, slots, pendingSlot, "ArithmeticException", e.what());
+        if (!h) throw ScalaError("ArithmeticException", e.what());
+        return h;
+    } catch (const std::bad_alloc& e) {
+        // An Error, not an Exception: `case e: Exception` must not catch it, which the
+        // prelude hierarchy decides, not this function.
+        const HandlerRec* h = deliver(ctx, blk, pc, slots, pendingSlot, "OutOfMemoryError",
+                                      e.what());
+        if (!h) throw ScalaError("OutOfMemoryError", e.what());
+        return h;
+    } catch (const std::logic_error&) {
+        // D74: a VM or compiler defect stays uncatchable. AFTER the two logic_error
+        // subclasses the interpreter translates, and that order is load-bearing.
+        throw;
+    } catch (const std::runtime_error& e) {
+        // A protoCore error becomes a Scala RuntimeException, and is never swallowed.
+        const HandlerRec* h =
+            deliver(ctx, blk, pc, slots, pendingSlot, "RuntimeException", e.what());
+        if (!h) throw ScalaError("RuntimeException", e.what());
+        return h;
+    }
+    // Anything else -- including a non-std::exception the boundary template's last
+    // clause names -- is not a Scala exception and propagates to that template.
 }
 
 const proto::ProtoObject* materialise(proto::ProtoContext* ctx, const char* cls, const char* msg) {

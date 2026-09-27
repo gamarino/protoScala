@@ -98,6 +98,42 @@ bool hasWhitespace(const std::string& s) {
     return s.find_first_of(" \t\n\r") != std::string::npos;
 }
 
+// Both headers a generated module includes must be findable on OUR include list, and
+// this is checked rather than assumed because the failure mode is a segfault.
+//
+// Measured: an installation whose prefix held no protoCore headers compiled a module
+// against `/usr/local/include/protoCore.h` -- a copy from February, of a different
+// protoCore -- because the compiler's default search path found it. The module linked,
+// loaded, and crashed in `ProtoObject::newChild` with no diagnostic. Nothing in the
+// generated Makefile can prevent that, because `-I` ADDS to the default path rather than
+// replacing it; the only place to catch it is here, before any output is written.
+//
+// The message names the environment override, because that is the actionable answer for
+// a prefix where protoCore's headers live somewhere else.
+bool checkHeadersAreReachable(const Toolchain& tc) {
+    for (const char* header : {"protoCore.h", "protoScala/GeneratedModule.h"}) {
+        bool found = false;
+        for (const std::string& d : tc.includeDirs) {
+            std::error_code ec;
+            if (fs::is_regular_file(fs::path(d) / header, ec)) { found = true; break; }
+        }
+        if (found) continue;
+        std::cerr << "protoscalac: cannot find " << header << " in its include path:\n";
+        for (const std::string& d : tc.includeDirs) std::cerr << "    " << d << '\n';
+        std::cerr << "  A generated module includes both protoCore.h and "
+                     "protoScala/GeneratedModule.h.\n"
+                     "  Compiling against a DIFFERENT protoCore.h that happens to be on the "
+                     "compiler's\n"
+                     "  default path produces a module that links and then crashes, so this is "
+                     "refused\n"
+                     "  here. Install protoCore's headers into the same prefix, or set "
+                     "PROTOSCALAC_INCLUDE_DIRS\n"
+                     "  (':'-separated) to the directories that hold them.\n";
+        return false;
+    }
+    return true;
+}
+
 bool generateMakefile(const fs::path& outRoot, const std::vector<fs::path>& sources,
                       const Toolchain& tc) {
     for (const std::string& d : tc.includeDirs)
@@ -114,6 +150,10 @@ bool generateMakefile(const fs::path& outRoot, const std::vector<fs::path>& sour
                       << "path without spaces)\n";
             return false;
         }
+    // After the whitespace check, because for a path list like "/a b" the whitespace
+    // message is the clearer of the two, and before anything is written, because a
+    // Makefile that would compile against the wrong protoCore.h must not exist.
+    if (!checkHeadersAreReachable(tc)) return false;
     std::ofstream o(outRoot / "Makefile", std::ios::binary);
     if (!o) {
         std::cerr << "protoscalac: cannot write " << (outRoot / "Makefile").string() << '\n';
