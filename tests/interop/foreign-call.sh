@@ -37,10 +37,40 @@ if [[ "$others" != "1" ]] || ! grep -q '^#include <protoCore.h>$' "$SRC/ForeignH
     fails=$((fails + 1))
 fi
 
-case "$SCRATCH" in
-    /home/*/Documentos/proyectos/*) rm -rf "$SCRATCH" ;;
-    *) echo "FAIL: refusing to clear '$SCRATCH'"; exit 1 ;;
-esac
+# The scratch directory the harness passes. This script owns it and clears it, so it
+# checks the path first -- but it checks what makes a path SAFE, not where the author
+# happens to work.
+#
+# It did the latter once, and that is why this comment is long: the guard was a glob on
+# the developer's own workspace prefix, so on a clean machine the build tree did not
+# match, the guard refused, and the script exited 1 in 0.00 s having done nothing. CI
+# went red on the two tests that were the whole point of the work, and the failure looked
+# like the capability was broken rather than the guard. A test must not encode the
+# machine it was written on.
+require_private_scratch() {
+    local p="$1"
+    case "$p" in
+        /*) ;;
+        *) echo "FAIL: the scratch path must be absolute, got '$p'"; exit 1 ;;
+    esac
+    case "$p" in
+        */../*|*/..) echo "FAIL: the scratch path must not contain '..': '$p'"; exit 1 ;;
+    esac
+    # At least three components and a non-empty last one, so '/', '/home' and '/home/x'
+    # can never be the target of the rm below whatever the harness passes.
+    local depth
+    depth=$(awk -F/ '{print NF - 1}' <<<"$p")
+    if [[ "$depth" -lt 3 || -z "${p##*/}" ]]; then
+        echo "FAIL: refusing to clear '$p': not plainly a private scratch directory"
+        exit 1
+    fi
+    if [[ -L "$p" ]]; then
+        echo "FAIL: the scratch path is a symlink: '$p'"
+        exit 1
+    fi
+}
+require_private_scratch "$SCRATCH"
+rm -rf "$SCRATCH"
 mkdir -p "$SCRATCH"
 
 # 2. The interpreted answers, from the same source file. This is the differential: the
