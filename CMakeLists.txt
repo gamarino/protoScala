@@ -589,14 +589,20 @@ elseif(UNIX)
     # installation of the interpreter pull in a toolchain for a mode most users never
     # reach (Phase 7 Task 14 Step 3).
     set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "g++, make")
-    # CPACK_DEBIAN_PACKAGE_SHLIBDEPS is deliberately NOT enabled. It would let
-    # dpkg-shlibdeps name libreadline's and libstdc++'s packages instead of
-    # hardcoding per-distribution SONAME packages, but dpkg-shlibdeps resolves
-    # every NEEDED entry to the distribution package that owns it and no
-    # distribution owns libprotoCore.so.2 -- it fails with "cannot find
-    # library" and takes the whole .deb down with it. The explicit protocore
-    # relation above is the one that matters; protoST and protoClojure declare
-    # their libreadline dependency the same way, which is to say not at all.
+    # CPACK_DEBIAN_PACKAGE_SHLIBDEPS is ON: the hand-written protocore version
+    # range above is not an ABI check by itself (installers-sep2026 report,
+    # F4 -- a protoCore inside the range but built with an older SOVERSION is
+    # accepted by dpkg and then fails at load time), and dpkg-shlibdeps was
+    # meant to add the missing SONAME-derived dependency. Verified it does
+    # NOT: protoCore's own .deb ships no shlibs/symbols control file, so
+    # dpkg-shlibdeps has no data to emit for libprotoCore.so.3, and CPack
+    # passes --ignore-missing-info by default, so the whole entry is dropped
+    # silently rather than failing the build (confirmed by hand-running
+    # dpkg-shlibdeps against a rebuilt sibling package). It stays on because
+    # it is harmless and does add real transitive deps (libc6, libstdc++6,
+    # ...); it does not close F4 on its own -- that needs a shlibs or
+    # symbols file in protoCore's own package.
+    set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
     set(CPACK_RPM_PACKAGE_NAME "protoScala")
     set(CPACK_RPM_PACKAGE_LICENSE "MIT")
     set(CPACK_RPM_PACKAGE_GROUP "Development/Languages")

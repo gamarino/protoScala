@@ -253,6 +253,16 @@ Two things limit the damage, and one closes it:
 - Raising the DEB floor to `2.2.0`, the first protoCore that shipped SOVERSION 3,
   would make the DEB range agree with the ABI. That is a packaging change for the
   maintainer to take, and it is not made here.
+- `CPACK_DEBIAN_PACKAGE_SHLIBDEPS` is now `ON`, so `dpkg-shlibdeps` runs and is
+  meant to add a SONAME-derived dependency alongside the range above. Verified
+  it does not: `dpkg -S` resolves `libprotoCore.so.3` to the `protocore`
+  package, but that package ships no `shlibs`/`symbols` control file, so
+  `dpkg-shlibdeps` has no version data to emit for it, and CPack's default
+  `--ignore-missing-info` drops the entry silently rather than failing the
+  build. The flag stays on because it is harmless and does add real
+  transitive dependencies (`libc6`, `libstdc++6`, ...); it does not close this
+  defect on its own — that would need a `shlibs` or `symbols` file in
+  protoCore's own package.
 
 ### Known defect: the DEB does not refresh the shared-library cache
 
