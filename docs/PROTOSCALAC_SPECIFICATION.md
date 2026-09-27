@@ -350,7 +350,19 @@ One shared library and **one** installed header:
 - `lib/cmake/protoScala/` — `find_package(protoScala CONFIG)`.
 
 Nothing is added to the header without a note here, and the soversion moves when the
-header changes **incompatibly**, and only then. `gen::generatedModuleAbi()` is the
+header changes **incompatibly**, and only then.
+
+**The header HAS changed incompatibly since it was written, and the soversion has NOT
+moved. That is deliberate and is recorded rather than left implicit.** On 2026-09-27
+`runModuleBody` gained the export table (two parameters), `rethrow` gained the block it
+names in its message, and `ExportRec` and `handleCaught` were added. Each of those breaks
+a module compiled against the earlier header — which is exactly what the rule is for.
+SOVERSION stays at 1 because **no version of this library has ever shipped**: protoScala
+is at 0.6.0, the phase is not released, and there is no module anywhere that was built
+against the earlier signatures. Moving to 2 would assert that a 1 exists in the wild to be
+protected from. The rule applies from the first release: after that, any change to this
+file's signatures moves the soversion, and a module built against the old one fails at
+`dlopen` with a version message rather than an undefined symbol. `gen::generatedModuleAbi()` is the
 **library's** answer, so a module can compare it with the `kGeneratedModuleABI` it
 was compiled against; comparing the constant with itself would prove nothing.
 
