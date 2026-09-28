@@ -2,8 +2,11 @@
 
 protoScala is a dynamic Scala 3 dialect on the protoCore runtime. It is a
 consumer of protoCore, never a bundler of it: `bin/protoscala` links
-`libprotoCore.so.2`, and every package protoScala produces declares a runtime
-dependency on protoCore's own package instead of shipping a copy.
+`libprotoScala.so.1`, which links **`libprotoCore.so.3`**, and every package
+protoScala produces declares a runtime dependency on protoCore's own package
+instead of shipping a copy. (`objdump -p` on either file shows the chain; it
+matters for packaging, because a dependency scanner that looks only at the
+executable sees no protoCore at all.)
 
 ---
 
@@ -14,13 +17,30 @@ dependency on protoCore's own package instead of shipping a copy.
 - **libreadline** (`libreadline-dev` on Debian/Ubuntu, `readline-devel` on
   Fedora/RHEL, `brew install readline` on macOS). It is a hard requirement of
   the interactive REPL: configuration fails with a `FATAL_ERROR` without it.
-- **protoCore 2.1.0 or newer**, installed, with its CMake package
-  configuration. See protoCore's `docs/INSTALLATION.md`.
+- **protoCore 2.2.0 or newer**, installed, with its CMake package configuration.
+  **2.5.0 is what everything in this document was verified against.** See
+  protoCore's `docs/INSTALLATION.md`.
 
-**Why 2.1.0 and not 2.0.0**, which the other four runtimes accept: protoScala's
-actor mailbox is built on protoCore's `ProtoMPSCQueue`, and protoCore gained it
-in 2.1.0. Building against 2.0.x would compile the CAS'd-`ProtoList` mailbox
-seam instead, silently changing the concurrency implementation.
+**Why 2.2.0.** Two floors apply and the higher one wins:
+
+- protoScala's actor mailbox is built on protoCore's `ProtoMPSCQueue`, which
+  protoCore gained in **2.1.0**. Building against 2.0.x would compile the
+  CAS'd-`ProtoList` mailbox seam instead, silently changing the concurrency
+  implementation. That is the floor `CMakeLists.txt` names
+  (`PROTOCORE_MIN_VERSION_FULL "2.1.0"`), and it is the version its diagnostics
+  and the DEB's `Depends` still quote.
+- protoScala is built against **`PROTOCORE_ABI_SOVERSION 3`**, and
+  `CMakeLists.txt` asserts it (`FATAL_ERROR` on mismatch). SOVERSION went
+  `2` → `3` in protoCore **2.2.0**, so **2.1.0 cannot build this tree**:
+  configuration stops naming both numbers.
+
+Until 2026-09-27 this page said "protoCore 2.1.0 or newer" throughout and admitted
+the SOVERSION change only in a Known-defect section 200 lines further down, so a
+reader who followed the prerequisite hit that `FATAL_ERROR`. The 2.1.0 floor in
+`CMakeLists.txt` is deliberately left as it is for now: the same variable is the
+DEB's dependency floor, and raising that is the packaging change recorded under
+"Known defect: the DEB dependency floor does not encode the ABI" as the
+maintainer's to take.
 
 ---
 
@@ -47,7 +67,7 @@ configuration there is no way to tell protoCore 1.x from 2.x, nor 2.0 from 2.1.
 protoCore's version compatibility is `SameMajorVersion`, and the requested minor
 version is a floor, so `2.1` accepts any `2.x` from `2.1.0` up and refuses
 `2.0.x`, `1.x` and `3.x`. protoScala additionally asserts that the package's
-`SOVERSION` is `2`.
+`SOVERSION` is **`3`**, which is what makes 2.2.0 the effective minimum.
 
 ### Selecting the actor mailbox backend
 
@@ -55,9 +75,12 @@ version is a floor, so `2.1` accepts any `2.x` from `2.1.0` up and refuses
 search of `protoCore.h`. The configure output names the version it decided on:
 
 ```
--- protoScala: installed protoCore 2.1.0 (SOVERSION 2) from .../lib/cmake/protoCore
--- protoScala: actor mailboxes on protoCore ProtoMPSCQueue (protoCore 2.1.0)
+-- protoScala: installed protoCore 2.5.0 (SOVERSION 3) from .../lib/cmake/protoCore
+-- protoScala: actor mailboxes on protoCore ProtoMPSCQueue (protoCore 2.5.0)
 ```
+
+`protoscala --version` reports the same decision at run time:
+`protoScala 0.6.0 (actor mailboxes: ProtoMPSCQueue)`.
 
 The earlier probe grepped whichever `protoCore.h` the discovery found first for
 `newMPSCQueue`, so which mailbox implementation was compiled in depended on the
@@ -70,9 +93,10 @@ When no installed package is found *and* no prefix was named, protoScala falls
 back to the sibling source tree `../protoCore`, searching `build_release`, then
 `build`, then `build_check`. The fallback prints a `WARNING` and must not be used
 to produce a distributable package. It still checks the ABI: it requires
-`libprotoCore.so.2` beside the library it found, and it reads the version out of
-`../protoCore/CMakeLists.txt`'s `project()` call and refuses anything older than
-2.1.0.
+`libprotoCore.so.3` beside the library it found — the file named by
+`PROTOCORE_ABI_SOVERSION`, so this check is what rejects a SOVERSION-2 sibling
+tree — and it reads the version out of `../protoCore/CMakeLists.txt`'s `project()`
+call and refuses anything older than 2.1.0.
 
 Pass `-DPROTOCORE_REQUIRE_PACKAGE=ON` to turn the fallback into a hard error.
 **Every packaging build sets it.** Switching a build directory between the two
@@ -174,12 +198,39 @@ protoCore's own package, with the 2.1.0 floor the mailbox requires:
 | DEB | `Depends: protocore (>= 2.1.0), protocore (<< 3.0.0)` |
 | RPM | `Requires: protoCore >= 2.1.0, protoCore < 3.0.0` |
 
-`CPACK_DEBIAN_PACKAGE_SHLIBDEPS` is deliberately **not** enabled. It would name
-libreadline's and libstdc++'s packages automatically, but `dpkg-shlibdeps`
-resolves every `NEEDED` entry to the distribution package that owns it, and no
-distribution owns `libprotoCore.so.2`; it fails with "cannot find library" and
-takes the whole `.deb` down with it. `libreadline` is therefore not declared,
-which matches protoST and protoClojure.
+`CPACK_DEBIAN_PACKAGE_SHLIBDEPS` is **`ON`** (`CMakeLists.txt`), so
+`dpkg-shlibdeps` runs over the package's ELF files and adds the dependencies it
+derives to the hand-written range above. This page said "deliberately **not**
+enabled" here and "now `ON`" eighty lines below until 2026-09-27; `ON` is the
+truth, and the consequence the old sentence drew — "`libreadline` is therefore not
+declared" — went with it.
+
+What it produces now, and how to check it without installing anything:
+
+```bash
+# from a directory holding a minimal debian/control (Source:/Package:/Architecture:)
+dpkg-shlibdeps -O --ignore-missing-info \
+    <staged>/usr/bin/protoscala <staged>/usr/lib/*/libprotoScala.so.1
+```
+
+gives
+`libc6 (>= 2.38), libgcc-s1 (>= 3.0), libreadline8t64 (>= 6.0), libstdc++6 (>= 13), protocore (>= 2.5.0)`
+on a host where protoCore 2.5.0 is installed from its own DEB. Two things about
+that line matter:
+
+- **`libreadline` is declared** after all, and so is a real SONAME-derived
+  `protocore` dependency.
+- It appears **only when the shared library is scanned too**. `bin/protoscala`
+  `NEEDED`s just `libprotoScala.so.1`; the protoCore SONAME is one level down. The
+  same run over the executable alone emits no `protocore` entry at all.
+
+The `protocore (>= 2.5.0)` half is new and comes from the **producer**: protoCore
+now ships a `DEBIAN/shlibs` (`libprotoCore 3 protocore (>= 2.5.0)`, from
+`CPACK_DEBIAN_PACKAGE_GENERATE_SHLIBS` with a `>=` policy). Before that,
+`SHLIBDEPS` alone produced nothing for protoCore, silently — see the Known defect
+below. The `.deb` artefacts built in this tree on 2026-09-27 predate protoCore's
+`shlibs` and carry only the hand-written range, so a package rebuilt today is not
+the package sitting in `build_pkg*/`.
 
 ### Platform verification status
 
@@ -193,6 +244,21 @@ sibling developer fallback was a hard error.
 | Linux / Fedora-RHEL | TGZ, RPM | **VERIFIED.** `cpack -G RPM` executed in a throwaway `fedora:41` container (glibc 2.40, `rpm` 4.20.1); the RPM installed with `rpm -i` and `protoscala` ran correctly there. This closes the gap left by decision D-I2. |
 | macOS | DragNDrop | **UNVERIFIED.** Configured and reviewed only; there is no macOS host here. Review is not verification. |
 | Windows | NSIS, ZIP | **UNVERIFIED.** Configured and reviewed only; there is no Windows host here. |
+
+### Packaging and installation defects: the whole list, in one place
+
+Five distinct issues came out of the 2026-09-27 end-to-end installer work, in four
+different states, and they were described across two documents with no
+cross-reference — "two packaging defects" in
+[ROADMAP.md](ROADMAP.md) §Phase 7 means **P1 and P2 only**.
+
+| # | Defect | State |
+|---|---|---|
+| P1 | `libprotoScala.so*` was installed in CMake's `Unspecified` component, so `cmake --install --component protoScala` — the command this page gives — installed `protoscalac` but not the library it links | **Fixed.** `COMPONENT protoScala` is now repeated on every artifact clause ([STATUS.md](STATUS.md) §"Phase 7 — packaging", item 1) |
+| P2 | `protoscalac` compiled a generated module against a stale `/usr/local/include/protoCore.h` when the prefix held no header, producing a module that linked, loaded and segfaulted with no diagnostic | **Fixed.** `protoscalac` refuses when it cannot find `protoCore.h` or `protoScala/GeneratedModule.h` on its own include path, and names the directories it searched (T0-21) |
+| P3 | T0-21 does not fire when protoCore is installed under `/usr` and a stale header remains in `/usr/local/include`: GCC searches `/usr/local/include` first and ignores a `-I` naming a standard system directory | **Not fixed, and not fixable with a compiler flag.** Reproduced; remedies are to remove the stale header or to install protoCore under a non-system prefix (next section) |
+| P4 | The DEB's `Depends: protocore (>= 2.1.0)` is a version range and not an ABI check, so it admits a protoCore whose SONAME this package was not linked against | **Not fixed** — raising the floor to `2.2.0` is the maintainer's packaging call. **Narrowed** since protoCore shipped a `shlibs` file: `dpkg-shlibdeps` now also emits `protocore (>= 2.5.0)` from the SONAME (§Packages) |
+| P5 | The DEB does not refresh the shared-library cache | **protoCore's: fixed** — its package now generates a `postinst` that runs `ldconfig`. **protoScala's: not fixed** — it ships no maintainer script |
 
 ### T0-21 has a blind spot when protoCore is installed under `/usr`
 
@@ -253,22 +319,40 @@ Two things limit the damage, and one closes it:
 - Raising the DEB floor to `2.2.0`, the first protoCore that shipped SOVERSION 3,
   would make the DEB range agree with the ABI. That is a packaging change for the
   maintainer to take, and it is not made here.
-- `CPACK_DEBIAN_PACKAGE_SHLIBDEPS` is now `ON`, so `dpkg-shlibdeps` runs and is
-  meant to add a SONAME-derived dependency alongside the range above. Verified
-  it does not: `dpkg -S` resolves `libprotoCore.so.3` to the `protocore`
-  package, but that package ships no `shlibs`/`symbols` control file, so
-  `dpkg-shlibdeps` has no version data to emit for it, and CPack's default
-  `--ignore-missing-info` drops the entry silently rather than failing the
-  build. The flag stays on because it is harmless and does add real
-  transitive dependencies (`libc6`, `libstdc++6`, ...); it does not close this
-  defect on its own — that would need a `shlibs` or `symbols` file in
-  protoCore's own package.
+- `CPACK_DEBIAN_PACKAGE_SHLIBDEPS` is `ON`, and **as of protoCore `ccce990f` it
+  now emits a real dependency**: `protocore (>= 2.5.0)`, derived from the SONAME.
+  The history is worth keeping, because it says where the missing piece was. With
+  the flag on and nothing else, `dpkg-shlibdeps` resolved `libprotoCore.so.3` to
+  the `protocore` package (`dpkg -S` agrees), found that the package shipped no
+  `shlibs`/`symbols` control file, and — because CPack passes
+  `--ignore-missing-info` — dropped the entry **silently** instead of failing the
+  build. The fix was in the producer: protoCore now ships a `DEBIAN/shlibs`
+  reading `libprotoCore 3 protocore (>= 2.5.0)`, and a re-run of
+  `dpkg-shlibdeps` over a staged protoScala tree emits that dependency (see
+  §Packages above for the exact command and output).
+  **This narrows the defect rather than closing it**: the emitted floor is the
+  protoCore version present on the *build* host, not a statement about the ABI, and
+  it still sits beside a hand-written range whose floor is `2.1.0`. A protoScala
+  DEB built against protoCore 2.2.0 would emit `protocore (>= 2.2.0)`, which is
+  correct for SOVERSION 3 by coincidence of when the SONAME changed.
 
-### Known defect: the DEB does not refresh the shared-library cache
+### Known defect: protoScala's DEB does not refresh the shared-library cache
 
-Neither this package nor protoCore's carries a `postinst` or an `ldconfig`
-trigger, so `ldconfig -p` does not list `libprotoCore.so.3` after `dpkg -i`.
-Programs still start, because each binary carries
-`RUNPATH $ORIGIN/../${CMAKE_INSTALL_LIBDIR}` and because the library lands in a
-directory the dynamic loader searches by default, but the cache is misleading.
-Run `ldconfig` after installing. The RPM has no such defect.
+**protoCore's does, since `ccce990f`.** `CPACK_DEBIAN_PACKAGE_GENERATE_SHLIBS`
+makes CPack generate maintainer scripts as well as the `shlibs` file, so the
+installed `protocore` package carries a `postinst` that runs `ldconfig` on
+`configure`, and `ldconfig -p` does list `libprotoCore.so.3` after `dpkg -i`.
+Verified on this host from dpkg's own database
+(`/var/lib/dpkg/info/protocore.postinst` and `ldconfig -p | grep protoCore`).
+Until 2026-09-27 this section said neither package carried one.
+
+**protoScala's package still carries no maintainer script.** It does not set
+`CPACK_DEBIAN_PACKAGE_GENERATE_SHLIBS`, and the control archive of the `.deb`
+built here on 2026-09-27 holds only `control` and `md5sums`
+(`dpkg-deb --ctrl-tarfile … | tar t`). So `libprotoScala.so.1` is not registered in
+the cache by installing protoScala. Programs still start, because each binary
+carries `RUNPATH $ORIGIN/../${CMAKE_INSTALL_LIBDIR}` and because the library lands
+in a directory the dynamic loader searches by default, but the cache is misleading.
+Run `ldconfig` after installing, or set that CPack option — which would also give
+protoScala's own library a `shlibs` file, for whatever links against it next. The
+RPM has no such defect.

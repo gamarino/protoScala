@@ -313,7 +313,10 @@ the frame's **retry loop** (**D120**), so `try`/`catch`/`finally` transpiles; an
 **packaging verified end to end** in a scratch prefix, which found two real defects — the
 shared library was in CMake's `Unspecified` install component, and `protoscalac` compiled
 against `/usr/local`'s stale `protoCore.h` when the prefix held none, producing a module
-that linked and segfaulted.
+that linked and segfaulted. Both are fixed. They are **P1 and P2** of the five packaging
+and installation issues that work turned up; the other three are open in different ways,
+and all five are listed with their state in
+[INSTALLATION.md](INSTALLATION.md) §"Packaging and installation defects".
 
 Where that leaves the two differentials: fixtures **704** of 922 run (was 360 in the first
 cut), 157 excluded (was 500); corpus **176** of the 191 the interpreter passes (was 5),
