@@ -41,13 +41,9 @@ This is the part I want you to see early, because everything above is worth noth
 
 **The Scala 3 corpus: 191 of 601 reachable tests pass — 31.8%.** I took the Scala 3 compiler's own `tests/run` corpus, 1654 single-file programs from dotty at `a68b419c`. Not a corpus I chose or curated; theirs. Since the denominator is the whole story, here is how those 1654 files divide, by a triage that records **which construct it found in each file** rather than excluding by wildcard:
 
-```
-                          tests   share   pass rate
----------------------------------------------------
-Unreachable — JVM-bound     410   24.8%        1.0%
-Unimplemented features      643   38.9%        3.3%
-In scope                    601   36.3%       31.8%
-```
+- **Unreachable — JVM-bound: 410 tests, 24.8% of the corpus.** Pass rate **1.0%**.
+- **Unimplemented features: 643 tests, 38.9%.** Pass rate **3.3%**.
+- **In scope — no out-of-scope construct found: 601 tests, 36.3%.** Pass rate **31.8%** — this is the headline.
 
 *Unreachable* means Java interop, `classOf`, `getClass`, reflection, `Serializable`, `synchronized`, `System.out`, or a checkfile that expects a JVM class name. *Unimplemented* is led by `given`/`using` (197 tests) and `inline`/macros (153), then lazy collections (77), `Seq` and mutable collections (75), `Array` (61) and anonymous classes (39). *In scope* means the triage found no out-of-scope construct in the file at all.
 
@@ -95,16 +91,12 @@ The second is the one I would point a sceptic at. protoCpp is **the ceiling**, a
 
 And it publishes the answer rather than implying one. I re-measured it for this post, against protoCore 2.5.0: going through the kernel costs **3.7× to 24.8×** the time of plain C++ doing the same work, in whole-process wall time.
 
-```
-                  C++ floor  through the kernel  ratio
-------------------------------------------------------
-list_append_loop    4.57 ms            16.85 ms   3.7×
-str_concat_loop     4.20 ms            16.25 ms   3.9×
-multithread_cpu     4.58 ms            26.88 ms   5.9×
-int_sum_loop        6.96 ms            73.03 ms  10.5×
-call_recursion      3.07 ms            35.41 ms  11.5×
-attr_lookup         7.19 ms           178.46 ms  24.8×
-```
+- `list_append_loop` — 4.57 ms in C++, 16.85 ms through the kernel: **3.7×**
+- `str_concat_loop` — 4.20 ms → 16.25 ms: **3.9×**
+- `multithread_cpu` — 4.58 ms → 26.88 ms: **5.9×**
+- `int_sum_loop` — 6.96 ms → 73.03 ms: **10.5×**
+- `call_recursion` — 3.07 ms → 35.41 ms: **11.5×**
+- `attr_lookup` — 7.19 ms → 178.46 ms: **24.8×**
 
 That is a wide and unflattering range, and it is the most informative number anyone has about protoCore: whatever a language on top costs, this is the floor it is standing on. Attribute lookup is the worst cell by a distance, which is exactly where you would expect a prototype chain to cost you.
 
