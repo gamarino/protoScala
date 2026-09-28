@@ -35,32 +35,47 @@
 > and a hand-written `object E` is the enum's own companion instead of a second
 > object that crashed the compiler. Recorded rather than fixed: D108–D112. In-scope
 > corpus rate **30.1 % → 31.8 %**, zero regressions across all 1654 files.
-> **Tests: as of 2026-09-25, against protoCore 2.5.0 (`df8406a3`), from a clean
-> build — 1344 total** (`ctest --test-dir build_release -N | tail -1`), 0 failed,
-> 7 skipped (the embedder-conformance rules that need process isolation) — 373 unit
-> (GoogleTest, including the separate `unit/actors` and `unit/modules` binaries
-> and `umd/protost-interop`), 919 conformance fixtures, 24 CLI checks, 12
-> benchmark smoke checks, **16** embedder-conformance rules. The step from the
-> 1343 recorded a day earlier is **entirely** that last group going 15 → 16:
-> protoCore 2.5.0 adds the rule `mutable.graph_cycles` and this suite is
-> parameterised over protoCore's rule list, so the figure moves when protoCore
-> does. **All
-> green**, and green at `PROTOSCALA_ACTOR_WORKERS=1` and `=16` (1248/1248
-> including `umd/protost-interop` in all three). Under
-> `PROTOCORE_HEAP_LIMIT_CELLS=20000` (the whole suite, unfiltered) 1247 of 1248
-> pass: `Mailbox.EightProducersLoseNothingAndDuplicateNothing` aborts, which was
-> verified to be **pre-existing** — it fails the same way on `main` at `bca0352`
-> — and is recorded under "Open bugs". It is the only failure in that
-> configuration, so it masks nothing, and it is what makes the low-heap sweep a
+> **Tests: 2313 registered cases** as of 2026-09-27, against protoCore 2.5.0
+> (`df8406a3`) — `ctest --test-dir build_release -N | tail -1`. CI
+> (`.github/workflows/ci.yml`, which builds protoCore, protoST and protoScala from
+> clean on `ubuntu-24.04`) registered the same 2313 on the current `main`, ran 2310
+> — the three clock-dependent cases are excluded there and run in a second job —
+> and reported **0 failed, 7 skipped** (the embedder-conformance rules that need
+> process isolation). Composition: **922** conformance fixtures and **922**
+> `transpiled/` differential twins of them (one per fixture; `PROTOSCALA_TRANSPILED_TESTS`
+> is `ON` by default, Phase 7), **396** individually registered GoogleTest cases plus
+> the five whole-binary cases `unit/actors`, `unit/modules`, `unit/generated_support`,
+> `umd/protost-interop` and `interop/foreign-call`, **28** CLI checks, **16**
+> embedder-conformance rules, **12** benchmark smoke checks and **12**
+> `benchmarks-transpiled/`.
+>
+> **Three older totals appear below and in the git history; each counts something
+> different, and none of them is the current suite.**
+> - **1344** (2026-09-25) is this suite with the `transpiled/` harness absent: it
+>   predates Phase 7, and its sub-composition (919 fixtures, 24 CLI checks) predates
+>   the fixtures added since.
+> - **1248** (2026-09-25, Track F) is the suite as it stood at Track F: 370 unit,
+>   841 conformance fixtures, 24 CLI checks, 12 benchmark smoke checks — 1247 — plus
+>   `umd/protost-interop` as the 1248th. It carried no embedder-conformance group.
+> - **1263** (2026-09-24) is the first embedder-conformance run's total, recorded in
+>   [CONFORMANCE.md](CONFORMANCE.md).
+>
+> The worker-count and low-heap sweeps below were run against the **1248**-case
+> suite and are quoted with it rather than renumbered: all green at
+> `PROTOSCALA_ACTOR_WORKERS=1` and `=16` (1248/1248, `umd/protost-interop` included
+> in all three runs); under `PROTOCORE_HEAP_LIMIT_CELLS=20000` (that suite,
+> unfiltered) 1247 of 1248 pass, `Mailbox.EightProducersLoseNothingAndDuplicateNothing`
+> aborting, which was verified to be **pre-existing** — it fails the same way on
+> `main` at `bca0352` — and is recorded under "Open bugs". It is the only failure in
+> that configuration, so it masks nothing, and it is what makes the low-heap sweep a
 > usable rooting check for new native code: Track F's 44 fixtures, including one
 > that round-trips a megabyte through a 64 KiB read loop, pass at a 20000-cell
-> ceiling.
+> ceiling. Neither sweep has been repeated against the 2313-case suite.
 >
-> `umd/protost-interop` is the 1248th case: it links protoST into a test
-> executable and, since Track Y, is built by default whenever protoST is found
-> beside this tree (`-DPROTOSCALA_PROTOST_INTEROP=OFF` restores a suite that
-> refers to no other tree). It holds the cross-runtime import tests; see R5 under
-> "Known issues".
+> `umd/protost-interop` links protoST into a test executable and, since Track Y, is
+> built by default whenever protoST is found beside this tree
+> (`-DPROTOSCALA_PROTOST_INTEROP=OFF` restores a suite that refers to no other
+> tree). It holds the cross-runtime import tests; see R5 under "Known issues".
 > Last verified 2026-09-25 (Track S).
 
 ## Implemented

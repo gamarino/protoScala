@@ -31,25 +31,37 @@ test newly failing**. After the fix the whole suite was green, and the retention
 the two cases measured is gone rather than reduced. Read the rule-8 section before
 trusting that: the case is intermittent for a reason that is not protoScala's.
 
-The suite total is deliberately **not** quoted here as a bare number, because it
-moves with every fixture added and with protoCore's own rule list — the total
-recorded at the first run (1263) had already drifted twice by the next day. It is
-one command:
+The policy on the suite total: it is **never quoted bare**, because it moves with
+every fixture added and with protoCore's own rule list — the total recorded at the
+first run (1263) had already drifted twice by the next day. Every total in this
+repository therefore carries its date, the protoCore version behind it and its
+composition, and the primary instruction is the command:
 
 ```bash
 ctest --test-dir build_release -N | tail -1        # the total
 ctest --test-dir build_release < /dev/null         # the result
 ```
 
-**As of 2026-09-25, against protoCore 2.5.0 (`df8406a3`), from a clean build:
-1344 cases, 0 failed, 7 skipped** (the seven embedder-conformance rules that need
-process isolation and are skipped in a shared run). Composition, so that a later
-count that moves is attributable: **919** `tests/conformance/**/*.scala` fixtures,
-**373** GoogleTest cases (including the separate `unit/actors` and `unit/modules`
-binaries and `umd/protost-interop`), **24** `cli/*`, **16** `embedder-conformance/*`,
-**12** `benchmarks/*`. The step from 1343 to 1344 is **entirely** the
-embedder-conformance group going 15 → 16: protoCore 2.5.0 adds one rule,
-`mutable.graph_cycles`, and this suite is parameterised over protoCore's rule list.
+**As of 2026-09-27, against protoCore 2.5.0 (`df8406a3`): 2313 registered cases.**
+On the current `main`, CI — which builds protoCore, protoST and protoScala from
+clean on `ubuntu-24.04` — registered the same 2313, ran 2310 (the three
+clock-dependent cases are excluded there and run in a second job) and reported
+**0 failed, 7 skipped** (the seven embedder-conformance rules that need process
+isolation and are skipped in a shared run). Composition, so that a later count that
+moves is attributable: **922** `tests/conformance/**/*.scala` fixtures and **922**
+`transpiled/` differential twins of them — one per fixture, registered because
+`PROTOSCALA_TRANSPILED_TESTS` is `ON` by default (Phase 7) — **396** individually
+registered GoogleTest cases plus the five whole-binary cases `unit/actors`,
+`unit/modules`, `unit/generated_support`, `umd/protost-interop` and
+`interop/foreign-call`, **28** `cli/*`, **16** `embedder-conformance/*`, **12**
+`benchmarks/*` and **12** `benchmarks-transpiled/*`.
+
+This file quoted **1344** until 2026-09-27. That number is the same suite with the
+transpiled harness absent — it predates Phase 7 — and its sub-composition had also
+gone stale (919 fixtures and 24 `cli/*`, against 922 and 28 in the tree). The step
+from 1343 to 1344 recorded there was the embedder-conformance group going 15 → 16:
+protoCore 2.5.0 adds one rule, `mutable.graph_cycles`, and this suite is
+parameterised over protoCore's rule list.
 
 Static check: **0 unjustified findings**, 1 justified entry, 3 informational.
 

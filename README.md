@@ -448,14 +448,23 @@ streaming).
 
 ### Conformance: what is measured, and against whose tests
 
-**protoScala's own suite.** As of **2026-09-25**, against protoCore 2.5.0
-(`df8406a3`) from a clean build: **1344 ctest cases, 0 failed, 7 skipped** — the
-skips are the embedder-conformance rules that need process isolation. Reproduce with
+**protoScala's own suite.** **2313 registered ctest cases** as of **2026-09-27**,
+against protoCore 2.5.0 (`df8406a3`). Reproduce with
 `ctest --test-dir build_release -N | tail -1` and
 `ctest --test-dir build_release < /dev/null`; the figure moves with every fixture
-added, and with protoCore's rule list, so prefer the command to the number. **Every
-one of those tests was written in this repository**, which is the limit that matters:
-they measure faithfulness to the implementers' model of Scala, not to Scala.
+added, and with protoCore's rule list, so prefer the command to the number. The
+result is not a claim from one manual run: continuous integration
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) builds protoCore, protoST
+and protoScala from clean on `ubuntu-24.04` and runs the suite on every push. On
+the current `main` it registered the same **2313**, ran **2310** — the three
+clock-dependent cases are excluded there and run in a second job — and reported
+**0 failed, 7 skipped**; the skips are the embedder-conformance rules that need
+process isolation. The count printed here until 2026-09-27 was **1344**, which
+predated Phase 7's differential harness: `PROTOSCALA_TRANSPILED_TESTS` is `ON` by
+default and registers one `transpiled/<fixture>` case per conformance fixture, so
+the suite is 922 cases larger than that number said. **Every one of those tests was
+written in this repository**, which is the limit that matters: they measure
+faithfulness to the implementers' model of Scala, not to Scala.
 
 **The Scala 3 compiler's own tests.** So protoScala is also measured against tests
 nobody here wrote — the single-file programs under `tests/run` in the Scala 3
