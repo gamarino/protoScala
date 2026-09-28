@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:1600px; height:900px; }
+  body {
+    background:#0d1117;
+    font-family:"Noto Sans Mono","DejaVu Sans Mono",monospace;
+    color:#e6edf3;
+    display:flex; flex-direction:column; justify-content:center;
+    padding:0 110px 70px;
+    position:relative;
+  }
+  .kicker {
+    font-size:23px; letter-spacing:.16em; text-transform:uppercase;
+    color:#6e7681; margin-bottom:56px;
+  }
+  table { border-collapse:collapse; font-size:42px; line-height:1.9; }
+  td { padding:0 46px 0 0; white-space:nowrap; }
+  td.name { font-weight:700; }
+  tr.a td { color:#8b949e; }
+  tr.a td.name { color:#adb5bd; }
+  tr.b td { color:#e6edf3; }
+  tr.b td.name { color:#e34234; }
+  .rule { height:1px; background:#21262d; margin:46px 0; }
+  .q { font-size:34px; line-height:1.55; color:#c9d1d9; max-width:1220px; }
+  .q b { color:#e6edf3; font-weight:700; }
+  .foot {
+    position:absolute; left:110px; bottom:64px;
+    font-size:21px; color:#6e7681; letter-spacing:.05em;
+  }
+  .bar {
+    position:absolute; left:0; top:0; bottom:0; width:10px;
+    background:#e34234;
+  }
+</style></head><body>
+  <div class="bar"></div>
+
+  <div class="kicker">one C++ object kernel · five language runtimes · and plain C++</div>
+
+  <table>
+    <tr class="a"><td class="name">Scala&nbsp;Native</td><td>keeps the types</td><td>drops the JVM</td></tr>
+    <tr class="b"><td class="name">protoScala</td><td>keeps the syntax</td><td>drops the types</td></tr>
+  </table>
+
+  <div class="rule"></div>
+
+  <div class="q">A dynamic Scala&nbsp;3 dialect on a prototype runtime.<br>
+  <b>Useful heresy, or a contradiction in terms?</b></div>
+
+  <div class="foot">31.8% of the reachable dotty corpus · 23.3&nbsp;ms cold start · no GIL · early</div>
+</body></html>
