@@ -686,8 +686,15 @@ superseded contended run:
 | `saturation-8` | 2.04× | 2.57× | 3.56× | 3.46× | 3.36× | 3.14× | **3.59×** | 3.32× |
 | `saturation-8`, protoClojure (control) | 1.89× | 2.38× | 3.42× | 3.32× | 3.00× | 3.02× | **3.67×** | 3.23× |
 
-*(contended, superseded: `saturation-32` read 2.02 / 2.82 / 3.43 / 3.60 / 3.68 /
-3.90 / 3.97 / 3.93, peaking at w=12.)*
+*The superseded contended run of 2026-09-23, kept as measured (load 7.98 → 10.28,
+CAS-list mailboxes, full tables in
+[2026-09-23-actors-v5-saturation.md](benchmarks/reports/2026-09-23-actors-v5-saturation.md)).
+Both series peak at w=12 there, and neither regression above six workers appears:*
+
+| speedup vs w=1 — contended, superseded | w=2 | w=3 | w=4 | w=5 | w=6 | w=8 | w=12 | w=16 |
+|---|---|---|---|---|---|---|---|---|
+| `saturation-32` | 2.02× | 2.82× | 3.43× | 3.60× | 3.68× | 3.90× | **3.97×** | 3.93× |
+| `saturation-32`, protoClojure twin | 1.79× | 2.69× | 3.09× | 3.60× | 3.51× | 3.65× | **3.91×** | 3.76× |
 
 **Two questions the v5 report left open because of load are now answered, and
 both answers changed.**
@@ -712,18 +719,26 @@ w=6, regressions at 8 and 12).
 spreads are wide ([2,549-3,220] at w=6), because 8 actors cap concurrency at 8
 under the single-method invariant. Its twin has the same irregular shape, which
 again points away from protoScala. The SMT answer rests on `saturation-32`.
-| protoClojure twin, 32 actors | 1.79× | 2.69× | 3.09× | 3.51× | 3.65× | 3.91× | 3.76× |
 
-**protoScala's actors do scale with workers** — this is the first mode in the
-suite that shows it, reaching **3.68× at 6 workers** and peaking at **3.97× at
-12**. Three honest qualifications: the near-linear region ends at about 3
-workers, not 6; **protoST's SMT regression above 6 workers did not reproduce**
-here; and the machine was carrying 6-7 foreign threads on its 12 logical CPUs
-throughout, which is enough to explain both. **The exact peak and the absence
-of an SMT cliff are therefore not settled** and need a quiet machine.
+*The superseded reading of the contended run, kept as written on 2026-09-23 —
+every figure in it is from the contended table above, and the quiet-window run
+reverses two of its three conclusions:* "protoScala's actors do scale with
+workers — this is the first mode in the suite that shows it, reaching 3.68× at 6
+workers and peaking at 3.97× at 12. Three honest qualifications: the near-linear
+region ends at about 3 workers, not 6; protoST's SMT regression above 6 workers
+did not reproduce here; and the machine was carrying 6-7 foreign threads on its 12
+logical CPUs throughout, which is enough to explain both. The exact peak and the
+absence of an SMT cliff are therefore not settled and need a quiet machine.
 protoClojure's twin traces the same curve, within a few percent, with the same
-peak — evidence that the shape is the machine's and not protoScala's
-scheduler.
+peak — evidence that the shape is the machine's and not protoScala's scheduler."
+
+*What the quiet machine it asked for then showed: the peak is **w=6**, not w=12;
+the near-linear region does reach the physical core count; and the SMT regression
+**does** appear, in the load control too. Only the last sentence survived — the
+shape is still the machine's rather than protoScala's, and that is now evidence
+from two runtimes regressing together instead of from two curves agreeing.* Until
+2026-09-27 that paragraph stood here in the present tense, next to a table row
+with no header of its own, contradicting the block above it on all three points.
 
 **`ProtoMPSCQueue` is shipped**, and `protoscala --version` says so:
 `protoScala 0.6.0 (actor mailboxes: ProtoMPSCQueue)`. protoCore merged it in
