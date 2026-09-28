@@ -27,12 +27,23 @@ include(GNUInstallDirs)
 #      protoClojure). Used only when no installed package was found and no
 #      prefix was named; refused by -DPROTOCORE_REQUIRE_PACKAGE=ON.
 #
-# The floor is 2.1, not the 2.0 the other four runtimes use: protoScala's actor
-# mailbox is built on protoCore's ProtoMPSCQueue, which protoCore gained in
-# 2.1.0. The ceiling is the next major, because protoCore's major version and
-# its soname move together.
-set(PROTOCORE_MIN_VERSION      "2.1")
-set(PROTOCORE_MIN_VERSION_FULL "2.1.0")
+# The floor is 2.2, and two independent requirements set it. The lower one is
+# ProtoMPSCQueue, which protoScala's actor mailbox is built on and protoCore
+# gained in 2.1.0 (PROTOSCALA_PMQ_MIN_PROTOCORE below). The binding one is the
+# ABI: PROTOCORE_ABI_SOVERSION went 2 -> 3 in protoCore 2.2.0, and the assertion
+# further down this file is a hard error, so 2.1.0 CANNOT build this tree.
+#
+# It said 2.1.0 until 2026-09-27, which made the diagnostics actively misleading:
+# a configure failure told the reader to "install protoCore 2.1.0 or newer", and
+# doing exactly that produced the SOVERSION FATAL_ERROR instead of a build. An
+# error message that names an unusable version is worse than no message. The
+# floor also travels into the DEB's Depends, where 2.2.0 is equally correct and
+# for the same reason.
+#
+# The ceiling is the next major, because protoCore's major version and its
+# soname move together.
+set(PROTOCORE_MIN_VERSION      "2.2")
+set(PROTOCORE_MIN_VERSION_FULL "2.2.0")
 set(PROTOCORE_NEXT_MAJOR       "3.0.0")
 set(PROTOCORE_ABI_SOVERSION    "3")
 # The protoCore release that introduced ProtoMPSCQueue. Kept separate from the
