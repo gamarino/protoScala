@@ -607,7 +607,11 @@ def write_report(path, meta, columns, workloads, results, jvm_compile, cold):
              "then the next, so ambient load hits every column alike); median "
              "wall-clock of a cold process (start-up included), spread reported as "
              "`[min-max]` beside every median. This machine is a daily-driver desktop "
-             "(VS Code, Chrome and PyCharm run throughout); ratios to CPython are the "
+             "(VS Code, Chrome and PyCharm run throughout) and this runner gates on "
+             "nothing: the load averages above are context, not a quietness claim; a "
+             "claim that the host was quiet has to come from an `mpstat -P ALL` idle "
+             "reading taken immediately before the run and recorded in the report that "
+             "cites it. Ratios to CPython are the "
              "primary result, absolute milliseconds are indicative only. Every run's "
              "printed result is verified; a wrong result, non-zero exit or timeout "
              "marks the cell FAILED and it is excluded from every aggregate.")

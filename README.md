@@ -530,9 +530,19 @@ matching protoClojure's raw actor throughput, are explicit non-goals (see
 [docs/DESIGN.md](docs/DESIGN.md) §1). Where the numbers below show protoScala
 losing, they are reported as measured, not adjusted or explained away.
 
-**Both tables in this section were re-measured on 2026-09-26 on a genuinely
-quiet host** — 0.55–0.59 busy CPUs of 12, verified with `mpstat -P ALL` before
-each run — superseding figures taken at 3.1–9.1. The quiet window did **not**
+**Both tables in this section were re-measured on 2026-09-26 behind a measured
+idle gate**: `mpstat -P ALL 5 3` immediately before each run, mean idle
+**95.0–95.4 %** of 12 CPUs — 0.55–0.59 busy CPUs — against a ≥ 92 % entry
+condition, superseding figures taken at 3.1–9.1 busy CPUs. What was gated is
+measured idle immediately before each measurement, and nothing more: this machine
+is otherwise a daily driver, which is what the generated reports' own headers say,
+and their load averages rise during the runs (up to 6.68 at the end of the actor
+table). That rise is consistent with the benchmarks' own worker pools — the actor
+runs reach `w=16` on 12 logical CPUs — but no measurement here separates the
+benchmark's load from foreign load *during* a run, so only the gate is claimed.
+This project's durable rule is that such a claim states measured idle and never a
+load average ([docs/DESIGN.md](docs/DESIGN.md) §1); until 2026-09-27 this sentence
+said "on a genuinely quiet host", which the reports' own boilerplate contradicted. The quiet window did **not**
 flatter protoScala: the general suite's geomean against CPython moved from
 0.91× to **1.06×**, and every one of its twelve ratios moved against
 protoScala, because CPython gained more from the quiet host than protoScala did

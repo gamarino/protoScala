@@ -8,8 +8,10 @@ then `Actor.stats`, then `ok` or `FAILED`) and this runner verifies that report
 throughput (protoClojure's 2026-06-14 lesson, protoPython's sprint-9 lesson).
 
 This machine is a shared daily-driver desktop with a load-average floor of
-roughly 2-3 on 12 cores that never drops to zero. Rather than wait for a quiet
-window, every cell is sampled several times, **round-robin across modes,
+roughly 2-3 on 12 cores that never drops to zero, so a run is either gated on
+**measured idle** (`mpstat -P ALL 5 3` immediately before it, recorded in the
+report that quotes the gate) or it is not gated at all — a load average is never
+the gate. Either way, every cell is sampled several times, **round-robin across modes,
 worker counts and runtimes** (one sample of protoScala at (mode, w), then one
 sample of protoClojure at the same (mode, w) if it has a twin, then the next
 (mode, w) pair, repeated for SAMPLES rounds) so that ambient load hits every
@@ -411,8 +413,12 @@ def render(args, binary, backend, cpu, phys, logical, started, load_start, load_
     a("it did and this runner verified that report before computing any rate; a")
     a("cell that failed any check is printed as FAILED and never as a number.\n")
     a("This machine is a shared daily-driver desktop (VS Code, Chrome and PyCharm")
-    a("run throughout; load-average floor ~2-3 on 12 logical CPUs). Rather than wait")
-    a(f"for a quiet window, every cell was sampled {samples} times, round-robin across")
+    a("run throughout; load-average floor ~2-3 on 12 logical CPUs), and this runner")
+    a("does not itself gate on anything: whether the host was quiet is established")
+    a("only by an `mpstat -P ALL` idle reading taken immediately before the run and")
+    a("recorded in the report that cites it. The load averages tabulated below are")
+    a("context, never a quietness claim, and they include this benchmark's own")
+    a(f"worker pools. Every cell was sampled {samples} times, round-robin across")
     a("modes, worker counts and runtimes (one protoScala sample, then one protoClojure")
     a("sample at the same mode/workers when a twin exists, then the next cell), so")
     a("ambient load hits every column alike. Median msg/s is the headline number and")

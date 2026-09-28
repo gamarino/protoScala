@@ -14,6 +14,16 @@ ambient load hits every column alike. Median msg/s is the headline number and
 `[min-max]` is its spread; ratios to protoClojure are the primary comparison,
 absolute msg/s is indicative only.
 
+> **Note added 2026-09-27.** The paragraph above is the runner's standing
+> boilerplate, and for *this* run it understates the method: the host **was**
+> gated on measured idle before the measurement — `mpstat -P ALL 5 3`, mean idle
+> 95.43 % (0.55 busy CPUs of 12) — and gate reading 3 in
+> [`2026-09-26-quiet-window.md`](2026-09-26-quiet-window.md) §0.1 is that
+> measurement's. The load averages tabulated below are context and not the gate:
+> they rise during the run and include this benchmark's own worker pools. The
+> runner's text has since been corrected so that later reports state this
+> themselves rather than advertising the opposite of the claim they support.
+
 | | |
 |---|---|
 | machine | AMD Ryzen 5 5500U with Radeon Graphics |
