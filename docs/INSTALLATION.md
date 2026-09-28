@@ -191,12 +191,15 @@ configure prints whether a generator was enabled or disabled, and why.
 
 Package names are pinned rather than left to each generator's default casing:
 `protoscala` for DEB, `protoScala` for RPM. Both declare a bounded dependency on
-protoCore's own package, with the 2.1.0 floor the mailbox requires:
+protoCore's own package. The floor is **2.2.0**, and two requirements set it:
+`ProtoMPSCQueue` needs 2.1.0, and `PROTOCORE_ABI_SOVERSION 3` needs 2.2.0, so the
+higher one binds. It read 2.1.0 until 2026-09-27, which named a protoCore that
+cannot build this tree:
 
 | Format | Relation |
 |--------|----------|
-| DEB | `Depends: protocore (>= 2.1.0), protocore (<< 3.0.0)` |
-| RPM | `Requires: protoCore >= 2.1.0, protoCore < 3.0.0` |
+| DEB | `Depends: protocore (>= 2.2.0), protocore (<< 3.0.0)` |
+| RPM | `Requires: protoCore >= 2.2.0, protoCore < 3.0.0` |
 
 `CPACK_DEBIAN_PACKAGE_SHLIBDEPS` is **`ON`** (`CMakeLists.txt`), so
 `dpkg-shlibdeps` runs over the package's ELF files and adds the dependencies it
@@ -257,7 +260,7 @@ cross-reference — "two packaging defects" in
 | P1 | `libprotoScala.so*` was installed in CMake's `Unspecified` component, so `cmake --install --component protoScala` — the command this page gives — installed `protoscalac` but not the library it links | **Fixed.** `COMPONENT protoScala` is now repeated on every artifact clause ([STATUS.md](STATUS.md) §"Phase 7 — packaging", item 1) |
 | P2 | `protoscalac` compiled a generated module against a stale `/usr/local/include/protoCore.h` when the prefix held no header, producing a module that linked, loaded and segfaulted with no diagnostic | **Fixed.** `protoscalac` refuses when it cannot find `protoCore.h` or `protoScala/GeneratedModule.h` on its own include path, and names the directories it searched (T0-21) |
 | P3 | T0-21 does not fire when protoCore is installed under `/usr` and a stale header remains in `/usr/local/include`: GCC searches `/usr/local/include` first and ignores a `-I` naming a standard system directory | **Not fixed, and not fixable with a compiler flag.** Reproduced; remedies are to remove the stale header or to install protoCore under a non-system prefix (next section) |
-| P4 | The DEB's `Depends: protocore (>= 2.1.0)` is a version range and not an ABI check, so it admits a protoCore whose SONAME this package was not linked against | **Not fixed** — raising the floor to `2.2.0` is the maintainer's packaging call. **Narrowed** since protoCore shipped a `shlibs` file: `dpkg-shlibdeps` now also emits `protocore (>= 2.5.0)` from the SONAME (§Packages) |
+| P4 | The DEB's `Depends` was a version range and not an ABI check, so it admitted a protoCore whose SONAME this package was not linked against | **Fixed 2026-09-27**, in two independent ways. The floor rose to `2.2.0`, the release that carries `SOVERSION 3`, so the range no longer admits a `SOVERSION 2` protoCore. And since protoCore began shipping a `shlibs` file, `dpkg-shlibdeps` derives `protocore (>= 2.5.0)` from the SONAME itself (§Packages), which cannot drift from the binary the way a hand-written range did |
 | P5 | The DEB does not refresh the shared-library cache | **protoCore's: fixed** — its package now generates a `postinst` that runs `ldconfig`. **protoScala's: not fixed** — it ships no maintainer script |
 
 ### T0-21 has a blind spot when protoCore is installed under `/usr`

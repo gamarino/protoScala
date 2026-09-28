@@ -211,7 +211,10 @@ else()
         message(FATAL_ERROR
             "The sibling protoCore at ${PROTOCORE_DIR} is "
             "${PROTOCORE_EFFECTIVE_VERSION}; protoScala requires "
-            "${PROTOCORE_MIN_VERSION_FULL} or later for ProtoMPSCQueue.")
+            "${PROTOCORE_MIN_VERSION_FULL} or later. Two requirements set that "
+            "floor and the message should not conflate them: ProtoMPSCQueue "
+            "needs ${PROTOSCALA_PMQ_MIN_PROTOCORE}, and PROTOCORE_ABI_SOVERSION "
+            "${PROTOCORE_ABI_SOVERSION} needs 2.2.0. The higher one binds.")
     endif()
     message(STATUS "protoScala: sibling protoCore ${PROTOCORE_EFFECTIVE_VERSION} "
                    "from ${PROTOCORE_LIB_DIR}")
