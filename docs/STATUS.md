@@ -3,8 +3,17 @@
 > Living tracker of the gap between [LANGUAGE.md](LANGUAGE.md) and the
 > implementation. Update it with every change.
 >
-> **Current state (2026-09-25):** Track F complete (file input and output);
-> Phase 4 complete (**0.5.0**): everything
+> **Current state (2026-09-27): released version 0.6.0 — Phase 6 complete; Phase 7
+> (the C++ transpiler) is a first cut whose version was deliberately NOT bumped**,
+> with two of its done-when rows unmet: the mutation matrix is partial and the
+> start-up regression is **not measured** ([ROADMAP.md](ROADMAP.md) §Phase 7). Its
+> output is nevertheless in the tree and tested — `protoscalac`, the 922-case
+> `transpiled/` differential, `CompiledModuleProvider` and the cross-runtime call
+> (the `### Phase 7 …` sections below). Tracks F, X, S and Y are complete. This
+> header read "Phase 4 complete (0.5.0)" until 2026-09-27, in a file that already
+> held five Phase 7 sections.
+>
+> **Phase 4 (0.5.0), for the record:** everything
 > Phases 1, 2, 3 and 5 delivered, plus **`try`/`catch`/`finally` and `throw` with
 > pattern-matched handlers, the `Throwable` hierarchy and native error
 > translation, `super[T].m`, `enum` and sealed hierarchies, named and default
@@ -76,7 +85,11 @@
 > built by default whenever protoST is found beside this tree
 > (`-DPROTOSCALA_PROTOST_INTEROP=OFF` restores a suite that refers to no other
 > tree). It holds the cross-runtime import tests; see R5 under "Known issues".
-> Last verified 2026-09-25 (Track S).
+> Last verified 2026-09-27: the suite count and result from CI on the current
+> `main` (Phase 7 packaging merge), the corpus rates re-scored from the archived
+> raw results, and the installer and packaging findings under "Phase 7 —
+> packaging". The language-surface rows below were last re-checked at Track S
+> (2026-09-25).
 
 ## Implemented
 
