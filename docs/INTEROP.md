@@ -188,9 +188,14 @@ list seen as a Scala `Seq` is wrapped, not copied).
   are per space", and it is **reversed**. protoScala keeps every key it needs in
   `RuntimeLayout` anyway — one place to read, nothing re-interned — which is a
   clarity convention now rather than a correctness requirement.
-- A provider resolves its runtime from **`ctx->space`**, never from a
-  thread-local: a thread-local answers "module not found" on every actor worker,
-  which is the bug protoST's `STModuleProvider.h` records having had.
+- *Superseded by Track Y (2026-09-24), and kept because the bug it records is
+  real.* This list used to read: "a provider resolves its runtime from
+  **`ctx->space`**, never from a thread-local: a thread-local answers 'module not
+  found' on every actor worker, which is the bug protoST's `STModuleProvider.h`
+  records having had." The thread-local half still holds; `ctx->space` is **not**
+  the alternative, for the reason the bullet below measures. A provider holds its
+  runtime in its own object state — it is an object — and uses `ctx` only to
+  allocate the result in the caller's context.
 - **The boundary catch shape is mandatory at every UMD and foreign-call site.**
   One template, `src/umd/ForeignBoundary.h`, six clauses in this order, and the
   order is the contract: `FutureYield` (not a `std::exception`, and first anyway,
