@@ -348,12 +348,27 @@ in [docs/STATUS.md](docs/STATUS.md) is still the maintainer's call.
 
 ## Project status
 
-**Phase 6 complete (version 0.6.0) — not production ready, open for community
+**Phase 6 complete (version 0.6.0); Phase 7 shipped as a first cut, with the
+version deliberately not bumped — not production ready, open for community
 review.** Phase 5 was implemented before Phases 3 and 4, so the minor version went
 0.2.0 → 0.3.0 (actors) → 0.4.0 (collections) → 0.5.0 (exceptions, enums,
-arguments and extensions) → 0.6.0 (modules, UMD and packaging). Every phase the
-roadmap named is now closed; what remains is listed in
-[docs/ROADMAP.md](docs/ROADMAP.md) as tracks rather than phases. **Track Y**
+arguments and extensions) → 0.6.0 (modules, UMD and packaging).
+
+**Phase 7 is the C++ transpiler, and it is what §"Producing a UMD module" and
+§Building below are documenting**: `protoscalac`, `libprotoScala.so.1`,
+`CompiledModuleProvider`, and the cross-runtime call — a protoScala function
+becomes a `proto::ProtoMethod`, which any runtime in the family can call, and
+`interop/foreign-call` proves it from a translation unit that names no protoScala
+symbol. It is called a first cut because two of its own done-when rows are unmet:
+the mutation matrix is partial, and **the start-up regression is not measured**
+([docs/ROADMAP.md](docs/ROADMAP.md) §Phase 7 lists both, and what is still open).
+Everything it added sits under `## [Unreleased]` in
+[CHANGELOG.md](CHANGELOG.md) for that reason. Until 2026-09-27 this section said
+"every phase the roadmap named is now closed" and the string "Phase 7" appeared
+nowhere in this file.
+
+What remains beyond the phases is listed in
+[docs/ROADMAP.md](docs/ROADMAP.md) as tracks. **Track Y**
 delivered the first working cross-runtime import (`import st.<module>`); what it
 did not deliver is `import py.numpy`, which needs work in protoPython rather than
 here. **Track F** added file input and output, so a program can read its own
