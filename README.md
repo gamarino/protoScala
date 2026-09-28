@@ -840,7 +840,7 @@ slot needs a rebuild before it means anything.
 | `object_tree` (131071-object tree) | 382.0 [376.5-414.0] | 166.6 [165.4-170.4] | 3119.7 [3076.7-3144.0] | — | — | 2.29× | 1.95× |
 | `list_ops` (map / filter / foldLeft, 100000) | 398.2 [393.3-418.9] | 1562.8 [1539.3-1867.7] | 525.2 [521.2-537.9] | — | — | 0.25× | 0.24× |
 | `map_build` (build and read back 50000) | 299.9 [294.6-306.4] | 63.3 [62.6-66.6] | 796.6 [783.9-801.1] | — | — | 4.74× | 4.43× |
-| **Geomean vs CPython** (12 workloads) | **1.06×** | 1.00× | 2.70× (12) | 1.93× (5) | 1.14× (4) | **1.06×** | 0.91× |
+| **Geomean vs CPython** (12 workloads; current, 2026-09-26) | **1.06×** | 1.00× | 2.70× (12) | 1.93× (5) | 1.14× (4) | **1.06×** | 0.91× |
 
 `map_build`'s 4.74× is the honest cost of an immutable map: each of the 50000
 inserts returns a new `ProtoMap` version where CPython's `dict` mutates one
@@ -867,7 +867,7 @@ not reproduce.*
 | `factorial_100` (BigInt) | 17.9 [16.4-18.7] | 17.9 [17.3-19.7] | 206.1 [196.5-221.1] | 32.9 [31.5-35.5] | 20.4 [19.7-21.5] | — | 16.3 [14.5-17.0] | 0.54× |
 | `attr_lookup` (3 field reads × 100000) | 35.8 [33.9-38.7] | 36.8 [34.0-37.9] | 210.0 [197.6-227.6] | 45.6 [42.0-47.1] | 161.6 [157.2-167.9] | 123.6 [117.6-129.4] | — | 0.79× |
 | `object_tree` (131071-object tree: build, path-copy, fold) | 406.9 [383.7-629.9] | 404.7 [379.6-613.6] | 255.0 [216.0-384.1] | 209.1 [195.6-261.0] | 3657.1 [3619.2-4142.0] | — | — | 1.95× |
-| **Geomean vs CPython** (rows) | 0.86× (10) | 0.87× (10) | 3.72× (10) | 1.00× | 2.82× (10) | 1.84× (5) | 1.11× (4) | **0.86×** |
+| **Geomean vs CPython** (rows; 2026-09-23, superseded) | 0.86× (10) | 0.87× (10) | 3.72× (10) | 1.00× | 2.82× (10) | 1.84× (5) | 1.11× (4) | **0.86×** |
 
 **Suite v1 completed in 0.4.0.** Phase 3 added the last two workloads the
 ROADMAP's benchmark suite v1 names, measured on 2026-09-23 at load average 3.90
@@ -880,7 +880,7 @@ into the current table above, re-measured; these are the figures as recorded the
 |---|---:|---:|---:|
 | `list_ops` (map / filter / foldLeft over 100000 elements) | 465.5 [454.4-492.4] | 1934.7 [1876.3-2041.2] | 0.24× |
 | `map_build` (build and read back 50000 entries) | 354.9 [345.7-355.3] | 80.0 [74.6-84.3] | 4.43× |
-| **Geomean vs CPython**, all 12 workloads | 0.91× | 1.00× | **0.91×** |
+| **Geomean vs CPython**, all 12 workloads (2026-09-23; superseded by the 1.06× above) | 0.91× | 1.00× | **0.91×** |
 
 Cold start (`benchmarks/cold-start.sh`, 21 runs, target < 25 ms).
 **Verdict: MET.** This supersedes a `MISSED` verdict recorded on 2026-09-26,
@@ -1000,7 +1000,16 @@ Earlier phases measured under the target: the 0.3.0 run gave script 21.02
 worst included, under 25 ms. Whether 0.3.0 would still measure there on the host
 as it is now was **not** re-checked, so that row is history too.
 
-**Reading.** Short rows measure start-up more than work: protoScala starts in
+*Reading of the superseded 2026-09-23 table, kept as written.* Every figure in
+this paragraph is from that table — geomean **0.86×**, `fib30` **2.07×**,
+`object_tree` **1.95×** — and the current quiet-window table above reads **1.06×**,
+**2.63×** and **2.29×** for the same three. Its `Scala 3.9 (JVM 21)` column is the
+one the current run could **not** reproduce, because no `SCALA_HOME` is installed
+on this host; the JVM sentences below therefore describe the 2026-09-23 measurement
+and nothing newer. Until 2026-09-27 this paragraph was headed simply "Reading." and
+stood in the present tense, which read as a characterisation of the current table
+and of a JVM comparison the same section says is absent. *As written:* Short rows
+measure start-up more than work: protoScala starts in
 about 17-18 ms (`factorial_100` is almost pure start-up) and CPython in about
 32-38 ms, so on short workloads protoScala comes out ahead, and the 0.86×
 geomean is as much a start-up figure as a throughput one. Where the work
