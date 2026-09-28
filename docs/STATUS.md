@@ -211,9 +211,11 @@ Delivered in Phase 5 (DESIGN §8), the concurrency block:
 - [x] `Thread.start(() => …)`, `t.join()`, `System.nanoTime()`,
       `System.currentTimeMillis()`, `System.getenv(name)` (D49).
 - [x] The mailbox seam: protoCore's `ProtoMPSCQueue` when the linked protoCore
-      provides it, a CAS'd `ProtoList` otherwise. **This build ships the
-      fallback**: protoCore 2.0.0 carries no `newMPSCQueue`.
-      `protoscala --version` names the backend in use.
+      provides it, a CAS'd `ProtoList` otherwise. **This build ships the queue**:
+      protoCore merged `ProtoMPSCQueue` in 2.1.0 (Phase P2) and the tree is built
+      against 2.5.0, so `protoscala --version` prints
+      `actor mailboxes: ProtoMPSCQueue`. Until 2026-09-27 this row said the build
+      ships the CAS'd fallback, which was true only against protoCore 2.0.0.
 - [x] The seven benchmark modes of DESIGN §8.5, each self-reporting and
       verified by the runner; tutorial chapter 13.
 
@@ -606,8 +608,6 @@ are quoted in the commit that made each change.
 - Supervision trees, `ExecutionContext`, actor timeouts and
   `Await.result(f, duration)` — not scheduled. An `await` waits forever; the
   shutdown reports any actor still parked on a future that never completed.
-- Actor mailboxes on protoCore's `ProtoMPSCQueue` — Phase P2 (the `Mailbox`
-  seam is in place; switching is a one-file change once protoCore merges it).
 - `collect` and `PartialFunction` (D63), `Seq`/`Iterable` as traits (D65),
   `Ordering` (D62), `SortedMap`/`ListMap`, `Array` (D69) and regular
   expressions (D70) — see the Phase 3 deviations for what each would cost.

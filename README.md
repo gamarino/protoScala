@@ -725,10 +725,16 @@ protoClojure's twin traces the same curve, within a few percent, with the same
 peak — evidence that the shape is the machine's and not protoScala's
 scheduler.
 
-**Nothing involving `ProtoMPSCQueue` is shipped**: it is not in protoCore
-master, the released protoScala still uses the CAS-list mailbox, and every
-queue figure quoted here describes a branch build that no released
-protoScala uses. Measurement and method:
+**`ProtoMPSCQueue` is shipped**, and `protoscala --version` says so:
+`protoScala 0.6.0 (actor mailboxes: ProtoMPSCQueue)`. protoCore merged it in
+2.1.0 (Phase P2) and this tree builds against 2.5.0. Until 2026-09-27 this
+paragraph read "Nothing involving `ProtoMPSCQueue` is shipped … the released
+protoScala still uses the CAS-list mailbox", which was written while the queue was
+on a protoCore branch; the CAS'd `ProtoList` mailbox is still the fallback the
+seam selects when the linked protoCore has no `newMPSCQueue`, i.e. against
+protoCore 2.0.x. The figures in the superseded tables above that name CAS-list
+mailboxes were measured on that fallback and are labelled where they appear.
+Measurement and method:
 [benchmarks/reports/2026-09-23-actors-v4-curve.md](benchmarks/reports/2026-09-23-actors-v4-curve.md)
 (superseding [v3](benchmarks/reports/2026-09-23-actors-v3-pmq.md)'s reading).
 Full reading, with every mode and worker count:
