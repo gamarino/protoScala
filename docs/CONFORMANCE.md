@@ -9,6 +9,18 @@ give, and what each capability of the adaptor does and does not prove.
 - Static ratchet: `conformance-allow.txt`
 - Run: `ctest --test-dir build_release -R embedder-conformance < /dev/null`
 
+**The other conformance measurement** — protoScala against the Scala 3 compiler's
+own `tests/run` corpus, the source of the in-scope 31.8 % and the whole-corpus
+13.1 % — lives in [`tools/corpus/`](../tools/corpus/) with its scoring rules, its
+caveats and the summary of the run behind those figures;
+`python3 tools/corpus/score.py --csv --both` re-derives them. Until 2026-09-27 that
+harness was outside the repository and the rate could not be reproduced from a
+clone, which is the same defect as quoting a total with no command. The corpus
+itself is third-party and is fetched rather than vendored (pinned commit, clone
+recipe in `tools/corpus/README.md`), so reproducing a *fresh* measurement needs
+network access; re-deriving the published one does not.
+[docs/STATUS.md](STATUS.md) carries the per-track numbers.
+
 ## First run — 2026-09-25, protoCore at `feature/embedder-conformance-p4`
 
 | Case | Rule | Result | Numbers the case reported |

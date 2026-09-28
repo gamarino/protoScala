@@ -1269,22 +1269,49 @@ exercised for the first time in Phase 6** — see the three entries below it.
   (Java interop, reflection, implicits/givens, `Array`, `Seq`, `Iterator`, …).
   Every rule names the construct it matched, and nothing is excluded from the run.
 
-  | measurement | in-scope rate |
-  |---|---|
-  | 0.6.0, before Track X | **75/601 = 12.5 %** |
-  | after the Predef surface (D103–D104) | **178/601 = 29.6 %** |
-  | after member imports as well (D105) | **183/601 = 30.4 %** |
-  | re-measured on this machine at the start of Track S | **181/601 = 30.1 %** |
-  | after Track S | **191/601 = 31.8 %** |
+  The rule matters and this table used to mix two of them. A corpus test with no
+  `.check` file passes, by dotty's rule, when it runs; **strict** also requires that
+  it print nothing unexpected, **lenient** does not. Every row below is **strict**,
+  which is the rule the published 31.8 % uses and the lower of the two. Re-derive
+  any of them with `python3 tools/corpus/score.py --csv --both`.
+
+  | measurement | in-scope rate (strict) | (lenient, for reference) |
+  |---|---|---|
+  | 0.6.0, before Track X | **74/601 = 12.3 %** | 75 = 12.5 % |
+  | after the Predef surface (D103–D104) | **176/601 = 29.3 %** | 178 = 29.6 % |
+  | after member imports as well (D105) | **181/601 = 30.1 %** | 183 = 30.4 % |
+  | re-measured on this machine at the start of Track S | **181/601 = 30.1 %** | 183 = 30.4 % |
+  | after Track S | **191/601 = 31.8 %** | 193 = 32.1 % |
+
+  Until 2026-09-27 the first three rows were lenient and the last two strict, which
+  understated the gain by about 0.3 pp. Both endpoints share the 601 denominator, so
+  the comparison was sound either way; the rule was not.
+
+  **Of the 191 in-scope passes, 107 matched a `.check` file and 84 (44 %) had
+  none**, passing on "exited 0 and printed nothing unexpected" — 754 of the 1654
+  corpus files have a `.check` at all, 280 of the in-scope 601. That is dotty's own
+  rule and stricter than the lenient reading, and the files concerned are
+  `assert`-based `object Test extends App` programs, so they do fail when an
+  assertion fails. The exposure is still real and is stated here because this file
+  already states it for the transpiler differential: a silent-failure mode that
+  exited 0 without running the body would score as a pass wherever there is no
+  output to check.
 
   Zero regressions: no test that passed anywhere in the 1654-file corpus before
-  this work fails after it. Across the whole corpus, in-scope and out, 82 → 206
-  at the end of Track X and **216** at the end of Track S, and the three
-  `internal error: unordered_map::at` escapes are gone (D74). The two-test
-  difference between Track X's 183 and Track S's starting 181 is the instrument,
-  not the tree: the harness's 10-second per-file timeout is marginal for a
-  handful of files on this machine, so the starting point was re-measured with
-  the same scripts and both Track S numbers come from that run.
+  this work fails after it. Across the whole corpus, in-scope and out (strict
+  throughout), **81 → 204** at the end of Track X and **216** at the end of Track S,
+  and the three `internal error: unordered_map::at` escapes are gone (D74).
+
+  **A correction.** This paragraph used to explain the two-test difference between
+  Track X's 183 and Track S's starting 181 as "the instrument, not the tree: the
+  harness's 10-second per-file timeout is marginal for a handful of files". That is
+  wrong, and the archived raw results disprove it: the strict pass sets of the two
+  runs are **identical** (symmetric difference empty) and each run has exactly
+  **one** timeout, the same file, `hashCodeDistribution`. The whole difference is the
+  scoring rule — 183 is the lenient count of the same run whose strict count is 181 —
+  and the two tests are `delayedInit` and `i12729`, both with no `.check`, both
+  exiting 0 with non-empty stdout. Nothing about the tree or the machine changed
+  between them.
   The member-import half is worth 5 in-scope tests on its own, which is small and
   was expected — its case is that it is the first thing a new user hits, not that
   it moves a number — and it also cut the in-scope `no module found` failures from
@@ -1294,8 +1321,8 @@ exercised for the first time in Phase 6** — see the three entries below it.
   written here — the point is the authorship, not the count, which is why no total
   is quoted. 257 of the corpus's disagreements with real Scala were anticipated
   by no document in this repository, and the single largest of them — six missing
-  Predef names — cost 103 in-scope tests and was invisible to a suite that had
-  never needed them. Track S went after the worst of the remaining 257 — the ones
+  Predef names — cost **102** in-scope tests under the strict rule (103 under the
+  lenient one) and was invisible to a suite that had never needed them. Track S went after the worst of the remaining 257 — the ones
   that returned a **wrong number** instead of failing — and every one of the four
   it found turned out to be a defect rather than a limit: `case` in a `for`
   generator, a blank line inside an expression, an `override val` parameter, and a

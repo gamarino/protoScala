@@ -1,0 +1,1655 @@
+test,bucket,has_check,strict,lenient,reason
+16405,1,0,fail,fail,scala.compiletime / staging
+1938,3,0,pass,pass,no out-of-scope construct found
+1938-2,3,0,fail,fail,no out-of-scope construct found
+19384,2,0,fail,fail,implicit / given / using (D3)
+19384-min,2,0,pass,pass,PartialFunction / collect (D63)
+26071,3,0,fail,fail,no out-of-scope construct found
+26957,3,0,fail,fail,no out-of-scope construct found
+3179,3,0,pass,pass,no out-of-scope construct found
+9416,3,0,fail,fail,no out-of-scope construct found
+CollectionTests,1,1,fail,fail,reflection / ClassTag / Mirror / TypeTest
+ConfManagement,2,1,fail,fail,implicit / given / using (D3)
+Course-2002-01,1,1,fail,fail,JVM System / Console / Predef JVM surface
+Course-2002-02,1,1,fail,fail,JVM System / Console / Predef JVM surface
+Course-2002-03,1,1,fail,fail,JVM System / Console / Predef JVM surface
+Course-2002-04,1,1,fail,fail,JVM System / Console / Predef JVM surface
+Course-2002-05,1,1,fail,fail,JVM System / Console / Predef JVM surface
+Course-2002-06,1,1,fail,fail,JVM System / Console / Predef JVM surface
+Course-2002-07,1,1,fail,fail,JVM System / Console / Predef JVM surface
+Course-2002-08,1,1,fail,fail,JVM System / Console / Predef JVM surface
+Course-2002-09,1,1,fail,fail,JVM System / Console / Predef JVM surface
+Course-2002-10,1,1,fail,fail,JVM System / Console / Predef JVM surface
+Course-2002-13,1,1,fail,fail,JVM System / Console / Predef JVM surface
+HLists,2,1,fail,fail,implicit / given / using (D3)
+HLists-nonvariant,2,1,fail,fail,implicit / given / using (D3)
+HelloWorld,3,1,pass,pass,no out-of-scope construct found
+IArrayOps,2,1,fail,fail,PartialFunction / collect (D63)
+IArrayOps-Factory,1,0,fail,fail,JVM reflection via getClass
+IArrayOps-IsSeq,1,0,fail,fail,classOf
+IArrayOps-experimental-BuildFrom,1,0,fail,fail,JVM reflection via getClass
+Lazies1,3,0,pass,pass,no out-of-scope construct found
+Lazies2,3,0,pass,pass,no out-of-scope construct found
+LazyLists,2,0,fail,fail,lazy collection / Iterator / view (D100)
+LazyValsLongs,3,0,fail,fail,no out-of-scope construct found
+Meter,1,1,fail,fail,JVM System / Console / Predef JVM surface
+MeterCaseClass,1,1,fail,fail,JVM System / Console / Predef JVM surface
+MultiArr,2,0,fail,fail,Array (D69 / no Array type)
+NestedClasses,1,1,fail,fail,JVM System / Console / Predef JVM surface
+OrderingTest,2,0,fail,fail,implicit / given / using (D3)
+Parser,2,0,fail,fail,implicit / given / using (D3)
+Pouring,2,1,fail,fail,inline / macro / quotes
+Pouring2,2,1,fail,fail,inline / macro / quotes
+Predef.readLine,1,0,fail,fail,Java interop (java./javax. reference)
+PrivateAnd,3,0,fail,fail,no out-of-scope construct found
+Providers,2,1,fail,fail,implicit / given / using (D3)
+QueueTest,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+ReplacementMatching,2,0,fail,fail,inline / macro / quotes
+ReverseSeqView,2,0,fail,fail,lazy collection / Iterator / view (D100)
+Signals,2,1,fail,fail,implicit / given / using (D3)
+Signals1,2,1,fail,fail,implicit / given / using (D3)
+Signals2,2,1,fail,fail,implicit / given / using (D3)
+StackMap,3,0,pass,pass,no out-of-scope construct found
+StringConcat,1,1,fail,fail,Java interop (java./javax. reference)
+Tuple-fromArray,1,1,fail,fail,reflection / ClassTag / Mirror / TypeTest
+Tuple-fromProduct,3,1,fail,fail,no out-of-scope construct found
+Typeable,2,1,fail,fail,implicit / given / using (D3)
+UnrolledBuffer,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+absoverride,1,1,fail,fail,synchronized
+abstract-givens,2,0,fail,fail,implicit / given / using (D3)
+adding-growing-set,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+anon-mirror-gen-local,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+applydynamic_sip,3,1,fail,fail,no out-of-scope construct found
+array-addition,2,1,fail,fail,Array (D69 / no Array type)
+array-charSeq,2,1,fail,fail,Array (D69 / no Array type)
+array-erasure,2,0,fail,fail,Array (D69 / no Array type)
+array-existential-bound,2,1,fail,fail,Array (D69 / no Array type)
+arrayclone-new,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+arraycopy,2,0,fail,fail,Array (D69 / no Array type)
+arrays,2,1,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+arrayview,2,0,fail,fail,lazy collection / Iterator / view (D100)
+arybufgrow,1,1,fail,fail,JVM System / Console / Predef JVM surface
+assert-stack,1,1,fail,fail,checkfile expects a JVM stack trace
+automatic-tupling-of-function-parameters-implicit-conversion,2,0,fail,fail,implicit / given / using (D3)
+automatic-tupling-of-function-parameters-spec,3,1,fail,fail,no out-of-scope construct found
+better-fors,3,1,fail,fail,no out-of-scope construct found
+better-fors-map-elim,3,0,fail,fail,no out-of-scope construct found
+better-fors-map-inlined,2,0,fail,fail,inline / macro / quotes
+bigDecimalCache,1,0,fail,fail,Java interop (java./javax. reference)
+bigDecimalTest,1,1,fail,fail,Java interop (java./javax. reference)
+binaryLiterals,3,0,fail,fail,no out-of-scope construct found
+bind-tuple-pattern,3,0,fail,fail,no out-of-scope construct found
+bitsets,1,1,fail,fail,JVM System / Console / Predef JVM surface
+blame_eye_triple_eee-double,3,1,fail,fail,no out-of-scope construct found
+blame_eye_triple_eee-float,3,1,fail,fail,no out-of-scope construct found
+block-field,3,1,fail,fail,no out-of-scope construct found
+boehm-berarducci,3,1,fail,fail,no out-of-scope construct found
+boolexprs,1,1,fail,fail,JVM System / Console / Predef JVM surface
+boolord,1,1,fail,fail,JVM System / Console / Predef JVM surface
+box-to-byte,1,0,fail,fail,Java interop (java./javax. reference)
+break-opt,2,1,fail,fail,implicit / given / using (D3)
+breaks,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+bridges,1,0,fail,fail,JVM System / Console / Predef JVM surface
+buffer-slice,2,1,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+builder,2,1,fail,fail,implicit / given / using (D3)
+byname-given,2,0,fail,fail,implicit / given / using (D3)
+byname-implicits-17,2,0,fail,fail,implicit / given / using (D3)
+byname-implicits-28,2,0,fail,fail,implicit / given / using (D3)
+byname-implicits-30,2,0,fail,fail,implicit / given / using (D3)
+byname-implicits-4,2,0,fail,fail,implicit / given / using (D3)
+byname-implicits-5,2,0,fail,fail,implicit / given / using (D3)
+byname-implicits-6,2,0,fail,fail,implicit / given / using (D3)
+byname-param,3,1,fail,fail,no out-of-scope construct found
+byname-varargs,2,1,fail,fail,inline / macro / quotes
+capturing,1,1,fail,fail,JVM reflection via getClass
+case-class-23,3,1,pass,pass,no out-of-scope construct found
+case-class-serializable,1,0,fail,fail,Java interop (java./javax. reference)
+case-class-toString,3,1,pass,pass,no out-of-scope construct found
+caseClassHash,3,1,fail,fail,no out-of-scope construct found
+case_class_equals_fields_sort,3,0,fail,fail,no out-of-scope construct found
+caseclasses,1,1,fail,fail,JVM System / Console / Predef JVM surface
+catch-sub-cases,3,0,fail,fail,no out-of-scope construct found
+classTags,1,0,fail,fail,classOf
+classmanifests_new_alias,1,1,fail,fail,reflection / ClassTag / Mirror / TypeTest
+classof,1,1,fail,fail,classOf
+classof-object,1,0,fail,fail,classOf
+classtags_contextbound,1,1,fail,fail,JVM reflection via getClass
+cochis,2,0,fail,fail,implicit / given / using (D3)
+cochis-example,2,0,fail,fail,implicit / given / using (D3)
+collection-stacks,2,1,fail,fail,inline / macro / quotes
+collections,2,1,fail,fail,lazy collection / Iterator / view (D100)
+collections-toSelf,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+collective-extensions,3,0,fail,fail,no out-of-scope construct found
+colltest,1,1,fail,fail,Java interop (java./javax. reference)
+colltest1,2,1,fail,fail,inline / macro / quotes
+companion-loading,2,1,fail,fail,implicit / given / using (D3)
+comparable-comparator,1,0,fail,fail,Java interop (java./javax. reference)
+complicatedmatch,3,1,pass,pass,no out-of-scope construct found
+concat-two-strings,2,0,fail,fail,Array (D69 / no Array type)
+config,2,1,fail,fail,implicit / given / using (D3)
+constValueTuple,3,1,fail,fail,no out-of-scope construct found
+constant-optimization,3,1,fail,fail,no out-of-scope construct found
+constructors,1,1,fail,fail,JVM System / Console / Predef JVM surface
+context-functions,2,0,fail,fail,implicit / given / using (D3)
+contextbounds-for-poly-functions,2,1,fail,fail,implicit / given / using (D3)
+contrarivant,2,0,fail,fail,implicit / given / using (D3)
+contrib674,3,1,pass,pass,no out-of-scope construct found
+convertible,2,1,fail,fail,implicit / given / using (D3)
+coop-equality,3,0,fail,fail,no out-of-scope construct found
+correct-bind,2,1,fail,fail,Array (D69 / no Array type)
+creator-applys,1,0,fail,fail,Java interop (java./javax. reference)
+curried-mirror,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+curried-using-threading,2,0,fail,fail,implicit / given / using (D3)
+dead-code-elimination,2,0,fail,fail,inline / macro / quotes
+deadlock,1,1,fail,fail,Java interop (java./javax. reference)
+dedented-string-literals,1,1,fail,fail,scala.compiletime / staging
+defaultGetters,3,1,pass,pass,no out-of-scope construct found
+defaults-serizaliable-no-forwarders,1,0,fail,fail,Java interop (java./javax. reference)
+defaults-serizaliable-with-forwarders,1,0,fail,fail,Java interop (java./javax. reference)
+defunctionalized,3,1,pass,pass,no out-of-scope construct found
+delambdafy-dependent-on-param-subst,3,0,fail,fail,no out-of-scope construct found
+delambdafy-dependent-on-param-subst-2,3,0,fail,fail,no out-of-scope construct found
+delambdafy-nested-by-name,3,1,pass,pass,no out-of-scope construct found
+delambdafy-two-lambdas,3,1,pass,pass,no out-of-scope construct found
+delayedInit,3,0,fail,pass,no out-of-scope construct found
+derived-specificity,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+deriving,1,1,fail,fail,reflection / ClassTag / Mirror / TypeTest
+deriving-constructor-order,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+deriving-from-product-typed,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+deriving-interesting-prefixes,2,1,fail,fail,implicit / given / using (D3)
+distinct,3,1,fail,fail,no out-of-scope construct found
+double-pattern-type,3,0,fail,fail,no out-of-scope construct found
+drop-apply-optimization,3,1,fail,fail,no out-of-scope construct found
+drop-no-effects,3,0,pass,pass,no out-of-scope construct found
+duplicate-meth,3,1,pass,pass,no out-of-scope construct found
+duration-coarsest,3,0,fail,fail,no out-of-scope construct found
+dynamic-anyval,2,1,fail,fail,implicit / given / using (D3)
+dynamicDynamicTests,2,0,fail,fail,implicit / given / using (D3)
+eff-dependent,2,0,fail,fail,implicit / given / using (D3)
+elidable-noflags,3,1,fail,fail,no out-of-scope construct found
+empty-array,2,1,fail,fail,Array (D69 / no Array type)
+emptypf,2,1,fail,fail,PartialFunction / collect (D63)
+enrich-gentraversable,2,1,fail,fail,implicit / given / using (D3)
+enum-Color,2,1,fail,fail,inline / macro / quotes
+enum-HList,3,0,fail,fail,no out-of-scope construct found
+enum-List1,3,1,pass,pass,no out-of-scope construct found
+enum-List2,3,1,pass,pass,no out-of-scope construct found
+enum-List2a,3,1,pass,pass,no out-of-scope construct found
+enum-Option,1,0,pass,pass,serialization
+enum-Option1,1,0,fail,fail,serialization
+enum-Tree,2,1,fail,fail,inline / macro / quotes
+enum-approx,3,0,fail,fail,no out-of-scope construct found
+enum-constrs,1,1,pass,pass,Java interop (java./javax. reference)
+enum-custom-toString,1,0,fail,fail,Java interop (java./javax. reference)
+enum-efficient-collections,1,1,fail,fail,classOf
+enum-in-trait,3,0,fail,fail,no out-of-scope construct found
+enum-nat,2,0,fail,fail,inline / macro / quotes
+enum-values,1,0,fail,fail,Java interop (java./javax. reference)
+enum-values-order,1,0,fail,fail,Java interop (java./javax. reference)
+enums,1,1,fail,fail,Java interop (java./javax. reference)
+enums-java-compat,1,1,fail,fail,JVM reflection via getClass
+enums-precise,3,0,fail,fail,no out-of-scope construct found
+enums-serialization-compat,1,0,fail,fail,classOf
+enums-thunk,3,0,fail,fail,no out-of-scope construct found
+eq-xmethod,3,0,fail,fail,no out-of-scope construct found
+equality,1,0,fail,fail,Java interop (java./javax. reference)
+erased-18,2,1,fail,fail,inline / macro / quotes
+erased-19,2,1,fail,fail,type-level feature (opaque / match type / higher-kinded bound)
+erased-20,2,1,fail,fail,type-level feature (opaque / match type / higher-kinded bound)
+erased-21,2,1,fail,fail,type-level feature (opaque / match type / higher-kinded bound)
+erased-25,2,1,fail,fail,type-level feature (opaque / match type / higher-kinded bound)
+erased-26,2,1,fail,fail,type-level feature (opaque / match type / higher-kinded bound)
+erased-7,2,1,fail,fail,type-level feature (opaque / match type / higher-kinded bound)
+erased-inline-product-1,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+erased-inline-product-2,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+erased-inline-product-3,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+erased-inline-vals,1,0,fail,fail,classOf
+erased-lambdas,2,0,fail,fail,implicit / given / using (D3)
+erased-machine-state,2,1,fail,fail,implicit / given / using (D3)
+erased-poly-ref,2,1,fail,fail,inline / macro / quotes
+escaped-space,3,1,fail,fail,no out-of-scope construct found
+eta-extension,3,0,pass,pass,no out-of-scope construct found
+evaluation-order,3,1,fail,fail,no out-of-scope construct found
+exc,3,0,pass,pass,no out-of-scope construct found
+exc1,3,0,pass,pass,no out-of-scope construct found
+exc2,1,0,fail,fail,JVM System / Console / Predef JVM surface
+exceptions,1,1,fail,fail,JVM System / Console / Predef JVM surface
+exceptions-2,1,1,fail,fail,Java interop (java./javax. reference)
+exceptions-nest,3,1,fail,fail,no out-of-scope construct found
+exoticnames,3,0,fail,fail,no out-of-scope construct found
+experimentalRun,3,0,fail,fail,no out-of-scope construct found
+export-anyval,2,1,fail,fail,export clause
+export-in-extension,2,0,fail,fail,export clause
+exports,2,1,fail,fail,implicit / given / using (D3)
+extension-methods,2,1,fail,fail,implicit / given / using (D3)
+extension-override,3,0,fail,fail,no out-of-scope construct found
+extension-specificity,3,0,fail,fail,no out-of-scope construct found
+extension-specificity2,2,0,fail,fail,implicit / given / using (D3)
+extmethod-overload,2,0,fail,fail,implicit / given / using (D3)
+extmethods2,2,0,fail,fail,implicit / given / using (D3)
+extra-implicits,2,1,fail,fail,implicit / given / using (D3)
+final-fields,3,1,fail,fail,no out-of-scope construct found
+final-var,3,1,pass,pass,no out-of-scope construct found
+finally,1,1,fail,fail,checkfile expects a JVM-qualified class name
+flat-flat-flat,2,0,fail,fail,lazy collection / Iterator / view (D100)
+for-desugar-strawman,3,0,fail,fail,no out-of-scope construct found
+fors,2,1,fail,fail,implicit / given / using (D3)
+forvaleq,3,1,fail,fail,no out-of-scope construct found
+forwarder,1,1,fail,fail,classOf
+fragables-extension,2,0,fail,fail,implicit / given / using (D3)
+fully-abstract-interface,1,1,fail,fail,classOf
+fully-abstract-nat,1,1,fail,fail,classOf
+fully-abstract-nat-1,2,1,fail,fail,implicit / given / using (D3)
+fully-abstract-nat-2,1,1,fail,fail,Java interop (java./javax. reference)
+fully-abstract-nat-3,2,1,fail,fail,implicit / given / using (D3)
+fully-abstract-nat-4,2,1,fail,fail,implicit / given / using (D3)
+fully-abstract-nat-5,2,1,fail,fail,implicit / given / using (D3)
+fully-abstract-nat-6,2,1,fail,fail,implicit / given / using (D3)
+fully-abstract-nat-7,2,1,fail,fail,implicit / given / using (D3)
+function-arity,3,0,fail,fail,no out-of-scope construct found
+functionXXL,3,0,pass,pass,no out-of-scope construct found
+future-flatmap-exec-count,1,1,fail,fail,Java interop (java./javax. reference)
+gadts,3,1,pass,pass,no out-of-scope construct found
+genericNumLits,2,1,fail,fail,implicit / given / using (D3)
+genericTupleMembers,3,0,fail,fail,no out-of-scope construct found
+genericValueClass,2,1,fail,fail,inline / macro / quotes
+getClassTest-valueClass,1,1,fail,fail,JVM reflection via getClass
+getclass,1,1,fail,fail,JVM reflection via getClass
+given-disambiguation,2,0,fail,fail,implicit / given / using (D3)
+given-eta,2,0,fail,fail,implicit / given / using (D3)
+given-triangle,1,1,fail,fail,JVM reflection via getClass
+given-var,2,0,fail,fail,implicit / given / using (D3)
+groupby,2,0,fail,fail,Array (D69 / no Array type)
+hashCodeDistribution,3,0,timeout,timeout,no out-of-scope construct found
+hashhash,1,0,fail,fail,Java interop (java./javax. reference)
+hashsetremove,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+hello,3,1,pass,pass,no out-of-scope construct found
+hk-alias-unification,2,0,fail,fail,implicit / given / using (D3)
+hmap,2,0,fail,fail,implicit / given / using (D3)
+hmap-covariant,2,0,fail,fail,implicit / given / using (D3)
+i10016,3,0,fail,fail,no out-of-scope construct found
+i10047,2,1,fail,fail,implicit / given / using (D3)
+i10062,3,0,fail,fail,no out-of-scope construct found
+i10068a,3,1,fail,fail,no out-of-scope construct found
+i10068b,3,0,fail,fail,no out-of-scope construct found
+i10068c,2,0,fail,fail,implicit / given / using (D3)
+i10068d,3,0,fail,fail,no out-of-scope construct found
+i10082,2,0,fail,fail,implicit / given / using (D3)
+i10178,2,0,fail,fail,implicit / given / using (D3)
+i10285,3,0,fail,fail,no out-of-scope construct found
+i10511,3,0,fail,fail,no out-of-scope construct found
+i10527,3,0,pass,pass,no out-of-scope construct found
+i10724,2,0,fail,fail,inline / macro / quotes
+i10857,2,0,fail,fail,export clause
+i10866,3,0,fail,fail,no out-of-scope construct found
+i10889,2,0,fail,fail,implicit / given / using (D3)
+i10905,3,0,fail,fail,no out-of-scope construct found
+i10930,2,0,fail,fail,lazy collection / Iterator / view (D100)
+i1099,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i10997,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i11008,3,1,fail,fail,no out-of-scope construct found
+i11008b,2,1,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+i11043,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i11045,3,0,fail,fail,no out-of-scope construct found
+i11050,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i11052a,2,0,fail,fail,implicit / given / using (D3)
+i11052b,3,0,fail,fail,no out-of-scope construct found
+i11114,1,1,fail,fail,JVM reflection via getClass
+i11174,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i11174local,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i11332,1,0,fail,fail,classOf
+i11367,3,1,fail,fail,no out-of-scope construct found
+i11419,2,1,fail,fail,Array (D69 / no Array type)
+i11542,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i11542a,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i11563,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i11571,3,1,fail,fail,no out-of-scope construct found
+i11583,2,0,fail,fail,implicit / given / using (D3)
+i11630,2,0,fail,fail,inline / macro / quotes
+i11676,2,0,fail,fail,implicit / given / using (D3)
+i11706,1,1,fail,fail,scala.compiletime / staging
+i11793,3,0,fail,fail,no out-of-scope construct found
+i11914,2,0,fail,fail,inline / macro / quotes
+i11914a,2,0,fail,fail,inline / macro / quotes
+i11938,1,0,fail,fail,Java interop (java./javax. reference)
+i11961,1,1,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i11966,2,1,fail,fail,implicit / given / using (D3)
+i11996,2,0,fail,fail,implicit / given / using (D3)
+i12032,2,1,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+i12160,2,0,fail,fail,inline / macro / quotes
+i12170,1,0,fail,fail,scala.compiletime / staging
+i12328,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i12328a,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i12328b,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i1240,2,0,fail,fail,anonymous class or class nested in a class (D80)
+i12597,2,0,fail,fail,Array (D69 / no Array type)
+i1263,2,0,fail,fail,anonymous class or class nested in a class (D80)
+i12656,2,0,fail,fail,inline / macro / quotes
+i12729,3,0,fail,pass,no out-of-scope construct found
+i12759,3,0,fail,fail,no out-of-scope construct found
+i12759b,2,0,fail,fail,implicit / given / using (D3)
+i12828a,3,0,fail,fail,no out-of-scope construct found
+i12828b,3,0,fail,fail,no out-of-scope construct found
+i12829,2,1,fail,fail,inline / macro / quotes
+i1284,2,0,fail,fail,Array (D69 / no Array type)
+i12914,1,1,fail,fail,Java interop (java./javax. reference)
+i12919,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i12919a,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i12919b,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i12976,3,0,fail,fail,no out-of-scope construct found
+i13087,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+i13087a,3,0,pass,pass,no out-of-scope construct found
+i13096,3,0,fail,fail,no out-of-scope construct found
+i13131,1,0,fail,fail,JVM reflection via getClass
+i13146,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i13146a,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i13146poly,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i13181,1,0,fail,fail,scala.compiletime / staging
+i13183,1,1,fail,fail,scala.compiletime / staging
+i13215,2,0,fail,fail,inline / macro / quotes
+i13216,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+i13228,2,1,fail,fail,export clause
+i13252a,3,0,fail,fail,no out-of-scope construct found
+i13304,2,1,fail,fail,implicit / given / using (D3)
+i13332,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i13332a,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i13332anonprod,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i13332intersection,1,0,fail,fail,Java interop (java./javax. reference)
+i13332shapeless,1,0,fail,fail,serialization
+i13332shapeless-b,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i13334,2,0,fail,fail,implicit / given / using (D3)
+i13358,3,1,fail,fail,no out-of-scope construct found
+i13433,1,1,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i13433b,1,1,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i13461-b,2,1,fail,fail,inline / macro / quotes
+i13490.min,2,0,fail,fail,export clause
+i1354,3,1,fail,fail,no out-of-scope construct found
+i1354b,3,1,fail,fail,no out-of-scope construct found
+i13630,3,1,pass,pass,no out-of-scope construct found
+i13691,2,0,fail,fail,implicit / given / using (D3)
+i13691b,2,0,fail,fail,implicit / given / using (D3)
+i13703,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i13747,2,0,pass,pass,inline / macro / quotes
+i1386,1,0,fail,fail,Java interop (java./javax. reference)
+i13862,3,0,fail,fail,no out-of-scope construct found
+i1387,1,0,fail,fail,classOf
+i1392a,3,0,fail,fail,no out-of-scope construct found
+i1392b,3,0,pass,pass,no out-of-scope construct found
+i1392c,3,0,pass,pass,no out-of-scope construct found
+i13950,3,0,fail,fail,no out-of-scope construct found
+i13961a,2,0,fail,fail,implicit / given / using (D3)
+i13968,3,0,fail,fail,no out-of-scope construct found
+i13986,2,1,fail,fail,implicit / given / using (D3)
+i13987,2,0,fail,fail,implicit / given / using (D3)
+i14020,2,1,fail,fail,implicit / given / using (D3)
+i14083,1,0,fail,fail,classOf
+i14127,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i14150,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i14164,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+i14198,1,0,fail,fail,Java interop (java./javax. reference)
+i14215,3,0,fail,fail,no out-of-scope construct found
+i1423,3,1,fail,fail,no out-of-scope construct found
+i1432,3,1,fail,fail,no out-of-scope construct found
+i14340,1,1,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i1441,1,0,fail,fail,classOf
+i14432,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i14432a,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i14432b,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i14432c,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i14582,2,0,fail,fail,lazy collection / Iterator / view (D100)
+i14587,3,0,pass,pass,no out-of-scope construct found
+i14587.min,3,0,fail,fail,no out-of-scope construct found
+i14587.opaques,2,0,pass,pass,type-level feature (opaque / match type / higher-kinded bound)
+i14623,3,0,fail,fail,no out-of-scope construct found
+i1463,3,0,fail,fail,no out-of-scope construct found
+i14667,3,1,fail,fail,no out-of-scope construct found
+i14675,3,1,fail,fail,no out-of-scope construct found
+i14693,2,1,fail,fail,Array (D69 / no Array type)
+i14705,3,0,fail,fail,no out-of-scope construct found
+i1490,3,1,fail,fail,no out-of-scope construct found
+i14964,3,0,fail,fail,no out-of-scope construct found
+i14964b,1,1,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i14970,2,0,fail,fail,Array (D69 / no Array type)
+i14983,3,0,pass,pass,no out-of-scope construct found
+i1503,2,1,fail,fail,anonymous class or class nested in a class (D80)
+i15101,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i15190,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i15234,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i15287,3,0,fail,fail,no out-of-scope construct found
+i15302a,2,0,fail,fail,inline / macro / quotes
+i15302b,3,0,fail,fail,no out-of-scope construct found
+i15315,2,0,fail,fail,anonymous class or class nested in a class (D80)
+i15317,2,0,fail,fail,inline / macro / quotes
+i1533,1,0,pass,pass,Java interop (java./javax. reference)
+i15374,2,0,fail,fail,inline / macro / quotes
+i15399,1,1,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i1543,3,1,pass,pass,no out-of-scope construct found
+i15618,2,1,fail,fail,Array (D69 / no Array type)
+i1569,2,1,fail,fail,inline / macro / quotes
+i15702,3,1,fail,fail,no out-of-scope construct found
+i15723,3,1,pass,pass,no out-of-scope construct found
+i15725,2,1,fail,fail,inline / macro / quotes
+i1573,3,1,pass,pass,no out-of-scope construct found
+i15840,2,0,fail,fail,implicit / given / using (D3)
+i15855,3,0,pass,pass,no out-of-scope construct found
+i15903,1,1,fail,fail,classOf
+i15903b,1,1,fail,fail,classOf
+i15903c,1,1,fail,fail,classOf
+i15903d,1,1,fail,fail,classOf
+i15913,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+i15943,3,1,pass,pass,no out-of-scope construct found
+i15988a,1,0,fail,fail,scala.compiletime / staging
+i15988b,1,0,fail,fail,scala.compiletime / staging
+i15998,3,0,fail,fail,no out-of-scope construct found
+i16006,3,1,fail,fail,no out-of-scope construct found
+i16065,3,0,fail,fail,no out-of-scope construct found
+i16092,3,0,fail,fail,no out-of-scope construct found
+i16108,2,0,fail,fail,implicit / given / using (D3)
+i16213,3,0,fail,fail,no out-of-scope construct found
+i16252,1,0,fail,fail,scala.compiletime / staging
+i16390,2,0,fail,fail,inline / macro / quotes
+i16458,2,0,fail,fail,lazy collection / Iterator / view (D100)
+i16459,2,0,fail,fail,lazy collection / Iterator / view (D100)
+i16464,2,0,fail,fail,implicit / given / using (D3)
+i16728,3,1,fail,fail,no out-of-scope construct found
+i16785,2,1,fail,fail,implicit / given / using (D3)
+i16806,1,1,fail,fail,Java interop (java./javax. reference)
+i16879,3,0,fail,fail,no out-of-scope construct found
+i1692,1,0,fail,fail,JVM reflection via getClass
+i1692b,1,0,fail,fail,JVM reflection via getClass
+i16943,3,0,fail,fail,no out-of-scope construct found
+i17021,3,0,fail,fail,no out-of-scope construct found
+i17021.defs,3,0,fail,fail,no out-of-scope construct found
+i17115,2,1,fail,fail,implicit / given / using (D3)
+i17317,3,1,fail,fail,no out-of-scope construct found
+i17317-b,3,1,pass,pass,no out-of-scope construct found
+i1732,3,0,fail,fail,no out-of-scope construct found
+i1732_1,3,0,fail,fail,no out-of-scope construct found
+i17332,3,0,fail,fail,no out-of-scope construct found
+i1748,2,1,fail,fail,implicit / given / using (D3)
+i17549,3,1,fail,fail,no out-of-scope construct found
+i17555,1,0,fail,fail,serialization
+i17584,2,0,fail,fail,inline / macro / quotes
+i17584a,2,0,fail,fail,inline / macro / quotes
+i1773,2,1,fail,fail,implicit / given / using (D3)
+i17761,1,1,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i1779,2,1,fail,fail,implicit / given / using (D3)
+i18150,1,1,fail,fail,scala.compiletime / staging
+i18183,2,0,fail,fail,implicit / given / using (D3)
+i18183.findRef,2,0,fail,fail,implicit / given / using (D3)
+i18183.given,2,0,fail,fail,implicit / given / using (D3)
+i18183.mixed,2,0,fail,fail,implicit / given / using (D3)
+i1820,3,1,fail,fail,no out-of-scope construct found
+i1820b,2,1,fail,fail,anonymous class or class nested in a class (D80)
+i18315,3,0,fail,fail,no out-of-scope construct found
+i1856,3,1,fail,fail,no out-of-scope construct found
+i18612-a,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i18612-b,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i18612-c,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i18612-d,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i18638,2,0,fail,fail,type-level feature (opaque / match type / higher-kinded bound)
+i18701,2,1,fail,fail,anonymous class or class nested in a class (D80)
+i18701.fixed,2,1,fail,fail,anonymous class or class nested in a class (D80)
+i1915,3,0,fail,fail,no out-of-scope construct found
+i19178,1,1,fail,fail,checkfile expects a JVM-qualified class name
+i19224,3,0,fail,fail,no out-of-scope construct found
+i19270,1,0,fail,fail,classOf
+i19394,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i19396,3,0,fail,fail,no out-of-scope construct found
+i19587,2,0,fail,fail,export clause
+i1960,3,0,pass,pass,no out-of-scope construct found
+i19641,3,0,fail,fail,no out-of-scope construct found
+i19711,1,0,fail,fail,JVM reflection via getClass
+i19724,2,0,fail,fail,inline / macro / quotes
+i1990b,2,1,fail,fail,inline / macro / quotes
+i1991,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i2004,3,1,fail,fail,no out-of-scope construct found
+i2004b,3,1,fail,fail,no out-of-scope construct found
+i20095,2,1,fail,fail,inline / macro / quotes
+i20145,3,1,fail,fail,no out-of-scope construct found
+i2020,3,0,fail,fail,no out-of-scope construct found
+i20225,2,1,fail,fail,inline / macro / quotes
+i20284,3,1,pass,pass,no out-of-scope construct found
+i20395,2,1,fail,fail,inline / macro / quotes
+i2077,2,1,pass,pass,inline / macro / quotes
+i20856,1,1,fail,fail,Java interop (java./javax. reference)
+i209,3,0,pass,pass,no out-of-scope construct found
+i21213,3,1,fail,fail,no out-of-scope construct found
+i21213-min,3,1,fail,fail,no out-of-scope construct found
+i2146,2,1,fail,fail,implicit / given / using (D3)
+i2147,1,1,fail,fail,JVM System / Console / Predef JVM surface
+i2156,3,0,fail,fail,no out-of-scope construct found
+i2163,3,0,fail,fail,no out-of-scope construct found
+i22150,2,1,fail,fail,Array (D69 / no Array type)
+i22345,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i22497,1,1,fail,fail,classOf
+i22498,2,0,fail,fail,inline / macro / quotes
+i2266,2,1,fail,fail,inline / macro / quotes
+i2275,1,0,fail,fail,Java threads / j.u.concurrent
+i22888,2,0,fail,fail,Array (D69 / no Array type)
+i22900,3,1,fail,fail,no out-of-scope construct found
+i22900a,3,1,fail,fail,no out-of-scope construct found
+i22968,1,1,fail,fail,scala.compiletime / staging
+i23131,3,0,fail,fail,no out-of-scope construct found
+i2314,3,0,fail,fail,no out-of-scope construct found
+i23179,2,0,fail,fail,Array (D69 / no Array type)
+i23279,2,0,fail,fail,inline / macro / quotes
+i23305,2,0,fail,fail,implicit / given / using (D3)
+i2337,2,0,fail,fail,lazy collection / Iterator / view (D100)
+i2337b,2,0,fail,fail,lazy collection / Iterator / view (D100)
+i23409,2,0,fail,fail,implicit / given / using (D3)
+i23409b,2,0,fail,fail,implicit / given / using (D3)
+i23440,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+i23444,3,0,fail,fail,no out-of-scope construct found
+i23477,3,0,fail,fail,no out-of-scope construct found
+i23479b,1,0,fail,fail,JVM reflection via getClass
+i2360,2,1,pass,pass,inline / macro / quotes
+i23693,3,0,fail,fail,no out-of-scope construct found
+i23776,2,1,fail,fail,inline / macro / quotes
+i23875,2,1,fail,fail,anonymous class or class nested in a class (D80)
+i23897,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i23901,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i2396,2,0,fail,fail,PartialFunction / collect (D63)
+i2396b,2,0,fail,fail,PartialFunction / collect (D63)
+i2396c,2,0,fail,fail,PartialFunction / collect (D63)
+i24056,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i24201a,3,1,fail,fail,no out-of-scope construct found
+i24201b,3,1,fail,fail,no out-of-scope construct found
+i24204,2,0,fail,fail,Array (D69 / no Array type)
+i24357,2,0,fail,fail,anonymous class or class nested in a class (D80)
+i24420-inline-local-ref,2,0,fail,fail,inline / macro / quotes
+i24420-inline-val,2,0,fail,fail,inline / macro / quotes
+i24420-transparent-inline-local-ref,2,0,fail,fail,inline / macro / quotes
+i2456,2,1,fail,fail,PartialFunction / collect (D63)
+i24573,3,1,fail,fail,no out-of-scope construct found
+i24653,1,1,fail,fail,classOf
+i24673,3,0,fail,fail,no out-of-scope construct found
+i24826,2,0,fail,fail,anonymous class or class nested in a class (D80)
+i24877,2,0,fail,fail,inline / macro / quotes
+i24926,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+i24998,1,0,fail,fail,JVM reflection via getClass
+i25000,2,0,fail,fail,anonymous class or class nested in a class (D80)
+i25000b,2,0,fail,fail,anonymous class or class nested in a class (D80)
+i25077,2,0,fail,fail,inline / macro / quotes
+i2508,2,0,fail,fail,implicit / given / using (D3)
+i25089,3,1,fail,fail,no out-of-scope construct found
+i2567,2,1,fail,fail,implicit / given / using (D3)
+i25725,2,1,fail,fail,implicit / given / using (D3)
+i25943,2,0,fail,fail,anonymous class or class nested in a class (D80)
+i25947,2,0,fail,fail,Array (D69 / no Array type)
+i26099,2,0,fail,fail,implicit / given / using (D3)
+i26176,2,0,fail,fail,inline / macro / quotes
+i26176-with-implicits,2,0,fail,fail,implicit / given / using (D3)
+i26349,3,0,fail,fail,no out-of-scope construct found
+i26800-trait-init-binary-compat,1,0,fail,fail,classOf
+i2738,1,1,fail,fail,Java threads / j.u.concurrent
+i2772,1,0,fail,fail,Java interop (java./javax. reference)
+i2795,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i2808,2,1,fail,fail,implicit / given / using (D3)
+i2883,1,1,fail,fail,JVM reflection via getClass
+i2895a,2,0,pass,pass,inline / macro / quotes
+i2916,3,1,pass,pass,no out-of-scope construct found
+i2939,2,0,fail,fail,implicit / given / using (D3)
+i2964,1,1,fail,fail,JVM reflection via getClass
+i2964b,1,1,fail,fail,JVM reflection via getClass
+i2964c,1,1,fail,fail,JVM reflection via getClass
+i2964d,1,1,fail,fail,JVM reflection via getClass
+i2964e,1,1,fail,fail,JVM reflection via getClass
+i3000b,1,1,fail,fail,JVM reflection via getClass
+i3006,1,1,fail,fail,Java threads / j.u.concurrent
+i3006b,1,1,fail,fail,Java threads / j.u.concurrent
+i3018,3,0,pass,pass,no out-of-scope construct found
+i3189,3,0,pass,pass,no out-of-scope construct found
+i3200c,3,0,fail,fail,no out-of-scope construct found
+i3207,1,1,fail,fail,checkfile expects a JVM collection name
+i3248,3,0,fail,fail,no out-of-scope construct found
+i3248b,3,0,fail,fail,no out-of-scope construct found
+i3248c,3,0,fail,fail,no out-of-scope construct found
+i3248d,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+i3339,2,1,fail,fail,Array (D69 / no Array type)
+i3340,1,1,fail,fail,checkfile expects a JVM stack trace
+i3396,2,1,fail,fail,implicit / given / using (D3)
+i3448,2,0,fail,fail,implicit / given / using (D3)
+i3539,3,0,fail,fail,no out-of-scope construct found
+i3548,3,0,fail,fail,no out-of-scope construct found
+i3624,3,0,fail,fail,no out-of-scope construct found
+i3920,2,0,fail,fail,Ordering / Numeric (D62)
+i3930,3,0,fail,fail,no out-of-scope construct found
+i4037,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i4073,2,1,fail,fail,implicit / given / using (D3)
+i4073b,3,1,pass,pass,no out-of-scope construct found
+i4073c,3,1,pass,pass,no out-of-scope construct found
+i4177,2,0,fail,fail,PartialFunction / collect (D63)
+i4205,1,1,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i4241,2,0,fail,fail,PartialFunction / collect (D63)
+i4364a,1,0,fail,fail,Java interop (java./javax. reference)
+i4364b,1,0,fail,fail,Java interop (java./javax. reference)
+i4404a,1,1,fail,fail,Java interop (java./javax. reference)
+i4404b,1,1,fail,fail,Java interop (java./javax. reference)
+i4404c,1,1,fail,fail,Java interop (java./javax. reference)
+i4410,3,0,pass,pass,no out-of-scope construct found
+i4430,1,0,fail,fail,Java interop (java./javax. reference)
+i4446,1,0,fail,fail,Java interop (java./javax. reference)
+i4451,3,0,fail,fail,no out-of-scope construct found
+i4496a,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i4496b,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i4523,1,1,fail,fail,classOf
+i4528,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i4557,3,1,fail,fail,no out-of-scope construct found
+i4557a,3,1,fail,fail,no out-of-scope construct found
+i4558,3,0,pass,pass,no out-of-scope construct found
+i4559,3,1,pass,pass,no out-of-scope construct found
+i4563,3,1,fail,fail,no out-of-scope construct found
+i4600,2,0,fail,fail,implicit / given / using (D3)
+i4600b,2,0,fail,fail,implicit / given / using (D3)
+i4659b,3,0,fail,fail,no out-of-scope construct found
+i4754,2,1,fail,fail,inline / macro / quotes
+i4935,3,0,pass,pass,no out-of-scope construct found
+i4935b,3,0,pass,pass,no out-of-scope construct found
+i4947,2,1,fail,fail,inline / macro / quotes
+i4947a2,2,1,fail,fail,inline / macro / quotes
+i4947c,2,1,fail,fail,inline / macro / quotes
+i4961,2,0,fail,fail,lazy collection / Iterator / view (D100)
+i4984b,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+i4984c,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+i4984d,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+i4984e,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+i502,1,1,fail,fail,classOf
+i505,1,0,fail,fail,synchronized
+i5067,3,1,pass,pass,no out-of-scope construct found
+i5067b,3,1,fail,fail,no out-of-scope construct found
+i5077,2,1,pass,pass,inline / macro / quotes
+i5224,2,1,fail,fail,implicit / given / using (D3)
+i5257,3,1,fail,fail,no out-of-scope construct found
+i5260,3,1,fail,fail,no out-of-scope construct found
+i5340,3,1,pass,pass,no out-of-scope construct found
+i5350,3,1,pass,pass,no out-of-scope construct found
+i5350b,3,1,fail,fail,no out-of-scope construct found
+i5350c,3,1,pass,pass,no out-of-scope construct found
+i5350d,3,1,pass,pass,no out-of-scope construct found
+i5386,3,1,fail,fail,no out-of-scope construct found
+i5441,1,1,fail,fail,Java interop (java./javax. reference)
+i5455,2,0,fail,fail,implicit / given / using (D3)
+i5527,2,0,fail,fail,implicit / given / using (D3)
+i5606,3,0,fail,fail,no out-of-scope construct found
+i5791,3,1,fail,fail,no out-of-scope construct found
+i5823,3,1,fail,fail,no out-of-scope construct found
+i5924,3,0,fail,fail,no out-of-scope construct found
+i5924b,3,0,fail,fail,no out-of-scope construct found
+i5924c,3,0,fail,fail,no out-of-scope construct found
+i5976,2,0,fail,fail,implicit / given / using (D3)
+i6109,3,0,fail,fail,no out-of-scope construct found
+i6219,2,0,fail,fail,inline / macro / quotes
+i6341,2,0,pass,pass,inline / macro / quotes
+i6490,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+i6490b,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+i659,2,0,fail,fail,PartialFunction / collect (D63)
+i6710,3,0,fail,fail,no out-of-scope construct found
+i6716,2,0,fail,fail,implicit / given / using (D3)
+i6816,2,0,fail,fail,implicit / given / using (D3)
+i6834,1,0,fail,fail,JVM reflection via getClass
+i6858,2,0,fail,fail,inline / macro / quotes
+i689,3,0,fail,fail,no out-of-scope construct found
+i6891,3,1,fail,fail,no out-of-scope construct found
+i6902,3,0,fail,fail,no out-of-scope construct found
+i6987,3,0,fail,fail,no out-of-scope construct found
+i6987b,3,0,fail,fail,no out-of-scope construct found
+i6996,3,1,fail,fail,no out-of-scope construct found
+i7031,3,0,pass,pass,no out-of-scope construct found
+i7049,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i7086,2,0,fail,fail,export clause
+i7110,2,0,fail,fail,inline / macro / quotes
+i7281,3,0,fail,fail,no out-of-scope construct found
+i7359,1,1,fail,fail,JVM System / Console / Predef JVM surface
+i7375,3,0,fail,fail,no out-of-scope construct found
+i744,3,1,pass,pass,no out-of-scope construct found
+i7487,1,0,fail,fail,scala.compiletime / staging
+i7488,1,0,fail,fail,scala.compiletime / staging
+i756,3,0,pass,pass,no out-of-scope construct found
+i7613,2,1,fail,fail,implicit / given / using (D3)
+i763,3,0,pass,pass,no out-of-scope construct found
+i7630,3,1,fail,fail,no out-of-scope construct found
+i764,3,0,pass,pass,no out-of-scope construct found
+i7675,3,1,fail,fail,no out-of-scope construct found
+i7677,3,0,fail,fail,no out-of-scope construct found
+i768,1,1,fail,fail,checkfile expects a JVM collection name
+i7783,3,0,pass,pass,no out-of-scope construct found
+i7788,2,1,fail,fail,implicit / given / using (D3)
+i7798,2,0,fail,fail,inline / macro / quotes
+i7843,2,1,fail,fail,implicit / given / using (D3)
+i7868,1,0,fail,fail,scala.compiletime / staging
+i789,3,1,fail,fail,no out-of-scope construct found
+i7926,3,1,pass,pass,no out-of-scope construct found
+i7960,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+i7963,1,0,fail,fail,Java interop (java./javax. reference)
+i7991,3,0,pass,pass,no out-of-scope construct found
+i8033,1,0,fail,fail,Java interop (java./javax. reference)
+i8035,2,0,fail,fail,implicit / given / using (D3)
+i8058,2,0,fail,fail,inline / macro / quotes
+i806,3,0,fail,fail,no out-of-scope construct found
+i8064,3,0,pass,pass,no out-of-scope construct found
+i8073,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i8073b,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i8096,3,0,pass,pass,no out-of-scope construct found
+i8314,2,0,fail,fail,Array (D69 / no Array type)
+i8396,2,0,fail,fail,implicit / given / using (D3)
+i8398,3,0,fail,fail,no out-of-scope construct found
+i8425,1,1,fail,fail,Java interop (java./javax. reference)
+i8530,2,1,fail,fail,implicit / given / using (D3)
+i8530-b,1,0,fail,fail,scala.compiletime / staging
+i8577a,2,0,fail,fail,inline / macro / quotes
+i8577b,2,0,fail,fail,inline / macro / quotes
+i8577c,2,0,fail,fail,inline / macro / quotes
+i8577d,2,0,fail,fail,inline / macro / quotes
+i8577e,2,0,fail,fail,inline / macro / quotes
+i8577f,2,0,fail,fail,inline / macro / quotes
+i8577g,2,0,fail,fail,inline / macro / quotes
+i8577h,2,0,fail,fail,inline / macro / quotes
+i8577i,2,0,fail,fail,inline / macro / quotes
+i8582,3,1,pass,pass,no out-of-scope construct found
+i8662,2,1,fail,fail,PartialFunction / collect (D63)
+i8726,3,0,fail,fail,no out-of-scope construct found
+i876,2,0,fail,fail,implicit / given / using (D3)
+i8903,2,1,fail,fail,implicit / given / using (D3)
+i8931,2,0,fail,fail,anonymous class or class nested in a class (D80)
+i8977,1,0,fail,fail,Java interop (java./javax. reference)
+i9011,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i9056,3,0,fail,fail,no out-of-scope construct found
+i9068,3,0,fail,fail,no out-of-scope construct found
+i9132,1,1,fail,fail,JVM System / Console / Predef JVM surface
+i9155,1,0,fail,fail,JVM reflection via getClass
+i9161,3,0,fail,fail,no out-of-scope construct found
+i9175,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+i9225,3,0,fail,fail,no out-of-scope construct found
+i9341,3,0,fail,fail,no out-of-scope construct found
+i9404,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i9439,1,0,fail,fail,Java interop (java./javax. reference)
+i9473,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+i9482,1,0,fail,fail,Java interop (java./javax. reference)
+i9507,3,0,pass,pass,no out-of-scope construct found
+i9530,2,1,fail,fail,implicit / given / using (D3)
+i9881,1,0,fail,fail,Java interop (java./javax. reference)
+i9928,2,1,fail,fail,implicit / given / using (D3)
+i9939,3,1,fail,fail,no out-of-scope construct found
+iarrays,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+ift-return,2,1,fail,fail,implicit / given / using (D3)
+impconvtimes,1,1,fail,fail,JVM System / Console / Predef JVM surface
+implicit-alias,2,1,fail,fail,implicit / given / using (D3)
+implicit-disambiguation,2,1,fail,fail,implicit / given / using (D3)
+implicit-functors,2,0,fail,fail,implicit / given / using (D3)
+implicit-functors2,2,0,fail,fail,implicit / given / using (D3)
+implicit-specifity,2,0,fail,fail,implicit / given / using (D3)
+implicit-specifity-2,2,0,fail,fail,implicit / given / using (D3)
+implicitFunctionXXL,2,1,fail,fail,implicit / given / using (D3)
+implicitFuns,1,0,fail,fail,Java interop (java./javax. reference)
+implicitFuns2,2,0,fail,fail,implicit / given / using (D3)
+implicitMatch,1,1,fail,fail,JVM reflection via getClass
+implicitclasses,2,0,fail,fail,implicit / given / using (D3)
+implicits-numeric,2,0,fail,fail,implicit / given / using (D3)
+implicits_poly,2,1,fail,fail,implicit / given / using (D3)
+implied-divergence,2,0,fail,fail,implicit / given / using (D3)
+implied-for,2,0,fail,fail,implicit / given / using (D3)
+implied-priority,2,0,fail,fail,implicit / given / using (D3)
+implied-specifity-2,2,0,fail,fail,implicit / given / using (D3)
+imports,1,1,fail,fail,JVM System / Console / Predef JVM surface
+indent,3,0,fail,fail,no out-of-scope construct found
+indexedSeq,3,0,fail,fail,no out-of-scope construct found
+indexedSeq-apply,3,1,fail,fail,no out-of-scope construct found
+infiniteloop,2,1,fail,fail,lazy collection / Iterator / view (D100)
+infix,3,0,fail,fail,no out-of-scope construct found
+inline-override,2,1,fail,fail,inline / macro / quotes
+inline-override-num,2,0,fail,fail,implicit / given / using (D3)
+inline-param-semantics,2,1,fail,fail,inline / macro / quotes
+inline-trait-body-lazy-val,2,0,fail,fail,inline / macro / quotes
+inline-trait-body-override-def,2,0,fail,fail,inline / macro / quotes
+inline-trait-body-override-val,2,1,fail,fail,inline / macro / quotes
+inline-trait-body-statements,2,1,fail,fail,inline / macro / quotes
+inline-trait-body-var,2,1,fail,fail,inline / macro / quotes
+inline-trait-child-and-grandchild-override,2,0,fail,fail,inline / macro / quotes
+inline-trait-clash-method-method,2,0,fail,fail,inline / macro / quotes
+inline-trait-clash-method-val-param,2,0,fail,fail,inline / macro / quotes
+inline-trait-clash-param-method,2,0,fail,fail,inline / macro / quotes
+inline-trait-clash-param-param,2,0,fail,fail,inline / macro / quotes
+inline-trait-clash-param-val-param,2,0,fail,fail,inline / macro / quotes
+inline-trait-clash-param-var-param,2,0,fail,fail,inline / macro / quotes
+inline-trait-clash-val-param-val-param,2,0,fail,fail,inline / macro / quotes
+inline-trait-clashing-parent-params,2,0,fail,fail,inline / macro / quotes
+inline-trait-enclosing-super-call,2,0,fail,fail,inline / macro / quotes
+inline-trait-enclosing-supercall-in-inline-trait,2,0,fail,fail,inline / macro / quotes
+inline-trait-indirect-with-params,2,0,pass,pass,inline / macro / quotes
+inline-trait-inheritance-diamond-simple-trait,2,1,fail,fail,inline / macro / quotes
+inline-trait-inheritance-inline-grandparent,2,1,fail,fail,inline / macro / quotes
+inline-trait-maximum-name-clash,2,0,fail,fail,inline / macro / quotes
+inline-trait-nested,2,0,fail,fail,inline / macro / quotes
+inline-trait-non-inline-blocks-inlining,1,0,fail,fail,Java threads / j.u.concurrent
+inline-trait-override-in-parent-triangle,2,0,fail,fail,inline / macro / quotes
+inline-trait-param-shadows-parent-indirect,2,0,pass,pass,inline / macro / quotes
+inline-trait-signature-parameters-val-block,2,1,fail,fail,inline / macro / quotes
+inline-trait-signature-side-effects-1,2,1,pass,pass,inline / macro / quotes
+inline-trait-signature-side-effects-2,2,1,pass,pass,inline / macro / quotes
+inline-trait-specialized-desugar,2,0,fail,fail,inline / macro / quotes
+inline-trait-super-call,2,0,fail,fail,inline / macro / quotes
+inline-trait-super-chain,2,0,fail,fail,inline / macro / quotes
+inline-trait-varargs,2,0,fail,fail,inline / macro / quotes
+inlineAddDeserializeLambda,1,0,fail,fail,Java interop (java./javax. reference)
+inliner-infer,3,1,pass,pass,no out-of-scope construct found
+innerClass,1,1,fail,fail,JVM reflection via getClass
+innerObject,3,1,pass,pass,no out-of-scope construct found
+instanceof-serializable,1,1,fail,fail,serialization
+instances,2,1,fail,fail,implicit / given / using (D3)
+instances-anonymous,2,1,fail,fail,implicit / given / using (D3)
+interleaving,2,0,fail,fail,implicit / given / using (D3)
+interpolation-opt,2,1,fail,fail,inline / macro / quotes
+interpolationArgs,1,1,fail,fail,checkfile expects a JVM-qualified class name
+intmap,3,0,fail,fail,no out-of-scope construct found
+invocation-receivers,3,1,fail,fail,no out-of-scope construct found
+invocationReceivers1,2,0,fail,fail,anonymous class or class nested in a class (D80)
+invocationReceivers2,2,0,fail,fail,anonymous class or class nested in a class (D80)
+iq,1,1,fail,fail,JVM System / Console / Predef JVM surface
+irrefutable,2,1,fail,fail,inline / macro / quotes
+is-valid-num,1,0,fail,fail,Java interop (java./javax. reference)
+isInstanceOf-eval,3,1,pass,pass,no out-of-scope construct found
+iterables,2,1,fail,fail,lazy collection / Iterator / view (D100)
+iterator-concat,2,1,fail,fail,lazy collection / Iterator / view (D100)
+iterator-from,1,0,fail,fail,JVM reflection via getClass
+iterator-iterate-lazy,2,0,fail,fail,lazy collection / Iterator / view (D100)
+iterator3444,3,0,fail,fail,no out-of-scope construct found
+iterators,2,1,fail,fail,lazy collection / Iterator / view (D100)
+kmpSliceSearch,1,1,fail,fail,Java interop (java./javax. reference)
+lambda-null,3,1,fail,fail,no out-of-scope construct found
+lambda-sam-bridge,3,0,fail,fail,no out-of-scope construct found
+lambda-serialization,1,0,fail,fail,classOf
+lambda-serialization-gc,1,0,fail,fail,classOf
+lambda-serialization-others,1,0,fail,fail,Java interop (java./javax. reference)
+lambda-serialization-security,1,0,fail,fail,Java interop (java./javax. reference)
+lambda-unit,3,0,fail,fail,no out-of-scope construct found
+lazy-exprs,3,1,fail,fail,no out-of-scope construct found
+lazy-impl,1,1,fail,fail,classOf
+lazy-implicit-lists,2,1,fail,fail,implicit / given / using (D3)
+lazy-implicit-nums,2,1,fail,fail,implicit / given / using (D3)
+lazy-override-run,3,1,pass,pass,no out-of-scope construct found
+lazy-threadUnsafe-transient,1,0,fail,fail,Java interop (java./javax. reference)
+lazy-traits,1,1,fail,fail,JVM System / Console / Predef JVM surface
+lazy-val-pattern,3,1,fail,fail,no out-of-scope construct found
+lazy-val-pattern-2,3,1,fail,fail,no out-of-scope construct found
+lazy-val-pattern-3,3,1,fail,fail,no out-of-scope construct found
+lazyVals,3,1,pass,pass,no out-of-scope construct found
+lazyVals_c3.0.0,3,1,pass,pass,no out-of-scope construct found
+lazyVals_c3.1.0,3,1,pass,pass,no out-of-scope construct found
+lift-and-unlift,2,0,fail,fail,PartialFunction / collect (D63)
+liftedTry,3,0,fail,fail,no out-of-scope construct found
+list-apply-eval,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+list_map,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+lists-run,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+literals,3,0,fail,fail,no out-of-scope construct found
+llift,3,0,fail,fail,no out-of-scope construct found
+longmap,3,0,fail,fail,no out-of-scope construct found
+loops,2,0,fail,fail,implicit / given / using (D3)
+loops-alt,1,0,fail,fail,Java interop (java./javax. reference)
+main-functions,3,1,fail,fail,no out-of-scope construct found
+manifest-summoning,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+mapConserve,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+mapValues,2,0,fail,fail,lazy collection / Iterator / view (D100)
+map_test,2,1,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+match-sub-cases,3,0,fail,fail,no out-of-scope construct found
+matchable,1,1,fail,fail,JVM reflection via getClass
+matcharraytail,2,1,fail,fail,Array (D69 / no Array type)
+matchbytes,3,1,pass,pass,no out-of-scope construct found
+matchemptyarray,2,1,fail,fail,Array (D69 / no Array type)
+matchintasany,3,1,pass,pass,no out-of-scope construct found
+matchnull,3,1,pass,pass,no out-of-scope construct found
+matchonseq,3,1,fail,fail,no out-of-scope construct found
+matchonstream,2,1,fail,fail,lazy collection / Iterator / view (D100)
+memoTest,3,0,pass,pass,no out-of-scope construct found
+missingparams,3,1,pass,pass,no out-of-scope construct found
+mixin-bridge-methods,1,0,fail,fail,classOf
+mixin-final-def-object-lucre,3,0,fail,fail,no out-of-scope construct found
+mixin-overrides,3,0,pass,pass,no out-of-scope construct found
+mixin-primitive-on-generic-1,3,1,pass,pass,no out-of-scope construct found
+mixin-primitive-on-generic-2,3,1,pass,pass,no out-of-scope construct found
+mixin-primitive-on-generic-3,3,1,pass,pass,no out-of-scope construct found
+mixin-primitive-on-generic-4,3,1,fail,fail,no out-of-scope construct found
+mixin-primitive-on-generic-5,3,1,fail,fail,no out-of-scope construct found
+mixins,1,1,fail,fail,JVM System / Console / Predef JVM surface
+multi-apply,3,0,fail,fail,no out-of-scope construct found
+mutable-treeset,2,0,fail,fail,implicit / given / using (D3)
+named-patmatch,3,0,fail,fail,no out-of-scope construct found
+named-patterns,3,1,fail,fail,no out-of-scope construct found
+named-tuple-ops,1,0,fail,fail,scala.compiletime / staging
+named-tuple-ordering,2,1,fail,fail,implicit / given / using (D3)
+named-tuples,2,1,fail,fail,inline / macro / quotes
+named-tuples-mirror,1,1,fail,fail,reflection / ClassTag / Mirror / TypeTest
+named-tuples-strawman-2,2,0,fail,fail,inline / macro / quotes
+named-tuples-strictEquality,3,0,fail,fail,no out-of-scope construct found
+named-tuples-xxl,2,1,fail,fail,inline / macro / quotes
+namedtuples-buildcolumn,2,1,fail,fail,implicit / given / using (D3)
+nats,2,0,fail,fail,implicit / given / using (D3)
+nested-object-implements-val,3,1,fail,fail,no out-of-scope construct found
+nestedEq,3,0,fail,fail,no out-of-scope construct found
+no-init-enclosing-static-objects,3,1,fail,fail,no out-of-scope construct found
+no-unused-nested-object-field,3,1,fail,fail,no out-of-scope construct found
+no-useless-forwarders,1,0,fail,fail,Java interop (java./javax. reference)
+noProtectedSuper,2,0,fail,fail,anonymous class or class nested in a class (D80)
+non-jvm-sam-non-apply,3,1,fail,fail,no out-of-scope construct found
+nonLocalReturns,3,0,fail,fail,no out-of-scope construct found
+nonlocal-return,3,0,fail,fail,no out-of-scope construct found
+nonlocalreturn,3,1,fail,fail,no out-of-scope construct found
+nothing-lazy-val,1,1,fail,fail,classOf
+nothing-val,1,1,fail,fail,classOf
+nothing-var,1,1,fail,fail,classOf
+nothingTypeDce,3,0,pass,pass,no out-of-scope construct found
+nothingTypeNoFramesNoDce,3,1,pass,pass,no out-of-scope construct found
+nothingTypeNoOpt,3,0,pass,pass,no out-of-scope construct found
+null-and-intersect,2,1,fail,fail,lazy collection / Iterator / view (D100)
+null-hash,3,0,fail,fail,no out-of-scope construct found
+null-lazy-val,1,1,fail,fail,JVM reflection via getClass
+null-val,1,1,fail,fail,JVM reflection via getClass
+null-var,1,1,fail,fail,JVM reflection via getClass
+nullAsInstanceOf,1,0,fail,fail,Java interop (java./javax. reference)
+nullInstanceEval,3,0,pass,pass,no out-of-scope construct found
+numbereq,1,0,fail,fail,Java interop (java./javax. reference)
+numeric-range,3,0,fail,fail,no out-of-scope construct found
+opaque-immutable-array-xm,1,0,fail,fail,Java interop (java./javax. reference)
+opaque-inline2,2,0,fail,fail,inline / macro / quotes
+optimizer-array-load,2,1,fail,fail,Array (D69 / no Array type)
+option-extract,2,0,fail,fail,PartialFunction / collect (D63)
+option-fold,3,1,fail,fail,no out-of-scope construct found
+ordered,2,0,fail,fail,implicit / given / using (D3)
+ordinal-innerclass,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+outer-accessors,3,0,fail,fail,no out-of-scope construct found
+outer-synchronized,1,1,fail,fail,Java interop (java./javax. reference)
+overload_directly_applicable,2,1,fail,fail,implicit / given / using (D3)
+overloading-specifity,2,0,fail,fail,implicit / given / using (D3)
+overloads,1,1,fail,fail,JVM System / Console / Predef JVM surface
+paramForwarding,1,1,fail,fail,JVM reflection via getClass
+paramForwarding_together,1,1,fail,fail,classOf
+paramForwarding_together_b,1,1,fail,fail,classOf
+partialFunctions,2,0,fail,fail,PartialFunction / collect (D63)
+patch-boundary,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+patmat,3,1,fail,fail,no out-of-scope construct found
+patmat-bind-typed,3,1,pass,pass,no out-of-scope construct found
+patmat-exhaustive-last-union,1,1,fail,fail,checkfile expects a scala.* qualified name
+patmat-exhaustive-last-union-2,3,0,pass,pass,no out-of-scope construct found
+patmat-finally,3,0,pass,pass,no out-of-scope construct found
+patmat-option-named,3,0,pass,pass,no out-of-scope construct found
+patmat-spec,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+patmatch-classtag,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+pf-sub-cases,2,0,fail,fail,PartialFunction / collect (D63)
+phantomValueClass,3,1,fail,fail,no out-of-scope construct found
+pkgobjvals,3,1,fail,fail,no out-of-scope construct found
+planets,2,1,pass,pass,inline / macro / quotes
+poly-kinded-derives,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+polymorphic-functions,2,0,fail,fail,implicit / given / using (D3)
+predef-cycle,1,0,fail,fail,Java threads / j.u.concurrent
+priorityQueue,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+productElementName,3,1,fail,fail,no out-of-scope construct found
+promotion,1,1,fail,fail,JVM System / Console / Predef JVM surface
+properties-version-string,3,0,fail,fail,no out-of-scope construct found
+protectedSuper,2,0,fail,fail,anonymous class or class nested in a class (D80)
+protectedacc,1,1,fail,fail,Java interop (java./javax. reference)
+proxy,2,1,fail,fail,anonymous class or class nested in a class (D80)
+pure-args-byname-noinline,2,1,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+puzzle,3,1,pass,pass,no out-of-scope construct found
+puzzler54,2,0,fail,fail,implicit / given / using (D3)
+quote-MacroOverride,2,0,fail,fail,inline / macro / quotes
+quoted-sematics-1,2,1,fail,fail,PartialFunction / collect (D63)
+rainwater,2,1,fail,fail,inline / macro / quotes
+range,2,0,fail,fail,implicit / given / using (D3)
+range-unit,1,1,fail,fail,checkfile expects a JVM-qualified class name
+rawstrings,2,1,fail,fail,inline / macro / quotes
+recursive-with-option,3,0,fail,fail,no out-of-scope construct found
+reducable,3,0,fail,fail,no out-of-scope construct found
+reduce-projections,2,1,fail,fail,inline / macro / quotes
+redundantParents,1,1,fail,fail,JVM reflection via getClass
+rescue,2,0,fail,fail,inline / macro / quotes
+rescue-boundary,2,0,fail,fail,inline / macro / quotes
+retclosure,1,1,fail,fail,JVM System / Console / Predef JVM surface
+retsynch,1,1,fail,fail,synchronized
+returning,2,0,fail,fail,implicit / given / using (D3)
+returns,3,0,pass,pass,no out-of-scope construct found
+richWrapperEquals,1,0,pass,pass,Java interop (java./javax. reference)
+richs,1,1,fail,fail,JVM reflection via getClass
+rooted_stringcontext,3,0,pass,pass,no out-of-scope construct found
+run-bug4840,3,1,fail,fail,no out-of-scope construct found
+runtime,1,1,fail,fail,JVM System / Console / Predef JVM surface
+runtime-richChar,2,1,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+runtimeChecked,3,0,fail,fail,no out-of-scope construct found
+runtimeChecked-2,3,0,fail,fail,no out-of-scope construct found
+safeThrowsStrawman,2,1,fail,fail,implicit / given / using (D3)
+safeThrowsStrawman2,1,1,fail,fail,scala.compiletime / staging
+saferExceptions,1,0,fail,fail,Java interop (java./javax. reference)
+sammy_repeated,1,1,fail,fail,checkfile expects a JVM collection name
+scala-tests-typeChecks,1,0,fail,fail,scala.compiletime / staging
+scala_enum_testing,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+scan,2,0,fail,fail,lazy collection / Iterator / view (D100)
+search,3,1,fail,fail,no out-of-scope construct found
+selectable-new,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+seqlike-kmp,1,1,fail,fail,JVM reflection via getClass
+serialization-new,1,1,fail,fail,classOf
+serialization-new-legacy,1,1,fail,fail,classOf
+serialize,1,0,fail,fail,Java interop (java./javax. reference)
+serialize-stream,1,1,fail,fail,Java interop (java./javax. reference)
+simpleClass,1,1,fail,fail,JVM reflection via getClass
+single-case-expr,2,0,fail,fail,PartialFunction / collect (D63)
+singleQuoteStrings,2,1,fail,fail,inline / macro / quotes
+singletons,3,1,fail,fail,no out-of-scope construct found
+sip23-valueof,2,0,fail,fail,implicit / given / using (D3)
+slice-strings,3,0,fail,fail,no out-of-scope construct found
+slices,2,1,fail,fail,Array (D69 / no Array type)
+sort,3,1,pass,pass,no out-of-scope construct found
+sorted-sets-ok,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+spec-self,3,1,fail,fail,no out-of-scope construct found
+specialized-trait-all-general-raw,1,0,fail,fail,Java threads / j.u.concurrent
+specialized-trait-argument-specializes-current-trait,2,0,fail,fail,inline / macro / quotes
+specialized-trait-array-of-specialized-trait-classtag,2,0,fail,fail,inline / macro / quotes
+specialized-trait-as-parameter,2,0,fail,fail,inline / macro / quotes
+specialized-trait-as-return-type,2,0,fail,fail,inline / macro / quotes
+specialized-trait-as-val,2,0,fail,fail,inline / macro / quotes
+specialized-trait-check-bridge-exists,1,0,fail,fail,classOf
+specialized-trait-check-bridge-exists-hidden-by-inline,1,0,fail,fail,classOf
+specialized-trait-check-specialized-method-called,1,0,fail,fail,Java threads / j.u.concurrent
+specialized-trait-class-extends-specialized-trait-check-specialized,1,0,fail,fail,classOf
+specialized-trait-collections-example,2,0,fail,fail,inline / macro / quotes
+specialized-trait-erasure,1,0,fail,fail,classOf
+specialized-trait-erasure-impl-classes,1,0,fail,fail,Java threads / j.u.concurrent
+specialized-trait-inline-trait-ordering-edge-case,1,0,fail,fail,classOf
+specialized-trait-inlining-loop,2,0,fail,fail,inline / macro / quotes
+specialized-trait-list-of-specialized-trait,1,0,fail,fail,Java threads / j.u.concurrent
+specialized-trait-list-zip-example,2,1,fail,fail,inline / macro / quotes
+specialized-trait-manual-class-extend-not-top-of-hierarchy,1,0,fail,fail,classOf
+specialized-trait-masked-inline-specialization-via-inlining,1,0,fail,fail,Java threads / j.u.concurrent
+specialized-trait-masked-inline-specialized,1,0,fail,fail,Java threads / j.u.concurrent
+specialized-trait-maths,2,0,fail,fail,inline / macro / quotes
+specialized-trait-multiple-package-same-file,1,0,fail,fail,Java threads / j.u.concurrent
+specialized-trait-multiple-package-same-file-nested,1,0,fail,fail,Java threads / j.u.concurrent
+specialized-trait-multiple-parameter-packs,2,0,fail,fail,inline / macro / quotes
+specialized-trait-multiple-parameter-packs-method,2,0,fail,fail,inline / macro / quotes
+specialized-trait-one-parent-is-inline,2,0,fail,fail,inline / macro / quotes
+specialized-trait-package-contains-object,1,0,fail,fail,Java threads / j.u.concurrent
+specialized-trait-pathological-context-bounds,2,0,fail,fail,inline / macro / quotes
+specialized-trait-requires-inline-trait-inlining,2,0,fail,fail,inline / macro / quotes
+specialized-trait-scoped-inside-object,2,0,fail,fail,inline / macro / quotes
+specialized-trait-scoped-inside-object-2,2,0,pass,pass,inline / macro / quotes
+specialized-trait-scoped-inside-object-3,2,0,pass,pass,inline / macro / quotes
+specialized-trait-self-inline,2,1,fail,fail,implicit / given / using (D3)
+specialized-trait-subtyping-once-specialized,2,0,fail,fail,inline / macro / quotes
+specialized-trait-super-chain,2,0,fail,fail,inline / macro / quotes
+specialized-trait-varargs,2,0,fail,fail,inline / macro / quotes
+specialized-trait-variance,2,0,fail,fail,inline / macro / quotes
+specialized-trait-vector-dot-product,2,0,fail,fail,implicit / given / using (D3)
+specialized-trait-vector-zip,2,1,fail,fail,inline / macro / quotes
+spread-patterns,2,1,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+spreads,2,1,fail,fail,Array (D69 / no Array type)
+spreads-subtyping,2,1,fail,fail,Array (D69 / no Array type)
+stable-enum-hashcodes,3,1,pass,pass,no out-of-scope construct found
+static-module-method,3,1,pass,pass,no out-of-scope construct found
+statics,3,0,fail,fail,no out-of-scope construct found
+sticky-extmethod,3,1,pass,pass,no out-of-scope construct found
+stream-stack-overflow-filter-map,2,0,fail,fail,lazy collection / Iterator / view (D100)
+streamWithFilter,2,1,fail,fail,lazy collection / Iterator / view (D100)
+stream_flatmap_odds,1,1,fail,fail,JVM System / Console / Predef JVM surface
+string-context-implicits-with-conversion,2,1,fail,fail,implicit / given / using (D3)
+string-extractor,2,1,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+string-switch,2,1,fail,fail,inline / macro / quotes
+string-switch-defaults-null,3,1,fail,fail,no out-of-scope construct found
+stringbuilder-drop,3,0,fail,fail,no out-of-scope construct found
+structural,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+structural-compat,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+structural-contextual,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+summonAll,2,1,fail,fail,implicit / given / using (D3)
+summonFrom,1,1,fail,fail,JVM reflection via getClass
+supercalls-traits,3,1,pass,pass,no out-of-scope construct found
+supercalls-traits-targetname,3,1,fail,fail,no out-of-scope construct found
+switches,3,0,fail,fail,no out-of-scope construct found
+synchronized-interface,1,1,fail,fail,synchronized
+sysprops,3,0,fail,fail,no out-of-scope construct found
+t0005,3,1,fail,fail,no out-of-scope construct found
+t0017,2,1,fail,fail,Array (D69 / no Array type)
+t0042,3,1,fail,fail,no out-of-scope construct found
+t0048,3,1,pass,pass,no out-of-scope construct found
+t0325,1,1,fail,fail,JVM reflection via getClass
+t0607,3,1,pass,pass,no out-of-scope construct found
+t0631,3,1,pass,pass,no out-of-scope construct found
+t0668,2,0,fail,fail,Array (D69 / no Array type)
+t0677-old,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+t0807,2,1,fail,fail,anonymous class or class nested in a class (D80)
+t0883,3,1,pass,pass,no out-of-scope construct found
+t0936,2,0,fail,fail,anonymous class or class nested in a class (D80)
+t10032,1,1,fail,fail,synchronized
+t1005,2,1,fail,fail,Array (D69 / no Array type)
+t10170,3,1,pass,pass,no out-of-scope construct found
+t10232,1,0,fail,fail,Java interop (java./javax. reference)
+t10290,3,0,fail,fail,no out-of-scope construct found
+t1044,2,0,fail,fail,lazy collection / Iterator / view (D100)
+t1048,3,1,pass,pass,no out-of-scope construct found
+t10594,3,0,pass,pass,no out-of-scope construct found
+t107,1,1,fail,fail,JVM System / Console / Predef JVM surface
+t1074,1,1,fail,fail,JVM System / Console / Predef JVM surface
+t1192,2,1,fail,fail,Array (D69 / no Array type)
+t1220,2,0,fail,fail,PartialFunction / collect (D63)
+t12348,1,0,fail,fail,classOf
+t1300,2,1,fail,fail,Array (D69 / no Array type)
+t13033,3,0,fail,fail,no out-of-scope construct found
+t1309,2,0,fail,fail,Array (D69 / no Array type)
+t1323,2,1,fail,fail,lazy collection / Iterator / view (D100)
+t1333,3,1,fail,fail,no out-of-scope construct found
+t1335,3,0,pass,pass,no out-of-scope construct found
+t13418,3,1,fail,fail,no out-of-scope construct found
+t1360,1,1,fail,fail,Java interop (java./javax. reference)
+t1373,3,0,pass,pass,no out-of-scope construct found
+t1381,2,1,fail,fail,implicit / given / using (D3)
+t1406b,3,0,fail,fail,no out-of-scope construct found
+t1423,3,1,pass,pass,no out-of-scope construct found
+t1434,3,0,fail,fail,no out-of-scope construct found
+t1466,3,0,pass,pass,no out-of-scope construct found
+t1500b,2,0,fail,fail,implicit / given / using (D3)
+t1500c,2,0,fail,fail,implicit / given / using (D3)
+t1505,3,0,fail,fail,no out-of-scope construct found
+t1524,2,1,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t153,2,1,fail,fail,lazy collection / Iterator / view (D100)
+t1535,3,1,pass,pass,no out-of-scope construct found
+t1591,2,1,fail,fail,anonymous class or class nested in a class (D80)
+t1672,3,0,fail,fail,no out-of-scope construct found
+t1697,3,0,pass,pass,no out-of-scope construct found
+t1718,2,1,pass,pass,Array (D69 / no Array type)
+t1747,3,0,pass,pass,no out-of-scope construct found
+t1829,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t1909b,3,0,pass,pass,no out-of-scope construct found
+t1909c,3,0,pass,pass,no out-of-scope construct found
+t1939,3,0,fail,fail,no out-of-scope construct found
+t1987,3,1,fail,fail,no out-of-scope construct found
+t1994,3,0,pass,pass,no out-of-scope construct found
+t2005,2,0,fail,fail,Array (D69 / no Array type)
+t2027,2,1,fail,fail,lazy collection / Iterator / view (D100)
+t2029,2,1,fail,fail,implicit / given / using (D3)
+t2075,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t2087-and-2400,3,0,fail,fail,no out-of-scope construct found
+t2111,3,1,fail,fail,no out-of-scope construct found
+t2127,3,0,fail,fail,no out-of-scope construct found
+t2147,2,1,fail,fail,lazy collection / Iterator / view (D100)
+t216,1,1,fail,fail,JVM System / Console / Predef JVM surface
+t2175,3,0,pass,pass,no out-of-scope construct found
+t2176,2,1,fail,fail,lazy collection / Iterator / view (D100)
+t2177,2,1,fail,fail,lazy collection / Iterator / view (D100)
+t2255,2,1,fail,fail,lazy collection / Iterator / view (D100)
+t2316_run,2,0,fail,fail,implicit / given / using (D3)
+t2333,3,0,pass,pass,no out-of-scope construct found
+t2378,3,0,pass,pass,no out-of-scope construct found
+t2418,3,1,pass,pass,no out-of-scope construct found
+t2446,2,1,fail,fail,Array (D69 / no Array type)
+t2488,3,1,fail,fail,no out-of-scope construct found
+t2526,2,0,fail,fail,lazy collection / Iterator / view (D100)
+t2544,2,1,fail,fail,lazy collection / Iterator / view (D100)
+t2552,2,1,fail,fail,lazy collection / Iterator / view (D100)
+t2594_tcpoly,3,0,fail,fail,no out-of-scope construct found
+t261,3,1,pass,pass,no out-of-scope construct found
+t266,3,0,fail,fail,no out-of-scope construct found
+t2754,3,0,pass,pass,no out-of-scope construct found
+t2755,2,1,fail,fail,Array (D69 / no Array type)
+t2788,2,1,fail,fail,Array (D69 / no Array type)
+t2818,3,1,fail,fail,no out-of-scope construct found
+t2849,3,0,fail,fail,no out-of-scope construct found
+t2857,2,1,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t2867,3,0,pass,pass,no out-of-scope construct found
+t2876,2,0,fail,fail,lazy collection / Iterator / view (D100)
+t2958,2,0,fail,fail,Array (D69 / no Array type)
+t298,2,1,fail,fail,implicit / given / using (D3)
+t3004,3,0,pass,pass,no out-of-scope construct found
+t3026,2,1,fail,fail,Array (D69 / no Array type)
+t3038,3,1,fail,fail,no out-of-scope construct found
+t3038b,3,1,pass,pass,no out-of-scope construct found
+t3038d,1,0,fail,fail,Java interop (java./javax. reference)
+t3048,2,0,fail,fail,anonymous class or class nested in a class (D80)
+t3088,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t3097,3,1,pass,pass,no out-of-scope construct found
+t3112,3,1,fail,fail,no out-of-scope construct found
+t3126,3,0,pass,pass,no out-of-scope construct found
+t3186,3,1,fail,fail,no out-of-scope construct found
+t3199b,1,1,fail,fail,Java interop (java./javax. reference)
+t3220-3,3,1,fail,fail,no out-of-scope construct found
+t3232,3,0,fail,fail,no out-of-scope construct found
+t3235-minimal,3,1,fail,fail,no out-of-scope construct found
+t3241,2,1,fail,fail,lazy collection / Iterator / view (D100)
+t3242b,3,0,fail,fail,no out-of-scope construct found
+t3269,2,1,fail,fail,lazy collection / Iterator / view (D100)
+t3273,2,0,fail,fail,lazy collection / Iterator / view (D100)
+t3326,2,1,fail,fail,implicit / given / using (D3)
+t3327,3,1,fail,fail,no out-of-scope construct found
+t3346a,2,1,fail,fail,implicit / given / using (D3)
+t3346d,2,0,fail,fail,implicit / given / using (D3)
+t3346g,2,1,fail,fail,implicit / given / using (D3)
+t3346h,2,1,fail,fail,implicit / given / using (D3)
+t3353,2,1,fail,fail,implicit / given / using (D3)
+t3395,2,1,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t3397,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t3452,3,1,pass,pass,no out-of-scope construct found
+t3452c,2,1,fail,fail,anonymous class or class nested in a class (D80)
+t3452f,1,0,fail,fail,classOf
+t3452h,3,0,fail,fail,no out-of-scope construct found
+t3487,3,0,pass,pass,no out-of-scope construct found
+t3488,3,1,pass,pass,no out-of-scope construct found
+t3493,3,0,fail,fail,no out-of-scope construct found
+t3496,2,0,fail,fail,lazy collection / Iterator / view (D100)
+t3502,2,0,fail,fail,lazy collection / Iterator / view (D100)
+t3508,2,0,fail,fail,lazy collection / Iterator / view (D100)
+t3509,3,0,fail,fail,no out-of-scope construct found
+t3516,2,1,fail,fail,lazy collection / Iterator / view (D100)
+t3529,2,0,fail,fail,lazy collection / Iterator / view (D100)
+t3540,2,0,fail,fail,lazy collection / Iterator / view (D100)
+t3563,3,0,pass,pass,no out-of-scope construct found
+t3603,3,0,fail,fail,no out-of-scope construct found
+t3613,1,0,fail,fail,Java interop (java./javax. reference)
+t3616,3,1,fail,fail,no out-of-scope construct found
+t3619,2,0,fail,fail,implicit / given / using (D3)
+t363,2,1,pass,pass,Array (D69 / no Array type)
+t3645,2,0,fail,fail,lazy collection / Iterator / view (D100)
+t3651,3,0,fail,fail,no out-of-scope construct found
+t3670,3,1,pass,pass,no out-of-scope construct found
+t3687,3,1,fail,fail,no out-of-scope construct found
+t3699,3,0,fail,fail,no out-of-scope construct found
+t3702,3,1,pass,pass,no out-of-scope construct found
+t3714,3,0,pass,pass,no out-of-scope construct found
+t3719,3,1,fail,fail,no out-of-scope construct found
+t3726,3,1,pass,pass,no out-of-scope construct found
+t3760,2,0,fail,fail,lazy collection / Iterator / view (D100)
+t3761-overload-byname,3,1,fail,fail,no out-of-scope construct found
+t3763,2,0,fail,fail,Array (D69 / no Array type)
+t3829,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t3832,3,0,fail,fail,no out-of-scope construct found
+t3835,3,1,pass,pass,no out-of-scope construct found
+t3855,3,0,pass,pass,no out-of-scope construct found
+t3877,3,1,pass,pass,no out-of-scope construct found
+t3887,3,0,fail,fail,no out-of-scope construct found
+t3895,3,1,pass,pass,no out-of-scope construct found
+t3923,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t3935,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t3950,3,1,fail,fail,no out-of-scope construct found
+t3980,3,1,pass,pass,no out-of-scope construct found
+t3984,2,0,fail,fail,lazy collection / Iterator / view (D100)
+t3994,2,0,fail,fail,implicit / given / using (D3)
+t4013,2,0,fail,fail,Array (D69 / no Array type)
+t4013b,3,0,fail,fail,no out-of-scope construct found
+t4013c,2,0,fail,fail,Array (D69 / no Array type)
+t4023,1,1,fail,fail,JVM reflection via getClass
+t4024,1,0,fail,fail,JVM reflection via getClass
+t4027,2,1,fail,fail,lazy collection / Iterator / view (D100)
+t405,3,0,pass,pass,no out-of-scope construct found
+t4054,2,0,fail,fail,lazy collection / Iterator / view (D100)
+t4062,3,1,pass,pass,no out-of-scope construct found
+t408,3,0,fail,fail,no out-of-scope construct found
+t4122,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t4147,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t4148,1,1,fail,fail,Java interop (java./javax. reference)
+t4190,2,1,fail,fail,lazy collection / Iterator / view (D100)
+t4288,2,0,fail,fail,lazy collection / Iterator / view (D100)
+t429,1,1,fail,fail,JVM System / Console / Predef JVM surface
+t4297,2,0,fail,fail,lazy collection / Iterator / view (D100)
+t4300,2,1,fail,fail,anonymous class or class nested in a class (D80)
+t4332b,2,0,fail,fail,lazy collection / Iterator / view (D100)
+t4351,3,1,fail,fail,no out-of-scope construct found
+t4398,3,0,fail,fail,no out-of-scope construct found
+t4400,3,0,fail,fail,no out-of-scope construct found
+t4415,3,0,pass,pass,no out-of-scope construct found
+t4482,3,1,pass,pass,no out-of-scope construct found
+t4535,2,1,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t4536,3,1,fail,fail,no out-of-scope construct found
+t4558,2,0,fail,fail,lazy collection / Iterator / view (D100)
+t4565_1,2,1,fail,fail,anonymous class or class nested in a class (D80)
+t4570,3,1,fail,fail,no out-of-scope construct found
+t4577,3,0,fail,fail,no out-of-scope construct found
+t4582,2,0,fail,fail,lazy collection / Iterator / view (D100)
+t4592,3,1,fail,fail,no out-of-scope construct found
+t4601,3,1,fail,fail,no out-of-scope construct found
+t4656,2,1,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t4660,2,0,fail,fail,lazy collection / Iterator / view (D100)
+t4697,2,1,fail,fail,lazy collection / Iterator / view (D100)
+t4709,2,0,fail,fail,lazy collection / Iterator / view (D100)
+t4742,3,0,pass,pass,no out-of-scope construct found
+t4750,2,1,fail,fail,regular expressions (D70)
+t4753,1,1,fail,fail,classOf
+t4770,3,1,fail,fail,no out-of-scope construct found
+t4777,3,1,pass,pass,no out-of-scope construct found
+t4809,3,0,fail,fail,no out-of-scope construct found
+t4813,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+t4827,3,0,fail,fail,no out-of-scope construct found
+t4827b,3,0,fail,fail,no out-of-scope construct found
+t4835,2,1,fail,fail,lazy collection / Iterator / view (D100)
+t4859,3,1,fail,fail,no out-of-scope construct found
+t4871,1,1,fail,fail,classOf
+t4897,3,1,fail,fail,no out-of-scope construct found
+t493,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t4930,2,1,fail,fail,implicit / given / using (D3)
+t4935,3,1,pass,pass,no out-of-scope construct found
+t4954,2,0,fail,fail,lazy collection / Iterator / view (D100)
+t498,2,1,fail,fail,lazy collection / Iterator / view (D100)
+t4996,3,1,fail,fail,no out-of-scope construct found
+t5009,3,1,fail,fail,no out-of-scope construct found
+t5037,3,1,fail,fail,no out-of-scope construct found
+t5040,2,1,fail,fail,anonymous class or class nested in a class (D80)
+t5045,2,1,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t5053,2,1,fail,fail,lazy collection / Iterator / view (D100)
+t5105,3,1,fail,fail,no out-of-scope construct found
+t5158,3,1,pass,pass,no out-of-scope construct found
+t5162,3,0,pass,pass,no out-of-scope construct found
+t5171,3,1,pass,pass,no out-of-scope construct found
+t5201,1,1,fail,fail,JVM System / Console / Predef JVM surface
+t5262,1,1,fail,fail,Java interop (java./javax. reference)
+t5284b,3,1,fail,fail,no out-of-scope construct found
+t5284c,3,1,fail,fail,no out-of-scope construct found
+t5300,2,0,fail,fail,PartialFunction / collect (D63)
+t5328,2,1,fail,fail,lazy collection / Iterator / view (D100)
+t5377,2,1,fail,fail,lazy collection / Iterator / view (D100)
+t5387,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t5394,3,0,fail,fail,no out-of-scope construct found
+t5407,3,1,fail,fail,no out-of-scope construct found
+t5530,2,1,pass,pass,inline / macro / quotes
+t5532,3,0,pass,pass,no out-of-scope construct found
+t5552,3,1,fail,fail,no out-of-scope construct found
+t5568,1,1,fail,fail,JVM reflection via getClass
+t5588,3,1,fail,fail,no out-of-scope construct found
+t5590,1,1,fail,fail,Java interop (java./javax. reference)
+t5604,3,1,fail,fail,no out-of-scope construct found
+t5608,2,1,fail,fail,Array (D69 / no Array type)
+t5610a,3,1,pass,pass,no out-of-scope construct found
+t5612,3,1,fail,fail,no out-of-scope construct found
+t5614,3,1,pass,pass,no out-of-scope construct found
+t5629,3,1,fail,fail,no out-of-scope construct found
+t5629b,2,1,fail,fail,anonymous class or class nested in a class (D80)
+t5648,3,1,pass,pass,no out-of-scope construct found
+t5656,2,1,fail,fail,lazy collection / Iterator / view (D100)
+t5665,2,0,fail,fail,anonymous class or class nested in a class (D80)
+t5680,2,1,fail,fail,Array (D69 / no Array type)
+t5688,3,1,fail,fail,no out-of-scope construct found
+t5729,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t5733,3,1,fail,fail,no out-of-scope construct found
+t5830,3,1,fail,fail,no out-of-scope construct found
+t5856,3,0,fail,fail,no out-of-scope construct found
+t5857,3,0,fail,fail,no out-of-scope construct found
+t5866,3,1,fail,fail,no out-of-scope construct found
+t5867,2,1,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t5879,2,1,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t5923c,3,0,pass,pass,no out-of-scope construct found
+t594,1,1,fail,fail,JVM System / Console / Predef JVM surface
+t5971,2,1,fail,fail,lazy collection / Iterator / view (D100)
+t5974,1,1,fail,fail,Java interop (java./javax. reference)
+t5986,2,1,fail,fail,implicit / given / using (D3)
+t601,1,1,fail,fail,JVM System / Console / Predef JVM surface
+t6011b,3,1,pass,pass,no out-of-scope construct found
+t6011c,3,1,fail,fail,no out-of-scope construct found
+t603,1,1,fail,fail,JVM System / Console / Predef JVM surface
+t6064,3,0,fail,fail,no out-of-scope construct found
+t6070,3,1,pass,pass,no out-of-scope construct found
+t6077_patmat_cse_irrefutable,3,1,pass,pass,no out-of-scope construct found
+t6089,1,1,fail,fail,checkfile expects a scala.* qualified name
+t6090,3,0,fail,fail,no out-of-scope construct found
+t6104,3,1,pass,pass,no out-of-scope construct found
+t6111,2,1,fail,fail,implicit / given / using (D3)
+t6114,1,0,fail,fail,Java interop (java./javax. reference)
+t6126,3,0,fail,fail,no out-of-scope construct found
+t6154,1,1,fail,fail,Java interop (java./javax. reference)
+t6188,1,1,fail,fail,checkfile expects a JVM-qualified class name
+t6206,3,1,fail,fail,no out-of-scope construct found
+t6246,1,1,fail,fail,reflection / ClassTag / Mirror / TypeTest
+t6260,3,1,fail,fail,no out-of-scope construct found
+t6260-delambdafy,1,1,fail,fail,Java interop (java./javax. reference)
+t627,2,1,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t6271,2,0,fail,fail,lazy collection / Iterator / view (D100)
+t6272,3,1,fail,fail,no out-of-scope construct found
+t629,1,1,fail,fail,JVM System / Console / Predef JVM surface
+t6290,2,0,fail,fail,implicit / given / using (D3)
+t6333,2,0,fail,fail,PartialFunction / collect (D63)
+t6337a,3,0,fail,fail,no out-of-scope construct found
+t6353,3,1,fail,fail,no out-of-scope construct found
+t6355,3,1,fail,fail,no out-of-scope construct found
+t6370,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t6380,1,1,fail,fail,classOf
+t6385,3,0,fail,fail,no out-of-scope construct found
+t6406-regextract,2,1,fail,fail,regular expressions (D70)
+t6443-by-name,3,1,pass,pass,no out-of-scope construct found
+t6443-varargs,3,1,pass,pass,no out-of-scope construct found
+t6443b,3,0,fail,fail,no out-of-scope construct found
+t6476,3,1,fail,fail,no out-of-scope construct found
+t6488,1,0,fail,fail,Java interop (java./javax. reference)
+t6500,3,0,fail,fail,no out-of-scope construct found
+t6506,2,0,fail,fail,lazy collection / Iterator / view (D100)
+t6534,3,0,fail,fail,no out-of-scope construct found
+t6541,1,0,fail,fail,classOf
+t6559,3,0,pass,pass,no out-of-scope construct found
+t6574b,2,1,fail,fail,implicit / given / using (D3)
+t6584,2,1,fail,fail,lazy collection / Iterator / view (D100)
+t6611,2,0,fail,fail,Array (D69 / no Array type)
+t6611b,2,0,fail,fail,Array (D69 / no Array type)
+t6614,2,1,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t6628,2,1,fail,fail,lazy collection / Iterator / view (D100)
+t6632,2,1,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t6633,2,1,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t6634,2,1,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t6637,1,1,fail,fail,Java interop (java./javax. reference)
+t6644,3,0,fail,fail,no out-of-scope construct found
+t6646,3,1,fail,fail,no out-of-scope construct found
+t6663,3,1,fail,fail,no out-of-scope construct found
+t6666a,2,0,fail,fail,anonymous class or class nested in a class (D80)
+t6673,2,1,fail,fail,Array (D69 / no Array type)
+t6706,1,0,fail,fail,JVM System / Console / Predef JVM surface
+t6793,1,0,fail,fail,classOf
+t6827,2,1,fail,fail,Array (D69 / no Array type)
+t6888,3,1,fail,fail,no out-of-scope construct found
+t6928-run,3,1,pass,pass,no out-of-scope construct found
+t6957,2,0,fail,fail,anonymous class or class nested in a class (D80)
+t6968,3,1,pass,pass,no out-of-scope construct found
+t7019,3,0,fail,fail,no out-of-scope construct found
+t704,1,1,fail,fail,JVM System / Console / Predef JVM surface
+t7120b,1,1,fail,fail,JVM reflection via getClass
+t7126,3,0,fail,fail,no out-of-scope construct found
+t7171,2,1,fail,fail,anonymous class or class nested in a class (D80)
+t7181,3,1,fail,fail,no out-of-scope construct found
+t7200,3,0,fail,fail,no out-of-scope construct found
+t7214,1,0,fail,fail,JVM reflection via getClass
+t7215,2,0,fail,fail,lazy collection / Iterator / view (D100)
+t7223,2,1,fail,fail,anonymous class or class nested in a class (D80)
+t7231,2,1,pass,pass,Array (D69 / no Array type)
+t7242,3,0,fail,fail,no out-of-scope construct found
+t7249,3,1,fail,fail,no out-of-scope construct found
+t7269,1,0,fail,fail,Java interop (java./javax. reference)
+t7278,3,0,fail,fail,no out-of-scope construct found
+t7300,3,1,pass,pass,no out-of-scope construct found
+t7336,2,0,fail,fail,Array (D69 / no Array type)
+t7341,3,0,pass,pass,no out-of-scope construct found
+t7396,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t7406,3,1,fail,fail,no out-of-scope construct found
+t7407,3,1,pass,pass,no out-of-scope construct found
+t7407b,3,1,pass,pass,no out-of-scope construct found
+t7436,3,0,pass,pass,no out-of-scope construct found
+t7445,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t7475b,2,1,fail,fail,anonymous class or class nested in a class (D80)
+t7571,2,0,fail,fail,PartialFunction / collect (D63)
+t7584,3,1,fail,fail,no out-of-scope construct found
+t7584b,3,0,fail,fail,no out-of-scope construct found
+t7763,3,0,fail,fail,no out-of-scope construct found
+t7899,3,0,fail,fail,no out-of-scope construct found
+t7912,1,0,fail,fail,JVM reflection via getClass
+t7985,2,0,fail,fail,Array (D69 / no Array type)
+t7985b,2,0,fail,fail,Array (D69 / no Array type)
+t7992,3,0,fail,fail,no out-of-scope construct found
+t7992b,3,0,fail,fail,no out-of-scope construct found
+t8002,3,0,fail,fail,no out-of-scope construct found
+t8010,2,0,fail,fail,anonymous class or class nested in a class (D80)
+t8015-ffc,2,0,fail,fail,inline / macro / quotes
+t8087,1,0,fail,fail,classOf
+t8100,2,1,fail,fail,lazy collection / Iterator / view (D100)
+t8188,1,0,fail,fail,Java interop (java./javax. reference)
+t8197,3,0,fail,fail,no out-of-scope construct found
+t8197b,2,0,fail,fail,implicit / given / using (D3)
+t8199,1,0,fail,fail,classOf
+t8233,3,0,pass,pass,no out-of-scope construct found
+t8233-bcode,3,0,pass,pass,no out-of-scope construct found
+t8245,3,0,fail,fail,no out-of-scope construct found
+t8280,2,1,fail,fail,implicit / given / using (D3)
+t8346,1,1,fail,fail,reflection / ClassTag / Mirror / TypeTest
+t8395,3,0,fail,fail,no out-of-scope construct found
+t8428,3,0,fail,fail,no out-of-scope construct found
+t8549b,1,0,fail,fail,classOf
+t8570,2,0,fail,fail,anonymous class or class nested in a class (D80)
+t8570a,1,1,fail,fail,JVM System / Console / Predef JVM surface
+t8601,3,0,fail,fail,no out-of-scope construct found
+t8601b,2,0,fail,fail,Array (D69 / no Array type)
+t8601c,3,0,fail,fail,no out-of-scope construct found
+t8601d,1,0,fail,fail,synchronized
+t8607,3,0,fail,fail,no out-of-scope construct found
+t8610,1,1,fail,fail,JVM System / Console / Predef JVM surface
+t8611a,3,0,fail,fail,no out-of-scope construct found
+t8611b,2,0,fail,fail,anonymous class or class nested in a class (D80)
+t8611c,3,0,fail,fail,no out-of-scope construct found
+t8690,1,1,fail,fail,Java interop (java./javax. reference)
+t8738,3,0,fail,fail,no out-of-scope construct found
+t8803,2,1,fail,fail,anonymous class or class nested in a class (D80)
+t8823,3,0,fail,fail,no out-of-scope construct found
+t8845,3,0,pass,pass,no out-of-scope construct found
+t8888,3,0,pass,pass,no out-of-scope construct found
+t889,2,1,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+t8893,3,0,fail,fail,no out-of-scope construct found
+t8893b,3,0,fail,fail,no out-of-scope construct found
+t8933c,3,0,fail,fail,no out-of-scope construct found
+t920,1,1,fail,fail,JVM System / Console / Predef JVM surface
+t920_1,1,0,fail,fail,JVM System / Console / Predef JVM surface
+t9400,1,0,fail,fail,classOf
+t949,2,0,fail,fail,anonymous class or class nested in a class (D80)
+t9516,3,0,fail,fail,no out-of-scope construct found
+t978,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+tagless,2,1,fail,fail,implicit / given / using (D3)
+tailrec-return,3,1,fail,fail,no out-of-scope construct found
+takeAndDrop,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+targetName,1,1,fail,fail,checkfile expects a JVM collection name
+targetName1,3,0,fail,fail,no out-of-scope construct found
+tcpoly_monads,1,1,fail,fail,JVM System / Console / Predef JVM surface
+tcpoly_overriding,1,1,fail,fail,JVM System / Console / Predef JVM surface
+tcpoly_parseridioms,2,0,fail,fail,implicit / given / using (D3)
+test-implicits,1,1,fail,fail,JVM System / Console / Predef JVM surface
+throws-annot,1,1,fail,fail,classOf
+toList,3,1,fail,fail,no out-of-scope construct found
+trailingCommas,1,1,fail,fail,JVM System / Console / Predef JVM surface
+trait-extends-inline-trait-uses,2,0,fail,fail,inline / macro / quotes
+traitInit,3,1,pass,pass,no out-of-scope construct found
+traitNoInit,1,0,fail,fail,classOf
+traitParamInit,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+traitParams,3,0,pass,pass,no out-of-scope construct found
+traitValBridge,3,0,pass,pass,no out-of-scope construct found
+traitValOverriddenByParamAccessor,3,0,pass,pass,no out-of-scope construct found
+traits-initialization,3,0,fail,fail,no out-of-scope construct found
+transform,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+transparent-foreach,2,0,fail,fail,implicit / given / using (D3)
+transparent-implicits,2,1,fail,fail,implicit / given / using (D3)
+transparent-object,2,1,pass,pass,inline / macro / quotes
+transparentArrowAssoc,2,0,fail,fail,inline / macro / quotes
+transparentAssign,2,0,fail,fail,inline / macro / quotes
+transparentByName,2,0,pass,pass,inline / macro / quotes
+transparentForeach,2,1,fail,fail,implicit / given / using (D3)
+transparentPrivates,2,0,fail,fail,inline / macro / quotes
+transparentProtected,2,0,fail,fail,inline / macro / quotes
+transpose,3,0,fail,fail,no out-of-scope construct found
+triemap-hash,3,0,fail,fail,no out-of-scope construct found
+triple-quoted-expr,3,1,fail,fail,no out-of-scope construct found
+try,1,1,fail,fail,JVM System / Console / Predef JVM surface
+try-2,1,1,fail,fail,JVM System / Console / Predef JVM surface
+try-catch-unify,1,1,fail,fail,classOf
+tryPatternMatch,1,1,fail,fail,Java interop (java./javax. reference)
+tuple-accessors,3,0,pass,pass,no out-of-scope construct found
+tuple-concat,3,1,fail,fail,no out-of-scope construct found
+tuple-cons,3,1,fail,fail,no out-of-scope construct found
+tuple-cons-2,3,1,fail,fail,no out-of-scope construct found
+tuple-deconstruct-wildcard-sideeffect,3,1,pass,pass,no out-of-scope construct found
+tuple-erased,3,0,fail,fail,no out-of-scope construct found
+tuple-for-comprehension,3,0,pass,pass,no out-of-scope construct found
+tuple-map,3,1,fail,fail,no out-of-scope construct found
+tuple-match,3,1,fail,fail,no out-of-scope construct found
+tuple-ops,1,1,fail,fail,JVM System / Console / Predef JVM surface
+tuple-patmat,3,0,fail,fail,no out-of-scope construct found
+tuple-patmat-extract,3,0,fail,fail,no out-of-scope construct found
+tuple-patmat-size,3,0,fail,fail,no out-of-scope construct found
+tuple-patterns,2,1,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+tuple-product,3,0,fail,fail,no out-of-scope construct found
+tuple-split,3,1,fail,fail,no out-of-scope construct found
+tuple-tail,3,1,fail,fail,no out-of-scope construct found
+tuple-typetests,3,1,fail,fail,no out-of-scope construct found
+tuple-underscore-syntax,3,0,fail,fail,no out-of-scope construct found
+tuple-zip,3,1,fail,fail,no out-of-scope construct found
+tupled-function-andThen,2,1,fail,fail,implicit / given / using (D3)
+tupled-function-apply,2,1,fail,fail,implicit / given / using (D3)
+tupled-function-compose,2,1,fail,fail,implicit / given / using (D3)
+tupled-function-extension-method,2,1,fail,fail,implicit / given / using (D3)
+tupled-function-tupled,2,1,fail,fail,implicit / given / using (D3)
+tupled-function-untupled,2,0,fail,fail,implicit / given / using (D3)
+tuples,1,1,fail,fail,JVM System / Console / Predef JVM surface
+tuples-empty,3,0,fail,fail,no out-of-scope construct found
+tuples1,2,1,fail,fail,Array (D69 / no Array type)
+tuples1a,3,0,fail,fail,no out-of-scope construct found
+tuples1b,1,1,fail,fail,JVM System / Console / Predef JVM surface
+typable,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+type-propagation,3,0,fail,fail,no out-of-scope construct found
+type-test-binding,1,1,fail,fail,reflection / ClassTag / Mirror / TypeTest
+type-test-nat,1,1,fail,fail,reflection / ClassTag / Mirror / TypeTest
+typeCheckErrors,1,1,fail,fail,scala.compiletime / staging
+typealias_overriding,1,1,fail,fail,JVM System / Console / Predef JVM surface
+typeclass-derivation-doc-example,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+typeclass-derivation1,1,0,fail,fail,scala.compiletime / staging
+typeclass-derivation2a,1,1,fail,fail,serialization
+typeclass-derivation2b,1,0,fail,fail,scala.compiletime / staging
+typeclass-derivation2d,1,1,fail,fail,serialization
+typeclass-derivation3,1,1,fail,fail,serialization
+typelevel-numeric,2,1,fail,fail,implicit / given / using (D3)
+typelevel-overrides,2,0,fail,fail,inline / macro / quotes
+typelevel-peano,2,1,fail,fail,inline / macro / quotes
+typetest,3,1,fail,fail,no out-of-scope construct found
+tyql,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+unambiref,3,1,fail,fail,no out-of-scope construct found
+unapply,2,0,fail,fail,implicit / given / using (D3)
+unapply-tparam,3,0,fail,fail,no out-of-scope construct found
+unapplyArray,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+unboxingBug,3,1,fail,fail,no out-of-scope construct found
+unchecked-patterns,3,0,fail,fail,no out-of-scope construct found
+unicodeEscapes,2,1,fail,fail,inline / macro / quotes
+uninitialized-field-values,1,0,fail,fail,scala.compiletime / staging
+unit-lazy-val,1,1,fail,fail,JVM reflection via getClass
+unit-val,1,1,fail,fail,JVM reflection via getClass
+unit-var,1,1,fail,fail,JVM reflection via getClass
+unit-volatile-var,1,0,fail,fail,JVM reflection via getClass
+unittest_collection,2,0,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+unittest_iterator,2,0,fail,fail,lazy collection / Iterator / view (D100)
+unreachable,3,0,fail,fail,no out-of-scope construct found
+unroll-inferredFinal,3,0,fail,fail,no out-of-scope construct found
+unroll-multiple,1,0,fail,fail,reflection / ClassTag / Mirror / TypeTest
+value-class-extractor,2,1,fail,fail,inline / macro / quotes
+value-class-extractor-2,3,1,fail,fail,no out-of-scope construct found
+value-class-extractor-seq,1,1,fail,fail,JVM reflection via getClass
+value-class-partial-func-depmet,2,0,fail,fail,PartialFunction / collect (D63)
+valueclasses-constr,3,1,fail,fail,no out-of-scope construct found
+valueclasses-nested-object,3,1,fail,fail,no out-of-scope construct found
+valueclasses-pavlov,3,1,fail,fail,no out-of-scope construct found
+variable-pattern-access,1,1,fail,fail,classOf
+vc-equals,2,0,fail,fail,Array (D69 / no Array type)
+verify-ctor,2,1,fail,fail,Array (D69 / no Array type)
+view-headoption,2,1,fail,fail,lazy collection / Iterator / view (D100)
+view-iterator-stream,2,1,fail,fail,lazy collection / Iterator / view (D100)
+viewtest,2,1,fail,fail,lazy collection / Iterator / view (D100)
+virtpatmat_alts,3,1,pass,pass,no out-of-scope construct found
+virtpatmat_apply,3,1,pass,pass,no out-of-scope construct found
+virtpatmat_casting,3,1,pass,pass,no out-of-scope construct found
+virtpatmat_literal,3,1,fail,fail,no out-of-scope construct found
+virtpatmat_npe,2,1,fail,fail,Array (D69 / no Array type)
+virtpatmat_opt_sharing,3,1,pass,pass,no out-of-scope construct found
+virtpatmat_partial_backquoted,2,1,fail,fail,PartialFunction / collect (D63)
+virtpatmat_stringinterp,2,1,fail,fail,implicit / given / using (D3)
+virtpatmat_switch,1,1,fail,fail,checkfile expects a JVM-qualified class name
+virtpatmat_tailcalls_verifyerror,3,1,pass,pass,no out-of-scope construct found
+virtpatmat_try,3,1,fail,fail,no out-of-scope construct found
+virtpatmat_typed,3,1,pass,pass,no out-of-scope construct found
+virtpatmat_unapply,3,1,fail,fail,no out-of-scope construct found
+virtpatmat_unapplyseq,2,1,fail,fail,Seq / mutable collections / ArrayBuffer (D65)
+virtpatmat_valdef,3,1,pass,pass,no out-of-scope construct found
+weak-conformance,1,0,fail,fail,Java interop (java./javax. reference)
+weakconform,3,0,pass,pass,no out-of-scope construct found
+whitebox-inline,2,0,fail,fail,inline / macro / quotes
+wildcard-vals,3,0,pass,pass,no out-of-scope construct found
+withIndex,1,1,fail,fail,JVM System / Console / Predef JVM surface
+xml,2,0,fail,fail,lazy collection / Iterator / view (D100)
+zero-arity-case-class,3,0,fail,fail,no out-of-scope construct found

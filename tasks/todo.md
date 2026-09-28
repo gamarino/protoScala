@@ -10,9 +10,11 @@ Every reference answer in this track was produced with
 `java -cp "$SCALA_HOME/lib/*:out"`, never `bin/scala`.
 
 Corpus in-scope baseline measured with the same scripts: **181/601 = 30.1 %**
-(bucket 3), 204/1654 overall. (The Track X note says 183/601; the two extra
-passes are timing-sensitive — one test times out at the harness's 10 s limit on
-this machine.)
+(bucket 3), 204/1654 overall, under the strict scoring rule. (The Track X note
+says 183/601. Corrected 2026-09-27: that is not timing. The two runs' strict pass
+sets are identical and both have exactly one timeout, the same file; 183 is the
+same run scored leniently — a no-`.check` test needing only `rc == 0`, not also
+empty stdout. The two tests are `delayedInit` and `i12729`.)
 
 ## Silent wrong answers
 

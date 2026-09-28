@@ -492,6 +492,26 @@ Measured 2026-09-25 against the tree above:
 | **601 in scope** | **191 — 31.8 %** | our own triage, described below |
 | **1654 whole corpus** | **216 — 13.1 %** | no triage at all |
 
+**Reproduce it:** the harness, the triage rules and a summary of that run are in
+[`tools/corpus/`](tools/corpus/) — `python3 tools/corpus/score.py --csv --both`
+re-derives both figures with no corpus and no build, and
+[`tools/corpus/README.md`](tools/corpus/README.md) has the pinned sparse clone of
+`scala/scala3` and the two commands that measure a fresh tree. Until 2026-09-27
+none of it was committed and the rate could not be reproduced from a clone; the
+corpus itself is third-party and is still fetched, not vendored, so that step needs
+network access.
+
+**Two disclosures that belong next to the 191.** The scoring rule is the stricter of
+the two readings of dotty's rule: a test with no `.check` file passes only if it
+exits 0 *and* prints nothing unexpected (the lenient reading gives 32.1 %). And
+**754 of the 1654 files have a `.check` at all** — of the 191 in-scope passes,
+**107 matched a checkfile and 84 (44 %) had none**, so 44 % of the headline is
+"ran and printed nothing unexpected" rather than an output comparison. Those are
+dotty's own terms and the files are `assert`-based, but any failure mode that exits
+0 without running the body would score as a pass on the ~900 files with no output to
+check. This repository already discloses exactly that split for the transpiler
+differential; it now does so for the interpreter too.
+
 **The 601 is our triage and it is not a standard.** Scala has no standards-body
 conformance suite — there is no equivalent of JavaScript's Test262 — so this is the
 reference implementation's own test corpus, and the in-scope bucket is a judgement
@@ -508,12 +528,23 @@ implicits and givens, 153 `inline` and macros, 77 lazy collections and `Iterator
 read the 13.1 %; a reader who wants to know how much roadmap is left should read the
 643.
 
+The two rows of the table do not nest as cleanly as they look: of the **216** passes
+over the whole corpus, 191 are in scope and **25 are tests this triage put out of
+scope and which pass anyway** — 4 from "out by design" (`enum-Option`,
+`enum-constrs`, `i1533`, `richWrapperEquals`) and 21 from "out for now". That is
+direct evidence that the triage is over-broad by at least 25, and a reminder of
+which way its bias runs: the rules hunt for constructs protoScala lacks, so the
+in-scope residue skews towards tests that pass. **13.1 % is the number with no
+judgement in it; 31.8 % is the number with our judgement in it; the gap is the
+judgement.**
+
 **What the corpus found that our own documents had not.** On the run of 2026-09-25,
 **257** of the corpus's disagreements with `scalac` were anticipated by no deviation
 recorded here; re-running the same instrument against the tree at protoCore 2.5.0
 the same day gives **236**, the difference being the fixes that landed in between.
-The largest single cause — six missing `Predef` names — cost 103 in-scope tests and
-was invisible to a suite that had never needed them. Both figures, how they are
+The largest single cause — six missing `Predef` names — cost **102** in-scope tests
+under the strict rule (103 under the lenient one, which is the figure this line
+carried until 2026-09-27) and was invisible to a suite that had never needed them. Both figures, how they are
 derived and the per-test attribution are in [docs/STATUS.md](docs/STATUS.md)
 ("Track S deviations") and [docs/DECISIONS-LOG.md](docs/DECISIONS-LOG.md).
 
