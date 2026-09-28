@@ -38,6 +38,20 @@ network access; re-deriving the published one does not.
 | `join.parks` | 2b | **PASS** (isolated) | a cycle completed while `Thread.start`/`t.join()` was blocked |
 | **`heap.ceiling_progress`** | **8** | **PASS** (isolated, was FAIL) | same cause, same fix. **Intermittent: about 2 runs in 10 alone**, for a second defect the retention had been masking — a protoCore `ProtoMPSCQueue` finding, diagnosed and not fixed here. See below |
 
+**Observation added 2026-09-27, on CI rather than on this machine: `join.parks` is
+intermittent on a 4-vCPU GitHub runner.** The isolate job (informational, never
+gates) ran the three isolated cases on three consecutive pushes: `join.parks`
+**failed at 10.0 s in two of the three** (runs `36361202315` and `36362507915`) and
+passed in the other (`36360213564`), while `heap.ceiling_progress` — the case
+documented as the ~2-in-10 flake — passed in all three. The failure is the case's
+own verdict, not a ctest timeout: `protoCore/conformance/CaseThreads.cpp` gives the
+collector **8 seconds** to complete a cycle while a `Thread.start`/`t.join()` is
+blocked, and on a 4-vCPU runner it sometimes does not. Whether that is a rule-2b
+weakness under CPU scarcity or a deadline too tight for a small host is **not
+diagnosed here**, and the row above (PASS, isolated, on a 12-CPU host) stands as
+measured. It is recorded because nothing in this file prepared a reader for seeing
+that case red.
+
 First run: **two cases red, both the same defect**, with **no previously-passing
 test newly failing**. After the fix the whole suite was green, and the retention
 the two cases measured is gone rather than reduced. Read the rule-8 section before
