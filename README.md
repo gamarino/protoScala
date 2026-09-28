@@ -583,23 +583,37 @@ every cell verifying its own message count. The mode set is the current seven:
 | Mode | peak msg/s (median) | at | protoClojure at the same worker count | ratio |
 |---|---:|---|---:|---:|
 | single | 212,406 [210,807-230,738] | 2 workers | 257,742 [241,538-268,202] | **0.82×** |
-| fan-out | 243,108 [233,633-252,268] | 2 workers | 483,679 [450,546-493,075] | **0.50×** |
+| fan-out | 243,108 [233,633-252,268] | 2 workers | 483,679 [450,546-493,075] | *not comparable* † |
 | ping-pong | 26,939 [26,298-27,588] | 4 workers | no twin | — |
 | await | 67,271 [66,136-71,312] | 6 workers | no twin | — |
 | priority | 157,089 [153,404-160,404] | 2 workers | no twin | — |
 | saturation-8 | 2,947 [2,567-3,034] | 12 workers | 2,679 [1,939-3,020] | **1.10×** |
 | saturation-32 | 3,373 [3,178-3,402] | 6 workers | 2,874 [2,655-2,979] | **1.17×** |
 
+† **The two `fan-out` scripts do not measure the same work**, so no ratio between
+those two columns is published here: protoScala's rotates its target on every send
+and protoClojure's sends 1000 consecutive messages to one actor. Each column stands
+as measured on its own script. Until 2026-09-27 this cell published **0.50×** and
+the paragraph below built a decay series on it — in the same document that calls
+that comparison invalid, three subsections further down. The per-worker ratios are
+still recorded, as the arithmetic of two differently-shaped runs, in
+[benchmarks/reports/2026-09-26-qw-actors.md](benchmarks/reports/2026-09-26-qw-actors.md);
+what replaces them as a result is the equalised-shape measurement in
+[the correction below](#correction-v4-the-fan-out-comparison-was-not-like-for-like),
+where **the ranking reverses from 2 workers up**.
+
 **Where protoScala loses, it loses increasingly, and that is the honest reading
-of this table.** On `fan-out` protoClojure scales 292,983 → 670,082 msg/s from 1
-to 4 workers while protoScala peaks at 2 and then falls, so the ratio decays
-**0.67× → 0.50× → 0.34× → 0.32× → 0.29× → 0.23×** at w = 1, 2, 4, 6, 8, 16. On
-`single` it decays **0.84× → 0.59×**, because protoScala's rate *falls* with
-added workers (210,572 → 149,160) where protoClojure's stays flat near 253,000.
-Both are the single-method invariant serialising one actor while the extra
-workers still cost synchronisation: **protoScala pays for workers it cannot
-use.** It leads only on the two CPU-bound saturation shapes, where per-message
-work dominates mailbox cost. Ask latency, 5,000 pooled samples per worker count:
+of this table.** On `single` — the one comparable shape in it — the ratio decays
+**0.84× → 0.59×**, because protoScala's rate *falls* with added workers
+(210,572 → 149,160) where protoClojure's stays flat near 253,000. protoScala's own
+`fan-out` rate falls the same way past its peak, 243,108 → 140,567 msg/s from w=2
+to w=16 (**−42 %**), which is a statement about protoScala alone; protoClojure's
+differently-shaped twin rises over the same window, 292,983 → 670,082 from w=1 to
+w=4, which is a statement about protoClojure alone. Both falls are the
+single-method invariant serialising one actor while the extra workers still cost
+synchronisation: **protoScala pays for workers it cannot use.** It leads only on
+the two CPU-bound saturation shapes, where per-message work dominates mailbox
+cost. Ask latency, 5,000 pooled samples per worker count:
 p50 rises 24.4 → 33.9 µs from w=1 to w=16, p99 2,131 → 2,486 µs.
 
 *The superseded 2026-09-23 table, CAS-list mailboxes at load 2.96→9.68:*
