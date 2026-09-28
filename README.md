@@ -544,8 +544,8 @@ recorded here; re-running the same instrument against the tree at protoCore 2.5.
 the same day gives **236**, the difference being the fixes that landed in between.
 The largest single cause — six missing `Predef` names — cost **102** in-scope tests
 under the strict rule (103 under the lenient one, which is the figure this line
-carried until 2026-09-27) and was invisible to a suite that had never needed them. Both figures, how they are
-derived and the per-test attribution are in [docs/STATUS.md](docs/STATUS.md)
+carried until 2026-09-27) and was invisible to a suite that had never needed them.
+Both figures, how they are derived and the per-test attribution are in [docs/STATUS.md](docs/STATUS.md)
 ("Track S deviations") and [docs/DECISIONS-LOG.md](docs/DECISIONS-LOG.md).
 
 These are low rates and they are published to be read as such. protoScala's aim is
