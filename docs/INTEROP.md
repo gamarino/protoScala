@@ -269,7 +269,15 @@ list seen as a Scala `Seq` is wrapped, not copied).
 - **What cross-runtime interop does NOT cover today**, stated so nobody infers
   more than was built:
   - **Values, not calls.** A protoST class or object crosses as a value and its
-    attributes read back. **Calling a protoST method from protoScala does not
+    attributes read back through protoScala's context, and a write through one
+    runtime's context is seen through the other's. That needs protoCore with the
+    process-global mutable table (merged after 2.5.0; protoCore
+    `docs/GLOBAL_MUTABLE_TABLE.md`): with protoCore 2.5.0 a mutable object read
+    through the other space's context answered another object's state, with no
+    error (protoST K4). Test: `ProtoSTInterop.AForeignObjectsStateIsReadThroughTheCallersContext`.
+    A protoST cell that protoScala keeps in its own structures must also stay
+    reachable in protoST's space (for example through a mutable object);
+    protoCore does not trace one space's roots from another. **Calling a protoST method from protoScala does not
     work**: a protoST method is an object carrying `__bc_ptr__` that protoST's own
     `ExecutionEngine` interprets on SEND, not a `proto::ProtoMethod` protoCore can
     dispatch. A foreign callable needs to be a protoCore method, as the plug-in

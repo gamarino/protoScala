@@ -274,6 +274,62 @@ TEST(ProtoSTInterop, AForeignValueIsTheSameObjectOnBothSides) {
     EXPECT_EQ(fromST->getHash(&scalaCtx), fromST->getHash(&stCtx));
 }
 
+// READING THROUGH THE CALLER'S CONTEXT -- protoST KNOWN_ISSUES K4.
+//
+// Until protoCore's mutable table became process-global
+// (protoCore docs/GLOBAL_MUTABLE_TABLE.md), each ProtoSpace had its own table
+// and its own mutable_ref counter, both starting at 1. The protoST class is a
+// mutable object; read through protoScala's context it resolved in
+// protoScala's table -- another object's state or its own birth state -- so
+// `__class_name__` was absent and no error was raised. Now its state is the one
+// protoST wrote, whichever space's context reads it, and a write through one
+// context is seen through the other.
+TEST(ProtoSTInterop, AForeignObjectsStateIsReadThroughTheCallersContext) {
+    writeFile("counter_lib.st",
+              "\"-- counter_lib.st --\"\n"
+              "Object subclass: #Counter instanceVariableNames: 'value'.\n"
+              "Counter >> initialize value := 0.\n"
+              "Counter >> increment value := value + 1.\n"
+              "Counter >> value ^ value.\n");
+    ::setenv("STPATH", ".", 1);
+
+    protoST::STRuntime st;
+    protoScala::Session session;
+
+    proto::ModuleProvider* stProvider =
+        proto::ProviderRegistry::instance().getProviderForSpec("provider:st");
+    ASSERT_NE(stProvider, nullptr);
+
+    proto::ProtoContext scalaCtx(&session.space(), nullptr);
+    const proto::ProtoObject* moduleInScala = stProvider->tryLoad("counter_lib", &scalaCtx);
+    ASSERT_NE(moduleInScala, nullptr);
+    ASSERT_NE(moduleInScala, PROTO_NONE);
+    const proto::ProtoObject* counter = moduleInScala->getAttribute(
+        &scalaCtx, proto::ProtoString::createSymbol(&scalaCtx, "Counter"));
+    ASSERT_NE(counter, nullptr);
+    ASSERT_NE(counter, PROTO_NONE);
+
+    // Read through protoScala's context.
+    const proto::ProtoObject* name = counter->getAttribute(
+        &scalaCtx, proto::ProtoString::createSymbol(&scalaCtx, "__class_name__"));
+    ASSERT_NE(name, nullptr);
+    ASSERT_NE(name, PROTO_NONE)
+        << "the protoST class has no __class_name__ through protoScala's context";
+    ASSERT_NE(name->asString(&scalaCtx), nullptr);
+    EXPECT_EQ(name->asString(&scalaCtx)->toStdString(&scalaCtx), "Counter");
+
+    // A write through protoScala's context is visible through protoST's.
+    const proto::ProtoString* probeKey =
+        proto::ProtoString::createSymbol(&scalaCtx, "crossSpaceProbe");
+    counter->setAttribute(&scalaCtx, probeKey, scalaCtx.fromInteger(4242));
+    proto::ProtoContext stCtx(st.space(), st.rootCtx());
+    const proto::ProtoObject* seen = counter->getAttribute(
+        &stCtx, proto::ProtoString::createSymbol(&stCtx, "crossSpaceProbe"));
+    ASSERT_NE(seen, nullptr);
+    ASSERT_NE(seen, PROTO_NONE) << "protoST does not see the write made through protoScala";
+    EXPECT_EQ(seen->asLong(&stCtx), 4242);
+}
+
 // The cross-runtime import must survive a collection on BOTH sides. protoST
 // collects for the first time as of S15/S16, so a foreign value held only
 // through protoScala's namespace object is exactly the case that a GC bug would
