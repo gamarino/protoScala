@@ -21,6 +21,7 @@ add_executable(protoscala_unit_tests
     test_exceptions.cpp
     test_primitives.cpp
     test_readystack.cpp
+    test_semaphore.cpp
     test_mailbox.cpp
     test_prelude_image.cpp
     test_opcode_ops.cpp

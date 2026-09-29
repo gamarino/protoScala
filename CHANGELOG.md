@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The actor scheduler no longer uses `std::counting_semaphore`.** libstdc++ 13's
+  implementation can lose a wakeup: `_M_release` notifies only when the count was 0,
+  so a waiter that lost the compare-and-swap for a permit can sleep on a stale
+  non-zero count and miss every later release. In protoST (S19) this left a worker
+  parked with a permit available and the runtime waiting on its join, about once
+  per 1,000 launches under load. The scheduler's `work_` is now
+  `runtime/Semaphore.h`, which sleeps only on 0 and notifies on every release.
+  No hang was observed in protoScala; the hazard was the same code path.
+  Tests: `Semaphore.*` in the unit suite.
+
 ### Added
 
 - **The cross-runtime call, demonstrated rather than argued.** `proto_module_init` now
