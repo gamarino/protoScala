@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Build
+
+- **`umd/protost-interop` links OpenSSL.** protoST 0.5.0's runtime has sockets
+  and https, so its static libraries need `OpenSSL::SSL`/`OpenSSL::Crypto`;
+  without them the interop test did not link and CTest reported it "Not Run".
+
 ### Fixed
 
 - **The actor scheduler no longer uses `std::counting_semaphore`.** libstdc++ 13's
