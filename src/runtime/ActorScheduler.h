@@ -11,6 +11,7 @@
  */
 #pragma once
 #include "runtime/ReadyStack.h"
+#include "runtime/Semaphore.h"
 #include "runtime/Runtime.h"
 #include "protoCore.h"
 
@@ -18,7 +19,6 @@
 #include <deque>
 #include <memory>
 #include <mutex>
-#include <semaphore>
 #include <vector>
 
 namespace protoScala {
@@ -97,7 +97,7 @@ private:
                             const proto::ProtoObject* future);
 
     ReadyStack<ActorState*> ready_[kBands];
-    std::counting_semaphore<(1 << 20)> work_{0};
+    Semaphore work_;
     std::atomic<bool> started_{false}, shuttingDown_{false};
     std::atomic<long long> messages_{0};
     std::atomic<unsigned> suspended_{0};
