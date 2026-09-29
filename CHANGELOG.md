@@ -18,6 +18,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   No hang was observed in protoScala; the hazard was the same code path.
   Tests: `Semaphore.*` in the unit suite.
 
+### Tests
+
+- **`ProtoSTInterop.AForeignObjectsStateIsReadThroughTheCallersContext`**: a
+  protoST class read through protoScala's context answers its own
+  `__class_name__`, and a write through protoScala's context is seen through
+  protoST's. It fails with protoCore 2.5.0, where each space had its own table
+  of mutable states (protoST K4), and passes with the process-global table
+  merged into protoCore after 2.5.0. `docs/INTEROP.md` states the requirement.
+
 ### Added
 
 - **The cross-runtime call, demonstrated rather than argued.** `proto_module_init` now
