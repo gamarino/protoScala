@@ -612,7 +612,12 @@ void bindPreludeHooks(proto::ProtoContext* ctx, RuntimeLayout& layout, const Glo
             // silently downgrade to RuntimeException and stop being catchable as
             // an IOException, which is the whole point of having the hierarchy.
             "IOException", "FileNotFoundException", "CharacterCodingException",
-            "MalformedInputException"};
+            "MalformedInputException",
+            // The I/O track: every class protoIO's error kinds map onto
+            // (IoSupport.h, D124), and the ones the prelude's I/O raises.
+            "FileAlreadyExistsException", "EOFException", "InterruptedIOException",
+            "SocketException", "ConnectException", "SocketTimeoutException",
+            "UnknownHostException"};
         layout.hooks.throwableClasses.clear();
         for (const char* name : kThrowables) {
             const ClassInfo* info = globals.findType(name);

@@ -371,6 +371,7 @@ add_library(protoscala_runtime OBJECT
     src/runtime/CollectionPrimitives.cpp
     src/runtime/ActorPrimitives.cpp
     src/runtime/FilePrimitives.cpp
+    src/runtime/IoPrimitives.cpp
     src/runtime/ActorScheduler.cpp
     src/runtime/Futures.cpp
     src/runtime/Mailbox.cpp

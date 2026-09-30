@@ -13,8 +13,28 @@ const std::vector<std::string>& builtinGlobalNames() {
                                       "Vector", "Map", "Set",
                                       // Track F: the filesystem natives the
                                       // prelude's Source and FileIO call.
-                                      "__fileReadText", "__fileWriteText",
-                                      "__fileExists", "__fileDelete", "__splitLines"};
+                                      "__fileWriteText",
+                                      "__fileExists", "__fileDelete", "__splitLines", "__skipLines",
+                                      // The I/O track (FilePrimitives.cpp,
+                                      // IoPrimitives.cpp, HttpPrimitives.cpp).
+                                      "__srcOpen", "__srcStdin", "__srcLine", "__srcRest",
+                                      "__srcClose", "__stdinLine",
+                                      "__fileReadBytes", "__fileWriteBytes", "__fileStat",
+                                      "__fileList", "__fileMkdirs", "__fileMove",
+                                      "__fileCopy", "__fileRemoveTree",
+                                      "__bytesFromSeq", "__bytesFromString", "__bytesLength",
+                                      "__bytesAt", "__bytesSlice", "__bytesConcat",
+                                      "__bytesEquals", "__bytesHash", "__bytesToList",
+                                      "__bytesDecode", "__bytesShow",
+                                      "__ioEnv", "__ioProps", "__ioExit", "__ioStderr",
+                                      "__procRunInherit", "__procCapture", "__procSpawn",
+                                      "__procWait", "__procKill",
+                                      "__tcpConnect", "__tcpListen", "__tcpAccept",
+                                      "__sockName", "__peerName",
+                                      "__fdReadLine", "__fdRead", "__fdReadBytes",
+                                      "__fdReadAll", "__fdWrite", "__fdSetTimeout",
+                                      "__fdClose", "__tlsConnect",
+                                      "__udpBind", "__udpSend", "__udpReceive"};
         for (unsigned n = 2; n <= kMaxTupleArity; ++n) v.push_back("Tuple" + std::to_string(n));
         return v;
     }();
