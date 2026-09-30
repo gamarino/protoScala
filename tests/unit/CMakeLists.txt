@@ -103,10 +103,10 @@ if(PROTOST_RUNTIME_LIBRARY AND PROTOST_FRONTEND_LIBRARY AND PROTOST_INCLUDE_DIR
         protoscala_repl protoscala_runtime protoscala_compiler protoscala_frontend
         protoscala_support
         "${PROTOST_RUNTIME_LIBRARY}" "${PROTOST_FRONTEND_LIBRARY}" GTest::gtest_main)
-    # protoST 0.5.0's runtime (its sockets and https) links OpenSSL; the static
-    # libraries do not carry that dependency, so name it here.
-    find_package(OpenSSL REQUIRED)
-    target_link_libraries(protoscala_protost_interop PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+    # protoST's runtime is built on protoIO (and so on OpenSSL) since protoST
+    # 0.5.0; its static libraries do not carry those dependencies, so they are
+    # named here. protoScala links the same protoIO target, which brings OpenSSL.
+    target_link_libraries(protoscala_protost_interop PRIVATE protoIO::protoio)
     target_compile_options(protoscala_protost_interop PRIVATE -Wall -Wextra)
     add_test(NAME umd/protost-interop COMMAND protoscala_protost_interop)
     set_tests_properties(umd/protost-interop PROPERTIES TIMEOUT 120)

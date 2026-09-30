@@ -17,6 +17,13 @@ namespace protoScala {
 namespace {
 // The actor whose handler is running on this thread (nullptr outside a turn).
 thread_local const proto::ProtoObject* tl_currentActor = nullptr;
+// The scheduler whose worker this thread is (nullptr on any other thread):
+// only a worker's blocking is accounted, since only a worker's blocking can
+// starve the pool.
+thread_local const ActorScheduler* tl_workerOf = nullptr;
+// A hard ceiling on the grown pool, protoST's value: a runaway program that
+// blocks thousands of actors in I/O gets a bounded number of threads.
+constexpr std::size_t kMaxWorkers = 256;
 } // namespace
 
 const proto::ProtoObject* currentActor() { return tl_currentActor; }
@@ -58,18 +65,56 @@ void ActorScheduler::ensureStarted(proto::ProtoSpace* space, proto::ProtoContext
         engine_ = engine;
         started_.store(true, std::memory_order_release);
         const unsigned n = configuredWorkerCount();
-        const proto::ProtoString* name =
-            proto::ProtoString::createSymbol(ctx, "protoscala-actor-worker");
-        const proto::ProtoObject* handle =
-            ctx->fromInteger(static_cast<long long>(reinterpret_cast<std::intptr_t>(this)));
-        for (unsigned i = 0; i < n; ++i) {
-            const proto::ProtoList* targs = ctx->newList()->appendLast(ctx, handle);
-            workers_.push_back(space_->newThread(ctx, name, &workerEntry, targs, nullptr));
-        }
+        baseWorkers_ = n;
+        for (unsigned i = 0; i < n; ++i) spawnWorker(ctx);
     });
 }
 
-unsigned ActorScheduler::workerCount() const { return static_cast<unsigned>(workers_.size()); }
+bool ActorScheduler::spawnWorker(proto::ProtoContext* ctx) {
+    {
+        std::lock_guard<std::mutex> g(workersMtx_);
+        if (shuttingDown_.load(std::memory_order_acquire)) return false;
+        ++spawning_;
+    }
+    // Creating a thread from a worker (enterBlocking) needs protoCore 2.6.1:
+    // before it, newThread replaced the space's main context with a temporary
+    // one and the main program's roots stopped being scanned.
+    const proto::ProtoString* name =
+        proto::ProtoString::createSymbol(ctx, "protoscala-actor-worker");
+    const proto::ProtoObject* handle =
+        ctx->fromInteger(static_cast<long long>(reinterpret_cast<std::intptr_t>(this)));
+    const proto::ProtoList* targs = ctx->newList()->appendLast(ctx, handle);
+    const proto::ProtoThread* t = space_->newThread(ctx, name, &workerEntry, targs, nullptr);
+    {
+        // Registered even when shutdown began meanwhile: shutdown waits for
+        // `spawning_` to drain and then joins every registered worker.
+        std::lock_guard<std::mutex> g(workersMtx_);
+        if (t) workers_.push_back(t);
+        --spawning_;
+    }
+    spawnedCv_.notify_all();
+    return t != nullptr;
+}
+
+bool ActorScheduler::enterBlocking(proto::ProtoContext* ctx) {
+    if (tl_workerOf != this) return false;
+    const int blocked = blockedInIo_.fetch_add(1, std::memory_order_acq_rel) + 1;
+    std::size_t total;
+    {
+        std::lock_guard<std::mutex> g(workersMtx_);
+        total = workers_.size() + spawning_;
+    }
+    if (total < kMaxWorkers && total - static_cast<std::size_t>(blocked) < baseWorkers_)
+        spawnWorker(ctx);
+    return true;
+}
+
+void ActorScheduler::leaveBlocking() { blockedInIo_.fetch_sub(1, std::memory_order_acq_rel); }
+
+unsigned ActorScheduler::workerCount() const {
+    std::lock_guard<std::mutex> g(workersMtx_);
+    return static_cast<unsigned>(workers_.size());
+}
 long long ActorScheduler::messagesProcessed() const {
     return messages_.load(std::memory_order_relaxed);
 }
@@ -512,6 +557,7 @@ bool ActorScheduler::drainOne(proto::ProtoContext* ctx) {
 
 void ActorScheduler::workerLoop(proto::ProtoContext* ctx) {
     ExecutionEngine::ActiveCallGuard active(engine_, layout_);
+    tl_workerOf = this;
     for (;;) {
         while (drainOne(ctx)) {}
         if (shuttingDown_.load(std::memory_order_acquire)) {
@@ -544,17 +590,28 @@ void ActorScheduler::workerLoop(proto::ProtoContext* ctx) {
 
 void ActorScheduler::shutdown(proto::ProtoContext* ctx) {
     if (!started_.load(std::memory_order_acquire)) return;
-    shuttingDown_.store(true, std::memory_order_release);
-    for (std::size_t i = 0; i < workers_.size(); ++i) work_.release();
+    std::vector<const proto::ProtoThread*> pool;
     {
         // The join blocks, so this thread must leave the GC quorum first: a
         // worker still allocating would otherwise wait for a safepoint we can
-        // no longer reach (P6).
+        // no longer reach (P6). The wait for a worker being created elsewhere
+        // (enterBlocking) is inside the same region, since that creation may
+        // itself be parked for a collection.
         proto::ProtoContext::UnmanagedScope unmanaged(ctx);
-        for (const proto::ProtoThread* t : workers_)
+        {
+            std::unique_lock<std::mutex> g(workersMtx_);
+            shuttingDown_.store(true, std::memory_order_release);
+            spawnedCv_.wait(g, [&] { return spawning_ == 0; });
+            pool = workers_;
+        }
+        for (std::size_t i = 0; i < pool.size(); ++i) work_.release();
+        for (const proto::ProtoThread* t : pool)
             if (t) const_cast<proto::ProtoThread*>(t)->join(ctx);
     }
-    workers_.clear();
+    {
+        std::lock_guard<std::mutex> g(workersMtx_);
+        workers_.clear();
+    }
     started_.store(false, std::memory_order_release);
     if (const unsigned n = suspended_.load(std::memory_order_relaxed))
         std::fprintf(stderr,

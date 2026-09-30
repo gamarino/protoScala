@@ -27,23 +27,29 @@ include(GNUInstallDirs)
 #      protoClojure). Used only when no installed package was found and no
 #      prefix was named; refused by -DPROTOCORE_REQUIRE_PACKAGE=ON.
 #
-# The floor is 2.2, and two independent requirements set it. The lower one is
+# The floor is 2.6.1, and three independent requirements set it. The lowest is
 # ProtoMPSCQueue, which protoScala's actor mailbox is built on and protoCore
-# gained in 2.1.0 (PROTOSCALA_PMQ_MIN_PROTOCORE below). The binding one is the
-# ABI: PROTOCORE_ABI_SOVERSION went 2 -> 3 in protoCore 2.2.0, and the assertion
-# further down this file is a hard error, so 2.1.0 CANNOT build this tree.
+# gained in 2.1.0 (PROTOSCALA_PMQ_MIN_PROTOCORE below). The next is the ABI:
+# PROTOCORE_ABI_SOVERSION went 2 -> 3 in protoCore 2.2.0, and the assertion
+# further down this file is a hard error, so 2.1.0 CANNOT build this tree. The
+# binding one is thread creation from a worker: the actor pool grows while
+# workers block in I/O (ActorScheduler::enterBlocking), which creates a thread
+# from a worker thread, and before protoCore 2.6.1 ProtoSpace::newThread did
+# that by replacing the space's main context with a temporary one, so the main
+# program's roots stopped being scanned and its values could be freed. 2.6.1 is
+# an API- and ABI-compatible fix (SOVERSION stays 3), so the check is on the
+# version.
 #
 # It said 2.1.0 until 2026-09-27, which made the diagnostics actively misleading:
 # a configure failure told the reader to "install protoCore 2.1.0 or newer", and
 # doing exactly that produced the SOVERSION FATAL_ERROR instead of a build. An
 # error message that names an unusable version is worse than no message. The
-# floor also travels into the DEB's Depends, where 2.2.0 is equally correct and
-# for the same reason.
+# floor also travels into the DEB's Depends, for the same reasons.
 #
 # The ceiling is the next major, because protoCore's major version and its
 # soname move together.
-set(PROTOCORE_MIN_VERSION      "2.2")
-set(PROTOCORE_MIN_VERSION_FULL "2.2.0")
+set(PROTOCORE_MIN_VERSION      "2.6.1")
+set(PROTOCORE_MIN_VERSION_FULL "2.6.1")
 set(PROTOCORE_NEXT_MAJOR       "3.0.0")
 set(PROTOCORE_ABI_SOVERSION    "3")
 # The protoCore release that introduced ProtoMPSCQueue. Kept separate from the
@@ -211,10 +217,12 @@ else()
         message(FATAL_ERROR
             "The sibling protoCore at ${PROTOCORE_DIR} is "
             "${PROTOCORE_EFFECTIVE_VERSION}; protoScala requires "
-            "${PROTOCORE_MIN_VERSION_FULL} or later. Two requirements set that "
+            "${PROTOCORE_MIN_VERSION_FULL} or later. Three requirements set that "
             "floor and the message should not conflate them: ProtoMPSCQueue "
-            "needs ${PROTOSCALA_PMQ_MIN_PROTOCORE}, and PROTOCORE_ABI_SOVERSION "
-            "${PROTOCORE_ABI_SOVERSION} needs 2.2.0. The higher one binds.")
+            "needs ${PROTOSCALA_PMQ_MIN_PROTOCORE}, PROTOCORE_ABI_SOVERSION "
+            "${PROTOCORE_ABI_SOVERSION} needs 2.2.0, and creating a thread from "
+            "a worker (the actor pool grows while workers block in I/O) needs "
+            "2.6.1. The highest one binds.")
     endif()
     message(STATUS "protoScala: sibling protoCore ${PROTOCORE_EFFECTIVE_VERSION} "
                    "from ${PROTOCORE_LIB_DIR}")
@@ -228,6 +236,29 @@ include_directories(${PROTOCORE_INCLUDE_DIRS} src include ${CMAKE_CURRENT_BINARY
 # module built against one soversion and loaded against another must fail with a
 # version message rather than with an undefined symbol.
 set(PROTOSCALA_ABI_SOVERSION "1")
+
+# --- protoIO: files, processes, TCP, UDP, TLS and HTTP (IoPrimitives.cpp) ------
+# protoIO is the POSIX I/O layer the protoCore runtimes share. It is a STATIC
+# library linked into libprotoScala.so, so the package gains no dependency on
+# protoIO itself -- only on OpenSSL, which protoIO's exported target names as a
+# PUBLIC link dependency and dpkg-shlibdeps then records. Resolution order, the
+# same as for protoCore: an installed CMake package (the protoio-dev deb, or any
+# prefix named with -DCMAKE_PREFIX_PATH, or a build tree named with
+# -DprotoIO_DIR), else the sibling source tree ../protoIO built as part of this
+# one.
+find_package(protoIO 0.1 CONFIG QUIET)
+if(protoIO_FOUND)
+    message(STATUS "protoScala: installed protoIO ${protoIO_VERSION} from ${protoIO_DIR}")
+elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../protoIO/CMakeLists.txt")
+    message(STATUS "protoScala: no installed protoIO package found; building the sibling ../protoIO")
+    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../protoIO"
+                     "${CMAKE_CURRENT_BINARY_DIR}/_protoIO" EXCLUDE_FROM_ALL)
+else()
+    message(FATAL_ERROR
+        "protoIO not found: install protoio-dev (or name a prefix with "
+        "-DCMAKE_PREFIX_PATH / -DprotoIO_DIR), or check out "
+        "https://github.com/gamarino/protoIO as ../protoIO")
+endif()
 
 # --- readline (interactive REPL) -------------------------------------------------
 find_library(READLINE_LIBRARY NAMES readline)
@@ -352,7 +383,7 @@ add_library(protoscala_runtime OBJECT
     ${CMAKE_CURRENT_BINARY_DIR}/generated/PreludeSource.cpp
 )
 target_link_libraries(protoscala_runtime PUBLIC protoscala_compiler protoscala_support
-    ${PROTOCORE_LIBRARY} pthread)
+    ${PROTOCORE_LIBRARY} pthread protoIO::protoio)
 target_compile_options(protoscala_runtime PRIVATE -Wall -Wextra -Wpedantic)
 set_property(TARGET protoscala_runtime PROPERTY POSITION_INDEPENDENT_CODE ON)
 # Provider plug-ins are dlopen'd (src/umd/ProviderPlugins.cpp); the installed
@@ -422,6 +453,14 @@ target_include_directories(protoScala
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     PRIVATE src)
+# protoIO is linked in statically and stays an implementation detail of the
+# library: its symbols are not exported, so they are not part of the ABI a
+# generated module sees, and a process that links another copy of protoIO (the
+# protoST interop test does) keeps two independent copies instead of silently
+# interposing one on the other.
+if(UNIX AND NOT APPLE)
+    target_link_options(protoScala PRIVATE "LINKER:--exclude-libs,libprotoio.a")
+endif()
 set_target_properties(protoScala PROPERTIES
     OUTPUT_NAME protoScala
     VERSION ${PROJECT_VERSION}
