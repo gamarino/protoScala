@@ -197,8 +197,11 @@ if(PROTOSCALA_TRANSPILED_TESTS)
         # mirror the ones above; a fixture whose environment differed between the
         # two paths would be comparing two different programs.
         if(conf_file MATCHES "^(26-file-io|30-io)/")
+            # A directory of their own, so a fixture and its transpiled twin
+            # never write the same file at the same time under `ctest -j`.
+            file(MAKE_DIRECTORY "${PROTOSCALA_FILE_IO_SCRATCH}/transpiled")
             set_tests_properties("transpiled/${conf_file}" PROPERTIES
-                ENVIRONMENT "PROTOSCALA_TEST_TMP=${PROTOSCALA_FILE_IO_SCRATCH}")
+                ENVIRONMENT "PROTOSCALA_TEST_TMP=${PROTOSCALA_FILE_IO_SCRATCH}/transpiled")
         elseif(conf_file MATCHES "^tutorial/00-readme-a-module")
             set_tests_properties("transpiled/${conf_file}" PROPERTIES ENVIRONMENT
                 "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/tutorial/_readme")
