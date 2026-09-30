@@ -173,7 +173,7 @@ if [[ -n "${PROTOSCALA_RUN_CWD:-}" ]]; then
 else
     RUN_DIR="$FILE_DIR"
 fi
-( cd "$RUN_DIR" && timeout 90s "$PROTOSCALA" --run-module "$SCRATCH/module.so" ) \
+( cd "$RUN_DIR" && timeout 90s "$PROTOSCALA" --run-module "$SCRATCH/module.so" </dev/null ) \
     >"$stdout_file" 2>"$stderr_file"
 exit_code=$?
 t3=$(ms_now)

@@ -17,7 +17,8 @@ add_subdirectory(unit)
 foreach(cli_test help version unknown-option script-errors main-args
                  repl-basic repl-multiline repl-errors repl-load repl-history-hygiene
                  repl-redefinition repl-results repl-indented-input repl-classes deep-source
-                 tutorial-repl actors-shutdown actors-stress modules)
+                 tutorial-repl actors-shutdown actors-stress modules
+                 io-stdin io-program io-blocking-pool)
     add_test(NAME cli/${cli_test}
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/cli/${cli_test}.sh" "$<TARGET_FILE:protoscala>")
 endforeach()
@@ -97,8 +98,8 @@ foreach(conf_file ${PROTOSCALA_CONFORMANCE_FILES})
     if(conf_file MATCHES "(^|/)_")
         continue()
     endif()
-    if(conf_file MATCHES "^26-file-io/")
-        # Track F. The fixtures that WRITE need a directory they may create files
+    if(conf_file MATCHES "^(26-file-io|30-io)/")
+        # Track F (and the I/O track's 30-io, which writes files too). The fixtures that WRITE need a directory they may create files
         # in. The conformance runner starts each fixture in its own source
         # directory, so a relative path would write into the repository -- these
         # fixtures therefore take the directory from the environment, and refuse
@@ -195,7 +196,7 @@ if(PROTOSCALA_TRANSPILED_TESTS)
         # reads a file or imports a module sees what it saw before. The blocks
         # mirror the ones above; a fixture whose environment differed between the
         # two paths would be comparing two different programs.
-        if(conf_file MATCHES "^26-file-io/")
+        if(conf_file MATCHES "^(26-file-io|30-io)/")
             set_tests_properties("transpiled/${conf_file}" PROPERTIES
                 ENVIRONMENT "PROTOSCALA_TEST_TMP=${PROTOSCALA_FILE_IO_SCRATCH}")
         elseif(conf_file MATCHES "^tutorial/00-readme-a-module")

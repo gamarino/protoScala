@@ -23,6 +23,10 @@
 #
 # Temporary files live in the current directory (CTest runs inside the build
 # tree), never in /tmp.
+#
+# Standard input is /dev/null: a fixture that reads it sees the end of input at
+# once, whatever the runner itself was started with (a terminal would block it).
+# tests/cli/io-stdin.sh is where real input is fed.
 
 set -u
 
@@ -81,10 +85,10 @@ if [[ -n "${PROTOSCALA_RUN_CWD:-}" ]]; then
         echo "FAIL: PROTOSCALA_RUN_CWD is not a directory: $PROTOSCALA_RUN_CWD"
         exit 1
     fi
-    ( cd "$PROTOSCALA_RUN_CWD" && timeout 90s "$PROTOSCALA" "$FILE_DIR/$FILE_BASE" ) \
+    ( cd "$PROTOSCALA_RUN_CWD" && timeout 90s "$PROTOSCALA" "$FILE_DIR/$FILE_BASE" </dev/null ) \
         >"$stdout_file" 2>"$stderr_file"
 else
-    ( cd "$FILE_DIR" && timeout 90s "$PROTOSCALA" "$FILE_BASE" ) \
+    ( cd "$FILE_DIR" && timeout 90s "$PROTOSCALA" "$FILE_BASE" </dev/null ) \
         >"$stdout_file" 2>"$stderr_file"
 fi
 exit_code=$?
