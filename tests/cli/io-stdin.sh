@@ -82,4 +82,11 @@ wait "$runner"; rc=$?
 [[ $rc -eq 0 && "$first" == "got one" && "$second" == "got two" ]] ||
     fail "streaming stdin: exit $rc, got '$first' then '$second'"
 
+# 6. Tutorial chapter 18 §18.1 says what its line counter prints when fed from a
+#    pipe; this is that run.
+tut="$(cd "$(dirname "$0")/../conformance/tutorial" && pwd)"
+out=$(printf 'one\nthree\ntwo\n' | "$P" "$tut/18-io-count-lines.scala" 2>&1); rc=$?
+[[ $rc -eq 0 && "$out" == "3 lines, the longest is 'three'" ]] ||
+    fail "tutorial §18.1: exit $rc, output '$out'"
+
 echo OK

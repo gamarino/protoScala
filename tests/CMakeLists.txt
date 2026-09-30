@@ -124,7 +124,7 @@ foreach(conf_file ${PROTOSCALA_CONFORMANCE_FILES})
         set_tests_properties("conformance/${conf_file}" PROPERTIES
             ENVIRONMENT
             "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/28-member-imports/_modules")
-    elseif(conf_file MATCHES "^tutorial/(16-|00-readme-10min-(scala|pyjs)-files)")
+    elseif(conf_file MATCHES "^tutorial/(16-|18-io-|00-readme-10min-(scala|pyjs)-files)")
         # Track F. The chapter-16 snippets name their files the way a reader
         # would (`"notes.txt"`), so each one is run from a private directory of
         # its own inside the build tree -- never the source tree, never /tmp.
@@ -208,7 +208,7 @@ if(PROTOSCALA_TRANSPILED_TESTS)
         elseif(conf_file MATCHES "^28-member-imports/")
             set_tests_properties("transpiled/${conf_file}" PROPERTIES ENVIRONMENT
                 "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/28-member-imports/_modules")
-        elseif(conf_file MATCHES "^tutorial/(16-|00-readme-10min-(scala|pyjs)-files)")
+        elseif(conf_file MATCHES "^tutorial/(16-|18-io-|00-readme-10min-(scala|pyjs)-files)")
             get_filename_component(file_io_stem "${conf_file}" NAME_WE)
             set(file_io_cwd "${PROTOSCALA_FILE_IO_SCRATCH}/transpiled-${file_io_stem}")
             file(MAKE_DIRECTORY "${file_io_cwd}")

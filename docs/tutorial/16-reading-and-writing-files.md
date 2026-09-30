@@ -1,14 +1,14 @@
 # 16. Reading and writing files
 
 > **Implementation status.** Everything in this chapter runs today:
-> `Source.fromFile`, `Source.fromString`, `mkString`, `getLines()`, `close()`, and
-> the four writing operations `FileIO.write`, `FileIO.append`, `FileIO.exists` and
-> `FileIO.delete`. What is not implemented: any other encoding than UTF-8 (D99),
-> an `Iterator` — `getLines()` answers a `List[String]` (D100) — directories
-> (there is no `mkdir`, no listing and no rename), random access, binary files,
-> and anything from `java.io` or `java.nio` (D8). Reading is `scala.io.Source`
-> and behaves like it; writing is protoScala's own surface and is **not** a
-> `PrintWriter` (D102).
+> `Source.fromFile`, `Source.fromString`, `mkString`, `getLines()` (a streaming
+> `Iterator`), `close()`, and the four writing operations `FileIO.write`,
+> `FileIO.append`, `FileIO.exists` and `FileIO.delete`. Directories, binary files,
+> standard input, other programs, sockets and HTTP are
+> [chapter 18](18-input-and-output.md). What is not implemented: any other encoding
+> than UTF-8 (D99), random access, and anything from `java.io` or `java.nio` (D8).
+> Reading is `scala.io.Source` and behaves like it; writing is protoScala's own
+> surface and is **not** a `PrintWriter` (D102).
 
 A program that cannot read its own input is a program you have to paste data
 into. This chapter is the two halves of fixing that: reading, which follows
@@ -21,9 +21,11 @@ Source.fromFile("notes.txt").getLines()
 
 ## 16.1 Reading a whole file
 
-`Source.fromFile(path)` opens a file and reads it. `getLines()` gives you its
-lines, without their line terminators; `mkString` gives you the whole text,
-terminators and all. `close()` says you are done with it.
+`Source.fromFile(path)` opens a file. `getLines()` gives you its lines, without
+their line terminators, reading them one at a time as you ask for them;
+`mkString` gives you the whole text, terminators and all. `close()` says you are
+done with it. A source is **consumed as it is read**, as Scala's is, so the lines
+are kept in a `List` when they are needed more than once.
 
 Fixture: [`tests/conformance/tutorial/16-files-write-then-read.scala`](../../tests/conformance/tutorial/16-files-write-then-read.scala)
 
@@ -31,9 +33,9 @@ Fixture: [`tests/conformance/tutorial/16-files-write-then-read.scala`](../../tes
 FileIO.write("notes.txt", "milk\nbread\napples\n")
 
 val src = Source.fromFile("notes.txt")
-val lines = src.getLines()
-val size = src.mkString.length
+val lines = src.getLines().toList
 src.close()
+val size = Source.fromFile("notes.txt").mkString.length
 
 println(s"${lines.length} lines, $size characters")
 ```
@@ -44,16 +46,18 @@ Prints:
 3 lines, 18 characters
 ```
 
-`getLines()` answers a **`List[String]`**, so everything you know about `List`
-applies to it directly — `map`, `filter`, `count`, `zipWithIndex`, a `for`
-comprehension, all of it.
+`getLines()` answers an **`Iterator[String]`**, as it does in Scala: the file is
+read a line at a time, so a file larger than memory can be processed. The
+iterator carries the operations you would use on a list — `map`, `filter`,
+`count`, `zipWithIndex`, `mkString`, a `for` comprehension — and `.toList` when
+you want the lines kept.
 
 Fixture: [`tests/conformance/tutorial/16-files-read-a-file-you-were-given.scala`](../../tests/conformance/tutorial/16-files-read-a-file-you-were-given.scala)
 
 ```scala
 FileIO.write("shopping.txt", "milk\nbread\napples\n")
 
-// `getLines()` answers a List, so everything you know about List applies.
+// `getLines()` answers an Iterator; `for`, `map` and `mkString` work on it.
 val shouted = for line <- Source.fromFile("shopping.txt").getLines() yield line.toUpperCase
 println(shouted.mkString(" | "))
 ```
@@ -64,10 +68,9 @@ Prints:
 MILK | BREAD | APPLES
 ```
 
-On the JVM, `getLines()` answers an `Iterator[String]` and you write `.toList` to
-get a list. protoScala has no `Iterator` at all, so it answers the list (D100).
-`.toList` on a `List` is the identity, which means the Scala spelling
-`getLines().toList` also works and means the same thing.
+protoScala's `Iterator` is a prelude class with the operations above and the
+other common ones (`take`, `drop`, `find`, `exists`, `foldLeft`, ...); the full
+list, and what it lacks compared with Scala's, is D100.
 
 ### `mkString` and `getLines()` are the same file two ways
 
@@ -94,7 +97,7 @@ The details matter, because every one of them is a bug somebody has shipped.
 protoScala answers exactly as Scala 3 on the JVM does, and each row below was
 checked against `scalac` 3.9.0:
 
-| The file contains | `getLines()` |
+| The file contains | `getLines().toList` |
 |---|---|
 | `alpha\nbeta\ngamma\n` | `List(alpha, beta, gamma)` — the trailing newline adds no fourth line |
 | `alpha\nbeta\ngamma` | `List(alpha, beta, gamma)` — a last line needs no terminator |
@@ -108,7 +111,7 @@ checked against `scalac` 3.9.0:
 same splitter, which is useful for testing a function that takes a `Source`:
 
 ```scala
-Source.fromString("x\ny").getLines()     // List(x, y)
+Source.fromString("x\ny").getLines().toList     // List(x, y)
 ```
 
 ## 16.2 If you come from Python or JavaScript
@@ -133,16 +136,15 @@ const lines = fs.readFileSync("notes.txt", "utf8").split("\n");
 **protoScala**
 
 ```scala
-val lines = Source.fromFile("notes.txt").getLines()
+val lines = Source.fromFile("notes.txt").getLines().toList
 ```
 
 Four things to carry over:
 
 1. **There is no `with` and no `try`-with-resources.** `close()` exists and you
-   should call it when you keep a source around, but a source you read and drop
-   holds nothing open: protoScala reads the file when it opens it. That is why
-   the one-liner above is not a resource leak, and it is also the one place where
-   protoScala's `Source` is deliberately not Scala's (§16.5).
+   should call it when you stop reading a source early, but a file source closes
+   its file by itself once it has been read to the end. That is why the
+   one-liner above is not a resource leak.
 2. **A missing file raises; it does not return `None`, `null` or `undefined`.**
    Python raises `FileNotFoundError`, Node throws an `Error` with `code:
    "ENOENT"`, and protoScala raises `FileNotFoundException`. See §16.4.
@@ -359,32 +361,29 @@ answer would not be acceptable, and is not what happens.
 
 ## 16.5 A closed source, and reading twice
 
-Scala's `Source` wraps an open stream and is **consumed as it is read**: after
-`src.mkString`, `src.getLines()` answers an empty list, because the underlying
-iterator is exhausted. protoScala reads the file when it opens it, so it can
-answer as often as you ask. That is **D101**, and it is deliberate: the Scala
-behaviour is a reliable source of bugs, and matching it would mean carrying a
-cursor for no gain.
+A `Source` wraps an open file and is **consumed as it is read**, in protoScala as
+in Scala: after `src.getLines().length` has read every line, a second
+`src.getLines()` finds nothing left. Keep the lines with `.toList`, or open the
+file again.
 
 Fixture: [`tests/conformance/tutorial/16-files-read-twice.scala`](../../tests/conformance/tutorial/16-files-read-twice.scala)
 
 ```scala
 FileIO.write("twice.txt", "a\nb\nc\n")
 val src = Source.fromFile("twice.txt")
-// A protoScala source may be read again. On the JVM the second answer would be
-// an empty list, because Scala's Source is consumed as it is read (D101).
+// A source is consumed as it is read, as Scala's is: the first pass reads every
+// line, and the second finds none left.
 println(s"${src.getLines().length} ${src.getLines().length}")
 ```
 
 Prints:
 
 ```text
-3 3
+3 0
 ```
 
-What does **not** change is that a closed source is closed. `close()` could have
-been a no-op here, since nothing is held open — it is not, because a program that
-reads a source it has already closed has a bug and should be told about it.
+A closed source is closed: a program that reads a source it has already closed
+has a bug and is told about it.
 
 Fixture: [`tests/conformance/tutorial/16-files-a-closed-source.scala`](../../tests/conformance/tutorial/16-files-a-closed-source.scala)
 
@@ -412,7 +411,7 @@ Fixture: [`tests/conformance/tutorial/16-files-word-count.scala`](../../tests/co
 FileIO.write("app.log",
   "INFO started\nERROR disk is full\nINFO retrying in 5 seconds\nERROR giving up\n")
 
-val lines = Source.fromFile("app.log").getLines()
+val lines = Source.fromFile("app.log").getLines().toList
 val errors = lines.count(l => l.startsWith("ERROR"))
 val words = lines.map(l => l.split(" ").length).sum
 println(s"errors=$errors words=$words")
@@ -431,22 +430,23 @@ For a longer one, the [worked example](worked-example.md) reads its own
 
 | | Scala 3 on the JVM | protoScala | id |
 |---|---|---|---|
-| `getLines()` | `Iterator[String]` | `List[String]` — there is no `Iterator` | D100 |
-| reading a source twice | the second read is empty; a `Source` is consumed | reads the file once, at `fromFile`, and answers as often as asked | D101 |
+| `getLines()` | `Iterator[String]` | `Iterator[String]`, a prelude class with the common operations; see D100 for what it lacks | D100 |
+| reading a source twice | the second read is empty; a `Source` is consumed | the same (D101 is retired) | — |
 | encodings | any charset the JVM knows, from an implicit `Codec` | UTF-8 only; another name raises `UnsupportedOperationException` | D99 |
 | writing | `java.io.PrintWriter`, `java.nio.file.Files` | `FileIO.write` / `append` / `exists` / `delete` | D102 |
 | `MalformedInputException`'s message | `Input length = 1` | the path and the byte offset | D98 |
 | the reason in a message | `strerror`, in your locale | the same text, always in English | D98 |
 | exception class names | `java.io.FileNotFoundException` | `FileNotFoundException` | D8 |
 | `Source` as an `Iterator[Char]` | `src.toList` gives characters, `src.next()` works | not provided; use `mkString` or `getLines()` | D100 |
-| directories | `java.nio.file.Files.createDirectory`, listing, walking | none | — |
-| binary files, random access | `FileChannel`, `InputStream` | none | — |
+| directories | `java.nio.file.Files.createDirectory`, listing, walking | `FileIO.mkdirs`, `list`, `move`, `copy`, ... ([chapter 18](18-input-and-output.md)) | D102 |
+| binary files | `Files.readAllBytes`, `Array[Byte]` | `FileIO.readBytes` / `writeBytes`, answering `Bytes` | D126 |
+| random access | `FileChannel`, `RandomAccessFile` | none | — |
 
 What is **the same**, and was checked against `scalac` 3.9.0 rather than assumed:
 the names `Source.fromFile`, `Source.fromString`, `mkString`, `getLines()` and
 `close()`; which exception class each failure raises; the `<path> (<reason>)`
-shape of a failure message; every row of the line-splitting table in §16.1; and
-that reading a closed source fails.
+shape of a failure message; every row of the line-splitting table in §16.1; that
+a source is consumed as it is read; and that reading a closed source fails.
 
 ---
 

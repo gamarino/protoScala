@@ -60,4 +60,13 @@ out=$("$P" "$work/stderr.scala" 2>"$work/err2"); rc=$?
 [[ $rc -eq 0 && "$out" == "caught" && "$(cat "$work/err2")" == "oops" ]] ||
     fail "stderr of !!: exit $rc, stdout '$out', stderr '$(cat "$work/err2")'"
 
+# 6. Tutorial chapter 18 §18.2: the usage message goes to stderr, nothing to
+#    stdout, and the shell sees status 2; with a name it greets.
+tut="$(cd "$(dirname "$0")/../conformance/tutorial" && pwd)"
+out=$("$P" "$tut/18-io-usage-and-exit.scala" 2>"$work/err3"); rc=$?
+[[ $rc -eq 2 && -z "$out" && "$(cat "$work/err3")" == "usage: greet NAME..." ]] ||
+    fail "tutorial §18.2: exit $rc, stdout '$out', stderr '$(cat "$work/err3")'"
+out=$(SHELL=/bin/sh "$P" "$tut/18-io-usage-and-exit.scala" Ada 2>&1); rc=$?
+[[ $rc -eq 0 && "$out" == "Hello, Ada, from /bin/sh" ]] || fail "tutorial §18.2 with a name: exit $rc, output '$out'"
+
 echo OK

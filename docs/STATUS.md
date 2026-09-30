@@ -530,7 +530,11 @@ against **scalac 3.9.0**. Tutorial: [chapter 18](tutorial/18-input-and-output.md
       floor.
 - [x] **Language fix found on the way.** `obj.p(args)` for a member `p` written
       without a parameter list applies its result, as Scala does
-      (`sys.env("HOME")`); the VM did this for `obj.p()` only.
+      (`sys.env("HOME")`); the VM did this for `obj.p()` only. And
+      **`String.split` drops trailing empty strings**, as Java's does
+      (`"a\nb\n".split("\n")` is `List(a, b)`; it answered `List(a, b, )`), found
+      by checking chapter 18's printed output line by line
+      (`16-strings/split-drops-trailing-empty-strings.scala`).
 - [ ] **Cold start regressed.** The prelude grew from 322 to about 1,080 lines, and
       loading OpenSSL adds a little more: interleaved against `main` on the same
       host, `hello.scala` went from about 21 ms to about 26 ms of wall time (task

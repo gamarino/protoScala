@@ -53,6 +53,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`obj.p(args)` applies the result of a member written without a parameter
   list**, as Scala does (`sys.env("HOME")`); it raised "wrong number of
   arguments" unless the argument list was empty.
+- **`String.split` drops trailing empty strings**, as Java's `split` does, so a
+  line-terminated text splits into its lines: `"a\nb\n".split("\n")` was
+  `List(a, b, )` and is `List(a, b)` (verified against scalac 3.9.0).
 
 ### Known issues
 
