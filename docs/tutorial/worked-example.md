@@ -197,7 +197,7 @@ a pattern and, for a fixed-shape log line, entirely sufficient.
 
 ```scala
 def lines(path: String): List[String] =
-  Source.fromFile(path).getLines().filter(l => l.trim.nonEmpty)
+  Source.fromFile(path).getLines().filter(l => l.trim.nonEmpty).toList
 ```
 
 Three lines, and they are worth a paragraph because of what they replaced.
@@ -221,9 +221,9 @@ embedded text would print the same line as before and fail that check. Removing 
 workaround is not finished until the test that guarded it has been replaced by a
 test of the real thing.
 
-`getLines()` answers a `List[String]`, not an `Iterator[String]`, because there is
-no `Iterator` in this dialect (D100), so `.filter` applies to it directly. The
-filter drops blank lines: nothing in `sample.log` is blank today, and it is there
+`getLines()` answers an `Iterator[String]`, as in Scala, which reads the file a
+line at a time; `.filter` applies to it directly and `.toList` keeps the result,
+because the report reads the lines more than once. The filter drops blank lines: nothing in `sample.log` is blank today, and it is there
 so that an edited log with a stray blank line still produces the same report
 rather than one extra malformed count.
 
@@ -387,10 +387,10 @@ that one message and leaves the actor alive with its previous state.
 **Integers do not overflow**, so a count is never wrong because it got large.
 
 **File I/O is `scala.io.Source` and nothing else.** `Source.fromFile`,
-`getLines()`, `mkString` and `close()` behave as they do on the JVM, with the two
-divergences chapter 16 lists (`getLines()` gives a `List`, and a source may be
-read again). There is no `java.io`, no `java.nio.file`, no `PrintWriter` and no
-`Using`; writing is a four-operation `FileIO` object of protoScala's own (D102).
+`getLines()`, `mkString` and `close()` behave as they do on the JVM, including a
+source being consumed as it is read; chapter 16 lists what differs. There is no
+`java.io`, no `java.nio.file`, no `PrintWriter` and no `Using`; writing is the
+`FileIO` object of protoScala's own (D102).
 
 ## The same program in Python
 

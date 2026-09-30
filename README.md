@@ -129,7 +129,7 @@ protoScala's own four operations (D102):
 
 ```scala
 FileIO.write("notes.txt", "one\ntwo\n")
-val lines = Source.fromFile("notes.txt").getLines()   // a List[String], not an Iterator
+val lines = Source.fromFile("notes.txt").getLines()   // an Iterator[String], as in Scala
 println(lines.mkString(" | "))                        // one | two
 ```
 
@@ -220,7 +220,7 @@ println(try Source.fromFile("gone.txt").mkString
         catch case e: IOException => e.getClass)                     // FileNotFoundException
 ```
 
-`getLines()` gives you a `List[String]` with no trailing empty entry, which is the
+`getLines()` gives you the lines with no trailing empty entry, which is the
 bug `"…".split("\n")` leaves you in Node. [Tutorial chapter
 16](docs/tutorial/16-reading-and-writing-files.md) puts all of it beside `open()`
 and `fs.readFileSync`.
@@ -373,7 +373,9 @@ delivered the first working cross-runtime import (`import st.<module>`); what it
 did not deliver is `import py.numpy`, which needs work in protoPython rather than
 here. **Track F** added file input and output, so a program can read its own
 input; the worked example now opens `sample.log` instead of carrying a second copy
-of it. The binary runs Scala 3 scripts and offers a REPL,
+of it. **The I/O track** (2026-09-30) gave protoScala the rest of a scripting
+language's reach through protoIO, the I/O library the protoCore runtimes share:
+standard input, the environment and exit status, other programs, sockets and HTTP. The binary runs Scala 3 scripts and offers a REPL,
 in both brace and significant-indentation syntax:
 
 - `val`/`var`/`lazy val`/`def`, `if`/`while`, lambdas and closures, placeholder
@@ -441,7 +443,14 @@ in both brace and significant-indentation syntax:
   for writing, which is protoScala's own surface because Scala's is
   `java.io.PrintWriter` (D97–D102). Every failure raises the class the JVM raises,
   with a message naming the path: a missing file, a directory where a file was
-  expected, no permission, and bytes that are not valid UTF-8.
+  expected, no permission, and bytes that are not valid UTF-8;
+- **input and output beyond files** (the I/O track): a streaming `getLines()`
+  `Iterator`, `StdIn` and `Source.stdin`, `sys.env`/`props`/`exit`, binary files
+  and directories through `FileIO` and `Bytes`, other programs in
+  `scala.sys.process`'s shape (`Process(List("ls", "-l")).!!`, `"ls".!`), TCP,
+  TLS and UDP sockets with java.net's names, an HTTP client in requests-scala's
+  shape (`requests.get(url).text()`) and an HTTP server served on actors
+  (`HttpServer(8080) { req => Response(200, "hi") }`), all on protoIO (D124–D132).
 
 ```scala
 val counter = Actor.spawn(0) { (state, msg) => (state + msg, state + msg) }
@@ -457,9 +466,10 @@ said otherwise and had outlived four phases. For the exact boundary — what is
 implemented, what is not, and every deviation with its `D<n>` id — see
 [docs/STATUS.md](docs/STATUS.md); [docs/ROADMAP.md](docs/ROADMAP.md) lists what
 remains, as tracks rather than phases. The largest absences today are a `py`, `js`
-or `clj` provider, nested classes in a `class` or `trait`, and anything about files
-beyond reading and writing one whole text file (no directories, no binary files, no
-streaming).
+or `clj` provider and nested classes in a `class` or `trait`; on the I/O side,
+random access to files, a TLS server and HTTP keep-alive. The I/O track also cost
+about 5 ms of cold start, so DESIGN §1's 25 ms budget is currently **not met**
+(see [docs/STATUS.md](docs/STATUS.md), the I/O track).
 
 ### Conformance: what is measured, and against whose tests
 
@@ -1119,13 +1129,17 @@ path, as a zero-cost-exceptions ABI should be. See
 
 ## Building
 
-Prerequisites: a C++20 compiler, CMake ≥ 3.20, libreadline (from Phase 1), and
-protoCore built as a sibling directory (or installed and passed via
-`-DPROTO_CORE_PREFIX=<prefix>`).
+Prerequisites: a C++20 compiler, CMake ≥ 3.21, libreadline (from Phase 1),
+OpenSSL 3 development files (`libssl-dev`), protoCore 2.6.1 or newer built as a
+sibling directory (or installed and passed via `-DPROTO_CORE_PREFIX=<prefix>`),
+and protoIO, installed (`protoio-dev`) or checked out as the sibling `../protoIO`,
+which the build then compiles as part of this one.
 
 ```bash
 # protoCore, once
 cd ../protoCore && cmake -B build_release -S . && cmake --build build_release --target protoCore
+
+# protoIO: nothing to do when it is checked out beside protoScala as ../protoIO
 
 # protoScala
 cd ../protoScala
