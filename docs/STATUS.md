@@ -44,6 +44,13 @@
 > and a hand-written `object E` is the enum's own companion instead of a second
 > object that crashed the compiler. Recorded rather than fixed: D108–D112. In-scope
 > corpus rate **30.1 % → 31.8 %**, zero regressions across all 1654 files.
+> **Tests (I/O track, 2026-09-30): 2426 registered cases, 2426 passed** in one
+> sequential local run against protoCore 2.6.2 (7 skipped, as before), up from
+> 2315 on `main` before the track (where `umd/protost-interop` did not link,
+> because protoST had moved onto protoIO): 54 new conformance fixtures, their 54
+> `transpiled/` twins and 3 CLI checks. The new cases also passed three
+> repeated runs, and the 30-io, chapter-18 and io-* cases pass at
+> `PROTOCORE_HEAP_LIMIT_CELLS=20000`. CI has not run this tree yet.
 > **Tests: 2313 registered cases** as of 2026-09-27, against protoCore 2.5.0
 > (`df8406a3`) — `ctest --test-dir build_release -N | tail -1`. CI
 > (`.github/workflows/ci.yml`, which builds protoCore, protoST and protoScala from
