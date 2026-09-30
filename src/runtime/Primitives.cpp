@@ -670,17 +670,29 @@ PRIM(string_split) {
     if (sep.empty())
         throw ScalaError("IllegalArgumentException", "String.split needs a non-empty separator");
     const std::string s = selfText(ctx, self);   // one walk, then slices
-    ListBuilder b(ctx);
+    // The pieces are sliced first (plain C++ strings, no ProtoObject) so that
+    // Java's rule can be applied before anything is built: when the separator
+    // occurs at all, trailing empty strings are removed, so "a\nb\n" splits
+    // into List(a, b) and ",,".split(",") into List(); a string without the
+    // separator is answered whole ("".split(",") is List("")). Verified against
+    // scalac 3.9.0.
+    std::vector<std::string> pieces;
     std::size_t from = 0;
+    bool matched = false;
     while (true) {
         const std::size_t at = s.find(sep, from);
         if (at == std::string::npos) {
-            b.add(str(b.context(), s.substr(from)));
+            pieces.push_back(s.substr(from));
             break;
         }
-        b.add(str(b.context(), s.substr(from, at - from)));
+        matched = true;
+        pieces.push_back(s.substr(from, at - from));
         from = at + sep.size();
     }
+    if (matched)
+        while (!pieces.empty() && pieces.back().empty()) pieces.pop_back();
+    ListBuilder b(ctx);
+    for (const std::string& piece : pieces) b.add(str(b.context(), piece));
     return b.finish();
 }
 
