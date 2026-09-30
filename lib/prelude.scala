@@ -927,6 +927,10 @@ object Requests:
     values.toList.map(kv => __urlEncode(kv._1.toString) + "=" + __urlEncode(kv._2.toString)).mkString("&")
   def decodeForm(text: String): Map[String, String] = __pairsToMap(__httpParseQuery(text))
 
+// requests-scala is written `requests.get(...)`: the same object under that name,
+// so code copied from its documentation runs unchanged (D131).
+val requests = Requests
+
 // ---------------------------------------------------------------------------
 // HTTP server (D132)
 // ---------------------------------------------------------------------------
