@@ -6,11 +6,70 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — input and output (the I/O track, 2026-09-30)
+
+- **I/O on protoIO**, the POSIX layer protoST, protoScala and protoClojure share
+  (files, processes, TCP, UDP, TLS, HTTP/1.1), linked statically; the package
+  gains a dependency on OpenSSL only. Scala's names wherever Scala has the thing,
+  as prelude globals (LANGUAGE §4.5, tutorial chapter 18, deviations D124–D132):
+  - **Standard input:** `StdIn.readLine()` (null at the end), `readInt`,
+    `readLong`, `readDouble`, `readBoolean`; `Source.stdin`.
+  - **The program:** `sys.env`, `sys.props`, `sys.exit`, `sys.error`,
+    `Console.err`.
+  - **Files:** `FileIO.readBytes`/`writeBytes` on a new immutable `Bytes` value,
+    `list`, `mkdirs`, `move`, `copy`, `isDirectory`, `isFile`, `size`,
+    `lastModified`, `deleteRecursively`; `"s".getBytes`.
+  - **Other programs:** `Process(List(...))` / `Process("cmd")` with `!`, `!!`,
+    `#<` and `run()` (`exitValue()`, `destroy()`), and `"cmd".!` / `"cmd".!!`.
+  - **Sockets:** `Socket`, `ServerSocket` (`accept`, `tryAccept(ms)`),
+    `DatagramSocket`, `startTls`, `setSoTimeout`.
+  - **HTTP:** a requests-scala-shaped client (`Requests.get/post/put/patch/
+    delete/head/send`, also as `requests`) and `HttpServer(port) { req =>
+    Response(...) }` served on actors, with protoIO's request limits
+    (400/414/431/413) and header validation.
+  - **Exceptions:** `EOFException`, `FileAlreadyExistsException`,
+    `InterruptedIOException`, `SocketTimeoutException`, `SocketException`,
+    `ConnectException`, `UnknownHostException`.
+- **The actor pool grows while workers block in I/O** (up to 256 workers), so an
+  actor waiting on I/O another actor must answer cannot starve the pool.
+- 44 conformance fixtures (`tests/conformance/30-io/`) and three CLI checks
+  (`io-stdin`, `io-program`, `io-blocking-pool`).
+
+### Changed
+
+- **`getLines()` answers a streaming `Iterator[String]`, and a `Source` is
+  consumed as it is read, as in Scala.** It used to answer a `List[String]` and
+  read the file whole when it was opened (D100 narrowed, D101 retired). Code
+  that read a source twice, or indexed `getLines()`, writes `.toList` — as the
+  same code must on the JVM.
+- **protoCore 2.6.1 or newer is required** (was 2.2.0): the actor pool now
+  creates threads from worker threads.
+- **protoIO is a build requirement** (an installed `protoio-dev` package or a
+  sibling `../protoIO`), and with it OpenSSL's development files.
+- Conformance programs run with `/dev/null` as standard input.
+
+### Fixed
+
+- **`obj.p(args)` applies the result of a member written without a parameter
+  list**, as Scala does (`sys.env("HOME")`); it raised "wrong number of
+  arguments" unless the argument list was empty.
+- **`String.split` drops trailing empty strings**, as Java's `split` does, so a
+  line-terminated text splits into its lines: `"a\nb\n".split("\n")` was
+  `List(a, b, )` and is `List(a, b)` (verified against scalac 3.9.0).
+
+### Known issues
+
+- **Cold start regressed by about 5 ms** (a larger prelude, and OpenSSL loaded at
+  start-up), so DESIGN §1's 25 ms budget is no longer met; the options are
+  recorded in DECISIONS-LOG for the maintainer.
+
 ### Build
 
 - **`umd/protost-interop` links OpenSSL.** protoST 0.5.0's runtime has sockets
   and https, so its static libraries need `OpenSSL::SSL`/`OpenSSL::Crypto`;
   without them the interop test did not link and CTest reported it "Not Run".
+  Since protoST moved onto protoIO the test links `protoIO::protoio`, which
+  brings OpenSSL with it.
 
 ### Fixed
 

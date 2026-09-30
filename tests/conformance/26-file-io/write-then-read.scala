@@ -7,6 +7,6 @@ val tmp = System.getenv("PROTOSCALA_TEST_TMP")
 if tmp == "" then throw new IllegalStateException("PROTOSCALA_TEST_TMP is not set")
 val path = tmp + "/write-then-read.txt"
 FileIO.write(path, "one\ntwo\n")
-val lines = Source.fromFile(path).getLines()
+val lines = Source.fromFile(path).getLines().toList
 println(FileIO.exists(path) + " " + lines.length + " " + lines.mkString("|"))
 FileIO.delete(path)

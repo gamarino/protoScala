@@ -15,4 +15,4 @@ def lines(path: String): List[String] =
   // A blank line is not a log entry. Nothing in `sample.log` is blank today; the
   // filter is here so that an edited log with a trailing newline or a stray blank
   // line still produces the same report rather than one extra malformed count.
-  Source.fromFile(path).getLines().filter(l => l.trim.nonEmpty)
+  Source.fromFile(path).getLines().filter(l => l.trim.nonEmpty).toList

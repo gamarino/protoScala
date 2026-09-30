@@ -21,8 +21,8 @@
 # while the total fell.
 #
 # Counts by code:
-#   D113    39
-#   D121    31
+#   D113    40
+#   D121    35
 #   D123    87
 #
 #   D113  await: cooperative suspension snapshots a bytecode frame, and a transpiled
@@ -154,6 +154,11 @@
 28-member-imports/an-in-scope-name-wins-over-a-module.scala            D123   an import is resolved at transpile time and is not re-performed at load time
 28-member-imports/an-object-wildcard-import.scala                      D123   an import is resolved at transpile time and is not re-performed at load time
 28-member-imports/an-unknown-prefix-still-says-import-error.scala      D123   an import is resolved at transpile time and is not re-performed at load time
+30-io/http-concurrent-clients.scala                                    D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
+30-io/http-handler-failure-is-a-500.scala                              D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
+30-io/http-header-injection-is-refused.scala                           D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
+30-io/http-named-arguments.scala                                       D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
+30-io/http-status-checking.scala                                       D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
 tutorial/00-readme-10min-pyjs-actors.scala                             D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
 tutorial/00-readme-10min-pyjs-match.scala                              D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
 tutorial/00-readme-a-module-and-its-type.scala                         D123   an import is resolved at transpile time and is not re-performed at load time

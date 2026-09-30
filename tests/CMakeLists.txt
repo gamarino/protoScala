@@ -17,7 +17,8 @@ add_subdirectory(unit)
 foreach(cli_test help version unknown-option script-errors main-args
                  repl-basic repl-multiline repl-errors repl-load repl-history-hygiene
                  repl-redefinition repl-results repl-indented-input repl-classes deep-source
-                 tutorial-repl actors-shutdown actors-stress modules)
+                 tutorial-repl actors-shutdown actors-stress modules
+                 io-stdin io-program io-blocking-pool)
     add_test(NAME cli/${cli_test}
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/cli/${cli_test}.sh" "$<TARGET_FILE:protoscala>")
 endforeach()
@@ -97,8 +98,8 @@ foreach(conf_file ${PROTOSCALA_CONFORMANCE_FILES})
     if(conf_file MATCHES "(^|/)_")
         continue()
     endif()
-    if(conf_file MATCHES "^26-file-io/")
-        # Track F. The fixtures that WRITE need a directory they may create files
+    if(conf_file MATCHES "^(26-file-io|30-io)/")
+        # Track F (and the I/O track's 30-io, which writes files too). The fixtures that WRITE need a directory they may create files
         # in. The conformance runner starts each fixture in its own source
         # directory, so a relative path would write into the repository -- these
         # fixtures therefore take the directory from the environment, and refuse
@@ -123,7 +124,7 @@ foreach(conf_file ${PROTOSCALA_CONFORMANCE_FILES})
         set_tests_properties("conformance/${conf_file}" PROPERTIES
             ENVIRONMENT
             "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/28-member-imports/_modules")
-    elseif(conf_file MATCHES "^tutorial/(16-|00-readme-10min-(scala|pyjs)-files)")
+    elseif(conf_file MATCHES "^tutorial/(16-|18-io-|00-readme-10min-(scala|pyjs)-files)")
         # Track F. The chapter-16 snippets name their files the way a reader
         # would (`"notes.txt"`), so each one is run from a private directory of
         # its own inside the build tree -- never the source tree, never /tmp.
@@ -195,9 +196,12 @@ if(PROTOSCALA_TRANSPILED_TESTS)
         # reads a file or imports a module sees what it saw before. The blocks
         # mirror the ones above; a fixture whose environment differed between the
         # two paths would be comparing two different programs.
-        if(conf_file MATCHES "^26-file-io/")
+        if(conf_file MATCHES "^(26-file-io|30-io)/")
+            # A directory of their own, so a fixture and its transpiled twin
+            # never write the same file at the same time under `ctest -j`.
+            file(MAKE_DIRECTORY "${PROTOSCALA_FILE_IO_SCRATCH}/transpiled")
             set_tests_properties("transpiled/${conf_file}" PROPERTIES
-                ENVIRONMENT "PROTOSCALA_TEST_TMP=${PROTOSCALA_FILE_IO_SCRATCH}")
+                ENVIRONMENT "PROTOSCALA_TEST_TMP=${PROTOSCALA_FILE_IO_SCRATCH}/transpiled")
         elseif(conf_file MATCHES "^tutorial/00-readme-a-module")
             set_tests_properties("transpiled/${conf_file}" PROPERTIES ENVIRONMENT
                 "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/tutorial/_readme")
@@ -207,7 +211,7 @@ if(PROTOSCALA_TRANSPILED_TESTS)
         elseif(conf_file MATCHES "^28-member-imports/")
             set_tests_properties("transpiled/${conf_file}" PROPERTIES ENVIRONMENT
                 "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/28-member-imports/_modules")
-        elseif(conf_file MATCHES "^tutorial/(16-|00-readme-10min-(scala|pyjs)-files)")
+        elseif(conf_file MATCHES "^tutorial/(16-|18-io-|00-readme-10min-(scala|pyjs)-files)")
             get_filename_component(file_io_stem "${conf_file}" NAME_WE)
             set(file_io_cwd "${PROTOSCALA_FILE_IO_SCRATCH}/transpiled-${file_io_stem}")
             file(MAKE_DIRECTORY "${file_io_cwd}")

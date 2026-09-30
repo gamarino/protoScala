@@ -5,6 +5,10 @@ name: CI
 # once.  This workflow builds protoCore, protoST and protoScala from clean and
 # runs the whole ctest suite on every push and pull request.
 #
+# HOW protoIO IS OBTAINED: the same way, as a sibling built into
+# ../protoIO/build_release (the main job hands it over with -DprotoIO_DIR; the
+# isolate job lets protoScala build it from source with add_subdirectory).
+#
 # HOW protoCore IS OBTAINED: checked out as a SIBLING directory and built into
 # ../protoCore/build_release, the first path protoScala's developer fallback
 # searches (CMakeLists.txt, decision D-I1).  No `cmake --install` is involved.
@@ -50,10 +54,16 @@ concurrency:
 env:
   PROTOCORE_REPO: numaes/protoCore
   PROTOST_REPO: gamarino/protoST
-  # protoCore 2.5.0, SOVERSION 3 (master, 2026-09-25).  Bump deliberately.
-  PROTOCORE_REF: ${{ github.event_name == 'schedule' && 'master' || 'df8406a3f44f2a7c8505251bf6887e0ad6e60809' }}
-  # protoST at the commit protoScala's interop test was last verified against.
-  PROTOST_REF: ${{ github.event_name == 'schedule' && 'main' || 'afe0263d69ca1d6ef0555eeaba5502f9057f33c5' }}
+  PROTOIO_REPO: gamarino/protoIO
+  # protoCore 2.6.2, SOVERSION 3 (tag v2.6.2, 2026-09-30).  Bump deliberately.
+  # 2.6.1 is the floor: the actor pool creates threads from worker threads.
+  PROTOCORE_REF: ${{ github.event_name == 'schedule' && 'master' || '752bdb2064d3a2a6f8aa6bc756f107ed395bebd0' }}
+  # protoST at the commit protoScala's interop test was last verified against
+  # (protoST on protoIO, 2026-09-30).
+  PROTOST_REF: ${{ github.event_name == 'schedule' && 'main' || 'e11c1e5fcf4318664779a4ba1150a38822e72d9b' }}
+  # protoIO 0.1.0 (main, 2026-09-30): the I/O layer protoScala and protoST link
+  # statically.  Bump deliberately, like protoCore.
+  PROTOIO_REF: ${{ github.event_name == 'schedule' && 'main' || '503c7e79292b52b427d1c829092bfd389c9aeec2' }}
   # The only ctest cases in this suite whose verdict is a clock.  For the two
   # deadlocking ones the TIMEOUT *is* the verdict (tests/unit/CMakeLists.txt),
   # and embedder-conformance/isolate.heap.ceiling_progress is documented as
@@ -87,6 +97,13 @@ jobs:
           ref: ${{ env.PROTOST_REF }}
           path: protoST
 
+      - name: Check out protoIO as a sibling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PROTOIO_REPO }}
+          ref: ${{ env.PROTOIO_REF }}
+          path: protoIO
+
       - name: Record what is being built
         run: |
           cmake --version | head -1
@@ -95,12 +112,13 @@ jobs:
             echo "protoScala at \`$(git -C protoScala rev-parse HEAD)\`"
             echo "protoCore ref \`$PROTOCORE_REF\` at \`$(git -C protoCore rev-parse HEAD)\`"
             echo "protoST ref \`$PROTOST_REF\` at \`$(git -C protoST rev-parse HEAD)\`"
+            echo "protoIO ref \`$PROTOIO_REF\` at \`$(git -C protoIO rev-parse HEAD)\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Install libreadline
+      - name: Install libreadline and OpenSSL
         run: |
           sudo apt-get update
-          sudo apt-get install -y libreadline-dev
+          sudo apt-get install -y libreadline-dev libssl-dev
 
       - name: Build protoCore
         # The conformance archive is not optional here: protoScala's sixteen
@@ -109,16 +127,25 @@ jobs:
           cmake -S protoCore -B protoCore/build_release -DCMAKE_BUILD_TYPE=Release
           cmake --build protoCore/build_release --target protoCore protoCoreConformance --parallel "$(nproc)"
 
+      - name: Build protoIO
+        # Built into ../protoIO/build_release, like protoCore, and handed to
+        # protoST and protoScala as a build tree (-DprotoIO_DIR), so both link
+        # the same archive.  protoIO's own suite is protoIO's CI's job.
+        run: |
+          cmake -S protoIO -B protoIO/build_release -DCMAKE_BUILD_TYPE=Release -DPROTOIO_BUILD_TESTS=OFF
+          cmake --build protoIO/build_release --target protoio --parallel "$(nproc)"
+
       - name: Build protoST's libraries
         # Only the two static libraries the interop test links; protoST's own
         # binary and suite are protoST's CI's job.
         run: |
-          cmake -S protoST -B protoST/build_release -DCMAKE_BUILD_TYPE=Release
+          cmake -S protoST -B protoST/build_release -DCMAKE_BUILD_TYPE=Release \
+                -DprotoIO_DIR="$PWD/protoIO/build_release"
           cmake --build protoST/build_release --target protost_runtime protost_frontend --parallel "$(nproc)"
 
       - name: Configure protoScala
         working-directory: protoScala
-        run: cmake -B build_release -S .
+        run: cmake -B build_release -S . -DprotoIO_DIR="$PWD/../protoIO/build_release"
 
       - name: Confirm the optional test groups were registered
         # These two groups are wired with `if(TARGET ...)` / `find_library` and
@@ -183,10 +210,17 @@ jobs:
           ref: ${{ env.PROTOCORE_REF }}
           path: protoCore
 
-      - name: Install libreadline
+      - name: Check out protoIO as a sibling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PROTOIO_REPO }}
+          ref: ${{ env.PROTOIO_REF }}
+          path: protoIO
+
+      - name: Install libreadline and OpenSSL
         run: |
           sudo apt-get update
-          sudo apt-get install -y libreadline-dev
+          sudo apt-get install -y libreadline-dev libssl-dev
 
       - name: Build protoCore
         run: |
@@ -198,6 +232,9 @@ jobs:
         # Interop is off in this job: it needs no protoST, and the three cases
         # below do not touch it.  Passing it explicitly rather than relying on
         # protoST's absence keeps the intent in the log.
+        # protoIO is the sibling checkout, built as part of this tree by the
+        # add_subdirectory fallback: the second of the two ways protoScala finds
+        # it, so CI exercises both.
         run: |
           cmake -B build_release -S . -DPROTOSCALA_PROTOST_INTEROP=OFF
           cmake --build build_release --parallel "$(nproc)"

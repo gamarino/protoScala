@@ -44,6 +44,13 @@
 > and a hand-written `object E` is the enum's own companion instead of a second
 > object that crashed the compiler. Recorded rather than fixed: D108–D112. In-scope
 > corpus rate **30.1 % → 31.8 %**, zero regressions across all 1654 files.
+> **Tests (I/O track, 2026-09-30): 2426 registered cases, 2426 passed** in one
+> sequential local run against protoCore 2.6.2 (7 skipped, as before), up from
+> 2315 on `main` before the track (where `umd/protost-interop` did not link,
+> because protoST had moved onto protoIO): 54 new conformance fixtures, their 54
+> `transpiled/` twins and 3 CLI checks. The new cases also passed three
+> repeated runs, and the 30-io, chapter-18 and io-* cases pass at
+> `PROTOCORE_HEAP_LIMIT_CELLS=20000`. CI has not run this tree yet.
 > **Tests: 2313 registered cases** as of 2026-09-27, against protoCore 2.5.0
 > (`df8406a3`) — `ctest --test-dir build_release -N | tail -1`. CI
 > (`.github/workflows/ci.yml`, which builds protoCore, protoST and protoScala from
@@ -481,6 +488,71 @@ one shown to be capable of failing by a mutation of the implementation.
 - [x] Tutorial chapter 16, with a fixture per runnable snippet and a check that
       each snippet is, verbatim, its fixture's body.
 
+### The I/O track — input and output on protoIO (2026-09-30)
+
+Spec: `../protoIO/docs/specs/2026-09-30-protoio-design.md` §4 (approved
+2026-09-30). protoScala's I/O is a set of bindings over **protoIO**, the POSIX
+layer protoST, protoScala and protoClojure share, linked statically into
+`libprotoScala.so` (the package gains a dependency on OpenSSL only). 44
+conformance fixtures in `tests/conformance/30-io/` (the design named the
+directory `27-io`, which `27-predef` already takes), three CLI checks
+(`io-stdin`, `io-program`, `io-blocking-pool`) and the updated Track F fixtures.
+Every behaviour that has a JVM counterpart and could be checked was checked
+against **scalac 3.9.0**. Tutorial: [chapter 18](tutorial/18-input-and-output.md).
+
+- [x] **Streaming sources.** `Source.fromFile(...).getLines()` answers an
+      `Iterator[String]` that reads one line at a time; a source is consumed as it
+      is read, as Scala's is (D100 narrowed, D101 retired). `Source.stdin`.
+- [x] **Standard input.** `StdIn.readLine()` (null at the end), `readInt`,
+      `readLong`, `readDouble`, `readBoolean` (`EOFException` at the end, with
+      Scala's message); output is flushed before the program waits for input, so a
+      prompt is visible and a filter answers each line as it arrives.
+- [x] **The program.** `sys.env`, `sys.props` (D127), `sys.exit` (D128),
+      `sys.error`, `Console.err`. Standard input of a conformance fixture is
+      `/dev/null`.
+- [x] **Files.** `FileIO.readBytes` / `writeBytes` on the new `Bytes` value (D126),
+      `list`, `mkdirs`, `move`, `copy`, `isDirectory`, `isFile`, `size`,
+      `lastModified`, `deleteRecursively`.
+- [x] **Other programs.** `Process(List(...))` / `Process("cmd")` with `!`, `!!`,
+      `#<` and `run()` (`exitValue()`, `destroy()`), and `"cmd".!` / `"cmd".!!`
+      (D129). Two megabytes fed to a program that exits without reading them do not
+      kill protoScala with SIGPIPE.
+- [x] **Sockets.** `Socket`, `ServerSocket`, `DatagramSocket` with java.net's
+      names and simplified streams, `startTls`, timeouts (D130).
+- [x] **HTTP client** in requests-scala's shape: `Requests.get/post/put/patch/
+      delete/head/send` (also as `requests`), one native call per exchange (D131).
+- [x] **HTTP server** served on actors: `HttpServer(port) { req => Response(...) }`
+      with `start`, `startInBackground`, `stop`, `port`; protoIO's request limits
+      (400, 414, 431, 413) and header validation (D132).
+- [x] **Exceptions**: `EOFException`, `FileAlreadyExistsException`,
+      `InterruptedIOException`, `SocketTimeoutException`, `SocketException`,
+      `ConnectException` and `UnknownHostException` join the hierarchy, and every
+      protoIO error kind maps onto a class (D124).
+- [x] **The unmanaged bracket.** Every blocking call — the Track F file
+      primitives included — runs inside `ProtoContext::UnmanagedScope` and touches
+      no ProtoObject inside it. A worker that blocks without bound grows the actor
+      pool (at most 256 workers), so actors blocked in I/O cannot starve the ones
+      that must answer them (`io-blocking-pool` times out with growth disabled).
+      Creating a thread from a worker needs protoCore **2.6.1**, which is now the
+      floor.
+- [x] **Language fix found on the way.** `obj.p(args)` for a member `p` written
+      without a parameter list applies its result, as Scala does
+      (`sys.env("HOME")`); the VM did this for `obj.p()` only. And
+      **`String.split` drops trailing empty strings**, as Java's does
+      (`"a\nb\n".split("\n")` is `List(a, b)`; it answered `List(a, b, )`), found
+      by checking chapter 18's printed output line by line
+      (`16-strings/split-drops-trailing-empty-strings.scala`).
+- [ ] **Cold start regressed.** The prelude grew from 322 to about 1,080 lines, and
+      loading OpenSSL adds a little more: interleaved against `main` on the same
+      host, `hello.scala` went from about 21 ms to about 26 ms of wall time (task
+      clock 16.4 → 20.5 ms), so the 25 ms budget of DESIGN §1, certified on a
+      quiet host at 21.6 ms, is **no longer met**. Measured on a host with
+      foreign load (mpstat 68–83 % idle), so the absolute figures are not a
+      certification either way; the difference is. The cost is linear in the
+      prelude's size (the image's reconstruction, and the cells it allocates).
+      The options are in DECISIONS-LOG (the I/O track) and the choice is the
+      maintainer's.
+
 ### Track X — what the Scala 3 run corpus found
 
 Every one of protoScala's other tests was written here, so they encode our
@@ -580,17 +652,13 @@ are quoted in the commit that made each change.
   records them for a later phase. Nesting in an **`object`** is implemented
   (Phase 4).
 - Exhaustiveness checking for `match` (D4: types are erased).
-- **Anything about files beyond reading and writing one whole text file.**
-  Track F delivered `scala.io.Source` (`fromFile`, `fromString`, `mkString`,
-  `getLines()`, `close()`) and `FileIO` (`write`, `append`, `exists`, `delete`);
-  see D97–D102. Still absent: **directories** (no `mkdir`, no listing, no
-  rename, no `java.nio.file.Path`), **binary files and random access** (no
-  `InputStream`, no `FileChannel`, no byte arrays), **any encoding but UTF-8**
-  (D99), **an `Iterator`**, so nothing streams — a file is read whole into memory
-  (D100, D101) — **stdin** (no `Source.stdin`, no `readLine`), and
-  **`java.io` / `java.nio` of any kind** (D8). A file larger than memory cannot
-  be processed, and that limit is a consequence of having no `Iterator` rather
-  than of anything in the file layer.
+- **Input and output, what is still absent after the I/O track:** random access
+  to a file, file attributes beyond size and modification time, any encoding but
+  UTF-8 (D99), `System.err` / `System.out` as objects (`Console.err` exists), a
+  TLS **server**, HTTP keep-alive, HTTP/2 and WebSockets, streaming HTTP bodies,
+  process pipelines (`#|`, `#>`, `#&&`), a process's working directory or
+  environment, and `java.io` / `java.nio` / `java.net` of any kind (D8). The
+  surface that exists is under "The I/O track" above.
 - A **`py`, `js` or `clj` provider**. protoScala routes all four family prefixes
   and reports `no provider registered for '<alias>'`; no runtime in the family
   registers those three aliases. `st` is the one prefix with a provider behind it
@@ -935,9 +1003,9 @@ argument in [DECISIONS-LOG.md](DECISIONS-LOG.md).
 | D97 | The exceptions file I/O raises are the JVM's **without the `java.io.` and `java.nio.charset.` prefixes** (D8), in the JVM's own shape: `IOException` extends `Exception`, `FileNotFoundException` and `CharacterCodingException` extend `IOException`, and `MalformedInputException` extends `CharacterCodingException`. `IOException` is deliberately **not** under `RuntimeException`: on the JVM an I/O failure is checked, and a Scala programmer writes `catch case e: IOException` expecting it to see a missing file *and* a bad byte. Which class each failure raises follows the JVM's rule, which is simpler than it looks: a failure of `open` is a `FileNotFoundException` whatever its errno (this is why the JVM reports "Permission denied" and "Is a directory" through that class), and a failure after the descriptor exists is an `IOException`. Verified against scalac 3.9.0 for a missing file, a directory, a file with no read permission and a file of invalid UTF-8 | Track F | (perm) |
 | D98 | A failure **message** keeps the JVM's `<path> (<reason>)` shape, but the reason is spelled out in **English** from a table of errnos instead of taken from `strerror`, which is localised — on the development machine the JVM reports `sample.log (No existe el archivo o el directorio)`. An errno outside the table keeps `std::strerror` and is therefore locale-dependent; the table covers every errno these operations can produce. `MalformedInputException`'s message also diverges: it names the path and the byte offset (`bad.bin: malformed UTF-8 input at byte 1`) where Scala's says only `Input length = 1`, because a message that does not name the file is of no use when several were read | Track F | (perm) |
 | D99 | **UTF-8 is the only encoding.** `Source.fromFile(path, enc)` accepts the second argument so the common Scala spelling compiles, and accepts only a name for UTF-8 (`UTF-8`/`UTF8`, any case); any other name — including one the JVM supports, such as `ISO-8859-1` — raises an `UnsupportedOperationException` naming it. Refusing is the point: decoding Latin-1 bytes as if they were UTF-8 hands the program plausible nonsense. Decoding is **strict**, as the JVM's is: an overlong form, a surrogate code point, a value above U+10FFFF and a sequence truncated at end of input are all `MalformedInputException`, never replacement characters. There is no implicit `Codec` because there are no implicits (D3) | Track F | later |
-| D100 | **`getLines()` answers a `List[String]`**, not an `Iterator[String]`: protoScala has no `Iterator` at all. `getLines().toList` therefore also works and means the same thing, since `toList` on a `List` is the identity. Consequences: a `Source` is not an `Iterator[Char]` either, so `src.next()` and the character-wise `src.toList` are unavailable; and nothing streams — the file is read whole, so a file larger than memory cannot be processed. How lines are split matches Scala exactly and was verified row by row against scalac 3.9.0: on `\n`, `\r\n` and a lone `\r`, the terminator stripped, a trailing terminator adding no final empty line, and an empty file answering no lines rather than one empty one | Track F | later |
-| D101 | **A `Source` may be read again.** Scala's is consumed as it is read: `src.mkString` followed by `src.getLines()` answers `List()` on the JVM (verified against scalac 3.9.0), because the underlying iterator is exhausted. protoScala reads the file when `fromFile` opens it and answers the same thing however often it is asked. Cost of matching Scala: a cursor and a consumed-ness flag, to reproduce a behaviour that is a reliable source of bugs — strictly more programs work this way, and only a program relying on exhaustion can tell. What does **not** change is that a **closed** source is closed: `close()` could have been a no-op, since nothing is held open, and it is not, because a program that reads a source it has already closed has a bug and should be told (`IOException`, message `<origin> (Stream Closed)`, where Scala's says only `Stream Closed`) | Track F | (perm) |
-| D102 | **Writing is protoScala's own surface, not a simulated `PrintWriter`.** Scala's canonical writers are `java.io.PrintWriter` and `java.nio.file.Files`; protoScala has no Java interop and will not have one (D8), so there is nothing to imitate, and imitating a `PrintWriter` would mean inventing a `Writer`, a stream hierarchy, a `flush` and a buffering policy so that one line of user code could look familiar. Instead: `FileIO.write(path, text)`, `FileIO.append(path, text)`, `FileIO.exists(path)`, `FileIO.delete(path)` — four operations, one call each. `write` replaces the whole file; the text is encoded as UTF-8, which is what `Source.fromFile` reads back; neither `write` nor `append` creates parent directories. `exists` answers `true` for a directory and `false` for a dangling symbolic link, as `java.io.File.exists()` does. `delete` answers `true` when it removed a file and `false` when there was nothing at the path, and **raises** for every other failure — a permission denial or a directory reported as `false` would be a swallowed error rather than an answer | Track F | (perm) |
+| D100 | **`getLines()` answers protoScala's own `Iterator`, which streams, and has the common operations only.** Since the I/O track (2026-09-30) it reads a line at a time and is consumed as it is read, as Scala's is. The `Iterator` is a prelude class with `hasNext`, `next()`, `foreach`, `map`, `flatMap`, `filter`, `filterNot`, `withFilter`, `take`, `drop`, `takeWhile`, `dropWhile`, `zipWithIndex`, `toList`, `toSeq`, `toVector`, `toSet`, `length`, `size`, `count`, `exists`, `forall`, `contains`, `find`, `foldLeft`, `sum`, `max`, `min`, `isEmpty`, `nonEmpty` and `mkString` (with 0, 1 or 3 arguments); it lacks the rest of Scala's (`grouped`, `sliding`, `zip`, `buffered`, `duplicate`, `partition`, ...), and `List`/`Vector` have no `.iterator` answering one. A `Source` is still not an `Iterator[Char]`, so `src.next()` and the character-wise `src.toList` are unavailable. Until 2026-09-30 `getLines()` answered a `List[String]` and the file was read whole. How lines are split matches Scala exactly and was verified row by row against scalac 3.9.0: on `\n`, `\r\n` and a lone `\r`, the terminator stripped, a trailing terminator adding no final empty line, and an empty file answering no lines rather than one empty one | Track F, I/O track | later |
+| D101 | *(retired 2026-09-30.)* A `Source` used to be read whole when it was opened and could be read again; since the I/O track it streams and is **consumed as it is read**, as Scala's is (`src.mkString` then `src.getLines().length` answers 17 and 0 on both, verified against scalac 3.9.0). What remains of the entry is a message: reading a **closed** source raises an `IOException` whose message is `<origin> (Stream Closed)`, where Scala's says only `Stream Closed` | Track F | (closed) |
+| D102 | **Writing is protoScala's own surface, not a simulated `PrintWriter`.** Scala's canonical writers are `java.io.PrintWriter` and `java.nio.file.Files`; protoScala has no Java interop and will not have one (D8), so there is nothing to imitate, and imitating a `PrintWriter` would mean inventing a `Writer`, a stream hierarchy, a `flush` and a buffering policy so that one line of user code could look familiar. Instead: `FileIO.write(path, text)`, `FileIO.append(path, text)`, `FileIO.exists(path)`, `FileIO.delete(path)` — four operations, one call each. `write` replaces the whole file; the text is encoded as UTF-8, which is what `Source.fromFile` reads back; neither `write` nor `append` creates parent directories. `exists` answers `true` for a directory and `false` for a dangling symbolic link, as `java.io.File.exists()` does. `delete` answers `true` when it removed a file and `false` when there was nothing at the path, and **raises** for every other failure — a permission denial or a directory reported as `false` would be a swallowed error rather than an answer The I/O track (2026-09-30) extended the surface in the same spirit, one call per operation: `readBytes`, `writeBytes`, `list`, `mkdirs`, `move`, `copy` (an existing target raises `FileAlreadyExistsException` unless `replaceExisting`, as `java.nio.file.Files` does), `isDirectory`, `isFile`, `size`, `lastModified` and `deleteRecursively`; `mkdirs` answers `false` only for a directory that was already there and raises for anything else in the way, where `java.io.File.mkdirs` swallows every failure as `false` | Track F, I/O track | (perm) |
 
 Two rules that are *not* deviations but decide what a program means, so they are
 recorded here rather than left to be discovered:
@@ -1047,6 +1115,26 @@ interpreter: there is nothing to drift from. The exception-boundary template app
 exactly two places, both inside `libprotoScala.so`, and the emitter writes no `catch`
 at all — a generator bug cannot drop the `std::logic_error` clause and retire D74 in a
 file no human wrote. Full specification: [`PROTOSCALAC_SPECIFICATION.md`](PROTOSCALAC_SPECIFICATION.md).
+
+### I/O track deviations — recorded 2026-09-30, pending review
+
+Decided by the implementing agent under the approved protoIO design (§4: "follow
+Scala by default; wherever the API differs from what a Scala programmer would
+write, the difference is recorded as a D-deviation"). Each JVM behaviour quoted
+was checked against scalac 3.9.0 unless the row says otherwise. The arguments are
+in [DECISIONS-LOG.md](DECISIONS-LOG.md) under "The I/O track".
+
+| id | Deviation | Plan | Revisit |
+|---|---|---|---|
+| D124 | **protoIO's error kinds map onto the JVM's I/O exceptions, in a slightly flatter tree.** FileNotFound → `FileNotFoundException`, FileExists → `FileAlreadyExistsException`, FileSystem and Process → `IOException` (scala.sys.process reports a program it cannot run as an `IOException`), ConnectionRefused → `ConnectException`, ConnectionTimedOut → `SocketTimeoutException` (a connect, a read after `setSoTimeout`, or a TLS handshake), NameLookup → `UnknownHostException`, Network → `SocketException`, LineTooLong and BodyTooLarge → `IOException`, InvalidArgument → `IllegalArgumentException`. Where the JVM differs: `FileAlreadyExistsException` sits directly under `IOException` (the JVM has `FileSystemException` between them, which nothing here raises); a TLS failure is a `SocketException`, where the JVM raises `SSLException` (also an `IOException`); an HTTP protocol error (a malformed status line, a body that ends early) is a `SocketException`, where the JVM raises a plain `IOException` or `ProtocolException`. **Messages** are protoIO's (`cannot connect to 127.0.0.1:9: Connection refused`) with the errno text in English (D98), where the JVM's are terse (`Connection refused`); an `UnknownHostException` carries the resolver's own text, which is localised (glibc's `gai_strerror`), where the JVM's is the host name | I/O track | later |
+| D125 | **All text I/O is UTF-8, whatever the platform or the peer says.** A `Source` (a file or standard input) decodes strictly (D99). Text read from a stream — `StdIn.readLine`, a `Socket`, a child's output (`!!`), an HTTP body (`text()`), `Bytes.utf8String` — decodes with U+FFFD for a malformed sequence, which is what java.io's readers do; the deviation is the charset: the JVM uses the platform default for sockets and processes and the response's declared charset for requests-scala's `text()`, and protoScala always uses UTF-8 | I/O track | later |
+| D126 | **Binary data is `Bytes`, not `Array[Byte]`.** protoScala has no `Array` (D69), so bytes are an immutable value held in a protoCore `ProtoByteBuffer`: `Bytes(1, 2, 3)`, `Bytes.fromSeq`, `Bytes.fromString`, `"s".getBytes`, with `length`, `apply(i)`, `slice`, `take`, `drop`, `++`, `toList`, `toVector`, `map`, `foreach`, `utf8String`, `sameElements`, and `==` / `hashCode` by content (an `Array[Byte]` compares by identity). Elements read as Scala's signed `Byte` values (-128..127); every writer accepts -128..255, so `0xFF` and `-1` are one byte, and anything outside is refused rather than truncated. `toString` is `Bytes(104, 105)`, where an array prints `[B@1b6d3586`. `getBytes` takes no charset (UTF-8 only, and no overloading, D31): `s.getBytes("UTF-8")` reaches `Bytes.apply` with a String and raises an `IllegalArgumentException` that says so, rather than answering a byte. `new String(bytes, cs)` is `bytes.utf8String` | I/O track | later |
+| D127 | **`sys.props` is a read-only snapshot of ten properties**: `user.dir`, `user.home`, `user.name`, `os.name`, `os.arch`, `os.version`, `line.separator`, `file.separator`, `path.separator` and `java.io.tmpdir`, with the JVM's meanings. Scala's is a mutable view of every JVM system property (`java.version`, `java.class.path`, ...), which have no meaning here. `sys.env` matches Scala: an immutable `Map`, read when it is asked for | I/O track | later |
+| D128 | **`sys.exit(n)` ends the process at once.** Standard output and error are flushed, and nothing else runs: no `finally` (as on the JVM), no shutdown hooks (protoScala has none), no join of the actor pool and none of the shutdown's reports. The status is `n & 0xFF`, as the JVM's is on Linux | I/O track | (perm) |
+| D129 | **`scala.sys.process`'s shape, reduced.** `Process(List(...))` or `Process(Vector(...))` rather than `Process(Seq(...))`, because there is no `Seq` (D65, ruled); `Process("a b c")` splits on spaces only (Scala 2.13 honours quotes); `#<` takes a `String` or `Bytes` (Scala: a `File`, `URL`, `InputStream` or another builder); `run()` with `#<` input is refused with `UnsupportedOperationException`; there are no pipelines (`#|`, `#>`, `#&&`, `#||`), no `ProcessLogger`, no `lazyLines`, and no working directory or environment arguments. Two stream differences: `!` without `#<` lets the child **share this program's standard input** (it is started with protoIO's `spawn`, which shares all three streams so that its output appears live), where Scala's `!` leaves the child's input unconnected and only `!<` connects it; and `!!` collects the child's standard error and writes it to this program's once the child has exited, where Scala's forwards it as it arrives. `!`, `!!` (with Scala's `Nonzero exit value: n`), `run()`, `exitValue()` and `destroy()` (SIGTERM, reported as 143) behave as Scala's; a missing program is an `IOException` with protoIO's message (`cannot run x: No such file or directory`, Scala: `Cannot run program "x": ...`) | I/O track | later |
+| D130 | **Sockets keep java.net's names, with simplified streams.** Reading and writing are methods of the socket (`readLine`, `read(n)`, `readBytes(n)`, `readAll`, `write`, `writeBytes`) instead of an `InputStream`/`OutputStream` pair; `read(n)` and `readBytes(n)` wait for n characters or bytes, or the end (`DataInputStream.readFully`'s semantics), where `InputStream.read` answers what has arrived. `new Socket(host, port, connectTimeoutMs)` takes the connect timeout that Java passes to `connect`. `new ServerSocket(port, host, backlog)` puts the host second (Java: port, backlog, address). `tryAccept(ms)` answers an `Option[Socket]`, because `accept()` and `accept(ms)` cannot coexist without overloading (D31); `accept()` with `setSoTimeout` raises `SocketTimeoutException("Accept timed out")`, as Java's does. `DatagramSocket.send(data, host, port)` and `receive(): Datagram` replace `DatagramPacket`. An address is a `String`: there is no `InetAddress`. TLS is `startTls(serverName)` on a connected socket, where Java wraps it with an `SSLSocketFactory`. `Socket(h, p)` without `new` works through a companion `apply` (D41 does not apply to prelude classes that define one). No `shutdownInput`/`shutdownOutput`, no socket options beyond the timeout | I/O track | later |
+| D131 | **The HTTP client is requests-scala's shape, not all of it.** Named arguments match requests-scala's (`headers`, `params`, `data`, `readTimeout`, `maxRedirects`, `check`), but the **positional** order is protoScala's own (`send(method, url, headers, params, data, ...)`; `post(url, data, headers, params, ...)`), and a named call is refused by the transpiler (D121). `readTimeout` bounds the connection and every wait (there is no separate `connectTimeout`); `data` is a `String`, `Bytes` or a `Map` sent as a form; there is no `auth`, cookie handling, proxy, compression, keep-alive, session or streaming. The object is `Requests`, bound also as `requests` so code copied from requests-scala runs unchanged. The response class is `HttpResponse`, because `Response` is the server's. A network failure raises the I/O classes of D124 instead of `requests.TimeoutException` / `requests.UnknownHostException`; `check = true` raises `RequestFailedException` for a 4xx or 5xx status, as requests-scala does | I/O track | later |
+| D132 | **The HTTP server is protoScala's own, small one.** Scala has no standard server; the design fixed `HttpServer(port) { req => Response(...) }` with `start`, `startInBackground`, `stop` and `port`. One request per connection (`connection: close`), no TLS, no routing, no streaming bodies. Connections are served on 16 actors, round robin, so a slow request delays the ones queued behind it on the same actor; the actors live for the session (D46). A connection has 30 s for each wait. The default host is `127.0.0.1`, not every interface, and the default body limit is 64 MiB | I/O track | later |
 
 ### Phase 7 — packaging, 2026-09-27
 

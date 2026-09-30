@@ -16,6 +16,7 @@
 #include "protoCore.h"
 
 #include <atomic>
+#include <condition_variable>
 #include <deque>
 #include <memory>
 #include <mutex>
@@ -70,6 +71,17 @@ public:
     // A completed future wakes an actor suspended on it.
     void resume(proto::ProtoContext* ctx, const proto::ProtoObject* actor);
 
+    // Blocking I/O (IoSupport.h, BlockingAccount). A worker about to block in
+    // the kernel calls enterBlocking first: when the workers NOT blocked would
+    // drop below the configured pool size, one more worker is started, so an
+    // actor waiting on I/O that another actor must answer (an HTTP client and
+    // server on one pool) cannot starve the pool. Answers whether the call was
+    // accounted (false off a worker thread), and then leaveBlocking must follow.
+    // The pool never shrinks: an extra worker parks like any other when idle.
+    // Scala's global ExecutionContext does the same for `blocking { ... }`.
+    bool enterBlocking(proto::ProtoContext* ctx);
+    void leaveBlocking();
+
     unsigned workerCount() const;
     long long messagesProcessed() const;
     unsigned suspendedCount() const;
@@ -104,6 +116,20 @@ private:
     proto::ProtoSpace* space_ = nullptr;
     const RuntimeLayout* layout_ = nullptr;
     ExecutionEngine* engine_ = nullptr;
+    // Starts one more worker (the allocation runs on `ctx`). False once
+    // shutdown has begun.
+    bool spawnWorker(proto::ProtoContext* ctx);
+
+    // `workers_` grows after start-up (enterBlocking), so it is guarded.
+    // `spawning_` counts workers being created: newThread runs WITHOUT the
+    // mutex, because it allocates and may park for a collection, and a thread
+    // waiting on a plain mutex cannot reach a safepoint; the count keeps their
+    // slots reserved meanwhile, and shutdown waits for it to drain.
+    mutable std::mutex workersMtx_;
+    std::condition_variable spawnedCv_;
+    unsigned spawning_ = 0;
+    unsigned baseWorkers_ = 0;
+    std::atomic<int> blockedInIo_{0};
     std::vector<const proto::ProtoThread*> workers_;
     std::mutex ownersMtx_;
     std::deque<std::unique_ptr<ActorState>> owners_;

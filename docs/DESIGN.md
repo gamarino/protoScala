@@ -46,6 +46,13 @@ reproduce `scalac`'s static typechecker. Its value proposition:
    0.669 s sys, sys 3.9× user — a direction to investigate, not a defect. The budget
    is met with about **3.4 ms** of margin. `docs/STATUS.md` and
    `benchmarks/reports/2026-09-26-quiet-window.md` §1 carry the detail.
+
+   **Status after the I/O track (2026-09-30): NOT MET.** The prelude roughly
+   tripled (the I/O surface) and the binary now loads OpenSSL; interleaved
+   against the previous `main` on the same host, `hello.scala` rose by about
+   5 ms of wall time (task clock 16.4 → 20.5 ms). The choice between a lazily
+   loaded I/O segment, an importable module and a new budget is open for the
+   maintainer (DECISIONS-LOG, the I/O track).
 2. **Native structural immutability** — functional collections and case
    classes map onto protoCore's persistent structures.
 3. **Real concurrency without a GIL** — native actors with O(1) message
@@ -141,7 +148,8 @@ protoScala/
 │   ├── frontend/             # Lexer (with offside rule), Parser, AST, Desugar, Linearizer
 │   ├── compiler/             # Compiler, Opcodes, BytecodeModule
 │   ├── runtime/              # ExecutionEngine, Primitives, Function, CaseClass,
-│   │                         # Collections, Exceptions, ActorScheduler, StackGuard
+│   │                         # Collections, Exceptions, ActorScheduler, StackGuard,
+│   │                         # File/Io/HttpPrimitives (bindings over protoIO)
 │   ├── repl/                 # readline REPL
 │   └── umd/                  # ScalaModuleProvider
 ├── lib/                      # Prelude written in protoScala (Option, Either, Try, ...)
@@ -158,6 +166,12 @@ Static libraries: `protoscala_support`, `protoscala_frontend`,
 `protoscala_compiler`, `protoscala_runtime`, `protoscala_repl`; binary
 `protoscala`. protoCore is found through `PROTO_CORE_PREFIX` or the sibling
 tree `../protoCore/build_release` (same logic as protoClojure and protoST).
+protoIO, the POSIX I/O layer the protoCore runtimes share (files, processes,
+TCP, UDP, TLS, HTTP/1.1), is found as an installed CMake package or built from
+the sibling `../protoIO`, and linked statically into `libprotoScala.so`; the I/O
+natives are thin bindings over it, and the Scala surface (`Source`, `StdIn`,
+`sys`, `Process`, `Socket`, `Requests`, `HttpServer`, ...) is prelude code on
+top of them (LANGUAGE §4.5).
 
 ### 3.2 Lexer
 
@@ -266,7 +280,10 @@ Performed on the AST before code generation:
   re-enter the VM (`map`, `foldLeft`, ...) without changing the protoCore
   `ProtoMethod` signature. It is saved and restored on every exit path.
 - **GC cooperation:** blocking waits run inside `ProtoContext::UnmanagedScope`;
-  no user code runs inside a protoCore `CriticalSection`. The need for a GC
+  no user code runs inside a protoCore `CriticalSection`. Every I/O call that may
+  block is bracketed the same way, with its arguments copied into C++ values
+  before the bracket opens and its result built after it closes, so nothing
+  inside touches a ProtoObject (`src/runtime/IoSupport.h`). The need for a GC
   poll at loop back-edges is an open platform question (§9, R1).
 
 ---
@@ -746,7 +763,13 @@ The printed form is distinct from other objects: `Actor(10)`.
 - **Worker pool** — workers created with `ProtoSpace::newThread` so they join
   the GC quorum; `PROTOSCALA_ACTOR_WORKERS`, default `max(2, cores − 2)`,
   cap 16 (protoClojure). Parked workers wait inside `UnmanagedScope`, so a
-  parked worker never delays a GC pause.
+  parked worker never delays a GC pause. **The pool grows while workers block
+  in I/O** (the I/O track, 2026-09-30): a worker entering a call that can wait
+  without bound starts one more worker when the unblocked workers would drop
+  below the configured size, up to 256, so an actor waiting on I/O that another
+  actor must answer cannot starve the pool (protoST's policy, and that of
+  Scala's `blocking { ... }`). It never shrinks. Creating a thread from a worker
+  needs protoCore 2.6.1.
 - **Worker context** — each worker re-installs the thread-local active call
   context captured when the scheduler starts, so a handler sees the full
   runtime; each message runs in its own `ProtoContext` (P2).

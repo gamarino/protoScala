@@ -17,11 +17,23 @@ executable sees no protoCore at all.)
 - **libreadline** (`libreadline-dev` on Debian/Ubuntu, `readline-devel` on
   Fedora/RHEL, `brew install readline` on macOS). It is a hard requirement of
   the interactive REPL: configuration fails with a `FATAL_ERROR` without it.
-- **protoCore 2.2.0 or newer**, installed, with its CMake package configuration.
-  **2.5.0 is what everything in this document was verified against.** See
+- **protoCore 2.6.1 or newer**, installed, with its CMake package configuration.
+  **2.5.0 is what the packaging sections of this document were verified
+  against; the I/O track (2026-09-30) was built and tested against 2.6.2.** See
   protoCore's `docs/INSTALLATION.md`.
+- **protoIO 0.1** (the POSIX I/O layer the protoCore runtimes share), either
+  installed (`protoio-dev`, or any prefix holding `lib/cmake/protoIO/`, named
+  with `-DCMAKE_PREFIX_PATH`), a build tree named with `-DprotoIO_DIR=<protoIO>/
+  build_release`, or the source tree checked out beside this one as
+  `../protoIO`, which the build then compiles as part of protoScala's (CMake
+  **3.21** is needed for that). It is linked **statically** into
+  `libprotoScala.so`, so an installed protoScala does not depend on protoIO.
+- **OpenSSL 3** development files (`libssl-dev` on Debian/Ubuntu,
+  `openssl-devel` on Fedora/RHEL), for protoIO's TLS and https. At run time
+  the package depends on `libssl3`, which `dpkg-shlibdeps` derives from the
+  library (§Packages).
 
-**Why 2.2.0.** Two floors apply and the higher one wins:
+**Why 2.6.1.** Three floors apply and the highest one wins:
 
 - protoScala's actor mailbox is built on protoCore's `ProtoMPSCQueue`, which
   protoCore gained in **2.1.0**. Building against 2.0.x would compile the
@@ -33,6 +45,11 @@ executable sees no protoCore at all.)
   `CMakeLists.txt` asserts it (`FATAL_ERROR` on mismatch). SOVERSION went
   `2` → `3` in protoCore **2.2.0**, so **2.1.0 cannot build this tree**:
   configuration stops naming both numbers.
+- Since the I/O track the actor pool **creates threads from worker threads**
+  while workers block in I/O, and before protoCore **2.6.1**
+  `ProtoSpace::newThread` did that by replacing the space's main context with a
+  temporary one, so the main program's roots stopped being scanned. 2.6.1 is
+  API- and ABI-compatible (SOVERSION 3), so only the version check can tell.
 
 Until 2026-09-27 this page said "protoCore 2.1.0 or newer" throughout and admitted
 the SOVERSION change only in a Known-defect section 200 lines further down, so a
@@ -59,15 +76,15 @@ cmake --build build_release -j4
 ctest --test-dir build_release --output-on-failure
 ```
 
-The discovery is `find_package(protoCore 2.1 CONFIG)`, so the prefix must hold
+The discovery is `find_package(protoCore 2.6.1 CONFIG)`, so the prefix must hold
 `lib/cmake/protoCore/protoCoreConfig.cmake`. **A prefix holding only
 `libprotoCore` and `protoCore.h` is no longer accepted**: without the package
 configuration there is no way to tell protoCore 1.x from 2.x, nor 2.0 from 2.1.
 
 protoCore's version compatibility is `SameMajorVersion`, and the requested minor
-version is a floor, so `2.1` accepts any `2.x` from `2.1.0` up and refuses
-`2.0.x`, `1.x` and `3.x`. protoScala additionally asserts that the package's
-`SOVERSION` is **`3`**, which is what makes 2.2.0 the effective minimum.
+version is a floor, so `2.6.1` accepts any `2.x` from `2.6.1` up and refuses
+older `2.x`, `1.x` and `3.x`. protoScala additionally asserts that the package's
+`SOVERSION` is **`3`**.
 
 ### Selecting the actor mailbox backend
 
@@ -191,15 +208,19 @@ configure prints whether a generator was enabled or disabled, and why.
 
 Package names are pinned rather than left to each generator's default casing:
 `protoscala` for DEB, `protoScala` for RPM. Both declare a bounded dependency on
-protoCore's own package. The floor is **2.2.0**, and two requirements set it:
-`ProtoMPSCQueue` needs 2.1.0, and `PROTOCORE_ABI_SOVERSION 3` needs 2.2.0, so the
-higher one binds. It read 2.1.0 until 2026-09-27, which named a protoCore that
-cannot build this tree:
+protoCore's own package. The floor is **2.6.1** (§Prerequisites: `ProtoMPSCQueue`
+needs 2.1.0, `PROTOCORE_ABI_SOVERSION 3` needs 2.2.0, and creating threads from
+workers needs 2.6.1, so the highest binds). It read 2.1.0 until 2026-09-27, which
+named a protoCore that cannot build this tree, and 2.2.0 until the I/O track:
 
 | Format | Relation |
 |--------|----------|
-| DEB | `Depends: protocore (>= 2.2.0), protocore (<< 3.0.0)` |
-| RPM | `Requires: protoCore >= 2.2.0, protoCore < 3.0.0` |
+| DEB | `Depends: protocore (>= 2.6.1), protocore (<< 3.0.0)` |
+| RPM | `Requires: protoCore >= 2.6.1, protoCore < 3.0.0` |
+
+protoIO is a static library, so it is **not** a package dependency; what it
+brings at run time is OpenSSL (`libssl3`), which `dpkg-shlibdeps` adds from
+`libprotoScala.so`'s `NEEDED` entries.
 
 `CPACK_DEBIAN_PACKAGE_SHLIBDEPS` is **`ON`** (`CMakeLists.txt`), so
 `dpkg-shlibdeps` runs over the package's ELF files and adds the dependencies it

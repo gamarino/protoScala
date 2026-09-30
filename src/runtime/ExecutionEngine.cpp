@@ -189,12 +189,13 @@ const proto::ProtoObject* ExecutionEngine::dispatch(proto::ProtoContext* ctx,
         if (argc == 0 && !applied) return PROTO_NONE;
         throw ScalaError("NullPointerException", "cannot call null");
     }
-    // `obj.p()` where `p` is written without a parameter list: Scala applies the
-    // *result* of the member (`def g = () => n; c.g()` is `c.g.apply()`), and
-    // rejects the call when the result takes no arguments ("method p in class H
-    // does not take parameters"). `def p() = e` is arity-1 too but not
-    // paramless, so it is called directly.
-    if (applied && argc == 0)
+    // `obj.p()` or `obj.p(args)` where `p` is written without a parameter list:
+    // Scala applies the *result* of the member (`def g = () => n; c.g()` is
+    // `c.g.apply()`, and `def env: Map[..]; sys.env("HOME")` is
+    // `sys.env.apply("HOME")`), and rejects the call when the result takes no
+    // arguments ("method p in class H does not take parameters"). `def p() = e`
+    // is arity-1 too but not paramless, so it is called directly.
+    if (applied)
         if (const BytecodeModule* mod = compiledModuleOf(ctx, layout_, m))
             if (mod->isMethod() && mod->isParamless() &&
                 !m->getOwnAttributeDirect(ctx, layout_.selfKey)) {
@@ -203,7 +204,7 @@ const proto::ProtoObject* ExecutionEngine::dispatch(proto::ProtoContext* ctx,
                 if (r != PROTO_NONE &&
                     (compiledModuleOf(ctx, layout_, r) || r->isMethod(ctx) ||
                      r->hasAttribute(ctx, layout_.applyName) == PROTO_TRUE))
-                    return invoke(ctx, r, base + 1, 0);
+                    return invoke(ctx, r, base + 1, argc);
                 throw ScalaError("NoSuchMethodError", "method " + plainName(name->toStdString(ctx)) +
                                                           " does not take parameters");
             }

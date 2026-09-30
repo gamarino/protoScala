@@ -396,7 +396,24 @@ Deviations recorded: **D97–D102** in [STATUS.md](STATUS.md).
 listing, no rename), binary files and random access, any encoding but UTF-8 (D99),
 streaming — there is no `Iterator`, so a file is read whole and one larger than
 memory cannot be processed (D100) — and stdin. Each is a separate decision and
-none of them blocked the goal.
+none of them blocked the goal. *All but random access and other encodings were
+delivered by the I/O track (2026-09-30), below.*
+
+## The I/O track — input and output on protoIO *(language + platform)* — **DELIVERED (2026-09-30)**
+
+Phase 3 of the protoIO plan: the same I/O reach protoST gained in 0.5.0, through
+protoIO, the POSIX layer the protoCore runtimes now share. Delivered: streaming
+`Source` with an `Iterator` (D101 retired), `Source.stdin` and `StdIn`, `sys.env`
+/ `props` / `exit`, binary files and directories through `FileIO`, `Bytes`,
+`scala.sys.process`'s shape, java.net-named sockets (TCP, TLS client, UDP), a
+requests-scala-shaped HTTP client and an actor-served HTTP server; the actor pool
+grows while workers block in I/O. 44 fixtures in `tests/conformance/30-io/`, three
+CLI checks, tutorial chapter 18. Deviations **D124–D132**.
+
+**Open:** the cold-start budget is no longer met (DESIGN §1); the maintainer's
+decision between a lazily loaded I/O segment, an importable module and a new
+budget is recorded in DECISIONS-LOG. Still absent: random access, other
+encodings, a TLS server, HTTP keep-alive, process pipelines.
 
 ## Track Y — a working cross-runtime import *(platform)*
 

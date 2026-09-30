@@ -80,7 +80,7 @@ that open the file:
 
 ```scala
 def lines(path: String): List[String] =
-  Source.fromFile(path).getLines().filter(l => l.trim.nonEmpty)
+  Source.fromFile(path).getLines().filter(l => l.trim.nonEmpty).toList
 ```
 
 Edit `sample.log` and the report follows; nothing has to be copied and there is
