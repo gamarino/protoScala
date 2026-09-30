@@ -845,6 +845,220 @@ final class DatagramSocket(port: Int = 0, host: String = ""):
       closed = true
       __fdClose(fd)
 
+// ---------------------------------------------------------------------------
+// HTTP client: requests-scala's shape (D131)
+// ---------------------------------------------------------------------------
+
+// A response. `headers` maps each lower-case name to all of its values, in
+// order, as requests-scala's does.
+final class HttpResponse(val url: String, val statusCode: Int, val statusMessage: String,
+                         val headers: Map[String, List[String]], __body: Any):
+  def bytes: Bytes = new Bytes(__body)
+  def contents: Bytes = new Bytes(__body)
+  // The body as text (UTF-8; a malformed sequence decodes as U+FFFD).
+  def text(): String = __bytesDecode(__body)
+  def is2xx: Boolean = statusCode >= 200 && statusCode < 300
+  def is3xx: Boolean = statusCode >= 300 && statusCode < 400
+  def is4xx: Boolean = statusCode >= 400 && statusCode < 500
+  def is5xx: Boolean = statusCode >= 500 && statusCode < 600
+  def contentType: Option[String] = headers.get("content-type").map(vs => vs.last)
+  def location: Option[String] = headers.get("location").map(vs => vs.last)
+  override def toString: String = "Response(" + url + ", " + statusCode + ")"
+
+class RequestsException(message: String) extends Exception(message)
+// What a checked request raises for a 4xx or 5xx status; it carries the
+// response.
+class RequestFailedException(val response: HttpResponse)
+    extends RequestsException("Request to " + response.url + " failed with status code " +
+                              response.statusCode + "\n" + response.text())
+
+// `requests.get(url)` and friends. Every method takes requests-scala's named
+// arguments: headers, params (an encoded query string), data (a String, Bytes,
+// or a Map sent as a form), readTimeout (milliseconds, for the connection and
+// every wait), maxRedirects and check (raise RequestFailedException for a 4xx
+// or 5xx status, true by default).
+object Requests:
+  def send(method: String, url: String, headers: Map[String, String] = Map(),
+           params: Map[String, String] = Map(), data: Any = null, readTimeout: Int = 30000,
+           maxRedirects: Int = 5, check: Boolean = true): HttpResponse =
+    val full =
+      if params.isEmpty then url
+      else url + (if url.contains("?") then "&" else "?") + encodeForm(params)
+    var hs = __flatPairs(headers)
+    val named = headers.toList.map(kv => kv._1.toString.toLowerCase)
+    val body: Any = data match
+      case null => null
+      case s: String => s
+      case b: Bytes =>
+        if !named.contains("content-type") then hs = hs ++ List("content-type", "application/octet-stream")
+        b.__buffer
+      case m: Map[Any, Any] =>
+        if !named.contains("content-type") then
+          hs = hs ++ List("content-type", "application/x-www-form-urlencoded")
+        encodeForm(m)
+      case other => other.toString
+    val r = __httpRequest(method, full, hs, body, readTimeout, maxRedirects)
+    val response = new HttpResponse(full, r(0), r(1), __pairsToMultiMap(r(2)), r(3))
+    if check && response.statusCode >= 400 then throw new RequestFailedException(response)
+    response
+  def get(url: String, headers: Map[String, String] = Map(), params: Map[String, String] = Map(),
+          readTimeout: Int = 30000, maxRedirects: Int = 5, check: Boolean = true): HttpResponse =
+    send("GET", url, headers, params, null, readTimeout, maxRedirects, check)
+  def head(url: String, headers: Map[String, String] = Map(), params: Map[String, String] = Map(),
+           readTimeout: Int = 30000, maxRedirects: Int = 5, check: Boolean = true): HttpResponse =
+    send("HEAD", url, headers, params, null, readTimeout, maxRedirects, check)
+  def delete(url: String, headers: Map[String, String] = Map(), params: Map[String, String] = Map(),
+             readTimeout: Int = 30000, maxRedirects: Int = 5, check: Boolean = true): HttpResponse =
+    send("DELETE", url, headers, params, null, readTimeout, maxRedirects, check)
+  def post(url: String, data: Any = null, headers: Map[String, String] = Map(),
+           params: Map[String, String] = Map(), readTimeout: Int = 30000, maxRedirects: Int = 5,
+           check: Boolean = true): HttpResponse =
+    send("POST", url, headers, params, data, readTimeout, maxRedirects, check)
+  def put(url: String, data: Any = null, headers: Map[String, String] = Map(),
+          params: Map[String, String] = Map(), readTimeout: Int = 30000, maxRedirects: Int = 5,
+          check: Boolean = true): HttpResponse =
+    send("PUT", url, headers, params, data, readTimeout, maxRedirects, check)
+  def patch(url: String, data: Any = null, headers: Map[String, String] = Map(),
+            params: Map[String, String] = Map(), readTimeout: Int = 30000, maxRedirects: Int = 5,
+            check: Boolean = true): HttpResponse =
+    send("PATCH", url, headers, params, data, readTimeout, maxRedirects, check)
+  // application/x-www-form-urlencoded, as java.net.URLEncoder writes it.
+  def encodeForm(values: Map[Any, Any]): String =
+    values.toList.map(kv => __urlEncode(kv._1.toString) + "=" + __urlEncode(kv._2.toString)).mkString("&")
+  def decodeForm(text: String): Map[String, String] = __pairsToMap(__httpParseQuery(text))
+
+// ---------------------------------------------------------------------------
+// HTTP server (D132)
+// ---------------------------------------------------------------------------
+
+// What a handler receives. `path` is percent-decoded and `target` is the
+// request target as sent; `query` and `headers` are Maps (header names in
+// lower case; a repeated name keeps its last value); `body` is the body as
+// text and `bodyBytes` as Bytes; `form` holds a form-encoded body's fields.
+final class Request(val method: String, val target: String, val path: String,
+                    val query: Map[String, String], val headers: Map[String, String],
+                    val bodyBytes: Bytes):
+  val body: String = bodyBytes.utf8String
+  // The fields of a form-encoded body (application/x-www-form-urlencoded);
+  // empty for any other body.
+  val form: Map[String, String] =
+    if headers.getOrElse("content-type", "").startsWith("application/x-www-form-urlencoded") then
+      __pairsToMap(__httpParseQuery(body))
+    else Map()
+  override def toString: String = "Request(" + method + " " + target + ")"
+
+// What a handler answers: a status, a body (a String or Bytes) and headers. A
+// response without a content-type gets text/plain (UTF-8) for a String and
+// application/octet-stream for Bytes.
+final case class Response(status: Int, body: Any = "", headers: Map[String, String] = Map())
+
+object Response:
+  def ok(body: Any): Response = Response(200, body)
+  def text(body: String, status: Int = 200): Response =
+    Response(status, body, Map("Content-Type" -> "text/plain; charset=utf-8"))
+  def json(body: String, status: Int = 200): Response =
+    Response(status, body, Map("Content-Type" -> "application/json"))
+  def html(body: String, status: Int = 200): Response =
+    Response(status, body, Map("Content-Type" -> "text/html; charset=utf-8"))
+  def redirect(location: String, status: Int = 302): Response =
+    Response(status, "", Map("Location" -> location))
+  def notFound(body: String = "Not Found"): Response = Response(404, body)
+
+// An HTTP/1.1 server. It listens as soon as it is built (so `port` is known,
+// and port 0 picks a free one); start() runs the accept loop on the calling
+// thread until stop(), startInBackground() runs it on a Thread. Each connection
+// is served on one of a fixed set of actors, round robin; a handler that blocks
+// in I/O does not starve the pool, which grows while workers block. Requests
+// the library refuses (400, 414, 431, 413) never reach the handler; a handler
+// that throws, or answers an invalid response, gets a plain 500 and a report on
+// standard error. One request per connection ("connection: close").
+final class HttpServer(port0: Int, host: String, maxBodyBytes: Int, handler: Request => Any):
+  private val fd: Int = __tcpListen(host, port0, 128)
+  val port: Int = __sockName(fd)(1)
+  private var started = false
+  private var stopped = false
+  private var background: Thread = null
+  private var servers: Vector[Any] = Vector()
+  private var next = 0
+
+  def serve(c: Int): Unit =
+    try
+      val r = __httpReadRequest(c, maxBodyBytes)
+      if r != null then
+        val req = new Request(r(0), r(1), r(2), __pairsToMap(r(3)), __pairsToMap(r(4)), new Bytes(r(5)))
+        val resp =
+          try HttpServer.asResponse(handler(req))
+          catch case e: Throwable =>
+            __ioStderr("protoscala: HttpServer handler failed on " + req + ": " + e + "\n")
+            Response(500, "Internal Server Error")
+        try __httpWriteResponse(c, resp.status, __flatPairs(resp.headers), HttpServer.bodyOf(resp.body))
+        catch case e: IllegalArgumentException =>
+          __ioStderr("protoscala: HttpServer refused the handler's response to " + req + ": " +
+                     e.getMessage + "\n")
+          __httpWriteResponse(c, 500, Nil, "Internal Server Error")
+    catch
+      case e: IOException => ()  // the client went away
+      case e: Throwable => __ioStderr("protoscala: HttpServer connection failed: " + e + "\n")
+    finally __fdClose(c)
+
+  private def begin(): Unit =
+    if stopped then throw new IllegalStateException("HttpServer: already stopped")
+    if started then throw new IllegalStateException("HttpServer: already started")
+    started = true
+    servers = (1 to HttpServer.connectionActors).toVector.map(_ =>
+      Actor.spawn(0) { (st, c) =>
+        serve(c)
+        (st, ())
+      })
+
+  private def acceptLoop(): Unit =
+    var go = true
+    while go do
+      val c = __tcpAccept(fd, -1)
+      if c < 0 then go = false
+      else
+        servers(next % servers.length) ! c
+        next += 1
+
+  // Serves on the calling thread until stop() is called (from a handler or
+  // another thread).
+  def start(): Unit =
+    begin()
+    acceptLoop()
+
+  // Serves on a Thread and answers at once.
+  def startInBackground(): HttpServer =
+    begin()
+    background = Thread.start(() => acceptLoop())
+    this
+
+  // Stops accepting: the listening socket is closed, and a background accept
+  // loop is joined. Requests already accepted are still answered.
+  def stop(): Unit =
+    if !stopped then
+      stopped = true
+      __fdClose(fd)
+      if background != null then background.join()
+
+  override def toString: String = "HttpServer(" + host + ":" + port + ")"
+
+object HttpServer:
+  // The number of actors connections are served on, round robin.
+  def connectionActors: Int = 16
+  def apply(port: Int, host: String = "127.0.0.1", maxBodyBytes: Int = 67108864)(
+      handler: Request => Any): HttpServer =
+    new HttpServer(port, host, maxBodyBytes, handler)
+  def asResponse(v: Any): Response = v match
+    case r: Response => r
+    case s: String => Response(200, s)
+    case b: Bytes => Response(200, b)
+    case other => throw new IllegalStateException("an HttpServer handler must answer a Response, got " + other)
+  def bodyOf(body: Any): Any = body match
+    case b: Bytes => b.__buffer
+    case s: String => s
+    case null => ""
+    case other => other.toString
+
 // Constructors the runtime's native methods call. A native cannot name a
 // global directly (a REPL redefinition gives `Some#1`, D25), so it resolves
 // these through the global table once, after the prelude is compiled.

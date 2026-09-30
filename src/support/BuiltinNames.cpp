@@ -34,7 +34,10 @@ const std::vector<std::string>& builtinGlobalNames() {
                                       "__fdReadLine", "__fdRead", "__fdReadBytes",
                                       "__fdReadAll", "__fdWrite", "__fdSetTimeout",
                                       "__fdClose", "__tlsConnect",
-                                      "__udpBind", "__udpSend", "__udpReceive"};
+                                      "__udpBind", "__udpSend", "__udpReceive",
+                                      "__httpRequest", "__httpReadRequest",
+                                      "__httpWriteResponse", "__httpParseQuery",
+                                      "__urlEncode"};
         for (unsigned n = 2; n <= kMaxTupleArity; ++n) v.push_back("Tuple" + std::to_string(n));
         return v;
     }();

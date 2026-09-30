@@ -37,8 +37,10 @@ void installCollectionPrimitives(proto::ProtoContext* ctx, const RuntimeLayout& 
 void installFilePrimitives(proto::ProtoContext* ctx, const RuntimeLayout& layout);
 
 // The I/O track: Bytes, the running program, processes and sockets
-// (IoPrimitives.cpp), on protoIO. installPrimitives calls it.
+// (IoPrimitives.cpp), and HTTP (HttpPrimitives.cpp), all on protoIO.
+// installPrimitives calls both.
 void installIoPrimitives(proto::ProtoContext* ctx, const RuntimeLayout& layout);
+void installHttpPrimitives(proto::ProtoContext* ctx, const RuntimeLayout& layout);
 
 // Resolves the prelude values the native methods construct. Call once, right
 // after loadPrelude, from every entry point that builds a runtime (Session,
