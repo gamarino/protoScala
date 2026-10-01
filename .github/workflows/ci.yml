@@ -63,7 +63,7 @@ env:
   PROTOST_REF: ${{ github.event_name == 'schedule' && 'main' || 'e11c1e5fcf4318664779a4ba1150a38822e72d9b' }}
   # protoIO 0.1.0 (main, 2026-09-30): the I/O layer protoScala and protoST link
   # statically.  Bump deliberately, like protoCore.
-  PROTOIO_REF: ${{ github.event_name == 'schedule' && 'main' || '8e823a6f1e7a424737d845206c77d3c5e03b1748' }}
+  PROTOIO_REF: ${{ github.event_name == 'schedule' && 'main' || '120c8c373db2ffd840f6c807a487afae251ff6d3' }}
   # The only ctest cases in this suite whose verdict is a clock.  For the two
   # deadlocking ones the TIMEOUT *is* the verdict (tests/unit/CMakeLists.txt),
   # and embedder-conformance/isolate.heap.ceiling_progress is documented as
