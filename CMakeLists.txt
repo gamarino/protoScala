@@ -628,11 +628,23 @@ install(TARGETS protoscala protoscalac
 # they link against. Found by Task 14 Step 5's end-to-end check, which is the first thing
 # in this repository ever to install and then run the result:
 # `protoscalac: error while loading shared libraries: libprotoScala.so.1`.
+# On Windows the DLL is a RUNTIME artifact (bin/, next to protoscala.exe) and its
+# import library an ARCHIVE one; a shared object on Linux and macOS is neither.
 install(TARGETS protoScala
     EXPORT protoScalaTargets
+    RUNTIME       DESTINATION ${CMAKE_INSTALL_BINDIR}              COMPONENT protoScala
+    ARCHIVE       DESTINATION ${CMAKE_INSTALL_LIBDIR}              COMPONENT protoScala
     LIBRARY       DESTINATION ${CMAKE_INSTALL_LIBDIR}              COMPONENT protoScala
                   NAMELINK_COMPONENT protoScala
     PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/protoScala COMPONENT protoScala)
+# protoIO is linked in statically, but OpenSSL is a DLL on Windows: install it
+# next to protoScala.dll, where Windows looks for it. (protoCore is a package of
+# its own and installs its DLL into its own prefix's bin/.)
+if(WIN32 AND PROTOSCALA_OPENSSL_DLLS)
+    install(FILES ${PROTOSCALA_OPENSSL_DLLS}
+        DESTINATION ${CMAKE_INSTALL_BINDIR}
+        COMPONENT protoScala)
+endif()
 install(EXPORT protoScalaTargets
     FILE protoScalaTargets.cmake NAMESPACE protoScala::
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/protoScala

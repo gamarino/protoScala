@@ -22,6 +22,7 @@
 #include "repl/Session.h"
 #include "runtime/Errors.h"
 #include "runtime/StackGuard.h"
+#include "support/Platform.h"
 #include <protoScala/Version.h>
 #include "protoCore.h"
 
@@ -61,7 +62,7 @@ std::vector<std::string> splitPathList(const std::string& s) {
 
 fs::path executableDir(const char* argv0) {
     std::error_code ec;
-    const fs::path self = fs::read_symlink("/proc/self/exe", ec);
+    const fs::path self = protoScala::currentExecutable(ec);
     if (!ec && !self.empty()) return self.parent_path();
     const fs::path fallback = fs::canonical(argv0, ec);
     if (!ec) return fallback.parent_path();

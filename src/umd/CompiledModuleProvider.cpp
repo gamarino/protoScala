@@ -35,7 +35,7 @@ std::string installedModuleDirectory() {
     // so a relocated install finds its own modules -- the same relationship
     // providerPluginDirectory() computes for plug-ins.
     std::error_code ec;
-    const std::filesystem::path exe = std::filesystem::read_symlink("/proc/self/exe", ec);
+    const std::filesystem::path exe = currentExecutable(ec);
     if (ec) return std::string(PROTOSCALA_INSTALL_LIBDIR) + "/protoscala/modules";
     return (exe.parent_path().parent_path() / PROTOSCALA_INSTALL_LIBDIR / "protoscala" / "modules")
         .lexically_normal()

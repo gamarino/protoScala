@@ -57,7 +57,7 @@ std::string providerPluginDirectory() {
     // /proc/self/exe so a relocated install still finds its own plug-ins (the
     // same relationship the RUNPATH $ORIGIN/../lib gives libprotoCore).
     std::error_code ec;
-    const std::filesystem::path exe = std::filesystem::read_symlink("/proc/self/exe", ec);
+    const std::filesystem::path exe = currentExecutable(ec);
     if (ec) return std::string(PROTOSCALA_INSTALL_LIBDIR) + "/protoscala/providers";
     return (exe.parent_path().parent_path() / PROTOSCALA_INSTALL_LIBDIR / "protoscala" /
             "providers")
