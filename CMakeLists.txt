@@ -147,7 +147,11 @@ if(protoCore_FOUND)
     endif()
     set(PROTOCORE_LIBRARY protoCore::protoCore)
     set(PROTOCORE_INCLUDE_DIRS "${protoCore_INCLUDE_DIR}")
-    if(TARGET protoCore::conformance)
+    # protoCore exports its conformance archive as protoCore::protoCoreConformance;
+    # the old name is kept for packages that may still use it.
+    if(TARGET protoCore::protoCoreConformance)
+        set(PROTOCORE_CONFORMANCE_LIBRARY protoCore::protoCoreConformance)
+    elseif(TARGET protoCore::conformance)
         set(PROTOCORE_CONFORMANCE_LIBRARY protoCore::conformance)
     endif()
     set(PROTOCORE_EFFECTIVE_VERSION "${protoCore_VERSION}")

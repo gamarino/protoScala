@@ -1,0 +1,143 @@
+name: Cross-platform
+
+# macOS and Windows. Linux is ci.yml's (sibling build trees, protoST interop,
+# the static conformance ratchet); this workflow adds the two platforms nobody
+# here can run locally.
+#
+# protoCore is built and INSTALLED here, and protoScala consumes the installed
+# package (-DPROTOCORE_REQUIRE_PACKAGE=ON): that is the supported mode on
+# Windows, and it also exercises the package path, which ci.yml does not.
+# protoIO is the sibling source tree, compiled into protoScala's build.
+#
+# Refs are pinned like ci.yml's: the first protoCore and protoIO commits that
+# build and pass on macOS and Windows. Bump deliberately.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PROTOCORE_REPO: numaes/protoCore
+  PROTOCORE_REF: effba28b86aa9cf0e2227c1d4ff9ce8b2473717c
+  PROTOIO_REPO: gamarino/protoIO
+  PROTOIO_REF: 8e823a6f1e7a424737d845206c77d3c5e03b1748
+  # Clock-dependent, as in ci.yml: their verdict is a timeout.
+  CLOCK_DEPENDENT_TESTS: '^embedder-conformance/isolate\.'
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (Apple clang, arm64)
+            os: macos-14
+            # No test is excluded on macOS beyond the clock-dependent ones.
+            exclude_tests: ''
+          - name: Windows (MSVC, x64)
+            os: windows-2022
+            # These three fail in Git Bash, not in protoScala (docs/INSTALLATION.md,
+            # "Windows (MSVC)"): Git Bash rewrites the POSIX paths they put in
+            # environment variables, and an MSYS FIFO does not reach a native
+            # program. Their behaviour was checked by hand on Windows.
+            exclude_tests: '|^cli/(version|io-stdin|io-program)$'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out protoScala
+        uses: actions/checkout@v4
+        with:
+          path: protoScala
+
+      - name: Check out protoCore as a sibling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PROTOCORE_REPO }}
+          ref: ${{ env.PROTOCORE_REF }}
+          path: protoCore
+
+      - name: Check out protoIO as a sibling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PROTOIO_REPO }}
+          ref: ${{ env.PROTOIO_REF }}
+          path: protoIO
+
+      - name: Dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          for f in readline openssl@3 ninja; do brew list "$f" >/dev/null 2>&1 || brew install "$f"; done
+          echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+          echo "EXTRA_PREFIX=;$(brew --prefix readline)" >> "$GITHUB_ENV"
+
+      - name: Dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          for d in "C:/Program Files/OpenSSL" "C:/Program Files/OpenSSL-Win64"; do
+            if [ -f "$d/include/openssl/ssl.h" ]; then echo "OPENSSL_ROOT_DIR=$d" >> "$GITHUB_ENV"; break; fi
+          done
+
+      - name: MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build and install protoCore
+        # A full build: the conformance archive is part of the package, and
+        # protoScala's embedder-conformance tests are registered only with it.
+        run: |
+          cmake -S protoCore -B protoCore/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build protoCore/build --parallel 4
+          cmake --install protoCore/build --prefix "$GITHUB_WORKSPACE/prefix"
+
+      - name: Configure protoScala
+        working-directory: protoScala
+        run: >
+          cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DPROTOCORE_REQUIRE_PACKAGE=ON
+          "-DCMAKE_PREFIX_PATH=$GITHUB_WORKSPACE/prefix$EXTRA_PREFIX"
+          ${OPENSSL_ROOT_DIR:+"-DOPENSSL_ROOT_DIR=$OPENSSL_ROOT_DIR"}
+
+      - name: Confirm the embedder conformance suite was registered
+        working-directory: protoScala
+        run: |
+          grep -q 'protoCore::protoCoreConformance' build/CMakeCache.txt build/tests/unit/CTestTestfile.cmake 2>/dev/null \
+            || ctest --test-dir build -N | grep -q 'embedder-conformance/' \
+            || { echo "protoCore's conformance archive was not found: the embedder suite would be missing"; exit 1; }
+
+      - name: Build protoScala
+        working-directory: protoScala
+        run: cmake --build build --parallel 4
+
+      - name: Report the registered test count
+        working-directory: protoScala
+        run: |
+          COUNT=$(ctest --test-dir build -N | tail -1)
+          echo "$COUNT"
+          echo "protoScala ctest (${{ runner.os }}): $COUNT" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Test suite
+        working-directory: protoScala
+        run: ctest --test-dir build -j2 --output-on-failure --timeout 600 -E "${CLOCK_DEPENDENT_TESTS}${{ matrix.exclude_tests }}" < /dev/null
+
+      - name: Install and run
+        working-directory: protoScala
+        run: |
+          cmake --install build --prefix "$GITHUB_WORKSPACE/prefix"
+          PATH="$GITHUB_WORKSPACE/prefix/bin:$PATH" protoscala --version
+          printf 'println("hello from " + sys.props("os.name"))\n' > hello.scala
+          PATH="$GITHUB_WORKSPACE/prefix/bin:$PATH" protoscala hello.scala
