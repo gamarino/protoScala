@@ -1,5 +1,6 @@
 #include "compiler/CppTables.h"
 
+#include <cmath>
 #include <cstdio>
 #include <ostream>
 #include <sstream>
@@ -28,7 +29,7 @@ std::string quoted(std::string_view s) {
 }
 
 std::string exactDouble(double d, std::string_view where) {
-    if (!(d == d) || d == 1.0 / 0.0 || d == -1.0 / 0.0)
+    if (!(d == d) || std::isinf(d))
         throw std::runtime_error(std::string(where) +
                                  " holds a non-finite double literal, which a generated static "
                                  "table cannot represent exactly");

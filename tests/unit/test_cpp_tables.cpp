@@ -15,6 +15,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <sstream>
 
 namespace tables = protoScala::tables;
@@ -79,7 +80,7 @@ TEST(CppTables, ExactDoubleRoundTripsAndRefusesNonFinite) {
         // and that is the whole reason it is used.
         EXPECT_EQ(std::memcmp(&d, &back, sizeof d), 0) << lit;
     }
-    const double inf = 1.0 / 0.0;
+    const double inf = std::numeric_limits<double>::infinity();
     const double nan = inf - inf;
     EXPECT_THROW(tables::exactDouble(inf, "a unit"), std::runtime_error);
     EXPECT_THROW(tables::exactDouble(-inf, "a unit"), std::runtime_error);

@@ -76,7 +76,7 @@ TEST(Mailbox, EightProducersLoseNothingAndDuplicateNothing) {
     std::set<long long> seen;
     while (static_cast<int>(seen.size()) < kProducers * kPer) {
         const proto::ProtoList* batch = Mailbox::takeAll(&ctx, q);
-        for (unsigned long i = 0; i < batch->getSize(&ctx); ++i)
+        for (proto::proto_ulong i = 0; i < batch->getSize(&ctx); ++i)
             EXPECT_TRUE(seen.insert(proto::asSmallInt(batch->getAt(&ctx, static_cast<int>(i))))
                             .second)
                 << "duplicated item";

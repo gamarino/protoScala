@@ -16,6 +16,28 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include(GNUInstallDirs)
 
+# Compiler and platform differences, gathered here so the targets below read the
+# same on every platform.  Outside Windows these are the flags and libraries the
+# build always used.
+if(MSVC)
+    # Sources are UTF-8; large generated tables need /bigobj.
+    add_compile_options(/utf-8 /bigobj)
+    set(PROTOSCALA_WARNINGS /W3)
+else()
+    set(PROTOSCALA_WARNINGS -Wall -Wextra -Wpedantic)
+endif()
+if(WIN32)
+    # Threads come from the C++ runtime; there is no libpthread.
+    set(PROTOSCALA_THREAD_LIB "")
+    # Windows has no rpath: a program finds its DLLs next to itself, so every
+    # executable and DLL of the build goes to one directory.
+    if(NOT CMAKE_RUNTIME_OUTPUT_DIRECTORY)
+        set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+    endif()
+else()
+    set(PROTOSCALA_THREAD_LIB pthread)
+endif()
+
 # --- protoCore ----------------------------------------------------------------
 # Resolution order (Phase I, decision D-I1):
 #   1. An installed protoCore CMake package: find_package(protoCore 2.1 CONFIG).
@@ -263,7 +285,14 @@ endif()
 # --- readline (interactive REPL) -------------------------------------------------
 find_library(READLINE_LIBRARY NAMES readline)
 find_path(READLINE_INCLUDE_DIR NAMES readline/readline.h)
-if(NOT READLINE_LIBRARY OR NOT READLINE_INCLUDE_DIR)
+if(WIN32 AND (NOT READLINE_LIBRARY OR NOT READLINE_INCLUDE_DIR))
+    # The Windows console edits the line and keeps a history itself, so the
+    # REPL reads plain lines there (src/repl/Repl.cpp, PROTOSCALA_NO_READLINE).
+    message(STATUS "protoScala: no readline; the REPL uses the console's own line editing")
+    set(PROTOSCALA_NO_READLINE ON)
+    set(READLINE_LIBRARY "")
+    set(READLINE_INCLUDE_DIR "")
+elseif(NOT READLINE_LIBRARY OR NOT READLINE_INCLUDE_DIR)
     message(FATAL_ERROR
         "libreadline not found. Install it (Debian/Ubuntu: libreadline-dev; "
         "Fedora/RHEL: readline-devel; macOS: brew install readline).")
@@ -279,8 +308,18 @@ string(FIND "${PROTOSCALA_PRELUDE_SOURCE}" ")proto_prelude" PROTOSCALA_PRELUDE_D
 if(NOT PROTOSCALA_PRELUDE_DELIMITER EQUAL -1)
     message(FATAL_ERROR "lib/prelude.scala must not contain the raw-string delimiter")
 endif()
-configure_file(src/support/PreludeSource.cpp.in
-    ${CMAKE_CURRENT_BINARY_DIR}/generated/PreludeSource.cpp @ONLY)
+if(MSVC)
+    # MSVC caps a string literal at 64 KiB, so there the prelude is embedded as
+    # a byte array (with the same bytes, hence the same hash).
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/lib/prelude.scala" PROTOSCALA_PRELUDE_HEX HEX)
+    string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," PROTOSCALA_PRELUDE_BYTES
+        "${PROTOSCALA_PRELUDE_HEX}")
+    configure_file(src/support/PreludeSourceBytes.cpp.in
+        ${CMAKE_CURRENT_BINARY_DIR}/generated/PreludeSource.cpp @ONLY)
+else()
+    configure_file(src/support/PreludeSource.cpp.in
+        ${CMAKE_CURRENT_BINARY_DIR}/generated/PreludeSource.cpp @ONLY)
+endif()
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/lib/prelude.scala")
 
@@ -296,8 +335,8 @@ add_library(protoscala_support OBJECT
     src/support/BuiltinNames.cpp
     src/runtime/StackGuard.cpp
 )
-target_link_libraries(protoscala_support PUBLIC ${PROTOCORE_LIBRARY} pthread)
-target_compile_options(protoscala_support PRIVATE -Wall -Wextra -Wpedantic)
+target_link_libraries(protoscala_support PUBLIC ${PROTOCORE_LIBRARY} ${PROTOSCALA_THREAD_LIB})
+target_compile_options(protoscala_support PRIVATE ${PROTOSCALA_WARNINGS})
 set_property(TARGET protoscala_support PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 # --- Frontend: lexer (with offside rule), parser, AST, desugar ------------------
@@ -310,7 +349,7 @@ add_library(protoscala_frontend OBJECT
     src/frontend/Linearizer.cpp
 )
 target_link_libraries(protoscala_frontend PUBLIC protoscala_support)
-target_compile_options(protoscala_frontend PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(protoscala_frontend PRIVATE ${PROTOSCALA_WARNINGS})
 set_property(TARGET protoscala_frontend PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 # --- Compiler: opcodes, bytecode modules, AST -> bytecode ------------------------
@@ -323,7 +362,7 @@ add_library(protoscala_compiler OBJECT
     src/compiler/CppTables.cpp
 )
 target_link_libraries(protoscala_compiler PUBLIC protoscala_frontend protoscala_support)
-target_compile_options(protoscala_compiler PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(protoscala_compiler PRIVATE ${PROTOSCALA_WARNINGS})
 set_property(TARGET protoscala_compiler PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 # --- The precompiled prelude image (a build product, not a cache) ----------------
@@ -347,7 +386,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_link_libraries(protoscala-precompile PRIVATE protoscala_compiler
         protoscala_frontend protoscala_support)
     target_include_directories(protoscala-precompile PRIVATE src)
-    target_compile_options(protoscala-precompile PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(protoscala-precompile PRIVATE ${PROTOSCALA_WARNINGS})
     set(PROTOSCALA_PRELUDE_IMAGE "${CMAKE_CURRENT_BINARY_DIR}/generated/PreludeImage.cpp")
     add_custom_command(
         OUTPUT  "${PROTOSCALA_PRELUDE_IMAGE}"
@@ -385,8 +424,8 @@ add_library(protoscala_runtime OBJECT
     ${CMAKE_CURRENT_BINARY_DIR}/generated/PreludeSource.cpp
 )
 target_link_libraries(protoscala_runtime PUBLIC protoscala_compiler protoscala_support
-    ${PROTOCORE_LIBRARY} pthread protoIO::protoio)
-target_compile_options(protoscala_runtime PRIVATE -Wall -Wextra -Wpedantic)
+    ${PROTOCORE_LIBRARY} ${PROTOSCALA_THREAD_LIB} protoIO::protoio)
+target_compile_options(protoscala_runtime PRIVATE ${PROTOSCALA_WARNINGS})
 set_property(TARGET protoscala_runtime PROPERTY POSITION_INDEPENDENT_CODE ON)
 # Provider plug-ins are dlopen'd (src/umd/ProviderPlugins.cpp); the installed
 # directory is baked in so a relocated install finds its own.
@@ -430,8 +469,12 @@ target_include_directories(protoscala_repl PRIVATE "${READLINE_INCLUDE_DIR}")
 # PUBLIC, not PRIVATE: protoscala_repl is an OBJECT library, and an OBJECT
 # library does not propagate a PRIVATE link library to whoever performs the
 # final link, so readline would be an undefined symbol in libprotoScala.so.
-target_link_libraries(protoscala_repl PUBLIC "${READLINE_LIBRARY}")
-target_compile_options(protoscala_repl PRIVATE -Wall -Wextra -Wpedantic)
+if(PROTOSCALA_NO_READLINE)
+    target_compile_definitions(protoscala_repl PRIVATE PROTOSCALA_NO_READLINE)
+else()
+    target_link_libraries(protoscala_repl PUBLIC "${READLINE_LIBRARY}")
+endif()
+target_compile_options(protoscala_repl PRIVATE ${PROTOSCALA_WARNINGS})
 set_property(TARGET protoscala_repl PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 # --- libprotoScala.so: the runtime a generated module links against -------------
@@ -450,7 +493,7 @@ add_library(protoScala SHARED
 target_link_libraries(protoScala
     PRIVATE protoscala_repl protoscala_runtime protoscala_compiler
             protoscala_frontend protoscala_support
-    PUBLIC  ${PROTOCORE_LIBRARY} pthread ${CMAKE_DL_LIBS})
+    PUBLIC  ${PROTOCORE_LIBRARY} ${PROTOSCALA_THREAD_LIB} ${CMAKE_DL_LIBS})
 target_include_directories(protoScala
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
@@ -463,19 +506,50 @@ target_include_directories(protoScala
 if(UNIX AND NOT APPLE)
     target_link_options(protoScala PRIVATE "LINKER:--exclude-libs,libprotoio.a")
 endif()
+if(WIN32)
+    # No __declspec annotations in the sources: export every symbol, as ELF does.
+    set_target_properties(protoScala PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+endif()
 set_target_properties(protoScala PROPERTIES
     OUTPUT_NAME protoScala
     VERSION ${PROJECT_VERSION}
     SOVERSION ${PROTOSCALA_ABI_SOVERSION}
     PUBLIC_HEADER include/protoScala/GeneratedModule.h)
-target_compile_options(protoScala PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(protoScala PRIVATE ${PROTOSCALA_WARNINGS})
+
+# Windows finds a DLL next to the program that loads it. Copy the DLLs
+# protoScala.dll needs -- protoCore, and OpenSSL through protoIO -- into the
+# build's bin/, so protoscala and the tests run in place.
+if(WIN32)
+    set(PROTOSCALA_RUNTIME_DLLS "")
+    if(TARGET ${PROTOCORE_LIBRARY})
+        list(APPEND PROTOSCALA_RUNTIME_DLLS "$<TARGET_FILE:${PROTOCORE_LIBRARY}>")
+    endif()
+    get_filename_component(PROTOSCALA_OPENSSL_BIN "${OPENSSL_INCLUDE_DIR}/../bin" ABSOLUTE)
+    file(GLOB PROTOSCALA_OPENSSL_DLLS
+        "${PROTOSCALA_OPENSSL_BIN}/libcrypto*.dll" "${PROTOSCALA_OPENSSL_BIN}/libssl*.dll")
+    list(APPEND PROTOSCALA_RUNTIME_DLLS ${PROTOSCALA_OPENSSL_DLLS})
+    # A target every library depends on, not a post-build step of protoScala:
+    # the unit tests link the object libraries directly, and are run to list
+    # their tests as soon as they are linked.
+    add_custom_target(protoscala_runtime_dlls
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${PROTOSCALA_RUNTIME_DLLS}
+                "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+        VERBATIM)
+    add_dependencies(protoscala_support protoscala_runtime_dlls)
+endif()
 
 # --- protoscala binary ----------------------------------------------------------
 add_executable(protoscala
     src/main.cpp
 )
+if(WIN32)
+    # UTF-8 process code page: argv, getenv and paths are UTF-8 as elsewhere.
+    target_sources(protoscala PRIVATE src/windows/utf8.manifest)
+endif()
 target_link_libraries(protoscala PRIVATE protoScala)
-target_compile_options(protoscala PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(protoscala PRIVATE ${PROTOSCALA_WARNINGS})
 
 # --- protoscalac: the transpiler (Phase 7) --------------------------------------
 # It links the shared library, creates a Session (D7) and therefore a ProtoSpace,
@@ -499,9 +573,12 @@ add_executable(protoscalac
     src/compiler/TranspilerMain.cpp
     src/compiler/CppEmitter.cpp
 )
+if(WIN32)
+    target_sources(protoscalac PRIVATE src/windows/utf8.manifest)
+endif()
 target_link_libraries(protoscalac PRIVATE protoScala)
 target_include_directories(protoscalac PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated")
-target_compile_options(protoscalac PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(protoscalac PRIVATE ${PROTOSCALA_WARNINGS})
 if(UNIX AND NOT APPLE)
     set_target_properties(protoscalac PROPERTIES
         INSTALL_RPATH "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")

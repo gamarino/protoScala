@@ -97,7 +97,7 @@ void makeGarbage(proto::ProtoContext* ctx, int n) {
 // a request is pending), so it is re-issued on each pass. Modelled on protoST's
 // tests/unit/test_gc_cycle.cpp.
 bool forceOneCycle(proto::ProtoSpace* space, proto::ProtoContext* ctx,
-                   unsigned long* maxReclaimed) {
+                   proto::proto_ulong* maxReclaimed) {
     const uint64_t start = space->getGCCycleCount();
     for (int round = 0; round < 40; ++round) {
         makeGarbage(ctx, kGarbagePerRound);
@@ -107,7 +107,7 @@ bool forceOneCycle(proto::ProtoSpace* space, proto::ProtoContext* ctx,
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
         if (space->getGCCycleCount() > start) {
-            const unsigned long r =
+            const proto::proto_ulong r =
                 space->reclaimedLastCycle.load(std::memory_order_relaxed);
             if (maxReclaimed && r > *maxReclaimed) *maxReclaimed = r;
             return true;
@@ -366,8 +366,8 @@ TEST(ProtoSTInterop, AForeignValueSurvivesACollectionOnBothSides) {
     // asserted below, because a test that forces no cycle guards nothing.
     const uint64_t scalaCyclesBefore = session.space().getGCCycleCount();
     const uint64_t stCyclesBefore    = st.space()->getGCCycleCount();
-    unsigned long  scalaReclaimed    = 0;
-    unsigned long  stReclaimed       = 0;
+    proto::proto_ulong  scalaReclaimed    = 0;
+    proto::proto_ulong  stReclaimed       = 0;
     forceOneCycle(&session.space(), &scalaCtx, &scalaReclaimed);
     {
         // And one in protoST's space, where the module and its classes live.
@@ -392,7 +392,7 @@ TEST(ProtoSTInterop, AForeignValueSurvivesACollectionOnBothSides) {
                 "(threshold %d)\n",
                 scalaReclaimed, kGarbagePerRound);
     std::fflush(stdout);
-    EXPECT_GE(scalaReclaimed, static_cast<unsigned long>(kGarbagePerRound))
+    EXPECT_GE(scalaReclaimed, static_cast<proto::proto_ulong>(kGarbagePerRound))
         << "protoScala's collector reclaimed " << scalaReclaimed
         << " cells after this test threw away " << kGarbagePerRound
         << " lists per round: the garbage never became a sweep candidate, so "

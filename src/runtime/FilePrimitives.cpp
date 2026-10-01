@@ -65,10 +65,67 @@
 #include <unordered_map>
 #include <vector>
 
+#if defined(_WIN32)
+#define NOMINMAX
+#include <windows.h>
+#include <fcntl.h>
+#include <io.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <BaseTsd.h>
+#else
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#endif
+
+// The four path syscalls of this file.  On POSIX they are the plain calls.  On
+// Windows a path is UTF-8 here and UTF-16 for the system, files are binary (no
+// CRLF translation), sizes are 64-bit, and a directory is reported as EISDIR
+// rather than the EACCES _wopen gives for one.
+namespace {
+#if defined(_WIN32)
+using ssize_t = SSIZE_T;
+using SysStat = struct ::_stat64;
+#ifndef S_ISDIR
+#define S_ISDIR(m) (((m) & _S_IFMT) == _S_IFDIR)
+#endif
+#ifndef S_ISREG
+#define S_ISREG(m) (((m) & _S_IFMT) == _S_IFREG)
+#endif
+#ifndef O_CLOEXEC
+#define O_CLOEXEC _O_NOINHERIT
+#endif
+
+std::wstring widePath(const std::string& path) {
+    if (path.empty()) return std::wstring();
+    const int n = ::MultiByteToWideChar(CP_UTF8, 0, path.data(), static_cast<int>(path.size()), nullptr, 0);
+    std::wstring out(static_cast<std::size_t>(n), L'\0');
+    ::MultiByteToWideChar(CP_UTF8, 0, path.data(), static_cast<int>(path.size()), out.data(), n);
+    return out;
+}
+
+int sysOpen(const std::string& path, int flags, int /*mode*/ = 0) {
+    const std::wstring w = widePath(path);
+    const int fd = ::_wopen(w.c_str(), flags | _O_BINARY, _S_IREAD | _S_IWRITE);
+    if (fd < 0 && errno == EACCES) {
+        const DWORD attrs = ::GetFileAttributesW(w.c_str());
+        if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY)) errno = EISDIR;
+    }
+    return fd;
+}
+int sysFstat(int fd, SysStat* st) { return ::_fstat64(fd, st); }
+int sysStat(const std::string& path, SysStat* st) { return ::_wstat64(widePath(path).c_str(), st); }
+int sysUnlink(const std::string& path) { return ::_wunlink(widePath(path).c_str()); }
+#else
+using SysStat = struct stat;
+int sysOpen(const std::string& path, int flags, int mode = 0) { return ::open(path.c_str(), flags, mode); }
+int sysFstat(int fd, SysStat* st) { return ::fstat(fd, st); }
+int sysStat(const std::string& path, SysStat* st) { return ::stat(path.c_str(), st); }
+int sysUnlink(const std::string& path) { return ::unlink(path.c_str()); }
+#endif
+} // namespace
 
 namespace protoScala {
 
@@ -91,7 +148,9 @@ const char* reasonFor(int e) {
         case EPERM:         return "Operation not permitted";
         case EROFS:         return "Read-only file system";
         case ENOSPC:        return "No space left on device";
+#ifdef EDQUOT   // not in the Windows CRT
         case EDQUOT:        return "Disk quota exceeded";
+#endif
         case EFBIG:         return "File too large";
         case ENAMETOOLONG:  return "File name too long";
         case ELOOP:         return "Too many levels of symbolic links";
@@ -254,11 +313,11 @@ bool namesUtf8(const std::string& enc) {
 
 std::string readWholeFile(const std::string& path, const char* what) {
     checkPath(path, what);
-    const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    const int fd = sysOpen(path, O_RDONLY | O_CLOEXEC);
     if (fd < 0) openFailed(path, errno);
     FdGuard guard(fd);
-    struct stat st {};
-    if (::fstat(fd, &st) != 0) ioFailed(path, errno);
+    SysStat st {};
+    if (sysFstat(fd, &st) != 0) ioFailed(path, errno);
     // On Linux `open` of a directory for reading SUCCEEDS and `read` then fails
     // with EISDIR. The JVM reports a directory from `open`, as a
     // FileNotFoundException carrying "(Is a directory)", so the check is here
@@ -284,7 +343,7 @@ void writeWholeFile(const std::string& path, const std::string& text, bool appen
                     const char* what) {
     checkPath(path, what);
     const int flags = O_WRONLY | O_CREAT | O_CLOEXEC | (append ? O_APPEND : O_TRUNC);
-    const int fd = ::open(path.c_str(), flags, 0666);
+    const int fd = sysOpen(path, flags, 0666);
     if (fd < 0) openFailed(path, errno);
     FdGuard guard(fd);
     std::size_t off = 0;
@@ -534,11 +593,11 @@ PRIM(prim_src_open) {
         proto::ProtoContext::UnmanagedScope out(ctx);
         try {
             fd = protoio::file::open(path, protoio::file::Mode::Read);
-            struct stat st {};
+            SysStat st {};
             // On Linux `open` of a directory for reading SUCCEEDS and `read` then
             // fails with EISDIR. The JVM reports a directory from `open`, as a
             // FileNotFoundException carrying "(Is a directory)".
-            if (::fstat(fd, &st) == 0 && S_ISDIR(st.st_mode)) {
+            if (sysFstat(fd, &st) == 0 && S_ISDIR(st.st_mode)) {
                 directory = true;
                 protoio::close(fd);
             }
@@ -663,11 +722,11 @@ PRIM(prim_file_exists) {
     (void)self;
     const std::string path = stringArg(ctx, arg(ctx, args, 0, "FileIO.exists", 1), "FileIO.exists");
     checkPath(path, "FileIO.exists");
-    struct stat st {};
+    SysStat st {};
     int rc;
     {
         proto::ProtoContext::UnmanagedScope out(ctx);
-        rc = ::stat(path.c_str(), &st);
+        rc = sysStat(path, &st);
     }
     // `exists` answers one question only — is there something at this path that
     // can be looked up — so a failure to stat is `false`, as `java.io.File`'s is.
@@ -682,7 +741,7 @@ PRIM(prim_file_delete) {
     int rc, e;
     {
         proto::ProtoContext::UnmanagedScope out(ctx);
-        rc = ::unlink(path.c_str());
+        rc = sysUnlink(path);
         e = errno;
     }
     if (rc == 0) return PROTO_TRUE;

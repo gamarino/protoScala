@@ -47,7 +47,7 @@ public:
     // measured by the case.  A delta of ProtoContext::allocatedCellsCount would
     // be actively wrong here: safepoint() zeroes that counter every time it
     // submits, so it is smallest exactly when protoScala is conforming.
-    unsigned long makeGarbage(unsigned long requestedCells) override {
+    proto::proto_ulong makeGarbage(proto::proto_ulong requestedCells) override {
         return evalUntilConsumed(requestedCells,
             "{ var i = 0; var n = 0\n"
             "  while i < 4000 do {\n"
@@ -65,7 +65,7 @@ public:
     // comments in CollectionPrimitives.cpp.  A `TupleN` is a case-class
     // instance, not a `ProtoTuple`, so measuring one would not reach rule 5's
     // subject.
-    unsigned long makeSequenceGarbage(unsigned long requestedCells) override {
+    proto::proto_ulong makeSequenceGarbage(proto::proto_ulong requestedCells) override {
         return evalUntilConsumed(requestedCells,
             "{ var i = 0; var n = 0\n"
             "  while i < 3000 do {\n"
@@ -89,7 +89,7 @@ public:
     // plus `!`, then `.value` until the consumer has caught up.  This is the
     // path P2's heap-ceiling finding was measured on and the path whose CAS
     // snapshot is now rooted before `appendLast`.
-    bool runProducerConsumer(unsigned long units) override {
+    bool runProducerConsumer(proto::proto_ulong units) override {
         // ONE actor for the LIFETIME OF THE HOST, and a bounded backlog.
         //
         // Both constraints were learned from failures of this adaptor, not from
@@ -118,9 +118,9 @@ public:
             actorReady_ = true;
             delivered_ = 0;
         }
-        const unsigned long perRound = 2000;
-        const unsigned long rounds = (units / perRound) + 1;
-        const unsigned long target = delivered_ + rounds * perRound;
+        const proto::proto_ulong perRound = 2000;
+        const proto::proto_ulong rounds = (units / perRound) + 1;
+        const proto::proto_ulong target = delivered_ + rounds * perRound;
         const std::string src =
             "{ var r = 0\n"
             "  while r < " + std::to_string(rounds) + " do {\n"
@@ -190,10 +190,10 @@ public:
     EvalHarness& harness() { return harness_; }
 
 private:
-    unsigned long evalUntilConsumed(unsigned long requestedCells,
+    proto::proto_ulong evalUntilConsumed(proto::proto_ulong requestedCells,
                                     const char* snippet) {
-        const long floor = inUse() + (long) (requestedCells + requestedCells / 2);
-        unsigned long rounds = 0;
+        const proto::proto_long floor = inUse() + (proto::proto_long) (requestedCells + requestedCells / 2);
+        proto::proto_ulong rounds = 0;
         while (inUse() < floor && rounds < 4096) {
             harness_.eval(snippet);
             ++rounds;
@@ -201,14 +201,14 @@ private:
         return rounds;
     }
 
-    long inUse() const {
+    proto::proto_long inUse() const {
         const proto::ProtoSpace& s = const_cast<ScalaConformanceHost*>(this)->harness_.space();
-        return (long) s.heapSize - (long) s.freeCellsCount;
+        return (proto::proto_long) s.heapSize - (proto::proto_long) s.freeCellsCount;
     }
 
     EvalHarness  harness_;
     bool          actorReady_ = false;
-    unsigned long delivered_  = 0;
+    proto::proto_ulong delivered_  = 0;
 };
 
 }  // namespace protoScala::test

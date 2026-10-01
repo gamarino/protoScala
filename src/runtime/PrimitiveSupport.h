@@ -35,26 +35,26 @@ inline const RuntimeLayout& layoutOf() { return *activeCallContext()->layout; }
 // Arguments
 // ---------------------------------------------------------------------------
 
-inline unsigned long argCount(ProtoContext* ctx, const ProtoList* args) {
+inline proto::proto_ulong argCount(ProtoContext* ctx, const ProtoList* args) {
     return args ? args->getSize(ctx) : 0;
 }
 
 [[noreturn, gnu::cold]] inline void wrongArgCount(const char* method, const std::string& expected,
-                                                  unsigned long got) {
+                                                  proto::proto_ulong got) {
     throw ScalaError("IllegalArgumentException",
                      std::string(method) + " takes " + expected + " argument(s), got " +
                      std::to_string(got));
 }
 
 inline void expectArgs(ProtoContext* ctx, const ProtoList* args, const char* method,
-                       unsigned long n) {
-    const unsigned long got = argCount(ctx, args);
+                       proto::proto_ulong n) {
+    const proto::proto_ulong got = argCount(ctx, args);
     if (got != n) wrongArgCount(method, std::to_string(n), got);
 }
 
 // Argument `i` of a call that must receive exactly `expected` arguments.
-inline const ProtoObject* arg(ProtoContext* ctx, const ProtoList* args, unsigned long i,
-                              const char* method, unsigned long expected) {
+inline const ProtoObject* arg(ProtoContext* ctx, const ProtoList* args, proto::proto_ulong i,
+                              const char* method, proto::proto_ulong expected) {
     expectArgs(ctx, args, method, expected);
     return args->getAt(ctx, static_cast<int>(i));
 }

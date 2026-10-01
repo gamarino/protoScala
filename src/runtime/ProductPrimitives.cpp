@@ -31,12 +31,12 @@ const ProtoList* fieldsOf(ProtoContext* ctx, const ProtoObject* self) {
     return isListFast(f) ? f->asList(ctx) : nullptr;
 }
 
-const ProtoString* keyAt(ProtoContext* ctx, const ProtoList* fields, unsigned long i) {
+const ProtoString* keyAt(ProtoContext* ctx, const ProtoList* fields, proto::proto_ulong i) {
     return reinterpret_cast<const ProtoString*>(fields->getAt(ctx, static_cast<int>(i)));
 }
 
 const ProtoObject* element(ProtoContext* ctx, const ProtoObject* self, const ProtoList* fields,
-                           unsigned long i) {
+                           proto::proto_ulong i) {
     const ProtoObject* v = self->getOwnAttributeDirect(ctx, keyAt(ctx, fields, i));
     return v ? v : PROTO_NONE;
 }
@@ -57,7 +57,7 @@ const ProtoObject* caseClassOf(ProtoContext* ctx, const ProtoObject* self) {
     if (cls->hasOwnAttribute(ctx, L.prefixKey) == PROTO_TRUE) return cls;
     // A class prototype's parents are its whole linearization (makeClass).
     const proto::ProtoList* chain = cls->getParents(ctx);
-    for (unsigned long i = 0, n = chain ? chain->getSize(ctx) : 0; i < n; ++i) {
+    for (proto::proto_ulong i = 0, n = chain ? chain->getSize(ctx) : 0; i < n; ++i) {
         const ProtoObject* p = chain->getAt(ctx, static_cast<int>(i));
         if (p->hasOwnAttribute(ctx, L.prefixKey) == PROTO_TRUE) return p;
     }
@@ -72,7 +72,7 @@ bool isInstanceOf(ProtoContext* ctx, const ProtoObject* v, const ProtoObject* cl
     if (!c) return false;
     if (c == cls) return true;
     const proto::ProtoList* chain = c->getParents(ctx);
-    for (unsigned long i = 0, n = chain ? chain->getSize(ctx) : 0; i < n; ++i)
+    for (proto::proto_ulong i = 0, n = chain ? chain->getSize(ctx) : 0; i < n; ++i)
         if (chain->getAt(ctx, static_cast<int>(i)) == cls) return true;
     return false;
 }
@@ -86,7 +86,7 @@ PRIM(product_toString) {
     std::string out = tuple ? "" : prefixOf(ctx, self);
     if (!fields) return str(ctx, out);  // a case object: its name
     out += '(';
-    for (unsigned long i = 0, n = fields->getSize(ctx); i < n; ++i) {
+    for (proto::proto_ulong i = 0, n = fields->getSize(ctx); i < n; ++i) {
         if (i) out += ',';
         out += show(ctx, L, element(ctx, self, fields, i));
     }
@@ -118,7 +118,7 @@ PRIM(product_equals) {
     const ProtoObject* argv[1] = {self};
     if (activeCallContext()->engine->send(ctx, other, L.canEqualName, argv, 1) != PROTO_TRUE)
         return PROTO_FALSE;
-    for (unsigned long i = 0, n = fields->getSize(ctx); i < n; ++i)
+    for (proto::proto_ulong i = 0, n = fields->getSize(ctx); i < n; ++i)
         if (!valuesEqual(ctx, L, element(ctx, self, fields, i), element(ctx, other, fields, i)))
             return PROTO_FALSE;
     return PROTO_TRUE;
@@ -131,7 +131,7 @@ PRIM(product_hashCode) {
     const ProtoList* fields = fieldsOf(ctx, self);
     std::vector<std::int32_t> hs;
     if (fields)
-        for (unsigned long i = 0, n = fields->getSize(ctx); i < n; ++i)
+        for (proto::proto_ulong i = 0, n = fields->getSize(ctx); i < n; ++i)
             hs.push_back(scalaHash(ctx, L, element(ctx, self, fields, i)));
     return ctx->fromInteger(hashing::productHash(hashing::javaStringHash(prefixOf(ctx, self)), hs));
 }
@@ -152,7 +152,7 @@ const ProtoObject* elementAt(ProtoContext* ctx, const ProtoObject* self, long lo
     const long long n = fields ? static_cast<long long>(fields->getSize(ctx)) : 0;
     if (i < 0 || i >= n)
         throw ScalaError("IndexOutOfBoundsException", "Index out of range: " + std::to_string(i));
-    return element(ctx, self, fields, static_cast<unsigned long>(i));
+    return element(ctx, self, fields, static_cast<proto::proto_ulong>(i));
 }
 
 PRIM(product_productElement) {
@@ -187,14 +187,14 @@ const ProtoObject* product_copy(ProtoContext* ctx, const ProtoObject* self, cons
     const BytecodeModule* ctor = init ? compiledModuleOf(ctx, L, init) : nullptr;
     if (!fields || (ctor && ctor->isVariadic()))
         throw ScalaError("NoSuchMethodError", "value copy is not a member of " + typeName(ctx, L, self));
-    const unsigned long n = fields->getSize(ctx);
-    const unsigned long positional = argCount(ctx, args);
+    const proto::proto_ulong n = fields->getSize(ctx);
+    const proto::proto_ulong positional = argCount(ctx, args);
     if (positional > n) wrongArgCount("copy", "at most " + std::to_string(n), positional);
     ProtoContext scope(ctx->space, ctx);
     scope.resizeAutomaticLocals(static_cast<unsigned>(n));
-    unsigned long named = 0;
-    for (unsigned long i = 0; i < n; ++i) {
-        const auto key = reinterpret_cast<unsigned long>(keyAt(&scope, fields, i));
+    proto::proto_ulong named = 0;
+    for (proto::proto_ulong i = 0; i < n; ++i) {
+        const auto key = reinterpret_cast<proto::proto_ulong>(keyAt(&scope, fields, i));
         const ProtoObject* v;
         if (i < positional) {
             v = args->getAt(&scope, static_cast<int>(i));
@@ -213,17 +213,17 @@ const ProtoObject* product_copy(ProtoContext* ctx, const ProtoObject* self, cons
         // (ProtoSparseList::processElements, protoCore.h).
         struct Rejected {
             const ProtoList* fields;
-            unsigned long n;
-            unsigned long positional;
+            proto::proto_ulong n;
+            proto::proto_ulong positional;
             std::string message;
         } rejected{fields, n, positional, {}};
         keywords->processElements(&scope, &rejected,
-            [](ProtoContext* c, void* receiver, unsigned long key, const ProtoObject*) {
+            [](ProtoContext* c, void* receiver, proto::proto_ulong key, const ProtoObject*) {
                 auto* r = static_cast<Rejected*>(receiver);
                 if (!r->message.empty()) return;
                 const std::string name = reinterpret_cast<const ProtoString*>(key)->toStdString(c);
-                for (unsigned long i = 0; i < r->n; ++i)
-                    if (reinterpret_cast<unsigned long>(keyAt(c, r->fields, i)) == key) {
+                for (proto::proto_ulong i = 0; i < r->n; ++i)
+                    if (reinterpret_cast<proto::proto_ulong>(keyAt(c, r->fields, i)) == key) {
                         if (i < r->positional)
                             r->message = "parameter " + name + " of copy is already instantiated";
                         return;
@@ -240,8 +240,8 @@ const ProtoObject* product_copy(ProtoContext* ctx, const ProtoObject* self, cons
 
 // The elements of `t` from the arguments: _1 .. _n.
 const ProtoObject* fillTuple(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* t,
-                             const ProtoList* args, unsigned long n) {
-    for (unsigned long k = 0; k < n; ++k)
+                             const ProtoList* args, proto::proto_ulong n) {
+    for (proto::proto_ulong k = 0; k < n; ++k)
         t = t->setAttribute(ctx, L.tupleFieldKey[k + 1], args->getAt(ctx, static_cast<int>(k)));
     return t;
 }
@@ -249,7 +249,7 @@ const ProtoObject* fillTuple(ProtoContext* ctx, const RuntimeLayout& L, const Pr
 // TupleN.<init>(this, a1..an): the fields _1.._n (tuples have no Scala body).
 PRIM(tuple_init) {
     const RuntimeLayout& L = layoutOf();
-    const unsigned long n = argCount(ctx, args);
+    const proto::proto_ulong n = argCount(ctx, args);
     const ProtoList* fields = fieldsOf(ctx, self);
     if (!fields || fields->getSize(ctx) != n)
         wrongArgCount("the tuple constructor", std::to_string(fields ? fields->getSize(ctx) : 0), n);
@@ -261,7 +261,7 @@ PRIM(tuple_init) {
 PRIM(tuple_apply) {
     const RuntimeLayout& L = layoutOf();
     const ProtoList* fields = fieldsOf(ctx, self);
-    const unsigned long n = fields ? fields->getSize(ctx) : 0;
+    const proto::proto_ulong n = fields ? fields->getSize(ctx) : 0;
     if (n < 2 || n > kMaxTupleArity) throw std::logic_error("tuple companion without an arity");
     expectArgs(ctx, args, "apply", n);
     return fillTuple(ctx, L, L.tupleProto[n]->newChild(ctx, false), args, n);

@@ -9,14 +9,22 @@
 // through protoCore's own `getImportModule`, so it is asserted here on the data.
 #include "umd/CompiledModuleProvider.h"
 #include "umd/ScalaModuleProvider.h"
+#include "support/Platform.h"
 
 #include "EvalHarness.h"
 
 #include <gtest/gtest.h>
 
 #include <cstdlib>
+#include <filesystem>
 #include <string>
 #include <vector>
+
+#if defined(_WIN32)
+// The CRT has no setenv/unsetenv; _putenv_s with an empty value removes one.
+static int setenv(const char* name, const char* value, int) { return _putenv_s(name, value); }
+static int unsetenv(const char* name) { return _putenv_s(name, ""); }
+#endif
 
 using protoScala::test::EvalHarness;
 
@@ -90,8 +98,10 @@ TEST_F(Provider, AMissIsProtoNoneAndDoesNotRaise) {
     EXPECT_EQ(r, PROTO_NONE);
     // And the diagnostic names both base paths, with the dots turned into directories.
     const std::string tried = p.triedPathsOf("util.NotThere");
-    EXPECT_NE(tried.find("/nonexistent/a/util/NotThere.so"), std::string::npos) << tried;
-    EXPECT_NE(tried.find("/nonexistent/b/util/NotThere.so"), std::string::npos) << tried;
+    // Joined as the provider joins them, so Windows' separator and suffix apply.
+    const std::string file = std::string("util/NotThere") + protoScala::kSharedLibrarySuffix;
+    EXPECT_NE(tried.find((std::filesystem::path("/nonexistent/a") / file).string()), std::string::npos) << tried;
+    EXPECT_NE(tried.find((std::filesystem::path("/nonexistent/b") / file).string()), std::string::npos) << tried;
 }
 
 TEST_F(Provider, TheAliasAndGuidAreTheRuledOnes) {
@@ -107,7 +117,9 @@ TEST_F(Provider, TheAliasAndGuidAreTheRuledOnes) {
 TEST_F(Provider, BasePathsPutTheEnvironmentFirstInOrder) {
     const char* saved = std::getenv("PROTOSCALA_MODULE_PATH");
     const std::string savedValue = saved ? saved : "";
-    ::setenv("PROTOSCALA_MODULE_PATH", "/one::/two", 1);
+    const std::string list = std::string("/one") + protoScala::kPathListSeparator +
+                             protoScala::kPathListSeparator + "/two";
+    ::setenv("PROTOSCALA_MODULE_PATH", list.c_str(), 1);
     const std::vector<std::string> paths = protoScala::compiledModuleBasePaths();
     if (saved) ::setenv("PROTOSCALA_MODULE_PATH", savedValue.c_str(), 1);
     else ::unsetenv("PROTOSCALA_MODULE_PATH");

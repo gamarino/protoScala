@@ -190,13 +190,13 @@ TEST(KeywordConvention, ANonInternedKeyMatchesNothing) {
     EXPECT_NE(interned, loose) << "fromUTF8 must not intern a name too long to embed";
 
     const proto::ProtoSparseList* bad = ctx->newSparseList();
-    bad = bad->setAt(ctx, reinterpret_cast<unsigned long>(loose), proto::makeSmallInt(1));
-    EXPECT_FALSE(bad->has(ctx, reinterpret_cast<unsigned long>(interned)))
+    bad = bad->setAt(ctx, reinterpret_cast<proto::proto_ulong>(loose), proto::makeSmallInt(1));
+    EXPECT_FALSE(bad->has(ctx, reinterpret_cast<proto::proto_ulong>(interned)))
         << "a key built from a non-interning constructor must not match the interned one";
 
     const proto::ProtoSparseList* good = ctx->newSparseList();
-    good = good->setAt(ctx, reinterpret_cast<unsigned long>(interned), proto::makeSmallInt(1));
-    EXPECT_TRUE(good->has(ctx, reinterpret_cast<unsigned long>(interned2)));
+    good = good->setAt(ctx, reinterpret_cast<proto::proto_ulong>(interned), proto::makeSmallInt(1));
+    EXPECT_TRUE(good->has(ctx, reinterpret_cast<proto::proto_ulong>(interned2)));
 }
 
 TEST(KeywordConvention, EveryParameterNameOfALinkedModuleIsInterned) {

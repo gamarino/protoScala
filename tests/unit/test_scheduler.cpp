@@ -111,7 +111,7 @@ TEST(Scheduler, SpawnBuildsAnAnchoredActor) {
         world().L().actorRegistry->getOwnAttributeDirect(&ctx, world().L().actorsKey);
     bool found = false;
     const ProtoList* actors = list->asList(&ctx);
-    for (unsigned long i = 0; i < actors->getSize(&ctx); ++i)
+    for (proto::proto_ulong i = 0; i < actors->getSize(&ctx); ++i)
         found = found || actors->getAt(&ctx, static_cast<int>(i)) == a;
     EXPECT_TRUE(found);
 }

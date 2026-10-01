@@ -1,0 +1,4 @@
+# Scala sources are LF on every platform: a multi-line string literal keeps its
+# line endings, so a CRLF checkout (Windows, core.autocrlf=true) would change
+# what programs and fixtures mean.
+*.scala text eol=lf

@@ -6,6 +6,8 @@
 set -u
 P="${1:?usage: repl-load.sh <protoscala>}"
 work=$(mktemp -d -p "$PWD" repl-load.XXXXXX)
+# Under Git Bash on Windows the REPL is a native program: it takes Windows paths.
+if command -v cygpath >/dev/null 2>&1; then work=$(cygpath -m "$work"); fi
 trap 'rm -rf "$work"' EXIT
 printf 'def square(x: Int): Int = x * x\nval loaded = "yes"\n' >"$work/lib.scala"
 out=$(printf '%s\n' ":load $work/lib.scala" 'square(12)' 'loaded' ':help' ':nope' \

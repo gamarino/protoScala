@@ -9,6 +9,7 @@
 #include "protoCore.h"
 
 #include <cmath>
+#include <exception>
 #include <new>
 #include <stdexcept>
 #include <string>
@@ -101,19 +102,22 @@ const proto::ProtoObject* ExecutionEngine::callNative(proto::ProtoContext* ctx, 
     // VM and terminate the process (Phase 6 plan A0-7). std::logic_error reaches
     // the std::exception arm and is re-thrown untouched, so D74 survives: a VM
     // defect stays uncatchable.
+    // The four pass-through clauses re-throw after the catch (see runFrame).
+    std::exception_ptr passOn;
     try {
         r = fn(&scope, self, nullptr, list, nullptr);
     } catch (FutureYield&) {
-        throw;  // a cooperative suspension, not an error
+        passOn = std::current_exception();  // a cooperative suspension, not an error
     } catch (ScalaThrow&) {
-        throw;  // a Scala exception already in flight
+        passOn = std::current_exception();  // a Scala exception already in flight
     } catch (ScalaError&) {
-        throw;  // a native throw site's own translation
+        passOn = std::current_exception();  // a native throw site's own translation
     } catch (const std::exception&) {
-        throw;  // runLoop translates it, and attaches the source line
+        passOn = std::current_exception();  // runLoop translates it, and attaches the source line
     } catch (...) {
         throw ScalaError("RuntimeException", "native exception");
     }
+    if (passOn) std::rethrow_exception(passOn);
     if (!r) r = PROTO_NONE;
     scope.returnValue = r;
     return r;
@@ -401,11 +405,11 @@ const proto::ProtoObject* ExecutionEngine::superSend(proto::ProtoContext* ctx,
     const RuntimeLayout& L = layout_;
     const proto::ProtoObject* owner = L.globals->getOwnAttributeDirect(ctx, site.keySymbol);
     const proto::ProtoList* chain = base[0]->getParents(ctx);  // young in ctx
-    const unsigned long n = chain->getSize(ctx);
+    const proto::proto_ulong n = chain->getSize(ctx);
     const std::string ownerName = GlobalTable::nameOfKey(site.key.substr(1));
     const std::string spelling =
         "super" + (site.exact ? "[" + ownerName + "]" : "") + "." + site.sval;
-    unsigned long k = 0;
+    proto::proto_ulong k = 0;
     while (k < n && chain->getAt(ctx, static_cast<int>(k)) != owner) ++k;
     if (k == n)
         throw ScalaError("NoSuchMethodError",
@@ -442,7 +446,7 @@ const proto::ProtoSparseList* keywordsOfSite(proto::ProtoContext* ctx,
                                              const BytecodeModule::Const& site) {
     const proto::ProtoSparseList* keywords = ctx->newSparseList();
     for (std::size_t k = 0; k < site.nameSymbols.size(); ++k)
-        keywords = keywords->setAt(ctx, reinterpret_cast<unsigned long>(site.nameSymbols[k]),
+        keywords = keywords->setAt(ctx, reinterpret_cast<proto::proto_ulong>(site.nameSymbols[k]),
                                    base[1 + site.argc + k]);
     return keywords;
 }
@@ -455,10 +459,10 @@ std::string unmatchedKeywordName(proto::ProtoContext* ctx, const BytecodeModule&
     const auto& symbols = mod.paramNameSymbols();
     const proto::ProtoSparseListIterator* it = keywords->getIterator(ctx);
     while (it && it->hasNext(ctx)) {
-        const unsigned long key = it->nextKey(ctx);
+        const proto::proto_ulong key = it->nextKey(ctx);
         bool known = false;
         for (const proto::ProtoString* s : symbols)
-            if (reinterpret_cast<unsigned long>(s) == key) { known = true; break; }
+            if (reinterpret_cast<proto::proto_ulong>(s) == key) { known = true; break; }
         if (!known) return reinterpret_cast<const proto::ProtoString*>(key)->toStdString(ctx);
         // `advance` is a non-const member of ProtoSparseListIterator, and
         // getIterator hands back a const pointer: the cast is protoCore's own
@@ -489,9 +493,9 @@ void ExecutionEngine::bindKeywordsAndDefaults(proto::ProtoContext& frame, const 
     std::vector<bool> filled(n, false);
     for (unsigned k = 0; k < positional && k < n; ++k) filled[k] = true;
     if (keywords) {
-        unsigned long matched = 0;
+        proto::proto_ulong matched = 0;
         for (std::size_t i = 0; i < n; ++i) {
-            const auto key = reinterpret_cast<unsigned long>(symbols[i]);
+            const auto key = reinterpret_cast<proto::proto_ulong>(symbols[i]);
             if (!keywords->has(&frame, key)) continue;
             ++matched;
             if (filled[i])
@@ -892,8 +896,16 @@ const proto::ProtoObject* ExecutionEngine::runFrame(proto::ProtoContext& frame,
     // Fast path: a module with no protected region can never enter a handler, so
     // it pays nothing beyond the one C++ try region a zero-cost-exceptions ABI
     // makes free on the non-throwing path.
+    // Exceptions passing through a VM frame are re-thrown AFTER the catch clause
+    // has completed (std::rethrow_exception), never with `throw;` inside it. Under
+    // the Itanium ABI (Linux, macOS) the two are the same. Under MSVC a catch clause
+    // runs before the stack below it is released, so a `throw;` inside it starts
+    // the next dispatch below the frames already left behind: each Scala frame an
+    // exception passed through would cost several KiB, and a StackOverflowError
+    // raised at depth would overflow the native stack while propagating.
     for (;;) {
         std::size_t faultPc = 0;
+        std::exception_ptr passOn;
         try {
             return runLoop(frame, mod, slots, sp, ip, &faultPc);
         } catch (ScalaThrow& t) {
@@ -902,18 +914,23 @@ const proto::ProtoObject* ExecutionEngine::runFrame(proto::ProtoContext& frame,
             // thing the collector can see the payload through (plan A0-2, E1).
             frame.returnValue = t.value;
             const BytecodeModule::Handler* h = mod.handlerFor(faultPc);
-            if (!h) throw;
-            sp = enterHandler(mod, slots, *h, t.value, &ip);
-            continue;   // leaves the catch block: the handler body then runs with
-                        // NO live C++ handler, so it suspends like any other code
+            if (h) {
+                sp = enterHandler(mod, slots, *h, t.value, &ip);
+                continue;   // leaves the catch block: the handler body then runs with
+                            // NO live C++ handler, so it suspends like any other code
+            }
+            passOn = std::current_exception();
         } catch (ScalaError& e) {
             const BytecodeModule::Handler* h = mod.handlerFor(faultPc);
-            if (!h) throw;                       // the uncaught path allocates nothing
-            const proto::ProtoObject* v = materialiseError(&frame, e);
-            frame.returnValue = v;
-            sp = enterHandler(mod, slots, *h, v, &ip);
-            continue;
+            if (h) {
+                const proto::ProtoObject* v = materialiseError(&frame, e);
+                frame.returnValue = v;
+                sp = enterHandler(mod, slots, *h, v, &ip);
+                continue;
+            }
+            passOn = std::current_exception();   // the uncaught path allocates nothing
         }
+        std::rethrow_exception(passOn);
     }
 }
 
@@ -946,6 +963,8 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
     // call opcode; it is what makes a frame resumable after a cooperative
     // yield (DESIGN §8.3, D43).
     unsigned pendingBase = kNoPendingCall;
+    // Set by the pass-through clauses below and re-thrown after them (runFrame).
+    std::exception_ptr passOn;
     try {
         for (;;) {
             Instr word = *ip++;
@@ -1296,16 +1315,16 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                                  " cannot be suspended at this instruction");
         appendSuspendedFrame(&frame, layout_, mod, static_cast<unsigned>(ip - code), pendingBase,
                              slots);
-        throw;
+        passOn = std::current_exception();
     } catch (ScalaThrow& t) {
         // A Scala exception value: runFrame searches this module's handler table.
         *faultPc = static_cast<std::size_t>(ip - code) - 1;
         if (t.line == 0) t.line = mod.lineAt(*faultPc);
-        throw;
+        passOn = std::current_exception();
     } catch (ScalaError& e) {
         *faultPc = static_cast<std::size_t>(ip - code) - 1;
         if (e.line == 0) e.line = mod.lineAt(*faultPc);
-        throw;
+        passOn = std::current_exception();
     } catch (const std::invalid_argument& e) {
         // protoCore argument errors (e.g. asIntegerString with a bad base).
         // Caught by its EXACT type: std::invalid_argument derives from
@@ -1342,6 +1361,7 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
         se.line = mod.lineAt(*faultPc);
         throw se;
     }
+    std::rethrow_exception(passOn);
 }
 
 const proto::ProtoObject* ExecutionEngine::slowBinary(proto::ProtoContext* ctx, Op op,

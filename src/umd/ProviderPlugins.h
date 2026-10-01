@@ -29,6 +29,14 @@
 #include <string>
 #include <vector>
 
+// Marks the two ABI functions of a plug-in. A Windows DLL exports only what it
+// declares exported; elsewhere every extern "C" function already is.
+#if defined(_WIN32)
+#define PROTOSCALA_PROVIDER_EXPORT __declspec(dllexport)
+#else
+#define PROTOSCALA_PROVIDER_EXPORT
+#endif
+
 namespace protoScala {
 
 inline constexpr const char* kProviderPluginABI = "protoScala-provider-1";

@@ -9,6 +9,8 @@
 set -u
 P="${1:?usage: repl-results.sh <protoscala>}"
 work=$(mktemp -d -p "$PWD" repl-results.XXXXXX)
+# Under Git Bash on Windows the REPL is a native program: it takes Windows paths.
+if command -v cygpath >/dev/null 2>&1; then work=$(cygpath -m "$work"); fi
 trap 'rm -rf "$work"' EXIT
 mkdir "$work/home"
 printf '\xEF\xBB\xBFval fromBom = 7\nprintln("bom ok")\n' >"$work/bom.scala"

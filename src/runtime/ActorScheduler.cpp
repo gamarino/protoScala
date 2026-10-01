@@ -8,6 +8,9 @@
 #include "protoCore.h"
 
 #include <cstdio>
+#if defined(_M_X64) || defined(_M_IX86)
+#include <immintrin.h>
+#endif
 #include <cstdlib>
 #include <string>
 #include <thread>
@@ -572,6 +575,8 @@ void ActorScheduler::workerLoop(proto::ProtoContext* ctx) {
             for (unsigned i = 0; i < kSpinPauses; ++i)
 #if defined(__x86_64__) || defined(__i386__)
                 __builtin_ia32_pause();
+#elif defined(_M_X64) || defined(_M_IX86)
+                _mm_pause();
 #else
                 std::this_thread::yield();
 #endif

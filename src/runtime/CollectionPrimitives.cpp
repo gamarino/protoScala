@@ -374,7 +374,7 @@ PRIM(prim_range_find) {
 PRIM(prim_range_mkString) {
     const RuntimeLayout& L = layoutOf();
     const RangeView v = viewOf(ctx, L, self);
-    const unsigned long argn = argCount(ctx, args);
+    const proto::proto_ulong argn = argCount(ctx, args);
     std::string start, sep, end;
     if (argn == 1) {
         sep = stringArg(ctx, args->getAt(ctx, 0), "mkString");
@@ -714,7 +714,7 @@ PRIM(prim_seq_contains) {
     const RuntimeLayout& L = layoutOf();
     const ProtoList* xs = seqData(ctx, L, self, "contains");
     const ProtoObject* x = arg(ctx, args, 0, "contains", 1);
-    for (unsigned long i = 0, n = xs->getSize(ctx); i < n; ++i)
+    for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i)
         if (valuesEqual(ctx, L, xs->getAt(ctx, static_cast<int>(i)), x)) return PROTO_TRUE;
     return PROTO_FALSE;
 }
@@ -723,7 +723,7 @@ PRIM(prim_seq_indexOf) {
     const RuntimeLayout& L = layoutOf();
     const ProtoList* xs = seqData(ctx, L, self, "indexOf");
     const ProtoObject* x = arg(ctx, args, 0, "indexOf", 1);
-    for (unsigned long i = 0, n = xs->getSize(ctx); i < n; ++i)
+    for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i)
         if (valuesEqual(ctx, L, xs->getAt(ctx, static_cast<int>(i)), x))
             return proto::makeSmallInt(static_cast<long long>(i));
     return proto::makeSmallInt(-1);
@@ -733,7 +733,7 @@ PRIM(prim_seq_exists) {
     const RuntimeLayout& L = layoutOf();
     const ProtoList* xs = seqData(ctx, L, self, "exists");
     const ProtoObject* p = arg(ctx, args, 0, "exists", 1);
-    for (unsigned long i = 0, n = xs->getSize(ctx); i < n; ++i) {
+    for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i) {
         proto::ProtoContext step(ctx->space, ctx);
         if (truth(&step, callOne(&step, p, xs->getAt(&step, static_cast<int>(i))), "exists"))
             return PROTO_TRUE;
@@ -745,7 +745,7 @@ PRIM(prim_seq_forall) {
     const RuntimeLayout& L = layoutOf();
     const ProtoList* xs = seqData(ctx, L, self, "forall");
     const ProtoObject* p = arg(ctx, args, 0, "forall", 1);
-    for (unsigned long i = 0, n = xs->getSize(ctx); i < n; ++i) {
+    for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i) {
         proto::ProtoContext step(ctx->space, ctx);
         if (!truth(&step, callOne(&step, p, xs->getAt(&step, static_cast<int>(i))), "forall"))
             return PROTO_FALSE;
@@ -758,7 +758,7 @@ PRIM(prim_seq_count) {
     const ProtoList* xs = seqData(ctx, L, self, "count");
     const ProtoObject* p = arg(ctx, args, 0, "count", 1);
     long long hits = 0;
-    for (unsigned long i = 0, n = xs->getSize(ctx); i < n; ++i) {
+    for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i) {
         proto::ProtoContext step(ctx->space, ctx);
         if (truth(&step, callOne(&step, p, xs->getAt(&step, static_cast<int>(i))), "count")) ++hits;
     }
@@ -769,7 +769,7 @@ PRIM(prim_seq_find) {
     const RuntimeLayout& L = layoutOf();
     const ProtoList* xs = seqData(ctx, L, self, "find");
     const ProtoObject* p = arg(ctx, args, 0, "find", 1);
-    for (unsigned long i = 0, n = xs->getSize(ctx); i < n; ++i) {
+    for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i) {
         const ProtoObject* x = xs->getAt(ctx, static_cast<int>(i));
         proto::ProtoContext step(ctx->space, ctx);
         if (truth(&step, callOne(&step, p, x), "find")) return optionOf(ctx, L, x);
@@ -786,7 +786,7 @@ PRIM(prim_seq_partition) {
     const ProtoObject** slot = scope.getAutomaticLocals();
     slot[0] = scope.newList()->asObject(&scope);
     slot[1] = scope.newList()->asObject(&scope);
-    for (unsigned long i = 0, n = xs->getSize(&scope); i < n; ++i) {
+    for (proto::proto_ulong i = 0, n = xs->getSize(&scope); i < n; ++i) {
         const ProtoObject* x = xs->getAt(&scope, static_cast<int>(i));
         const unsigned which = truth(&scope, callOne(&scope, p, x), "partition") ? 0u : 1u;
         slot[which] = slot[which]->asList(&scope)->appendLast(&scope, x)->asObject(&scope);
@@ -807,7 +807,7 @@ PRIM(prim_seq_map) {
     const ProtoList* xs = seqData(ctx, L, self, "map");
     const ProtoObject* f = arg(ctx, args, 0, "map", 1);
     ListBuilder b(ctx);
-    for (unsigned long i = 0, n = xs->getSize(ctx); i < n; ++i)
+    for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i)
         b.add(callOne(b.context(), f, xs->getAt(b.context(), static_cast<int>(i))));
     return rewrap(ctx, L, self, b.finish()->asList(ctx));
 }
@@ -817,7 +817,7 @@ PRIM(prim_seq_flatMap) {
     const ProtoList* xs = seqData(ctx, L, self, "flatMap");
     const ProtoObject* f = arg(ctx, args, 0, "flatMap", 1);
     ListBuilder b(ctx);
-    for (unsigned long i = 0, n = xs->getSize(ctx); i < n; ++i)
+    for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i)
         addFlat(b, callOne(b.context(), f, xs->getAt(b.context(), static_cast<int>(i))), "flatMap");
     return rewrap(ctx, L, self, b.finish()->asList(ctx));
 }
@@ -827,7 +827,7 @@ PRIM(prim_seq_filter) {
     const ProtoList* xs = seqData(ctx, L, self, "filter");
     const ProtoObject* p = arg(ctx, args, 0, "filter", 1);
     ListBuilder b(ctx);
-    for (unsigned long i = 0, n = xs->getSize(ctx); i < n; ++i) {
+    for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i) {
         const ProtoObject* x = xs->getAt(b.context(), static_cast<int>(i));
         if (truth(b.context(), callOne(b.context(), p, x), "filter")) b.add(x);
     }
@@ -839,7 +839,7 @@ PRIM(prim_seq_filterNot) {
     const ProtoList* xs = seqData(ctx, L, self, "filterNot");
     const ProtoObject* p = arg(ctx, args, 0, "filterNot", 1);
     ListBuilder b(ctx);
-    for (unsigned long i = 0, n = xs->getSize(ctx); i < n; ++i) {
+    for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i) {
         const ProtoObject* x = xs->getAt(b.context(), static_cast<int>(i));
         if (!truth(b.context(), callOne(b.context(), p, x), "filterNot")) b.add(x);
     }
@@ -863,7 +863,7 @@ PRIM(prim_seq_foreach) {
     const RuntimeLayout& L = layoutOf();
     const ProtoList* xs = seqData(ctx, L, self, "foreach");
     const ProtoObject* f = arg(ctx, args, 0, "foreach", 1);
-    for (unsigned long i = 0, n = xs->getSize(ctx); i < n; ++i)
+    for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i)
         (void)callOne(ctx, f, xs->getAt(ctx, static_cast<int>(i)));
     return L.unit;
 }
@@ -873,9 +873,9 @@ PRIM(prim_seq_zip) {
     const ProtoList* xs = seqData(ctx, L, self, "zip");
     proto::ProtoContext scope(ctx->space, ctx);
     const ProtoList* ys = seqArg(&scope, L, arg(&scope, args, 0, "zip", 1), "zip");
-    const unsigned long n = std::min(xs->getSize(&scope), ys->getSize(&scope));
+    const proto::proto_ulong n = std::min(xs->getSize(&scope), ys->getSize(&scope));
     ListBuilder b(&scope);
-    for (unsigned long i = 0; i < n; ++i)
+    for (proto::proto_ulong i = 0; i < n; ++i)
         b.add(makePair(b.context(), L, xs->getAt(b.context(), static_cast<int>(i)),
                        ys->getAt(b.context(), static_cast<int>(i))));
     return rewrap(&scope, L, self, b.finish()->asList(&scope));
@@ -886,7 +886,7 @@ PRIM(prim_seq_zipWithIndex) {
     expectArgs(ctx, args, "zipWithIndex", 0);
     const ProtoList* xs = seqData(ctx, L, self, "zipWithIndex");
     ListBuilder b(ctx);
-    for (unsigned long i = 0, n = xs->getSize(ctx); i < n; ++i)
+    for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i)
         b.add(makePair(b.context(), L, xs->getAt(b.context(), static_cast<int>(i)),
                        proto::makeSmallInt(static_cast<long long>(i))));
     return rewrap(ctx, L, self, b.finish()->asList(ctx));
@@ -897,11 +897,11 @@ PRIM(prim_seq_distinct) {
     expectArgs(ctx, args, "distinct", 0);
     const ProtoList* xs = seqData(ctx, L, self, "distinct");
     ListBuilder b(ctx);
-    for (unsigned long i = 0, n = xs->getSize(ctx); i < n; ++i) {
+    for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i) {
         const ProtoObject* x = xs->getAt(b.context(), static_cast<int>(i));
         const ProtoList* seen = b.context()->getAutomaticLocal(0)->asList(b.context());
         bool dup = false;
-        for (unsigned long k = 0, m = seen->getSize(b.context()); k < m && !dup; ++k)
+        for (proto::proto_ulong k = 0, m = seen->getSize(b.context()); k < m && !dup; ++k)
             dup = valuesEqual(b.context(), L, seen->getAt(b.context(), static_cast<int>(k)), x);
         if (!dup) b.add(x);
     }
@@ -913,7 +913,7 @@ PRIM(prim_seq_flatten) {
     expectArgs(ctx, args, "flatten", 0);
     const ProtoList* xs = seqData(ctx, L, self, "flatten");
     ListBuilder b(ctx);
-    for (unsigned long i = 0, n = xs->getSize(ctx); i < n; ++i)
+    for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i)
         addFlat(b, xs->getAt(b.context(), static_cast<int>(i)), "flatten");
     return rewrap(ctx, L, self, b.finish()->asList(ctx));
 }
@@ -993,7 +993,7 @@ PRIM(prim_foldPartial_apply) {
 const ProtoObject* foldEntry(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
                              bool left, const char* method) {
     const RuntimeLayout& L = layoutOf();
-    const unsigned long n = argCount(ctx, args);
+    const proto::proto_ulong n = argCount(ctx, args);
     if (n == 1) return makeFoldPartial(ctx, L, self, args->getAt(ctx, 0), left);
     if (n != 2) wrongArgCount(method, "1 or 2", n);
     return foldImpl(ctx, seqData(ctx, L, self, method), args->getAt(ctx, 0), args->getAt(ctx, 1), left);
@@ -1210,7 +1210,7 @@ PRIM(prim_seq_sortWith) {
 
 PRIM(prim_seq_mkString) {
     const RuntimeLayout& L = layoutOf();
-    const unsigned long argn = argCount(ctx, args);
+    const proto::proto_ulong argn = argCount(ctx, args);
     std::string start, sep, end;
     if (argn == 1) {
         sep = stringArg(ctx, args->getAt(ctx, 0), "mkString");
@@ -1223,7 +1223,7 @@ PRIM(prim_seq_mkString) {
     }
     const ProtoList* xs = seqData(ctx, L, self, "mkString");
     std::string out = start;
-    for (unsigned long i = 0, n = xs->getSize(ctx); i < n; ++i) {
+    for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i) {
         if (i) out += sep;
         out += show(ctx, L, xs->getAt(ctx, static_cast<int>(i)));
     }
@@ -1235,7 +1235,7 @@ PRIM(prim_vector_toString) {
     expectArgs(ctx, args, "toString", 0);
     const ProtoList* xs = seqData(ctx, L, self, "toString");
     std::string out = "Vector(";
-    for (unsigned long i = 0, n = xs->getSize(ctx); i < n; ++i) {
+    for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i) {
         if (i) out += ", ";
         out += show(ctx, L, xs->getAt(ctx, static_cast<int>(i)));
     }
@@ -1333,11 +1333,11 @@ bool scalaIsIdentityKey(ProtoContext* ctx, const ProtoObject* key) {
     return true;
 }
 
-unsigned long scalaKeyHash(ProtoContext* ctx, const ProtoObject* key) {
+proto::proto_ulong scalaKeyHash(ProtoContext* ctx, const ProtoObject* key) {
     // Called only for value-equality keys. scalaHash is Scala's ##: cooperative
     // across Int/Long/Double, Char by code point, String by content, case
     // classes structurally, every Seq kind through the one SeqView.
-    return static_cast<unsigned long>(
+    return static_cast<proto::proto_ulong>(
         static_cast<long long>(scalaHash(ctx, *activeCallContext()->layout, key)));
 }
 
@@ -1819,10 +1819,10 @@ PRIM(prim_map_map) {
     EntryFnState st = entryState(L, &scope, slot, f, set);
     proto::hashedForEach(&scope, mapDataOf(&scope, L, self, "map"), &st, &mapVisit);
     const proto::ProtoList* results = slot[0]->asList(&scope);
-    const unsigned long n = results->getSize(&scope);
+    const proto::proto_ulong n = results->getSize(&scope);
     // A Set rebuilds a Set; a Map rebuilds a Map when every result is a pair.
     bool allPairs = !set;
-    for (unsigned long i = 0; i < n && allPairs; ++i) {
+    for (proto::proto_ulong i = 0; i < n && allPairs; ++i) {
         const ProtoObject* e = results->getAt(&scope, static_cast<int>(i));
         allPairs = isScalaInstance(&scope, L, e) &&
                    e->getAttribute(&scope, L.tupleKey) == PROTO_TRUE;
@@ -1830,7 +1830,7 @@ PRIM(prim_map_map) {
     if (!set && !allPairs) return slot[0];
     const proto::ProtoMap* out = scope.newMap();
     slot[1] = out->asObject(&scope);
-    for (unsigned long i = 0; i < n; ++i) {
+    for (proto::proto_ulong i = 0; i < n; ++i) {
         const ProtoObject* e = results->getAt(&scope, static_cast<int>(i));
         const ProtoObject* k = e;
         const ProtoObject* v = e;
@@ -1854,13 +1854,13 @@ PRIM(prim_map_flatMap) {
     // Flatten what the function returned, then rebuild the receiver's kind.
     const proto::ProtoList* results = slot[0]->asList(&scope);
     ListBuilder b(&scope);
-    for (unsigned long i = 0, n = results->getSize(&scope); i < n; ++i)
+    for (proto::proto_ulong i = 0, n = results->getSize(&scope); i < n; ++i)
         addFlat(b, results->getAt(b.context(), static_cast<int>(i)), "flatMap");
     slot[0] = b.finish();
     const proto::ProtoList* flat = slot[0]->asList(&scope);
-    const unsigned long n = flat->getSize(&scope);
+    const proto::proto_ulong n = flat->getSize(&scope);
     bool allPairs = !set;
-    for (unsigned long i = 0; i < n && allPairs; ++i) {
+    for (proto::proto_ulong i = 0; i < n && allPairs; ++i) {
         const ProtoObject* e = flat->getAt(&scope, static_cast<int>(i));
         allPairs = isScalaInstance(&scope, L, e) &&
                    e->getAttribute(&scope, L.tupleKey) == PROTO_TRUE;
@@ -1868,7 +1868,7 @@ PRIM(prim_map_flatMap) {
     if (!set && !allPairs) return slot[0];
     const proto::ProtoMap* out = scope.newMap();
     slot[1] = out->asObject(&scope);
-    for (unsigned long i = 0; i < n; ++i) {
+    for (proto::proto_ulong i = 0; i < n; ++i) {
         const ProtoObject* e = flat->getAt(&scope, static_cast<int>(i));
         const ProtoObject* k = e;
         const ProtoObject* v = e;
@@ -1959,7 +1959,7 @@ PRIM(prim_map_foldLeft) {
     proto::ProtoContext scope(ctx->space, ctx);
     const ProtoObject* entries = mapEntries(&scope, self, nullptr, "foldLeft", 0);
     scope.returnValue = entries;
-    const unsigned long n = argCount(&scope, args);
+    const proto::proto_ulong n = argCount(&scope, args);
     if (n == 1) return makeFoldPartial(&scope, L, entries, args->getAt(&scope, 0), /*left=*/true);
     if (n != 2) wrongArgCount("foldLeft", "1 or 2", n);
     return foldImpl(&scope, entries->asList(&scope), args->getAt(&scope, 0),
@@ -2013,7 +2013,7 @@ const ProtoObject* mapShow(ProtoContext* ctx, const ProtoObject* self, const Pro
     scope.returnValue = entries;
     const proto::ProtoList* l = entries->asList(&scope);
     std::string out = set ? "Set(" : "Map(";
-    for (unsigned long i = 0, n = l->getSize(&scope); i < n; ++i) {
+    for (proto::proto_ulong i = 0, n = l->getSize(&scope); i < n; ++i) {
         if (i) out += ", ";
         const ProtoObject* e = l->getAt(&scope, static_cast<int>(i));
         if (set) {
@@ -2029,7 +2029,7 @@ SEQ_NAMED(prim_map_toString, mapShow, "toString")
 
 PRIM(prim_map_mkString) {
     const RuntimeLayout& L = layoutOf();
-    const unsigned long argn = argCount(ctx, args);
+    const proto::proto_ulong argn = argCount(ctx, args);
     std::string start, sep, end;
     if (argn == 1) {
         sep = stringArg(ctx, args->getAt(ctx, 0), "mkString");
@@ -2045,7 +2045,7 @@ PRIM(prim_map_mkString) {
     scope.returnValue = entries;
     const proto::ProtoList* l = entries->asList(&scope);
     std::string out = start;
-    for (unsigned long i = 0, n = l->getSize(&scope); i < n; ++i) {
+    for (proto::proto_ulong i = 0, n = l->getSize(&scope); i < n; ++i) {
         if (i) out += sep;
         out += show(&scope, L, l->getAt(&scope, static_cast<int>(i)));
     }
@@ -2126,8 +2126,8 @@ PRIM(prim_mapCompanion_apply) {
     const ProtoObject** slot = scope.getAutomaticLocals();
     const proto::ProtoMap* data = scope.newMap();
     slot[0] = data->asObject(&scope);
-    const unsigned long n = argCount(&scope, args);
-    for (unsigned long i = 0; i < n; ++i) {
+    const proto::proto_ulong n = argCount(&scope, args);
+    for (proto::proto_ulong i = 0; i < n; ++i) {
         const ProtoObject* pair = args->getAt(&scope, static_cast<int>(i));
         const ProtoObject* k = nullptr;
         const ProtoObject* v = nullptr;
@@ -2151,8 +2151,8 @@ PRIM(prim_setCompanion_apply) {
     const ProtoObject** slot = scope.getAutomaticLocals();
     const proto::ProtoMap* data = scope.newMap();
     slot[0] = data->asObject(&scope);
-    const unsigned long n = argCount(&scope, args);
-    for (unsigned long i = 0; i < n; ++i) {
+    const proto::proto_ulong n = argCount(&scope, args);
+    for (proto::proto_ulong i = 0; i < n; ++i) {
         const ProtoObject* e = args->getAt(&scope, static_cast<int>(i));
         data = proto::hashedPut(&scope, data, scalaKeySemantics(), e, e);
         slot[0] = data->asObject(&scope);
@@ -2186,7 +2186,7 @@ PRIM(prim_seq_groupBy) {
     const ProtoObject** slot = scope.getAutomaticLocals();
     const proto::ProtoMap* data = scope.newMap();
     slot[0] = data->asObject(&scope);
-    for (unsigned long i = 0, n = xs->getSize(&scope); i < n; ++i) {
+    for (proto::proto_ulong i = 0, n = xs->getSize(&scope); i < n; ++i) {
         slot[1] = xs->getAt(&scope, static_cast<int>(i));
         slot[2] = callOne(&scope, f, slot[1]);
         const ProtoObject* bucket = proto::hashedGet(&scope, data, scalaKeySemantics(), slot[2]);

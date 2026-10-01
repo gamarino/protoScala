@@ -97,7 +97,7 @@ std::string textArg(ProtoContext* ctx, const ProtoObject* v, const char* method)
 // ---------------------------------------------------------------------------
 
 PRIM(prim_println) {
-    const unsigned long n = argCount(ctx, args);
+    const proto::proto_ulong n = argCount(ctx, args);
     if (n > 1) wrongArgCount("println", "0 or 1", n);
     std::string line;
     if (n == 1) line = show(ctx, layoutOf(), args->getAt(ctx, 0));
@@ -133,13 +133,13 @@ PRIM(prim_class_name_of) {
 // specifiers were already validated at compile time, so a parse failure here is
 // an internal error, not a user one.
 PRIM(prim_fmt) {
-    const unsigned long n = argCount(ctx, args);
+    const proto::proto_ulong n = argCount(ctx, args);
     if (n == 0 || n % 3 != 1)
         throw ScalaError("IllegalArgumentException", "__fmt takes 3k + 1 arguments, got " +
                                                          std::to_string(n));
     const RuntimeLayout& L = layoutOf();
     std::string out;
-    for (unsigned long k = 0; k + 1 < n; k += 3) {
+    for (proto::proto_ulong k = 0; k + 1 < n; k += 3) {
         out += stringArg(ctx, args->getAt(ctx, static_cast<int>(k)), "__fmt");
         const ProtoObject* v = args->getAt(ctx, static_cast<int>(k + 1));
         const std::string spec = stringArg(ctx, args->getAt(ctx, static_cast<int>(k + 2)), "__fmt");
@@ -516,7 +516,7 @@ PRIM(string_charAt) { return charAt(ctx, self, args, "charAt"); }
 PRIM(string_apply)  { return charAt(ctx, self, args, "apply"); }
 
 PRIM(string_substring) {
-    const unsigned long n = argCount(ctx, args);
+    const proto::proto_ulong n = argCount(ctx, args);
     if (n != 1 && n != 2) wrongArgCount("substring", "1 or 2", n);
     const long long len = stringLength(ctx, self);
     const long long begin = intArg(ctx, args->getAt(ctx, 0), "substring");
@@ -561,7 +561,7 @@ PRIM(string_endsWith) {
 // indexOf(x) / indexOf(x, from): the code-point index of the first
 // occurrence of the String or Char `x` at or after `from`, or -1.
 PRIM(string_indexOf) {
-    const unsigned long n = argCount(ctx, args);
+    const proto::proto_ulong n = argCount(ctx, args);
     if (n != 1 && n != 2) wrongArgCount("indexOf", "1 or 2", n);
     const std::string needle = textArg(ctx, args->getAt(ctx, 0), "indexOf");
     const long long from = n == 2 ? std::max(0LL, intArg(ctx, args->getAt(ctx, 1), "indexOf")) : 0;
@@ -645,7 +645,7 @@ PRIM(string_toDouble) {
 // flatten once, which is said at each of them.
 
 PRIM(string_lastIndexOf) {
-    const unsigned long n = argCount(ctx, args);
+    const proto::proto_ulong n = argCount(ctx, args);
     if (n != 1 && n != 2) wrongArgCount("lastIndexOf", "1 or 2", n);
     const std::string needle = textArg(ctx, args->getAt(ctx, 0), "lastIndexOf");
     const std::string s = selfText(ctx, self);   // one walk: a backward search
@@ -719,7 +719,7 @@ PRIM(string_replace) {
 // stripMargin(margin = '|'): on each line, drop the leading whitespace up to and
 // including the first margin character; a line without one is left alone.
 PRIM(string_stripMargin) {
-    const unsigned long n = argCount(ctx, args);
+    const proto::proto_ulong n = argCount(ctx, args);
     if (n > 1) wrongArgCount("stripMargin", "0 or 1", n);
     std::string margin = "|";
     if (n == 1) {
@@ -901,7 +901,7 @@ PRIM(string_foreach) {
 }
 
 PRIM(string_mkString) {
-    const unsigned long argn = argCount(ctx, args);
+    const proto::proto_ulong argn = argCount(ctx, args);
     std::string start, sep, end;
     if (argn == 1) {
         sep = textArg(ctx, args->getAt(ctx, 0), "mkString");
@@ -966,9 +966,9 @@ PRIM(string_toBoolean) {
 PRIM(string_format) {
     const RuntimeLayout& L = layoutOf();
     const std::string fmt = selfText(ctx, self);   // one walk
-    const unsigned long argn = argCount(ctx, args);
+    const proto::proto_ulong argn = argCount(ctx, args);
     std::string out;
-    unsigned long next = 0;
+    proto::proto_ulong next = 0;
     std::size_t i = 0;
     while (i < fmt.size()) {
         if (fmt[i] != '%') { out += fmt[i++]; continue; }
@@ -1016,7 +1016,7 @@ PRIM(withFilter_withFilter) {
 }
 
 bool accepted(ProtoContext* ctx, const ProtoList* preds, const ProtoObject* x) {
-    for (unsigned long k = 0, n = preds->getSize(ctx); k < n; ++k)
+    for (proto::proto_ulong k = 0, n = preds->getSize(ctx); k < n; ++k)
         if (!truth(ctx, callOne(ctx, preds->getAt(ctx, static_cast<int>(k)), x), "withFilter")) return false;
     return true;
 }
@@ -1030,7 +1030,7 @@ const ProtoObject* withFilterApply(ProtoContext* ctx, const ProtoObject* self, c
     const ProtoList* list = self->getOwnAttributeDirect(ctx, L.listKey)->asList(ctx);
     const ProtoList* preds = self->getOwnAttributeDirect(ctx, L.predsKey)->asList(ctx);
     ListBuilder b(ctx);
-    for (unsigned long i = 0, n = list->getSize(ctx); i < n; ++i) {
+    for (proto::proto_ulong i = 0, n = list->getSize(ctx); i < n; ++i) {
         const ProtoObject* x = list->getAt(b.context(), static_cast<int>(i));
         if (!accepted(b.context(), preds, x)) continue;
         const ProtoObject* r = callOne(b.context(), f, x);
@@ -1055,10 +1055,10 @@ PRIM(listCompanion_empty) { expectArgs(ctx, args, "empty", 0); return ctx->newLi
 
 PRIM(function_apply) {
     ExecutionEngine* engine = activeCallContext()->engine;
-    const unsigned long n = argCount(ctx, args);
+    const proto::proto_ulong n = argCount(ctx, args);
     ProtoContext scope(ctx->space, ctx);
     scope.resizeAutomaticLocals(static_cast<unsigned>(n));
-    for (unsigned long i = 0; i < n; ++i)
+    for (proto::proto_ulong i = 0; i < n; ++i)
         scope.setAutomaticLocal(static_cast<unsigned>(i), args->getAt(&scope, static_cast<int>(i)));
     const ProtoObject* r = engine->invoke(&scope, self, scope.getAutomaticLocals(),
                                           static_cast<unsigned>(n));
@@ -1253,8 +1253,8 @@ const ProtoObject* prim_kwprobe_call(ProtoContext* ctx, const ProtoObject*,
                                      const proto::ProtoSparseList* keywords) {
     const RuntimeLayout& L = layoutOf();
     std::string out = "pos=[";
-    const unsigned long n = args ? args->getSize(ctx) : 0;
-    for (unsigned long i = 0; i < n; ++i) {
+    const proto::proto_ulong n = args ? args->getSize(ctx) : 0;
+    for (proto::proto_ulong i = 0; i < n; ++i) {
         if (i > 0) out += ",";
         out += show(ctx, L, args->getAt(ctx, static_cast<int>(i)));
     }
@@ -1265,7 +1265,7 @@ const ProtoObject* prim_kwprobe_call(ProtoContext* ctx, const ProtoObject*,
     if (keywords) {
         const proto::ProtoSparseListIterator* it = keywords->getIterator(ctx);
         while (it && it->hasNext(ctx)) {
-            const unsigned long key = it->nextKey(ctx);
+            const proto::proto_ulong key = it->nextKey(ctx);
             const ProtoObject* v = it->nextValue(ctx);
             const auto* symbol = reinterpret_cast<const proto::ProtoString*>(key);
             pairs.emplace_back(symbol->toStdString(ctx), show(ctx, L, v));

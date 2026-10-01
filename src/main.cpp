@@ -14,6 +14,7 @@
 #include "umd/CompiledModuleProvider.h"
 #include "umd/ProviderPlugins.h"
 #include "runtime/StackGuard.h"
+#include "support/Platform.h"
 
 #include <cstdio>
 #include <cstring>
@@ -21,7 +22,28 @@
 #include <string>
 #include <vector>
 
+#if defined(_WIN32)
+#include <fcntl.h>
+#include <io.h>
+#define NOMINMAX
+#include <windows.h>
+#endif
+
 namespace {
+
+// Windows: the standard streams carry exactly the bytes the program writes, as
+// on Linux and macOS (no "\n" -> "\r\n" translation), and a console shows and
+// reads them as UTF-8. The process code page is UTF-8 through the manifest
+// (src/windows/utf8.manifest).
+void prepareStandardStreams() {
+#if defined(_WIN32)
+    _setmode(_fileno(stdin), _O_BINARY);
+    _setmode(_fileno(stdout), _O_BINARY);
+    _setmode(_fileno(stderr), _O_BINARY);
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+#endif
+}
 
 // The mailbox backend is part of the version line so a benchmark report can
 // never misattribute its numbers to the wrong queue (DESIGN §8.5).
@@ -69,7 +91,8 @@ void printVersion() {
     std::printf("compiled modules searched:");
     for (const std::string& dir : protoScala::compiledModuleBasePaths())
         std::printf(" %s", dir.c_str());
-    std::printf("\n  (set PROTOSCALA_MODULE_PATH to add directories, ':'-separated)\n");
+    std::printf("\n  (set PROTOSCALA_MODULE_PATH to add directories, '%c'-separated)\n",
+                protoScala::kPathListSeparator);
 }
 
 void printHelp() {
@@ -107,6 +130,7 @@ int runJob(void* p) {
 } // namespace
 
 int main(int argc, char** argv) {
+    prepareStandardStreams();
     protoScala::configureThreadStacks();
     try {
         if (argc >= 2) {

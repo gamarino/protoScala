@@ -32,7 +32,7 @@ add_executable(protoscala_unit_tests
 target_link_libraries(protoscala_unit_tests
     PRIVATE protoscala_runtime protoscala_compiler protoscala_frontend protoscala_support gtest gtest_main)
 
-target_compile_options(protoscala_unit_tests PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(protoscala_unit_tests PRIVATE ${PROTOSCALA_WARNINGS})
 
 include(GoogleTest)
 gtest_discover_tests(protoscala_unit_tests)
@@ -43,7 +43,7 @@ gtest_discover_tests(protoscala_unit_tests)
 add_executable(test_generated_support test_generated_support.cpp)
 target_link_libraries(test_generated_support PRIVATE protoScala gtest gtest_main)
 target_include_directories(test_generated_support PRIVATE "${CMAKE_SOURCE_DIR}/src")
-target_compile_options(test_generated_support PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(test_generated_support PRIVATE ${PROTOSCALA_WARNINGS})
 add_test(NAME unit/generated_support COMMAND test_generated_support)
 set_tests_properties(unit/generated_support PROPERTIES TIMEOUT 300)
 
@@ -54,8 +54,12 @@ add_library(protoscala_probe_provider MODULE probe_provider.cpp)
 target_include_directories(protoscala_probe_provider PRIVATE
     "${CMAKE_SOURCE_DIR}/src" ${PROTOCORE_INCLUDE_DIRS})
 target_link_libraries(protoscala_probe_provider PRIVATE ${PROTOCORE_LIBRARY})
-target_compile_options(protoscala_probe_provider PRIVATE -Wall -Wextra -Wpedantic)
-set_target_properties(protoscala_probe_provider PROPERTIES PREFIX "" SUFFIX ".so")
+target_compile_options(protoscala_probe_provider PRIVATE ${PROTOSCALA_WARNINGS})
+if(WIN32)
+    set_target_properties(protoscala_probe_provider PROPERTIES PREFIX "" SUFFIX ".dll")
+else()
+    set_target_properties(protoscala_probe_provider PROPERTIES PREFIX "" SUFFIX ".so")
+endif()
 
 # The UMD tests need their own process for the same reason the scheduler tests
 # do -- one runtime per process (R5) -- and they construct a second Session to
@@ -66,7 +70,7 @@ add_executable(test_modules test_modules.cpp)
 target_link_libraries(test_modules
     PRIVATE protoscala_repl protoscala_runtime protoscala_compiler protoscala_frontend
             protoscala_support gtest gtest_main)
-target_compile_options(test_modules PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(test_modules PRIVATE ${PROTOSCALA_WARNINGS})
 add_test(NAME unit/modules COMMAND test_modules)
 set_tests_properties(unit/modules PROPERTIES TIMEOUT 300)
 
@@ -75,7 +79,7 @@ set_tests_properties(unit/modules PROPERTIES TIMEOUT 300)
 add_executable(test_actors test_scheduler.cpp)
 target_link_libraries(test_actors
     PRIVATE protoscala_runtime protoscala_compiler protoscala_frontend protoscala_support gtest)
-target_compile_options(test_actors PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(test_actors PRIVATE ${PROTOSCALA_WARNINGS})
 add_test(NAME unit/actors COMMAND test_actors)
 set_tests_properties(unit/actors PROPERTIES TIMEOUT 300 ENVIRONMENT "PROTOSCALA_ACTOR_WORKERS=4")
 
@@ -107,7 +111,7 @@ if(PROTOST_RUNTIME_LIBRARY AND PROTOST_FRONTEND_LIBRARY AND PROTOST_INCLUDE_DIR
     # 0.5.0; its static libraries do not carry those dependencies, so they are
     # named here. protoScala links the same protoIO target, which brings OpenSSL.
     target_link_libraries(protoscala_protost_interop PRIVATE protoIO::protoio)
-    target_compile_options(protoscala_protost_interop PRIVATE -Wall -Wextra)
+    target_compile_options(protoscala_protost_interop PRIVATE ${PROTOSCALA_WARNINGS})
     add_test(NAME umd/protost-interop COMMAND protoscala_protost_interop)
     set_tests_properties(umd/protost-interop PROPERTIES TIMEOUT 120)
 elseif(NOT PROTOSCALA_PROTOST_INTEROP)

@@ -129,9 +129,9 @@ private:
 
 }  // namespace
 
-extern "C" const char* protoScalaProviderABI() { return protoScala::kProviderPluginABI; }
+extern "C" PROTOSCALA_PROVIDER_EXPORT const char* protoScalaProviderABI() { return protoScala::kProviderPluginABI; }
 
-extern "C" int protoScalaRegisterProviders(proto::ProtoSpace*) {
+extern "C" PROTOSCALA_PROVIDER_EXPORT int protoScalaRegisterProviders(proto::ProtoSpace*) {
     proto::ProviderRegistry::instance().registerProvider(std::make_unique<ProbeProvider>());
     return 0;
 }

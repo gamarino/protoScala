@@ -64,6 +64,9 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#if defined(_MSC_VER) && !defined(__clang__)
+#include <intrin.h>
+#endif
 
 namespace protoScala::ops {
 
@@ -264,7 +267,15 @@ inline const proto::ProtoObject* arith(proto::ProtoContext* ctx, ExecutionEngine
         bool fits;
         if (op == Op::ADD)      { r = x + y; fits = proto::smallIntInRange(r); }
         else if (op == Op::SUB) { r = x - y; fits = proto::smallIntInRange(r); }
+#if defined(_MSC_VER) && !defined(__clang__)
+        else {
+            long long high;
+            r = _mul128(x, y, &high);
+            fits = high == (r >> 63) && proto::smallIntInRange(r);
+        }
+#else
         else fits = !__builtin_mul_overflow(x, y, &r) && proto::smallIntInRange(r);
+#endif
         return fits ? proto::makeSmallInt(r)
              : op == Op::ADD ? a->add(ctx, b)          // promotes to LargeInteger
              : op == Op::SUB ? a->subtract(ctx, b)

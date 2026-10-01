@@ -137,7 +137,7 @@ bool complete(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::Pro
     const proto::ProtoObject* waiters = fut->getOwnAttributeDirect(ctx, L.waitersKey);
     if (waiters && waiters != PROTO_NONE) {
         const proto::ProtoList* list = waiters->asList(ctx);
-        for (unsigned long i = 0; i < list->getSize(ctx); ++i)
+        for (proto::proto_ulong i = 0; i < list->getSize(ctx); ++i)
             ActorScheduler::instance().resume(ctx, list->getAt(ctx, static_cast<int>(i)));
     }
     runContinuations(ctx, L, f);
@@ -202,7 +202,7 @@ void runContinuations(proto::ProtoContext* ctx, const RuntimeLayout& L,
         return;
     const proto::ProtoList* list = conts->asList(&held);
     ActorTurnPause pause;
-    for (unsigned long i = 0; i < list->getSize(&held); ++i) {
+    for (proto::proto_ulong i = 0; i < list->getSize(&held); ++i) {
         proto::ProtoContext scope(held.space, &held);
         const proto::ProtoObject* arg = tryOf(&scope, L, f);
         scope.returnValue = arg;

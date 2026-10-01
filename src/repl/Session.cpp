@@ -15,7 +15,7 @@
 #include "umd/ScalaModuleProvider.h"
 
 #include <algorithm>
-#include <dlfcn.h>
+#include "support/DynamicLibrary.h"
 
 #include <cstdio>
 #include <filesystem>

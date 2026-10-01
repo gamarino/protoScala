@@ -5,7 +5,8 @@
 #include "runtime/GeneratedModuleEntry.h"
 #include "umd/ForeignBoundary.h"
 
-#include <dlfcn.h>
+#include "support/DynamicLibrary.h"
+#include "support/Platform.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -48,7 +49,7 @@ std::vector<std::string> compiledModuleBasePaths() {
     if (const char* v = std::getenv("PROTOSCALA_MODULE_PATH"); v && *v) {
         std::stringstream ss(v);
         std::string entry;
-        while (std::getline(ss, entry, ':'))
+        while (std::getline(ss, entry, kPathListSeparator))
             if (!entry.empty()) out.push_back(entry);
     }
     out.push_back(installedModuleDirectory());
@@ -56,7 +57,7 @@ std::vector<std::string> compiledModuleBasePaths() {
 }
 
 std::string findCompiledModuleFile(const std::string& logicalPath) {
-    const std::string rel = toRelativePath(logicalPath) + ".so";
+    const std::string rel = toRelativePath(logicalPath) + kSharedLibrarySuffix;
     for (const std::string& base : compiledModuleBasePaths()) {
         const std::string p = (std::filesystem::path(base) / rel).string();
         std::error_code ec;
@@ -86,7 +87,7 @@ CompiledModuleProvider::~CompiledModuleProvider() {
 }
 
 std::string CompiledModuleProvider::triedPathsOf(const std::string& logicalPath) const {
-    const std::string rel = toRelativePath(logicalPath) + ".so";
+    const std::string rel = toRelativePath(logicalPath) + kSharedLibrarySuffix;
     std::string out;
     std::lock_guard<std::mutex> g(mutex_);
     for (const std::string& base : basePaths_) {
@@ -100,7 +101,7 @@ const proto::ProtoObject* CompiledModuleProvider::tryLoad(const std::string& log
                                                           proto::ProtoContext* ctx) {
     if (!ctx) return PROTO_NONE;
 
-    const std::string rel = toRelativePath(logicalPath) + ".so";
+    const std::string rel = toRelativePath(logicalPath) + kSharedLibrarySuffix;
     std::string found;
     for (const std::string& base : basePaths_) {
         const std::string p = (std::filesystem::path(base) / rel).string();

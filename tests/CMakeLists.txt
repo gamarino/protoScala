@@ -14,25 +14,45 @@ add_subdirectory(unit)
 # --- CLI checks -----------------------------------------------------------------
 # The actor CLI checks start worker pools and run for tens of seconds under
 # load, so they carry their own deadline.
+# The script tests are bash scripts. Windows cannot run a script directly, so
+# there they run through the bash of Git for Windows; elsewhere the prefix is
+# empty and the script is the command.
+if(WIN32)
+    find_program(PROTOSCALA_BASH bash HINTS "C:/Program Files/Git/bin" "C:/Program Files/Git/usr/bin"
+                 NO_DEFAULT_PATH)
+    if(NOT PROTOSCALA_BASH)
+        find_program(PROTOSCALA_BASH bash)
+    endif()
+    set(PROTOSCALA_SH "${PROTOSCALA_BASH}")
+else()
+    set(PROTOSCALA_SH "")
+endif()
+
 foreach(cli_test help version unknown-option script-errors main-args
                  repl-basic repl-multiline repl-errors repl-load repl-history-hygiene
                  repl-redefinition repl-results repl-indented-input repl-classes deep-source
                  tutorial-repl actors-shutdown actors-stress modules
                  io-stdin io-program io-blocking-pool)
     add_test(NAME cli/${cli_test}
-        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/cli/${cli_test}.sh" "$<TARGET_FILE:protoscala>")
+        COMMAND ${PROTOSCALA_SH} "${CMAKE_CURRENT_SOURCE_DIR}/cli/${cli_test}.sh" "$<TARGET_FILE:protoscala>")
 endforeach()
 foreach(cli_test disassemble gc-pressure actor-bench-smoke package)
     add_test(NAME cli/${cli_test}
-        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/cli/${cli_test}.sh" "$<TARGET_FILE:protoscala>"
+        COMMAND ${PROTOSCALA_SH} "${CMAKE_CURRENT_SOURCE_DIR}/cli/${cli_test}.sh" "$<TARGET_FILE:protoscala>"
                 "${CMAKE_CURRENT_SOURCE_DIR}")
 endforeach()
 
 # The transpiler's CLI checks take the tests directory, protoscalac and a private
 # scratch directory in the build tree -- never /tmp, and never the source tree.
-foreach(cli_test transpiler-cli transpiler-refusals run-module compiled-provider)
+# protoscalac builds a module with g++ and make, which Windows does not have.
+if(WIN32)
+    set(PROTOSCALA_TRANSPILER_CLI_TESTS "")
+else()
+    set(PROTOSCALA_TRANSPILER_CLI_TESTS transpiler-cli transpiler-refusals run-module compiled-provider)
+endif()
+foreach(cli_test ${PROTOSCALA_TRANSPILER_CLI_TESTS})
     add_test(NAME cli/${cli_test}
-        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/cli/${cli_test}.sh" "$<TARGET_FILE:protoscala>"
+        COMMAND ${PROTOSCALA_SH} "${CMAKE_CURRENT_SOURCE_DIR}/cli/${cli_test}.sh" "$<TARGET_FILE:protoscala>"
                 "${CMAKE_CURRENT_SOURCE_DIR}" "$<TARGET_FILE:protoscalac>"
                 "${CMAKE_CURRENT_BINARY_DIR}/cli-scratch/${cli_test}")
     set_tests_properties(cli/${cli_test} PROPERTIES TIMEOUT 600)
@@ -55,7 +75,7 @@ set_tests_properties(cli/actors-stress PROPERTIES
 set_tests_properties(cli/gc-pressure cli/actor-bench-smoke PROPERTIES TIMEOUT 600)
 
 add_test(NAME cli/examples
-    COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/cli/examples.sh" "$<TARGET_FILE:protoscala>"
+    COMMAND ${PROTOSCALA_SH} "${CMAKE_CURRENT_SOURCE_DIR}/cli/examples.sh" "$<TARGET_FILE:protoscala>"
             "${CMAKE_SOURCE_DIR}")
 
 # --- Conformance fixtures (glob-discovered) -------------------------------------
@@ -78,7 +98,7 @@ foreach(conf_file ${PROTOSCALA_CONFORMANCE_FILES})
     endif()
     if(NOT "${first_char}" STREQUAL "_")
         add_test(NAME "conformance/${conf_file}"
-            COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/conformance/run.sh"
+            COMMAND ${PROTOSCALA_SH} "${CMAKE_CURRENT_SOURCE_DIR}/conformance/run.sh"
                     "$<TARGET_FILE:protoscala>"
                     "${CMAKE_CURRENT_SOURCE_DIR}/conformance/${conf_file}")
     endif()
@@ -173,8 +193,15 @@ endforeach()
 # which is fine on its own and is more than the rest of the suite costs together.
 # ON by default anyway, because a differential harness nobody runs is a harness
 # that rots -- which is precisely what its three anti-rot guards exist to prevent.
+# OFF on Windows, where protoscalac's generated Makefile and g++ are not there.
+if(WIN32)
+    set(PROTOSCALA_TRANSPILED_TESTS_DEFAULT OFF)
+else()
+    set(PROTOSCALA_TRANSPILED_TESTS_DEFAULT ON)
+endif()
 option(PROTOSCALA_TRANSPILED_TESTS
-    "Register one transpiled/<fixture> case per conformance fixture (needs g++ and make)" ON)
+    "Register one transpiled/<fixture> case per conformance fixture (needs g++ and make)"
+    ${PROTOSCALA_TRANSPILED_TESTS_DEFAULT})
 
 if(PROTOSCALA_TRANSPILED_TESTS)
     set(PROTOSCALA_TRANSPILE_EXCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/transpile-exclude.txt")
@@ -184,7 +211,7 @@ if(PROTOSCALA_TRANSPILED_TESTS)
         endif()
         string(REPLACE "/" "_" conf_slug "${conf_file}")
         add_test(NAME "transpiled/${conf_file}"
-            COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/conformance/run-transpiled.sh"
+            COMMAND ${PROTOSCALA_SH} "${CMAKE_CURRENT_SOURCE_DIR}/conformance/run-transpiled.sh"
                     "$<TARGET_FILE:protoscala>"
                     "$<TARGET_FILE:protoscalac>"
                     "${CMAKE_CURRENT_SOURCE_DIR}/conformance/${conf_file}"
@@ -239,7 +266,7 @@ file(GLOB PROTOSCALA_BENCHMARK_FILES
 
 foreach(bench_file ${PROTOSCALA_BENCHMARK_FILES})
     add_test(NAME "benchmarks/${bench_file}"
-        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/conformance/run.sh"
+        COMMAND ${PROTOSCALA_SH} "${CMAKE_CURRENT_SOURCE_DIR}/conformance/run.sh"
                 "$<TARGET_FILE:protoscala>"
                 "${CMAKE_SOURCE_DIR}/benchmarks/comparable/${bench_file}")
 endforeach()
@@ -258,7 +285,7 @@ if(PROTOSCALA_TRANSPILED_TESTS)
     foreach(bench_file ${PROTOSCALA_BENCHMARK_FILES})
         string(REPLACE "/" "_" bench_slug "${bench_file}")
         add_test(NAME "benchmarks-transpiled/${bench_file}"
-            COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/conformance/run-transpiled.sh"
+            COMMAND ${PROTOSCALA_SH} "${CMAKE_CURRENT_SOURCE_DIR}/conformance/run-transpiled.sh"
                     "$<TARGET_FILE:protoscala>"
                     "$<TARGET_FILE:protoscalac>"
                     "${CMAKE_SOURCE_DIR}/benchmarks/comparable/${bench_file}"
@@ -352,10 +379,10 @@ if(PROTOSCALA_TRANSPILED_TESTS)
         interop/ForeignHost.cpp)
     target_link_libraries(protoscala-foreign-caller PRIVATE protoScala)
     target_include_directories(protoscala-foreign-caller PRIVATE "${CMAKE_SOURCE_DIR}/src")
-    target_compile_options(protoscala-foreign-caller PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(protoscala-foreign-caller PRIVATE ${PROTOSCALA_WARNINGS})
 
     add_test(NAME interop/foreign-call
-        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/interop/foreign-call.sh"
+        COMMAND ${PROTOSCALA_SH} "${CMAKE_CURRENT_SOURCE_DIR}/interop/foreign-call.sh"
                 "$<TARGET_FILE:protoscala>"
                 "$<TARGET_FILE:protoscalac>"
                 "$<TARGET_FILE:protoscala-foreign-caller>"

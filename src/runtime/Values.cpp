@@ -67,8 +67,8 @@ std::string classNameOf(proto::ProtoContext* ctx, const RuntimeLayout& L, const 
 } // namespace
 
 std::int32_t identityHash(proto::ProtoContext* ctx, const proto::ProtoObject* v) {
-    const unsigned long h = v->getHash(ctx);
-    return static_cast<std::int32_t>((h ^ (h >> 32)) & 0x7FFFFFFFUL);
+    const proto::proto_ulong h = v->getHash(ctx);
+    return static_cast<std::int32_t>((h ^ (h >> 32)) & PROTO_UL(0x7FFFFFFF));
 }
 
 std::string defaultToString(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v) {
@@ -231,9 +231,9 @@ std::string show(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::
     if (isListFast(v)) {
         checkNativeStack();  // nested lists recurse
         const proto::ProtoList* list = v->asList(ctx);
-        const unsigned long n = list->getSize(ctx);
+        const proto::proto_ulong n = list->getSize(ctx);
         std::string out = "List(";
-        for (unsigned long k = 0; k < n; ++k) {
+        for (proto::proto_ulong k = 0; k < n; ++k) {
             if (k) out += ", ";
             out += show(ctx, L, list->getAt(ctx, static_cast<int>(k)));
         }

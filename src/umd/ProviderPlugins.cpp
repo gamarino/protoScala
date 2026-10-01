@@ -1,7 +1,8 @@
 #include "umd/ProviderPlugins.h"
 #include "umd/ForeignBoundary.h"
 
-#include <dlfcn.h>
+#include "support/DynamicLibrary.h"
+#include "support/Platform.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -27,7 +28,7 @@ void appendSharedObjects(const std::string& dir, std::vector<std::string>* out) 
     for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
         if (ec) break;
         if (!entry.is_regular_file(ec) && !entry.is_symlink()) continue;
-        if (entry.path().extension() == ".so") found.push_back(entry.path().string());
+        if (entry.path().extension() == kSharedLibrarySuffix) found.push_back(entry.path().string());
     }
     std::sort(found.begin(), found.end());
     out->insert(out->end(), found.begin(), found.end());
@@ -38,7 +39,7 @@ std::vector<std::string> discoverPluginPaths() {
     if (const char* v = std::getenv("PROTOSCALA_PROVIDERS"); v && *v) {
         std::stringstream ss(v);
         std::string entry;
-        while (std::getline(ss, entry, ':')) {
+        while (std::getline(ss, entry, kPathListSeparator)) {
             if (entry.empty()) continue;
             std::error_code ec;
             if (std::filesystem::is_directory(entry, ec)) appendSharedObjects(entry, &out);

@@ -31,8 +31,13 @@
 #include <utility>
 #include <vector>
 
+#if defined(_WIN32)
+#define NOMINMAX
+#include <windows.h>
+#else
 #include <sys/utsname.h>
 #include <unistd.h>
+#endif
 
 namespace protoScala {
 
@@ -97,7 +102,7 @@ std::string byteBufferArg(proto::ProtoContext* ctx, const proto::ProtoObject* v,
     if (!v || v == PROTO_NONE || !v->isByteBuffer(ctx))
         prim::wrongType(ctx, method, "Bytes", v);
     const proto::ProtoByteBuffer* b = v->asByteBuffer(ctx);
-    const unsigned long n = b->getSize(ctx);
+    const proto::proto_ulong n = b->getSize(ctx);
     return n == 0 ? std::string() : std::string(b->getBuffer(ctx), n);
 }
 
@@ -145,7 +150,7 @@ const ProtoObject* text(ProtoContext* ctx, std::string_view bytes) {
 // Bytes (D126)
 // ---------------------------------------------------------------------------
 
-std::string bufArg(ProtoContext* ctx, const ProtoList* args, unsigned long i, const char* method) {
+std::string bufArg(ProtoContext* ctx, const ProtoList* args, proto::proto_ulong i, const char* method) {
     return io::byteBufferArg(ctx, args->getAt(ctx, static_cast<int>(i)), method);
 }
 
@@ -280,6 +285,33 @@ PRIM(io_props) {
         return std::make_pair(cwd, protoio::file::tempDir());
     });
     props.emplace_back("user.dir", dirs.first);
+#if defined(_WIN32)
+    if (const auto home = protoio::process::getenv("USERPROFILE")) props.emplace_back("user.home", *home);
+    if (const auto user = protoio::process::getenv("USERNAME")) props.emplace_back("user.name", *user);
+    props.emplace_back("os.name", "Windows");
+    SYSTEM_INFO si {};
+    ::GetNativeSystemInfo(&si);
+    props.emplace_back("os.arch", si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64 ? "amd64"
+                                : si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_ARM64 ? "aarch64"
+                                                                                            : "x86");
+    // GetVersionEx reports the version the manifest claims; ntdll reports the real one.
+    using RtlGetVersionFn = LONG(WINAPI*)(OSVERSIONINFOW*);
+    if (const auto rtlGetVersion = reinterpret_cast<RtlGetVersionFn>(
+            ::GetProcAddress(::GetModuleHandleW(L"ntdll.dll"), "RtlGetVersion"))) {
+        OSVERSIONINFOW v {};
+        v.dwOSVersionInfoSize = sizeof v;
+        if (rtlGetVersion(&v) == 0)
+            props.emplace_back("os.version", std::to_string(v.dwMajorVersion) + "." +
+                                             std::to_string(v.dwMinorVersion));
+    }
+    // println writes "\n" and the standard streams are binary (src/main.cpp), and
+    // Windows accepts '/' in every path, so a program sees the same line and file
+    // separators everywhere. A list of paths (PATH, PROTOSCALA_MODULE_PATH) is
+    // separated by ';' here, as drive letters contain ':'.
+    props.emplace_back("line.separator", "\n");
+    props.emplace_back("file.separator", "/");
+    props.emplace_back("path.separator", ";");
+#else
     if (const auto home = protoio::process::getenv("HOME")) props.emplace_back("user.home", *home);
     if (const auto user = protoio::process::getenv("USER")) props.emplace_back("user.name", *user);
     struct utsname u {};
@@ -291,6 +323,7 @@ PRIM(io_props) {
     props.emplace_back("line.separator", "\n");
     props.emplace_back("file.separator", "/");
     props.emplace_back("path.separator", ":");
+#endif
     props.emplace_back("java.io.tmpdir", dirs.second);
     ListBuilder out(ctx);
     for (const auto& [k, v] : props) {

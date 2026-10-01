@@ -18,10 +18,10 @@ class BytecodeModule;
 // (protoCore headers/proto_internal.h:142,251, core/ProtoContext.cpp:788-794;
 // protoCore has no public isUnicodeChar).
 inline bool isCharFast(const proto::ProtoObject* v) {
-    return (reinterpret_cast<unsigned long>(v) & 0x3FFUL) == 0x081UL;
+    return (reinterpret_cast<proto::proto_ulong>(v) & PROTO_UL(0x3FF)) == PROTO_UL(0x081);
 }
 inline char32_t charValueFast(const proto::ProtoObject* v) {
-    return static_cast<char32_t>(reinterpret_cast<unsigned long>(v) >> 10);
+    return static_cast<char32_t>(reinterpret_cast<proto::proto_ulong>(v) >> 10);
 }
 // A Char as the SmallInteger of its code point (Scala Char widens to Int in
 // arithmetic and ==); other values unchanged. Allocates nothing.
@@ -30,10 +30,10 @@ inline const proto::ProtoObject* widenChar(const proto::ProtoObject* v) {
 }
 // POINTER_TAG_DOUBLE = 15, POINTER_TAG_LARGE_INTEGER = 14 (headers/proto_internal.h:236-237).
 inline bool isDoubleFast(const proto::ProtoObject* v) {
-    return v && (reinterpret_cast<unsigned long>(v) & 0x3FUL) == 15;
+    return v && (reinterpret_cast<proto::proto_ulong>(v) & PROTO_UL(0x3F)) == 15;
 }
 inline bool isLargeIntFast(const proto::ProtoObject* v) {
-    return v && (reinterpret_cast<unsigned long>(v) & 0x3FUL) == 14;
+    return v && (reinterpret_cast<proto::proto_ulong>(v) & PROTO_UL(0x3F)) == 14;
 }
 inline bool isIntegerFast(const proto::ProtoObject* v) {
     return proto::isSmallInt(v) || isLargeIntFast(v);
@@ -43,13 +43,13 @@ inline bool isNumberFast(const proto::ProtoObject* v) {
 }
 // POINTER_TAG_LIST = 2, POINTER_TAG_LIST_SMALL = 25 (protoClojure src/compiler/Compiler.cpp:16-36).
 inline bool isListFast(const proto::ProtoObject* v) {
-    const unsigned long t = reinterpret_cast<unsigned long>(v) & 0x3FUL;
+    const proto::proto_ulong t = reinterpret_cast<proto::proto_ulong>(v) & PROTO_UL(0x3F);
     return v && (t == 2 || t == 25);
 }
 
 // POINTER_TAG_OBJECT is 0 (protoCore core/ProtoObject.cpp:560-575): an object cell.
 inline bool isObjectCellFast(const proto::ProtoObject* v) {
-    return v && (reinterpret_cast<unsigned long>(v) & 0x3FUL) == 0;
+    return v && (reinterpret_cast<proto::proto_ulong>(v) & PROTO_UL(0x3F)) == 0;
 }
 
 // Appends the UTF-8 encoding of code point `c` to `out`.
