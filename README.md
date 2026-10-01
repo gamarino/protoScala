@@ -1149,6 +1149,12 @@ ctest --test-dir build_release
 ./build_release/protoscala --version
 ```
 
+On **Windows**, protoScala builds natively with Visual Studio 2022 (MSVC) and
+runs scripts and the REPL from `cmd.exe` or PowerShell; the steps, and what
+differs there (no readline, `;`-separated path lists, the transpiler's module
+build not yet ported), are in
+[docs/INSTALLATION.md — Windows (MSVC)](docs/INSTALLATION.md#windows-msvc).
+
 ## Producing a UMD module — in C++, in Python or in Scala
 
 A protoCore UMD module is a shared library that defines `proto_module_init`. Three

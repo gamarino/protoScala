@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Windows (MSVC), 2026-10-01
+
+- **Native Windows build.** protoScala, protoCore and protoIO build with Visual
+  Studio 2022; `protoscala` runs scripts and the REPL natively and installs
+  with `cmake --install` (or `cpack -G ZIP`). 1413 of 1416 tests pass on
+  Windows 11; the three left fail in the Git Bash harness, not the runtime.
+  The transpiler's module build (`g++`, `make`) is not ported yet. Every
+  Windows difference is behind `WIN32` / `_MSC_VER`; on Linux the suite passes
+  2409/2409 as before. See docs/INSTALLATION.md, "Windows (MSVC)".
+- `.gitattributes` keeps `*.scala` LF on every platform: a multi-line string
+  literal keeps its line endings, so a CRLF checkout changed what programs
+  meant.
+
+### Fixed
+
+- **A StackOverflowError raised deep in a recursion could crash the process
+  under MSVC.** Exceptions passing through a VM frame (`runLoop`, `runFrame`,
+  `callNative`) are now re-thrown with `std::rethrow_exception` after the catch
+  clause instead of `throw;` inside it. The two are equivalent under the
+  Itanium ABI (Linux, macOS); under MSVC a catch clause runs before the stack
+  below it is released, so each re-throw cost several KiB more and the native
+  stack overflowed while the error propagated.
+
 ### Added — input and output (the I/O track, 2026-09-30)
 
 - **I/O on protoIO**, the POSIX layer protoST, protoScala and protoClojure share

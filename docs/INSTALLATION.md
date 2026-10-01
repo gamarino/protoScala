@@ -12,11 +12,13 @@ executable sees no protoCore at all.)
 
 ## Prerequisites
 
-- A **C++20** compiler (GCC or Clang).
+- A **C++20** compiler (GCC or Clang; MSVC from Visual Studio 2022 on
+  Windows, see [Windows (MSVC)](#windows-msvc)).
 - **CMake** 3.20 or newer.
 - **libreadline** (`libreadline-dev` on Debian/Ubuntu, `readline-devel` on
   Fedora/RHEL, `brew install readline` on macOS). It is a hard requirement of
-  the interactive REPL: configuration fails with a `FATAL_ERROR` without it.
+  the interactive REPL: configuration fails with a `FATAL_ERROR` without it
+  (except on Windows, where the REPL uses the console's own line editing).
 - **protoCore 2.6.1 or newer**, installed, with its CMake package configuration.
   **2.5.0 is what the packaging sections of this document were verified
   against; the I/O track (2026-09-30) was built and tested against 2.6.2.** See
@@ -192,6 +194,70 @@ change the meaning of an `import` that already resolved.
 
 ---
 
+## Windows (MSVC)
+
+protoScala builds and runs natively on Windows with Visual Studio 2022 (MSVC
+19.44 verified, Windows 11), using the CMake and Ninja that ship with it. Build
+protoCore first (its `docs/INSTALLATION.md`, "Windows (MSVC)") and install it
+into a prefix; protoIO is compiled from the sibling `../protoIO` as on Linux.
+From an "x64 Native Tools Command Prompt":
+
+```bat
+set PREFIX=%LOCALAPPDATA%\Programs\proto
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ^
+      -DCMAKE_PREFIX_PATH=%PREFIX% -DCMAKE_INSTALL_PREFIX=%PREFIX% ^
+      "-DOPENSSL_ROOT_DIR=C:/Program Files/OpenSSL-Win64"
+cmake --build build
+ctest --test-dir build -j8
+cmake --install build
+%PREFIX%\bin\protoscala --version
+```
+
+Any OpenSSL 3 for Windows with headers and import libraries works as
+`OPENSSL_ROOT_DIR`; the one PostgreSQL ships (`C:/Program Files/PostgreSQL/17`)
+was used for the verification. The build copies the DLLs protoScala needs
+(`protoCore.dll`, `libssl-3-x64.dll`, `libcrypto-3-x64.dll`) into `build/bin/`,
+so `protoscala.exe` and the tests run in place; `cmake --install` puts
+`protoscala.exe`, `protoScala.dll` and the OpenSSL DLLs in `<prefix>/bin`, and
+protoCore's own install adds `protoCore.dll` there. With that one directory on
+`PATH`, `protoscala` runs scripts and the REPL from `cmd.exe` or PowerShell.
+`cpack -G ZIP` produces `protoscala-<version>-win64.zip`.
+
+How Windows differs, by design:
+
+- **Same output bytes everywhere.** The standard streams are binary, so
+  `println` writes `\n` as on Linux, and the console is switched to UTF-8.
+  `sys.props` reports `os.name` `Windows`, `os.arch` `amd64`, the real
+  `os.version`, `user.home` / `user.name` from `USERPROFILE` / `USERNAME`,
+  `line.separator` `\n`, `file.separator` `/` (Windows accepts it in every
+  path) and `path.separator` `;`.
+- **UTF-8 throughout.** `protoscala.exe` carries a manifest that makes UTF-8
+  the process code page (Windows 10 1903 or later), so arguments, environment
+  variables and file names with non-ASCII characters work as on Linux.
+- **Path lists use `;`** (`PROTOSCALA_MODULE_PATH`, `PROTOSCALA_PROVIDERS`),
+  as `PATH` does, since drive letters contain `:`. Provider plug-ins are
+  `.dll` files and export their two ABI functions with
+  `PROTOSCALA_PROVIDER_EXPORT` (`src/umd/ProviderPlugins.h`).
+- **No readline.** The console edits the line and keeps a history itself, so
+  the REPL reads plain lines and keeps no history file.
+- **Deep recursion** still raises `StackOverflowError`: the evaluator thread
+  reserves 32 MiB, and the stack limit comes from
+  `GetCurrentThreadStackLimits`.
+
+Not available on Windows yet:
+
+- **`protoscalac`'s module build.** The transpiler drives `g++` and `make`;
+  it has not been ported to MSVC, so the `transpiled/*` tests are off by
+  default there (`PROTOSCALA_TRANSPILED_TESTS`) and the four transpiler CLI
+  checks are not registered.
+- **Test harness.** The script tests run through Git for Windows' `bash`.
+  1413 of 1416 tests pass; the three that do not (`cli/version`,
+  `cli/io-stdin`, `cli/io-program`) fail in the harness, not in protoScala:
+  Git Bash rewrites the POSIX paths those scripts put in environment
+  variables, and an MSYS FIFO does not reach a native program.
+
+---
+
 ## Packages (CPack)
 
 ```bash
@@ -267,7 +333,7 @@ sibling developer fallback was a hard error.
 | Linux / Debian-Ubuntu | TGZ, DEB | **VERIFIED.** Installed with `dpkg -i` as root in a throwaway `ubuntu:24.04` container; `protoscala` ran a script and `protoscalac --build-so` compiled, linked and produced a loadable `module.so` there, outside any repository, with no `LD_LIBRARY_PATH` and no `PROTOSCALAC_INCLUDE_DIRS` set. |
 | Linux / Fedora-RHEL | TGZ, RPM | **VERIFIED.** `cpack -G RPM` executed in a throwaway `fedora:41` container (glibc 2.40, `rpm` 4.20.1); the RPM installed with `rpm -i` and `protoscala` ran correctly there. This closes the gap left by decision D-I2. |
 | macOS | DragNDrop | **UNVERIFIED.** Configured and reviewed only; there is no macOS host here. Review is not verification. |
-| Windows | NSIS, ZIP | **UNVERIFIED.** Configured and reviewed only; there is no Windows host here. |
+| Windows | NSIS, ZIP | **PARTLY VERIFIED** (2026-10-01, Windows 11, MSVC 19.44, protoCore 2.6.2). Built and tested (1413/1416, see [Windows (MSVC)](#windows-msvc)); `cmake --install` into a user prefix, then `protoscala --version`, a script and the REPL run from `cmd.exe` with only that prefix's `bin` on `PATH`; `cpack -G ZIP` builds the ZIP. The NSIS installer has not been built (no NSIS on that host). |
 
 ### Packaging and installation defects: the whole list, in one place
 
