@@ -560,8 +560,18 @@ target_compile_options(protoscala PRIVATE ${PROTOSCALA_WARNINGS})
 list(JOIN PROTOCORE_INCLUDE_DIRS ":" PROTOSCALAC_PROTOCORE_INCLUDES)
 set(PROTOSCALAC_BUILD_INCLUDE_DIRS
     "${CMAKE_CURRENT_SOURCE_DIR}/include:${PROTOSCALAC_PROTOCORE_INCLUDES}")
+# A generated module links -lprotoScala -lprotoCore, so the build tree's list
+# names protoCore's library directory as well as its include directory. With the
+# sibling developer tree that is PROTOCORE_LIB_DIR; with an installed package it
+# is the directory of the imported library, which a prefix outside the linker's
+# default search path (say ~/opt/proto) does not otherwise supply: every
+# transpiled module then failed to link with "cannot find -lprotoCore".
 if(DEFINED PROTOCORE_LIB_DIR)
     set(PROTOSCALAC_BUILD_LIBRARY_DIRS "${CMAKE_BINARY_DIR}:${PROTOCORE_LIB_DIR}")
+elseif(TARGET protoCore::protoCore)
+    get_target_property(_protoCore_location protoCore::protoCore LOCATION)
+    get_filename_component(_protoCore_package_libdir "${_protoCore_location}" DIRECTORY)
+    set(PROTOSCALAC_BUILD_LIBRARY_DIRS "${CMAKE_BINARY_DIR}:${_protoCore_package_libdir}")
 else()
     set(PROTOSCALAC_BUILD_LIBRARY_DIRS "${CMAKE_BINARY_DIR}")
 endif()
