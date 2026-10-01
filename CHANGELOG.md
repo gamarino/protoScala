@@ -21,6 +21,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`protoscalac` could not link a module against an installed protoCore in
+  a non-default prefix.** In the build tree it named protoCore's include
+  directory but not its library directory, so every generated module failed
+  with `cannot find -lprotoCore` (all `transpiled/*` tests and the transpiler
+  CLI checks, 770 on Linux) unless `LIBRARY_PATH` was set. The library
+  directory of the imported `protoCore::protoCore` target is now passed too;
+  the suite passes 2409/2409 without it.
 - **A StackOverflowError raised deep in a recursion could crash the process
   under MSVC.** Exceptions passing through a VM frame (`runLoop`, `runFrame`,
   `callNative`) are now re-thrown with `std::rethrow_exception` after the catch
