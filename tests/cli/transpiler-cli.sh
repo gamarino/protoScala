@@ -169,8 +169,14 @@ if [[ "$out" != "Hello, protoScala!" ]]; then
     fails=$((fails + 1))
 fi
 # ldd states the cost honestly (§D2): the module brings a protoScala runtime.
-if ! ldd "$SCRATCH/so/module.so" | grep -q 'libprotoScala.so.1'; then
-    echo "FAIL: module.so does not name libprotoScala.so.1"
+# macOS has no ldd: otool -L lists the same, as libprotoScala.1.dylib.
+if command -v ldd >/dev/null 2>&1; then
+    deps=$(ldd "$SCRATCH/so/module.so"); runtime='libprotoScala.so.1'
+else
+    deps=$(otool -L "$SCRATCH/so/module.so"); runtime='libprotoScala.1.dylib'
+fi
+if ! grep -q "$runtime" <<<"$deps"; then
+    echo "FAIL: module.so does not name $runtime"
     fails=$((fails + 1))
 fi
 
