@@ -1130,7 +1130,7 @@ path, as a zero-cost-exceptions ABI should be. See
 ## Building
 
 Prerequisites: a C++20 compiler, CMake ≥ 3.21, libreadline (from Phase 1),
-OpenSSL 3 development files (`libssl-dev`), protoCore 2.6.1 or newer built as a
+OpenSSL 3 development files (`libssl-dev`), protoCore 2.7.0 or newer built as a
 sibling directory (or installed and passed via `-DPROTO_CORE_PREFIX=<prefix>`),
 and protoIO, installed (`protoio-dev`) or checked out as the sibling `../protoIO`,
 which the build then compiles as part of this one.

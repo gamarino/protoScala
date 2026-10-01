@@ -57,13 +57,13 @@ env:
   PROTOIO_REPO: gamarino/protoIO
   # protoCore 2.6.2, SOVERSION 3 (tag v2.6.2, 2026-09-30).  Bump deliberately.
   # 2.6.1 is the floor: the actor pool creates threads from worker threads.
-  PROTOCORE_REF: ${{ github.event_name == 'schedule' && 'master' || '752bdb2064d3a2a6f8aa6bc756f107ed395bebd0' }}
+  PROTOCORE_REF: ${{ github.event_name == 'schedule' && 'master' || 'fc5d79db4f89f8a6eb473a52766b1908140a19d1' }}
   # protoST at the commit protoScala's interop test was last verified against
   # (protoST on protoIO, 2026-09-30).
   PROTOST_REF: ${{ github.event_name == 'schedule' && 'main' || 'e11c1e5fcf4318664779a4ba1150a38822e72d9b' }}
   # protoIO 0.1.0 (main, 2026-09-30): the I/O layer protoScala and protoST link
   # statically.  Bump deliberately, like protoCore.
-  PROTOIO_REF: ${{ github.event_name == 'schedule' && 'main' || '503c7e79292b52b427d1c829092bfd389c9aeec2' }}
+  PROTOIO_REF: ${{ github.event_name == 'schedule' && 'main' || '8e823a6f1e7a424737d845206c77d3c5e03b1748' }}
   # The only ctest cases in this suite whose verdict is a clock.  For the two
   # deadlocking ones the TIMEOUT *is* the verdict (tests/unit/CMakeLists.txt),
   # and embedder-conformance/isolate.heap.ceiling_progress is documented as

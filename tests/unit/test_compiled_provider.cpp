@@ -15,6 +15,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
@@ -127,7 +128,11 @@ TEST_F(Provider, BasePathsPutTheEnvironmentFirstInOrder) {
     ASSERT_GE(paths.size(), 3u);
     EXPECT_EQ(paths[0], "/one");
     EXPECT_EQ(paths[1], "/two");   // the empty entry is dropped, not turned into "."
-    EXPECT_NE(paths.back().find("protoscala/modules"), std::string::npos) << paths.back();
+    // The installed directory is absolute, from the executable's own path, so on
+    // Windows it is spelled with backslashes.
+    std::string last = paths.back();
+    std::replace(last.begin(), last.end(), '\\', '/');
+    EXPECT_NE(last.find("protoscala/modules"), std::string::npos) << paths.back();
     EXPECT_EQ(protoScala::findCompiledModuleFile("util.NotThere"), "");
 }
 

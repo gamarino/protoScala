@@ -70,8 +70,10 @@ endif()
 #
 # The ceiling is the next major, because protoCore's major version and its
 # soname move together.
-set(PROTOCORE_MIN_VERSION      "2.6.1")
-set(PROTOCORE_MIN_VERSION_FULL "2.6.1")
+# 2.7.0: the Windows port spells protoCore's 64-bit integers
+# proto::proto_long / proto_ulong, which first exist there.
+set(PROTOCORE_MIN_VERSION      "2.7.0")
+set(PROTOCORE_MIN_VERSION_FULL "2.7.0")
 set(PROTOCORE_NEXT_MAJOR       "3.0.0")
 set(PROTOCORE_ABI_SOVERSION    "3")
 # The protoCore release that introduced ProtoMPSCQueue. Kept separate from the

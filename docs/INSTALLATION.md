@@ -19,7 +19,7 @@ executable sees no protoCore at all.)
   Fedora/RHEL, `brew install readline` on macOS). It is a hard requirement of
   the interactive REPL: configuration fails with a `FATAL_ERROR` without it
   (except on Windows, where the REPL uses the console's own line editing).
-- **protoCore 2.6.1 or newer**, installed, with its CMake package configuration.
+- **protoCore 2.7.0 or newer** (2.7.0 is where `proto::proto_long` first exists; the "Why 2.6.1" floors below still hold underneath it), installed, with its CMake package configuration.
   **2.5.0 is what the packaging sections of this document were verified
   against; the I/O track (2026-09-30) was built and tested against 2.6.2.** See
   protoCore's `docs/INSTALLATION.md`.
@@ -34,6 +34,9 @@ executable sees no protoCore at all.)
   `openssl-devel` on Fedora/RHEL), for protoIO's TLS and https. At run time
   the package depends on `libssl3`, which `dpkg-shlibdeps` derives from the
   library (§Packages).
+- **Running the test suite on macOS** needs GNU `timeout`, which macOS does
+  not ship: `brew install coreutils` and put `$(brew --prefix coreutils)/libexec/gnubin`
+  on `PATH` (the cross-platform CI job does exactly that).
 
 **Why 2.6.1.** Three floors apply and the highest one wins:
 

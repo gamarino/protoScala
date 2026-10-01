@@ -99,9 +99,9 @@ void emitConsts(std::ostream& o, const std::string& name, const BytecodeModule& 
               << ", .argc = " << c.argc << "u"
               << ", .flags = " << c.flags << "u"
               << ", .exact = " << (c.exact ? "true" : "false")
-              << ", .sval = " << quoted(c.sval)
+              << ", .sval = " << tables::quoted(c.sval)
               << ", .slen = " << c.sval.size() << "u"
-              << ", .key = " << quoted(c.key)
+              << ", .key = " << tables::quoted(c.key)
               << ", .namesFirst = " << namesFirst
               << ", .namesCount = " << c.names.size()
               << ", .fieldsFirst = " << fieldsFirst
@@ -134,7 +134,7 @@ void emitStrings(std::ostream& o, const std::string& name, const StringPool& poo
     if (pool.all().empty()) {
         o << " \"\" ";
     } else {
-        for (const std::string& s : pool.all()) o << "\n    " << quoted(s) << ',';
+        for (const std::string& s : pool.all()) o << "\n    " << tables::quoted(s) << ',';
         o << '\n';
     }
     o << "};\n";
@@ -175,7 +175,7 @@ void emitBlockRec(std::ostream& o, const FlatBlock& blk, std::size_t index,
     // block's identity.
     o << "static void* " << n << "_handle = nullptr;\n";
     o << "static const protoScala::gen::BlockRec " << n << "_rec = {\n"
-      << "    .name = " << quoted(m.name()) << ",\n"
+      << "    .name = " << tables::quoted(m.name()) << ",\n"
       << "    .arity = " << m.arity() << "u, .localCount = " << m.localCount()
       << "u, .maxStack = " << m.maxStack() << "u, .captureCount = " << m.captureCount() << "u,\n"
       << "    .variadic = " << (m.isVariadic() ? "true" : "false")

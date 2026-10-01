@@ -293,7 +293,7 @@ bool emitImage(const char* path, const std::string& source, const GlobalTable& g
 
     o << "const char* const kStrings[] = {";
     for (std::size_t i = 0; i < t.strings.size(); ++i) {
-        o << "\n    " << quoted(t.strings[i]) << ',';
+        o << "\n    " << tables::quoted(t.strings[i]) << ',';
     }
     if (t.strings.empty()) o << " \"\" ";
     o << "\n};\n";
@@ -318,8 +318,8 @@ bool emitImage(const char* path, const std::string& source, const GlobalTable& g
                     << ", .base = " << c.base << ", .argc = " << c.argc << "u"
                     << ", .flags = " << c.flags << "u"
                     << ", .exact = " << (c.exact ? "true" : "false")
-                    << ", .sval = " << quoted(t.constSval[i])
-                    << ", .key = " << quoted(t.constKey[i])
+                    << ", .sval = " << tables::quoted(t.constSval[i])
+                    << ", .key = " << tables::quoted(t.constKey[i])
                     << ", .namesFirst = " << c.namesFirst << ", .namesCount = " << c.namesCount
                     << ", .fieldsFirst = " << c.fieldsFirst << ", .fieldsCount = " << c.fieldsCount
                     << "}";
@@ -344,7 +344,7 @@ bool emitImage(const char* path, const std::string& source, const GlobalTable& g
 
     emitArray(o, "PreludeModuleRec", "kModules", t.modules,
               [&](std::ostream& s, const PreludeModuleRec& m, std::size_t i) {
-                  s << "{.parent = " << m.parent << ", .name = " << quoted(t.moduleName[i])
+                  s << "{.parent = " << m.parent << ", .name = " << tables::quoted(t.moduleName[i])
                     << ", .arity = " << m.arity
                     << ", .variadic = " << (m.variadic ? "true" : "false")
                     << ", .method = " << (m.method ? "true" : "false")
@@ -363,15 +363,15 @@ bool emitImage(const char* path, const std::string& source, const GlobalTable& g
 
     emitArray(o, "PreludeBindingRec", "kBindings", t.bindings,
               [&](std::ostream& s, const PreludeBindingRec& b, std::size_t i) {
-                  s << "{.name = " << quoted(t.bindingName[i]) << ", .kind = " << unsigned(b.kind)
-                    << ", .key = " << quoted(t.bindingKey[i]) << ", .maskFirst = " << b.maskFirst
+                  s << "{.name = " << tables::quoted(t.bindingName[i]) << ", .kind = " << unsigned(b.kind)
+                    << ", .key = " << tables::quoted(t.bindingKey[i]) << ", .maskFirst = " << b.maskFirst
                     << ", .maskCount = " << b.maskCount << "}";
               });
 
     emitArray(o, "PreludeMemberRec", "kMembers", t.members,
               [&](std::ostream& s, const PreludeMemberRec& m, std::size_t i) {
-                  s << "{.name = " << quoted(t.memberName[i]) << ", .kind = " << unsigned(m.kind)
-                    << ", .key = " << quoted(t.memberKey[i])
+                  s << "{.name = " << tables::quoted(t.memberName[i]) << ", .kind = " << unsigned(m.kind)
+                    << ", .key = " << tables::quoted(t.memberKey[i])
                     << ", .concrete = " << (m.concrete ? "true" : "false")
                     << ", .byNameValue = " << (m.byNameValue ? "true" : "false")
                     << ", .maskFirst = " << m.maskFirst << ", .maskCount = " << m.maskCount << "}";
@@ -379,7 +379,7 @@ bool emitImage(const char* path, const std::string& source, const GlobalTable& g
 
     emitArray(o, "PreludeTypeRec", "kTypes", t.types,
               [&](std::ostream& s, const PreludeTypeRec& c, std::size_t i) {
-                  s << "{.name = " << quoted(t.typeName[i]) << ", .key = " << quoted(t.typeKey[i])
+                  s << "{.name = " << tables::quoted(t.typeName[i]) << ", .key = " << tables::quoted(t.typeKey[i])
                     << ", .kind = " << unsigned(c.kind) << ", .flags = " << c.flags << "u"
                     << ", .linFirst = " << c.linFirst << ", .linCount = " << c.linCount
                     << ", .fieldFirst = " << c.fieldFirst << ", .fieldCount = " << c.fieldCount
@@ -391,13 +391,13 @@ bool emitImage(const char* path, const std::string& source, const GlobalTable& g
                     << ", .memberCount = " << c.memberCount
                     << ", .primaryArity = " << c.primaryArity << "u"
                     << ", .primaryMinArity = " << c.primaryMinArity << "u"
-                    << ", .companionTermKey = " << quoted(t.typeCompTerm[i])
-                    << ", .companionTypeKey = " << quoted(t.typeCompType[i]) << "}";
+                    << ", .companionTermKey = " << tables::quoted(t.typeCompTerm[i])
+                    << ", .companionTypeKey = " << tables::quoted(t.typeCompType[i]) << "}";
               });
 
     emitArray(o, "PreludeTypeAliasRec", "kTypeAliases", t.typeAliases,
               [](std::ostream& s, const std::pair<std::string, std::string>& a, std::size_t) {
-                  s << "{.name = " << quoted(a.first) << ", .key = " << quoted(a.second) << "}";
+                  s << "{.name = " << tables::quoted(a.first) << ", .key = " << tables::quoted(a.second) << "}";
               });
 
     // The by-name selector index (CaptureAnalysis's conservative union). Without
@@ -409,7 +409,7 @@ bool emitImage(const char* path, const std::string& source, const GlobalTable& g
         for (const auto& kv : globals.byNameSelectors()) sel.push_back(kv.first);
         std::sort(sel.begin(), sel.end());
         for (const std::string& s : sel)
-            o << "\n    {.name = " << quoted(s) << ", .mask = "
+            o << "\n    {.name = " << tables::quoted(s) << ", .mask = "
               << globals.byNameSelectors().at(s) << "u},";
         if (sel.empty()) o << " {} ";
     }
