@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — protoCore 2.9.4 in CI, 2026-10-02
+
+- **CI builds protoCore 2.9.4** (tag `v2.9.4`, `9cb0ef5`) on Linux, macOS and
+  Windows, the informational conformance-isolate job included; it built 2.7.0
+  on Linux and 2.9.0 on macOS and Windows. The declared minimum, 2.7.0, is
+  tested by one job only, the floor entry of `ci.yml`'s `test` job (Linux).
+  protoIO stays pinned to 0.2.2 (`1611ff9`); protoST, built for the interop
+  test, is pinned to its current `main`.
+- The conformance host never dereferences `joinBlockingThread`'s release flag
+  (protoScala code cannot observe a C++ flag), so protoCore 2.9.4's
+  `releaseFlagRaised()` has no read to replace here; the host's comment now
+  says so.
+
 ### Changed — the Windows review, 2026-10-02
 
 - **`protoscalac` builds modules on Windows.** `--emit-make` writes an NMake

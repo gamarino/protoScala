@@ -22,8 +22,10 @@ executable sees no protoCore at all.)
 - **protoCore 2.7.0 or newer** (2.7.0 is where `proto::proto_long` first exists; the "Why 2.6.1" floors below still hold underneath it), installed, with its CMake package configuration.
   **On Windows the floor is 2.9.0**: it is the release that honours
   `ProtoSpace::setThreadStackBytes` there, which gives the actor workers the
-  evaluator's 32 MiB stack (§Windows). CI builds and tests against **2.7.0 on
-  Linux** and **2.9.0 on macOS and Windows**; the packaging sections below were
+  evaluator's 32 MiB stack (§Windows). CI builds and tests against **2.9.4 on
+  Linux, macOS and Windows**, and against **2.7.0**, the declared minimum, in
+  one Linux job (the floor job; the Windows minimum, 2.9.0, has no job of its
+  own); the packaging sections below were
   verified against 2.5.0. See protoCore's `docs/INSTALLATION.md`.
 - **protoIO 0.2.2 or newer within 0.2** (the I/O layer the protoCore runtimes
   share; 0.2.2 brings `process::run` options, crash statuses as 128 + signal on

@@ -32,7 +32,9 @@ name: CI
 # request is the only thing that changed.  Tracking the tips catches integration
 # breaks, which is worth having, but a red build would then have three possible
 # authors; the schedule keeps that signal separate, and the summary records the
-# commits actually used.
+# commits actually used.  The `test` job runs twice: against the pinned
+# protoCore release (2.9.4) and against the declared minimum (2.7.0, its floor
+# entry -- this repository's only floor job, on 2.7.0 on the schedule too).
 
 on:
   push:
@@ -55,13 +57,13 @@ env:
   PROTOCORE_REPO: numaes/protoCore
   PROTOST_REPO: gamarino/protoST
   PROTOIO_REPO: gamarino/protoIO
-  # protoCore 2.7.0, SOVERSION 3 (tag v2.7.0).  Bump deliberately.
-  # 2.7.0 is the floor on Linux and macOS (proto::proto_long / proto_ulong);
-  # Windows needs 2.9.0, which cross-platform.yml builds.
-  PROTOCORE_REF: ${{ github.event_name == 'schedule' && 'master' || 'fc5d79db4f89f8a6eb473a52766b1908140a19d1' }}
-  # protoST at the commit protoScala's interop test was last verified against
-  # (protoST on protoIO, 2026-09-30).
-  PROTOST_REF: ${{ github.event_name == 'schedule' && 'main' || 'e11c1e5fcf4318664779a4ba1150a38822e72d9b' }}
+  # protoCore 2.9.4, SOVERSION 3 (tag v2.9.4, 9cb0ef5).  Bump deliberately.
+  # Every job builds it except the floor entry of the `test` job, which builds
+  # the declared minimum (2.7.0, see there).
+  PROTOCORE_REF: ${{ github.event_name == 'schedule' && 'master' || '9cb0ef540826ee6c3162998db84ddf48464d6e2a' }}
+  # protoST main (7dea1dc, 2026-10-02: protoCore 2.9.4 and protoIO 0.2.2 in its
+  # CI), the commit protoScala's interop test was last verified against.
+  PROTOST_REF: ${{ github.event_name == 'schedule' && 'main' || '7dea1dc2afd8af83ed295a75b794f768ce0260a9' }}
   # protoIO 0.2.2 (main, 1611ff9): the I/O layer protoScala and protoST link
   # statically, and protoScala's floor.  Bump deliberately, like protoCore.
   PROTOIO_REF: ${{ github.event_name == 'schedule' && 'main' || '1611ff9cf8d499cdc42a6e108e42ecfc36fd8164' }}
@@ -75,9 +77,24 @@ env:
 
 jobs:
   test:
-    name: Build and test suite
+    name: ${{ matrix.name }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Build and test suite
+            # Empty: env.PROTOCORE_REF (2.9.4, or master on the schedule).
+            protocore_ref: ''
+          # THE FLOOR JOB, the only one in this repository. protoCore 2.7.0
+          # (tag v2.7.0, fc5d79d), SOVERSION 3: PROTOCORE_MIN_VERSION in
+          # CMakeLists.txt on Linux and macOS (proto::proto_long /
+          # proto_ulong). Built on every event, the schedule included. The
+          # Windows minimum (2.9.0) has no job of its own: cross-platform.yml
+          # builds 2.9.4 there.
+          - name: Build and test suite (protoCore 2.7.0, the declared minimum)
+            protocore_ref: fc5d79db4f89f8a6eb473a52766b1908140a19d1
     steps:
       - name: Check out protoScala
         uses: actions/checkout@v4
@@ -88,7 +105,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ env.PROTOCORE_REPO }}
-          ref: ${{ env.PROTOCORE_REF }}
+          ref: ${{ matrix.protocore_ref || env.PROTOCORE_REF }}
           path: protoCore
 
       - name: Check out protoST as a sibling
@@ -106,6 +123,8 @@ jobs:
           path: protoIO
 
       - name: Record what is being built
+        env:
+          PROTOCORE_REF: ${{ matrix.protocore_ref || env.PROTOCORE_REF }}
         run: |
           cmake --version | head -1
           g++ --version | head -1

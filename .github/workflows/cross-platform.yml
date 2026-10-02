@@ -9,10 +9,11 @@ name: Cross-platform
 # Windows, and it also exercises the package path, which ci.yml does not.
 # protoIO is the sibling source tree, compiled into protoScala's build.
 #
-# Refs are pinned like ci.yml's. protoCore 2.9.0 (tag v2.9.0, 21889c9): the floor on
-# Windows, where it honours ProtoSpace::setThreadStackBytes and names its DLL
-# protoCore-3.dll. protoIO 0.2.2 (main, 1611ff9): the floor everywhere. Bump
-# deliberately.
+# Refs are pinned like ci.yml's. protoCore 2.9.4 (tag v2.9.4, 9cb0ef5), as
+# ci.yml's main job. The Windows minimum, 2.9.0 (where protoCore honours
+# ProtoSpace::setThreadStackBytes and names its DLL protoCore-3.dll), has no
+# job; the repository's only floor job is ci.yml's (Linux, 2.7.0). protoIO
+# 0.2.2 (main, 1611ff9): the floor everywhere. Bump deliberately.
 
 on:
   push:
@@ -29,7 +30,7 @@ concurrency:
 
 env:
   PROTOCORE_REPO: numaes/protoCore
-  PROTOCORE_REF: 21889c911b0d0c69bb99d53ea8c3b1bb349f547d
+  PROTOCORE_REF: 9cb0ef540826ee6c3162998db84ddf48464d6e2a
   PROTOIO_REPO: gamarino/protoIO
   PROTOIO_REF: 1611ff9cf8d499cdc42a6e108e42ecfc36fd8164
   # Clock-dependent, as in ci.yml: their verdict is a timeout.

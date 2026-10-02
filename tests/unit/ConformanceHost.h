@@ -150,7 +150,12 @@ public:
         // The flag is deliberately NOT polled: protoScala has no way for a
         // Scala-level loop to read a C++ flag, and inventing a builtin for the
         // suite's benefit would make the adaptor test something protoScala does
-        // not do.  Instead the spawned thread does a few seconds of its own
+        // not do.  Nothing here dereferences it either, so the cross-thread
+        // read protoCore 2.9.4 made atomic -- a host that polls the flag must
+        // use proto::conformance::releaseFlagRaised(), never `*releaseFlag` --
+        // has no counterpart in this host.
+        //
+        // Instead the spawned thread does a few seconds of its own
         // allocating work and finishes, which is what the case actually needs --
         // a join that is genuinely blocked while a collection is demanded, and
         // that terminates within the case's own bound whatever happens.
