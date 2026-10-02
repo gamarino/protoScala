@@ -67,20 +67,26 @@ cat >"$work/stream.scala" <<'SCALA'
 for line <- Source.stdin.getLines() do
   println("got " + line)
 SCALA
-# The two pipes are a coprocess's rather than named FIFOs: Git for Windows' bash
-# emulates a FIFO in a way a native program cannot read, but a coprocess's pipes
-# are the system's own, so the same check runs on every platform.
-coproc STREAM { timeout 30s "$P" "$work/stream.scala" 2>&1; }
-to_program=${STREAM[1]}
-from_program=${STREAM[0]}
-echo "one" >&"$to_program"
-IFS= read -r -t 20 first <&"$from_program" || first="(timeout)"
-echo "two" >&"$to_program"
-exec {to_program}>&-
-IFS= read -r -t 20 second <&"$from_program" || second="(timeout)"
-wait "$STREAM_PID"; rc=$?
-[[ $rc -eq 0 && "$first" == "got one" && "$second" == "got two" ]] ||
-    fail "streaming stdin: exit $rc, got '$first' then '$second'"
+# The writer is a process substitution, whose pipe is the system's own: Git for
+# Windows' bash emulates a named FIFO in a way a native program cannot read, and
+# macOS's bash 3.2 has no coprocesses. The program's output goes to a file the
+# writer watches; protoscala flushes its output before it waits for input.
+stream_out="$work/stream.out"
+: >"$stream_out"
+stream_writer() {
+    echo "one"
+    local i
+    for ((i = 0; i < 200; i++)); do
+        grep -q '^got one' "$stream_out" && break
+        sleep 0.1
+    done
+    grep -q '^got one' "$stream_out" || : >"$work/stream.late"
+    echo "two"
+}
+timeout 30s "$P" "$work/stream.scala" < <(stream_writer) >"$stream_out" 2>&1; rc=$?
+got=$(cat "$stream_out")
+[[ $rc -eq 0 && "$got" == $'got one\ngot two' && ! -e "$work/stream.late" ]] ||
+    fail "streaming stdin: exit $rc, output '$got'$([[ -e "$work/stream.late" ]] && echo ', line 1 was not answered before line 2 was sent')"
 
 # 6. Tutorial chapter 18 §18.1 says what its line counter prints when fed from a
 #    pipe; this is that run.

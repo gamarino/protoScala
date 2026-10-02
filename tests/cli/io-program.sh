@@ -66,9 +66,15 @@ tut="$(cd "$(dirname "$0")/../conformance/tutorial" && pwd)"
 out=$("$P" "$tut/18-io-usage-and-exit.scala" 2>"$work/err3"); rc=$?
 [[ $rc -eq 2 && -z "$out" && "$(cat "$work/err3")" == "usage: greet NAME..." ]] ||
     fail "tutorial §18.2: exit $rc, stdout '$out', stderr '$(cat "$work/err3")'"
-# A value that is not a path: Git for Windows' bash rewrites a POSIX path in the
-# environment of a native program (/bin/sh becomes C:/Program Files/Git/usr/bin/sh).
+# Git for Windows' bash hands SHELL to a native program as a Windows path
+# (/bin/sh becomes C:\Program Files\Git\usr\bin\sh.exe, testsh becomes
+# <cwd>\testsh), so there only the end of the value is compared.
 out=$(SHELL=testsh "$P" "$tut/18-io-usage-and-exit.scala" Ada 2>&1); rc=$?
-[[ $rc -eq 0 && "$out" == "Hello, Ada, from testsh" ]] || fail "tutorial §18.2 with a name: exit $rc, output '$out'"
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) want_shell='Hello, Ada, from *testsh' ;;
+    *)                    want_shell='Hello, Ada, from testsh' ;;
+esac
+# shellcheck disable=SC2053
+[[ $rc -eq 0 && "$out" == $want_shell ]] || fail "tutorial §18.2 with a name: exit $rc, output '$out'"
 
 echo OK
