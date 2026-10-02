@@ -452,6 +452,7 @@ bool CppEmitter::emitBlock(std::size_t index, const GlobalTable&) {
         // body under the same table.
         out_ << "    std::size_t pc = 0;\n"
              << "    std::size_t resumePc = kEntry;\n"
+             << "    std::exception_ptr caught;\n"
              << "    for (;;) {\n"
              << "      try {\n"
              << "        switch (resumePc) {\n"
@@ -689,14 +690,18 @@ bool CppEmitter::emitBlock(std::size_t index, const GlobalTable&) {
     // produced, and reaching it is not an error.
     out_ << "    return F.finish(gen::unitValue(C));\n";
     if (guarded)
-        // handleCaught rethrows when no entry covers `pc`, so reaching `continue` means
-        // an entry matched and its body is now re-protected by the same table.
+        // The clause only captures the exception: the handler search runs after it has
+        // completed, so a re-throw (no entry covers `pc`) does not happen inside a catch
+        // clause, which under MSVC would keep the stack below it for as long as the
+        // exception travels. handleCaughtException rethrows when no entry covers `pc`,
+        // so reaching the next iteration means an entry matched and its body is now
+        // re-protected by the same table.
         out_ << "      } catch (...) {\n"
-             << "        const gen::HandlerRec* h =\n"
-             << "            gen::handleCaught(C, " << rec << ", pc, S, F.pendingSlot());\n"
-             << "        resumePc = h->handlerPc;\n"
-             << "        continue;\n"
+             << "        caught = std::current_exception();\n"
              << "      }\n"
+             << "      resumePc = gen::handleCaughtException(C, " << rec
+             << ", pc, S, F.pendingSlot(), caught)->handlerPc;\n"
+             << "      caught = nullptr;\n"
              << "    }\n";
     out_ << "}\n\n";
     return true;
@@ -740,6 +745,7 @@ bool CppEmitter::emit(const CompiledUnit& unit, const GlobalTable& globals) {
          << "#include <protoScala/GeneratedModule.h>\n"
          << "#include <protoCore.h>\n\n"
          << "#include <cstddef>\n"
+         << "#include <exception>\n"
          << "#include <stdexcept>\n\n"
          << "namespace gen = protoScala::gen;\n\n"
          // The retry loop's "run the body from the top" sentinel. A distinct value

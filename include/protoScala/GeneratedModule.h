@@ -35,6 +35,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 
 /**
  * Marks the extern "C" entry points of a generated module (`proto_module_init`,
@@ -380,6 +381,28 @@ const proto::ProtoObject* materialise(proto::ProtoContext*, const char* cls, con
  */
 const HandlerRec* handleCaught(proto::ProtoContext* ctx, const BlockRec& blk, std::size_t pc,
                                const proto::ProtoObject** slots, unsigned pendingSlot);
+
+/**
+ * `handleCaught` for a frame that has already LEFT its `catch (...)` clause:
+ * `caught` is the exception the clause captured with `std::current_exception()`.
+ * Same classification, same writes, same result; when no handler covers `pc` it
+ * re-throws the translated exception from outside every catch clause of the
+ * generated frame.
+ *
+ * This is what a generated frame calls (since the Windows review; `handleCaught`
+ * stays for modules built before). Under the Itanium ABI the two are the same.
+ * Under MSVC a catch clause runs before the stack below it is released, so a
+ * re-throw from inside the generated clause kept that stack for as long as the
+ * exception travelled, and an exception crossing many guarded frames could
+ * overflow the native stack while it propagated -- the VM's own frames re-throw
+ * after their catch for the same reason.
+ *
+ * An addition to this header, not a change: a module built against an earlier
+ * one still loads, so `kGeneratedModuleABI` does not move.
+ */
+const HandlerRec* handleCaughtException(proto::ProtoContext* ctx, const BlockRec& blk,
+                                        std::size_t pc, const proto::ProtoObject** slots,
+                                        unsigned pendingSlot, std::exception_ptr caught);
 
 /** JUMP_BACK's GC obligation (P4 rule 1). Inlined to one call. */
 void safepoint(proto::ProtoContext*);

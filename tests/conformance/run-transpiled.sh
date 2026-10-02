@@ -226,7 +226,10 @@ if [[ $verdict_ok -eq 0 ]]; then
 fi
 
 echo "FAIL: transpiled $FILE_BASE disagreed with its directive ($directive)"
-echo "  exit $exit_code, expected ${expected:+'}${expected}${expected:+'}"
+# A quote inside ${var:+...} is parsed differently by bash 5.2 (Git for Windows),
+# so the quotes around the expected text are a variable.
+q=""; [[ -n "$expected" ]] && q="'"
+echo "  exit $exit_code, expected ${q}${expected}${q}"
 echo "  last stdout line: '$last_line'"
 echo "stdout:"; sed 's/^/  /' "$stdout_file"
 echo "stderr:"; sed 's/^/  /' "$stderr_file"

@@ -23,6 +23,14 @@
  *  - std::exception carries what() across.
  *  - catch(...) is the last resort and says so rather than inventing a message.
  *
+ * Every clause captures its exception, translated or not, and the template
+ * throws it AFTER the catch clause has completed (std::rethrow_exception), as
+ * the VM's frames do. Under the Itanium ABI that is the same as `throw;` inside
+ * the clause; under MSVC a catch clause runs before the stack below it is
+ * released, so a re-throw inside it keeps that stack, and a StackOverflowError
+ * leaving a deep recursion of transpiled functions (each of which is entered
+ * through this boundary) overflowed the native stack again while it propagated.
+ *
  * tests/unit/test_exceptions.cpp has one case per clause. Removing any clause
  * turns one of them red.
  */
@@ -30,6 +38,7 @@
 #include "runtime/Errors.h"
 #include "runtime/FutureYield.h"
 
+#include <exception>
 #include <stdexcept>
 #include <utility>
 
@@ -37,15 +46,21 @@ namespace protoScala {
 
 template <typename Call>
 auto translateForeignException(Call&& call) -> decltype(call()) {
+    std::exception_ptr passOn;
     try {
         return call();
     }
-    catch (FutureYield&)            { throw; }   // a cooperative suspension, not an error
-    catch (ScalaThrow&)             { throw; }   // a Scala exception already in flight
-    catch (ScalaError&)             { throw; }   // a native throw site's own translation
-    catch (const std::logic_error&) { throw; }   // D74: a VM defect stays uncatchable
-    catch (const std::exception& e) { throw ScalaError("RuntimeException", e.what()); }
-    catch (...)                     { throw ScalaError("RuntimeException", "native exception"); }
+    catch (FutureYield&)            { passOn = std::current_exception(); }  // a cooperative suspension, not an error
+    catch (ScalaThrow&)             { passOn = std::current_exception(); }  // a Scala exception already in flight
+    catch (ScalaError&)             { passOn = std::current_exception(); }  // a native throw site's own translation
+    catch (const std::logic_error&) { passOn = std::current_exception(); }  // D74: a VM defect stays uncatchable
+    catch (const std::exception& e) {
+        passOn = std::make_exception_ptr(ScalaError("RuntimeException", e.what()));
+    }
+    catch (...) {
+        passOn = std::make_exception_ptr(ScalaError("RuntimeException", "native exception"));
+    }
+    std::rethrow_exception(passOn);
 }
 
 } // namespace protoScala

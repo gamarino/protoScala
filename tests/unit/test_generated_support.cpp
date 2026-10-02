@@ -362,5 +362,55 @@ TEST_F(Guarded, NoHandlerForThisPcRethrows) {
     EXPECT_EQ(slots[4], nullptr);
 }
 
+// handleCaughtException is what a generated frame calls since the Windows review:
+// AFTER its catch clause, with the exception the clause captured, so that a re-throw
+// never happens inside a catch clause of the generated frame (under MSVC that kept the
+// stack below it while the exception travelled). Same answers as handleCaught.
+std::exception_ptr captured(void (*thrower)()) {
+    try {
+        thrower();
+    } catch (...) {
+        return std::current_exception();
+    }
+    return nullptr;
+}
+
+TEST_F(Guarded, AfterTheCatchACoveredExceptionIsDeliveredTranslated) {
+    const proto::ProtoObject* slots[8] = {};
+    const std::exception_ptr e = captured([] { throw std::out_of_range("past the end"); });
+    const gen::HandlerRec* h = gen::handleCaughtException(c(), guardedRec, 0, slots, 4, e);
+    ASSERT_NE(h, nullptr);
+    EXPECT_EQ(h->handlerPc, 20u);
+    ASSERT_NE(slots[1], nullptr);
+    EXPECT_EQ(slots[1], slots[4]);
+    EXPECT_NE(str(slots[1]).find("IndexOutOfBoundsException"), std::string::npos)
+        << str(slots[1]);
+}
+
+TEST_F(Guarded, AfterTheCatchAnUncoveredExceptionIsRethrownTranslated) {
+    const proto::ProtoObject* slots[8] = {};
+    const std::exception_ptr e = captured([] { throw std::runtime_error("nothing catches this"); });
+    try {
+        gen::handleCaughtException(c(), guardedRec, 50, slots, 4, e);
+        FAIL() << "handleCaughtException returned an entry for an uncovered pc";
+    } catch (const protoScala::ScalaError& err) {
+        EXPECT_EQ(err.className(), "RuntimeException");
+        EXPECT_EQ(err.message(), "nothing catches this");
+    }
+    EXPECT_EQ(slots[1], nullptr);
+    EXPECT_EQ(slots[4], nullptr);
+}
+
+TEST_F(Guarded, AfterTheCatchALogicErrorStaysUncatchable) {
+    const proto::ProtoObject* slots[8] = {};
+    const std::exception_ptr e = captured([] { throw std::logic_error("a generator defect"); });
+    try {
+        gen::handleCaughtException(c(), guardedRec, 0, slots, 4, e);
+        FAIL() << "handleCaughtException swallowed a std::logic_error";
+    } catch (const std::logic_error& err) {
+        EXPECT_STREQ(err.what(), "a generator defect");
+    }
+}
+
 
 }  // namespace

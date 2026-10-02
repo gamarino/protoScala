@@ -761,6 +761,26 @@ const HandlerRec* handleCaught(proto::ProtoContext* ctx, const BlockRec& blk, st
     // clause names -- is not a Scala exception and propagates to that template.
 }
 
+const HandlerRec* handleCaughtException(proto::ProtoContext* ctx, const BlockRec& blk,
+                                        std::size_t pc, const proto::ProtoObject** slots,
+                                        unsigned pendingSlot, std::exception_ptr caught) {
+    // handleCaught classifies the exception being handled, so it runs inside a catch
+    // clause of THIS function; whatever it re-throws is captured there and thrown
+    // again once that clause has completed, from this frame, outside every catch
+    // clause of the generated one.
+    std::exception_ptr passOn;
+    try {
+        std::rethrow_exception(caught);
+    } catch (...) {
+        try {
+            return handleCaught(ctx, blk, pc, slots, pendingSlot);
+        } catch (...) {
+            passOn = std::current_exception();
+        }
+    }
+    std::rethrow_exception(passOn);
+}
+
 const proto::ProtoObject* materialise(proto::ProtoContext* ctx, const char* cls, const char* msg) {
     const ScalaError err(cls ? cls : "RuntimeException", msg ? msg : "");
     return ops::Engine::materialiseError(engineOf("materialise"), ctx, err);
