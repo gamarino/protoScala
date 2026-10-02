@@ -18,6 +18,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (protoScala code cannot observe a C++ flag), so protoCore 2.9.4's
   `releaseFlagRaised()` has no read to replace here; the host's comment now
   says so.
+- **`embedder-conformance/isolate.join.parks` is no longer red on CI.** The
+  conformance host's thread ran a fixed 300,000 iterations, which finish in
+  under 150 ms on a GitHub runner, before the case demands its collection;
+  the case then reported a rule-2b failure that was not protoScala's join
+  (docs/CONFORMANCE.md). The thread now works for two seconds of wall clock.
 
 ### Changed — the Windows review, 2026-10-02
 

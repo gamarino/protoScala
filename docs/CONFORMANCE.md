@@ -52,6 +52,21 @@ diagnosed here**, and the row above (PASS, isolated, on a 12-CPU host) stands as
 measured. It is recorded because nothing in this file prepared a reader for seeing
 that case red.
 
+**Diagnosed 2026-10-02: the host's thread finished too early, not the join.** The
+case demands its collection 150 ms after it calls `joinBlockingThread`. protoScala's
+host ran a fixed 300,000-iteration loop, about 245 ms on the 12-CPU host but under
+150 ms on a GitHub runner, so the join had already returned when the collection was
+demanded; the case's main thread then waited in an unbracketed `std::thread::join`
+of its own 10 s timer, no cycle could complete, and the case reported a rule-2b
+failure (`runningThreads=1`, `gcCycleCount 0->0`, 10.0 s: exactly the CI log of runs
+2026-09-30 to 2026-10-02, against protoCore 2.7.0 and again 2.9.4). Reproduced
+locally by cutting the loop to 30,000 iterations: FAIL 3 of 3. The host now spins
+for two seconds of wall clock instead, so the join is blocked when the collection
+is demanded: PASS 20 of 20 locally against protoCore 2.9.4 and 3 of 3 against
+2.7.0. protoScala's join was never at fault: `t.join()` reaches `ProtoThread::join`,
+which parks. That a case whose runtime thread ends early reports a rule-2b failure
+rather than NotApplicable is a protoCore conformance-case issue, reported there.
+
 First run: **two cases red, both the same defect**, with **no previously-passing
 test newly failing**. After the fix the whole suite was green, and the retention
 the two cases measured is gone rather than reduced. Read the rule-8 section before

@@ -155,10 +155,21 @@ public:
         // use proto::conformance::releaseFlagRaised(), never `*releaseFlag` --
         // has no counterpart in this host.
         //
-        // Instead the spawned thread does a few seconds of its own
-        // allocating work and finishes, which is what the case actually needs --
-        // a join that is genuinely blocked while a collection is demanded, and
-        // that terminates within the case's own bound whatever happens.
+        // Instead the spawned thread does two seconds of its own allocating
+        // work and finishes, which is what the case actually needs -- a join
+        // that is genuinely blocked while a collection is demanded, and that
+        // terminates within the case's own bound whatever happens.
+        //
+        // The work is bounded by the CLOCK, not by an iteration count.  The
+        // case demands its collection 150 ms after it calls this method, and
+        // a cycle must complete while the join is still blocked.  A fixed
+        // 300,000 iterations took ~245 ms on a Ryzen 5 5500U but less than
+        // 150 ms on GitHub's runners, so the join had returned before the
+        // collection was demanded, the case's main thread then sat in an
+        // unbracketed std::thread::join of its own timer, and join.parks
+        // reported "no collection cycle could complete" (CI, 2026-09-30 to
+        // 2026-10-02; reproduced locally with 30,000 iterations, 3 of 3).
+        // Two seconds is well clear of 150 ms and well inside the case's 8 s.
         //
         // The thread goes through Thread.start, which is ProtoSpace::newThread
         // (ActorPrimitives.cpp), and t.join() reaches ProtoThread::join, so this
@@ -168,9 +179,11 @@ public:
         // wrong thread.
         const std::string got = harness_.eval(
             "{ val t = Thread.start { () =>\n"
+            "    val start = System.currentTimeMillis()\n"
             "    var i = 0\n"
             "    var n = 0\n"
-            "    while i < 300000 do { val s = \"spin-\" + i; n = n + s.length; i += 1 }\n"
+            "    while System.currentTimeMillis() - start < 2000 do {\n"
+            "      val s = \"spin-\" + i; n = n + s.length; i += 1 }\n"
             "    n }\n"
             "  t.join(); 1 }");
         return got == "1";
