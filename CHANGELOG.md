@@ -52,7 +52,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Tests no longer excluded on Windows**: `cli/io-stdin` streams through a
   coprocess's pipes instead of named FIFOs, and `cli/io-program` and
   `cli/version` no longer put POSIX paths in the environment, which Git for
-  Windows' `bash` rewrites. WINDOWS_COUNTS_CHANGELOG
+  Windows' `bash` rewrites.
+- **Test counts now** (CI, 2026-10-02): Windows and macOS register 2428 tests
+  and run 2425, all passing (7 skipped); Linux registers 2429 (with
+  `umd/protost-interop`) and runs 2426, all passing. A local sequential run on
+  Linux against protoCore 2.9.0 passes 2428/2428.
 - `printf` formats in the protoST interop test use `%llu` with a cast for
   `proto_ulong`; `NOMINMAX` is defined only when it is not already.
 
