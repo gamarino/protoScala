@@ -14,6 +14,8 @@ PROTOSCALA="${1:?usage: transpiler-refusals.sh <protoscala> <tests-dir> <protosc
 TESTS_DIR="${2:?}"
 PROTOSCALAC="${3:?}"
 SCRATCH="${4:?}"
+# shellcheck source=platform.sh
+source "$(dirname "$0")/platform.sh"
 
 fails=0
 rm -rf "$SCRATCH"
@@ -58,7 +60,7 @@ refuse an_import "an import is not supported by protoscalac yet (D123)" \
     'import util.Strings' \
     '@main def run(): Unit = println(1)'
 
-# The counterpart of `refuse`: a construct the transpiler SUPPORTS must produce a .so
+# The counterpart of `refuse`: a construct the transpiler SUPPORTS must produce a module
 # that prints what the interpreter prints. Without this the file would only ever say
 # what protoscalac cannot do, and a refusal added by mistake would read as correct.
 accept() {  # accept <name> <expected-stdout> <source...>
@@ -74,7 +76,7 @@ accept() {  # accept <name> <expected-stdout> <source...>
         return
     fi
     local got
-    got=$("$PROTOSCALA" --run-module "$dir/module.so" 2>&1)
+    got=$("$PROTOSCALA" --run-module "$dir/module.$SO" 2>&1)
     if [[ "$got" != "$want" ]]; then
         echo "FAIL: $name printed '$got', expected '$want'"
         fails=$((fails + 1))

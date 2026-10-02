@@ -23,6 +23,8 @@ PROTOSCALA="${1:?usage: compiled-provider.sh <protoscala> <tests> <protoscalac> 
 TESTS_DIR="${2:?}"
 PROTOSCALAC="${3:?}"
 SCRATCH="${4:?}"
+# shellcheck source=platform.sh
+source "$(dirname "$0")/platform.sh"
 
 fails=0
 # The scratch directory the harness passes. This script owns it and clears it, so it
@@ -39,6 +41,7 @@ require_private_scratch() {
     local p="$1"
     case "$p" in
         /*) ;;
+        [A-Za-z]:/*) ;;   # Windows: CTest names the build tree as C:/...
         *) echo "FAIL: the scratch path must be absolute, got '$p'"; exit 1 ;;
     esac
     case "$p" in
@@ -73,7 +76,7 @@ if ! "$PROTOSCALAC" "$SCRATCH/src/Strings.scala" -o "$SCRATCH/build" --build-so 
     sed 's/^/  /' "$SCRATCH/build.out"
     exit 1
 fi
-cp "$SCRATCH/build/module.so" "$SCRATCH/modules/util/Strings.so"
+cp "$SCRATCH/build/module.$SO" "$SCRATCH/modules/util/Strings.$SO"
 
 # --- 1. the import resolves to the .so ------------------------------------------
 cat > "$SCRATCH/run/importer.scala" <<'SCALA'
@@ -86,6 +89,16 @@ out=$(PROTOSCALA_MODULE_PATH="$SCRATCH/modules" "$PROTOSCALA" "$SCRATCH/run/impo
 want=$'HELLO!\nabab'
 if [[ "$out" != "$want" ]]; then
     echo "FAIL: importing the compiled module printed:"; sed 's/^/  /' <<<"$out"
+    fails=$((fails + 1))
+fi
+
+# A RELATIVE PROTOSCALA_MODULE_PATH is resolved against the working directory, as
+# any relative path is. Windows refused to load a library named relatively, so this
+# import failed there although the file was found.
+out=$(cd "$SCRATCH" && PROTOSCALA_MODULE_PATH="modules" "$PROTOSCALA" "$SCRATCH/run/importer.scala" 2>&1)
+if [[ "$out" != "$want" ]]; then
+    echo "FAIL: importing through a relative PROTOSCALA_MODULE_PATH printed:"
+    sed 's/^/  /' <<<"$out"
     fails=$((fails + 1))
 fi
 
@@ -117,7 +130,7 @@ cat > "$SCRATCH/src/Script.scala" <<'SCALA'
 SCALA
 if "$PROTOSCALAC" "$SCRATCH/src/Script.scala" -o "$SCRATCH/build2" --build-so \
         >"$SCRATCH/build2.out" 2>&1; then
-    cp "$SCRATCH/build2/module.so" "$SCRATCH/modules/bad/Script.so"
+    cp "$SCRATCH/build2/module.$SO" "$SCRATCH/modules/bad/Script.$SO"
     cat > "$SCRATCH/run/imports-a-script.scala" <<'SCALA'
 import bad.Script
 @main def run(): Unit = println(1)
@@ -134,10 +147,8 @@ fi
 
 # --- 4. a .so that is not a protoCore module ------------------------------------
 mkdir -p "$SCRATCH/modules/nope"
-cat > "$SCRATCH/src/notamodule.cpp" <<'CPP'
-extern "C" int unrelated() { return 0; }
-CPP
-if c++ -shared -fPIC -o "$SCRATCH/modules/nope/Thing.so" "$SCRATCH/src/notamodule.cpp" \
+echo "$PS_EXPORT int unrelated() { return 0; }" > "$SCRATCH/src/notamodule.cpp"
+if build_plain_library "$SCRATCH/modules/nope/Thing.$SO" "$SCRATCH/src/notamodule.cpp" \
         2>/dev/null; then
     cat > "$SCRATCH/run/imports-nonmodule.scala" <<'SCALA'
 import nope.Thing
@@ -175,7 +186,7 @@ SCALA
 mkdir -p "$SCRATCH/build3"
 if "$PROTOSCALAC" "$SCRATCH/src/Counter.scala" -o "$SCRATCH/build3" --build-so \
         --module-name util.Counter >"$SCRATCH/build3.out" 2>&1; then
-    cp "$SCRATCH/build3/module.so" "$SCRATCH/modules/util/Counter.so"
+    cp "$SCRATCH/build3/module.$SO" "$SCRATCH/modules/util/Counter.$SO"
     cat > "$SCRATCH/run/twice.scala" <<'SCALA'
 import util.Counter
 import util.Counter as Again

@@ -9,8 +9,10 @@ name: Cross-platform
 # Windows, and it also exercises the package path, which ci.yml does not.
 # protoIO is the sibling source tree, compiled into protoScala's build.
 #
-# Refs are pinned like ci.yml's: the first protoCore and protoIO commits that
-# build and pass on macOS and Windows. Bump deliberately.
+# Refs are pinned like ci.yml's. protoCore 2.9.0 (master, 21889c9): the floor on
+# Windows, where it honours ProtoSpace::setThreadStackBytes and names its DLL
+# protoCore-3.dll. protoIO 0.2.2 (main, 1611ff9): the floor everywhere. Bump
+# deliberately.
 
 on:
   push:
@@ -27,9 +29,9 @@ concurrency:
 
 env:
   PROTOCORE_REPO: numaes/protoCore
-  PROTOCORE_REF: 43b6dc0717e417aa6af1436a45bec187753a8130
+  PROTOCORE_REF: 21889c911b0d0c69bb99d53ea8c3b1bb349f547d
   PROTOIO_REPO: gamarino/protoIO
-  PROTOIO_REF: 120c8c373db2ffd840f6c807a487afae251ff6d3
+  PROTOIO_REF: 1611ff9cf8d499cdc42a6e108e42ecfc36fd8164
   # Clock-dependent, as in ci.yml: their verdict is a timeout.
   CLOCK_DEPENDENT_TESTS: '^embedder-conformance/isolate\.'
 
@@ -48,11 +50,10 @@ jobs:
             exclude_tests: ''
           - name: Windows (MSVC, x64)
             os: windows-2022
-            # These three fail in Git Bash, not in protoScala (docs/INSTALLATION.md,
-            # "Windows (MSVC)"): Git Bash rewrites the POSIX paths they put in
-            # environment variables, and an MSYS FIFO does not reach a native
-            # program. Their behaviour was checked by hand on Windows.
-            exclude_tests: '|^cli/(version|io-stdin|io-program)$'
+            # Nothing is excluded on Windows either: the transpiler builds its
+            # modules with nmake, cl and link from the MSVC environment below, and
+            # the script tests no longer depend on MSYS path rewriting or FIFOs.
+            exclude_tests: ''
     defaults:
       run:
         shell: bash
@@ -143,3 +144,36 @@ jobs:
           PATH="$GITHUB_WORKSPACE/prefix/bin:$PATH" protoscala --version
           printf 'println("hello from " + sys.props("os.name"))\n' > hello.scala
           PATH="$GITHUB_WORKSPACE/prefix/bin:$PATH" protoscala hello.scala
+
+      - name: The ZIP runs on its own (Windows)
+        # The package must carry everything protoscala.exe loads: protoCore's DLL,
+        # OpenSSL's, and the C++ runtime. It is unpacked into a clean directory
+        # and run with a PATH that holds only that directory and Windows' own, so
+        # a DLL found in a build or install tree cannot hide a missing one.
+        if: runner.os == 'Windows'
+        working-directory: protoScala/build
+        run: |
+          cpack -G ZIP
+          zip=$(ls protoscala-*.zip | head -1)
+          unzip -l "$zip" | tee zip-contents.txt
+          for f in protoscala.exe protoscalac.exe protoScala.dll protoCore-3.dll \
+                   libcrypto-3-x64.dll libssl-3-x64.dll msvcp140.dll vcruntime140.dll \
+                   protoCore.h protoCore.lib protoScala.lib GeneratedModule.h; do
+            grep -q "/$f\$" zip-contents.txt || { echo "the ZIP lacks $f"; exit 1; }
+          done
+          grep -qi 'OpenSSL-.*-LICENSE.txt' zip-contents.txt || { echo "the ZIP lacks OpenSSL's licence"; exit 1; }
+          clean="$RUNNER_TEMP/zip-run"
+          rm -rf "$clean" && mkdir -p "$clean" && unzip -q "$zip" -d "$clean"
+          bin=$(dirname "$(find "$clean" -name protoscala.exe | head -1)")
+          cd "$clean"
+          printf 'println("hello from the ZIP on " + sys.props("os.name"))\n' > hello.scala
+          out=$(PATH="$bin:/c/Windows/System32:/c/Windows" protoscala.exe hello.scala)
+          echo "$out"
+          [ "$out" = "hello from the ZIP on Windows" ] || { echo "unexpected output"; exit 1; }
+          # The unpacked protoscalac builds a module against the headers and import
+          # libraries in the ZIP, and the unpacked protoscala runs it.
+          printf '@main def run(): Unit = println("module from the ZIP")\n' > mod.scala
+          "$bin/protoscalac.exe" mod.scala -o mod --build-so
+          out=$(PATH="$bin:/c/Windows/System32:/c/Windows" protoscala.exe --run-module mod/module.dll)
+          echo "$out"
+          [ "$out" = "module from the ZIP" ] || { echo "unexpected output"; exit 1; }

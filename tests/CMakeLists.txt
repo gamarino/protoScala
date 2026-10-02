@@ -44,12 +44,9 @@ endforeach()
 
 # The transpiler's CLI checks take the tests directory, protoscalac and a private
 # scratch directory in the build tree -- never /tmp, and never the source tree.
-# protoscalac builds a module with g++ and make, which Windows does not have.
-if(WIN32)
-    set(PROTOSCALA_TRANSPILER_CLI_TESTS "")
-else()
-    set(PROTOSCALA_TRANSPILER_CLI_TESTS transpiler-cli transpiler-refusals run-module compiled-provider)
-endif()
+# protoscalac builds a module with make and the C++ compiler, or on Windows with
+# nmake, cl and link from a Developer environment (the one the build runs in).
+set(PROTOSCALA_TRANSPILER_CLI_TESTS transpiler-cli transpiler-refusals run-module compiled-provider)
 foreach(cli_test ${PROTOSCALA_TRANSPILER_CLI_TESTS})
     add_test(NAME cli/${cli_test}
         COMMAND ${PROTOSCALA_SH} "${CMAKE_CURRENT_SOURCE_DIR}/cli/${cli_test}.sh" "$<TARGET_FILE:protoscala>"
@@ -193,18 +190,33 @@ endforeach()
 # which is fine on its own and is more than the rest of the suite costs together.
 # ON by default anyway, because a differential harness nobody runs is a harness
 # that rots -- which is precisely what its three anti-rot guards exist to prevent.
-# OFF on Windows, where protoscalac's generated Makefile and g++ are not there.
+# On Windows the modules are built with nmake, cl and link, so the default follows
+# whether nmake is on PATH, which it is in the Developer environment a build with
+# MSVC runs in.
 if(WIN32)
-    set(PROTOSCALA_TRANSPILED_TESTS_DEFAULT OFF)
+    find_program(PROTOSCALA_NMAKE nmake)
+    if(PROTOSCALA_NMAKE)
+        set(PROTOSCALA_TRANSPILED_TESTS_DEFAULT ON)
+    else()
+        set(PROTOSCALA_TRANSPILED_TESTS_DEFAULT OFF)
+        message(STATUS "protoScala: nmake not found, so the transpiled/* tests are off "
+                       "(configure from a Developer Command Prompt to turn them on)")
+    endif()
 else()
     set(PROTOSCALA_TRANSPILED_TESTS_DEFAULT ON)
 endif()
 option(PROTOSCALA_TRANSPILED_TESTS
-    "Register one transpiled/<fixture> case per conformance fixture (needs g++ and make)"
+    "Register one transpiled/<fixture> case per conformance fixture (needs the C++ toolchain and make, or nmake on Windows)"
     ${PROTOSCALA_TRANSPILED_TESTS_DEFAULT})
 
 if(PROTOSCALA_TRANSPILED_TESTS)
     set(PROTOSCALA_TRANSPILE_EXCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/transpile-exclude.txt")
+    # Windows' own list: fixtures whose transpiled twin cannot pass there, each
+    # with a reason. Checked in both directions like the main list.
+    set(PROTOSCALA_TRANSPILE_EXCLUDE_PLATFORM "")
+    if(WIN32)
+        set(PROTOSCALA_TRANSPILE_EXCLUDE_PLATFORM "${CMAKE_CURRENT_SOURCE_DIR}/transpile-exclude-windows.txt")
+    endif()
     foreach(conf_file ${PROTOSCALA_CONFORMANCE_FILES})
         if(conf_file MATCHES "(^|/)_")
             continue()
@@ -216,7 +228,8 @@ if(PROTOSCALA_TRANSPILED_TESTS)
                     "$<TARGET_FILE:protoscalac>"
                     "${CMAKE_CURRENT_SOURCE_DIR}/conformance/${conf_file}"
                     "${PROTOSCALA_TRANSPILE_EXCLUDE}"
-                    "${CMAKE_CURRENT_BINARY_DIR}/transpiled/${conf_slug}")
+                    "${CMAKE_CURRENT_BINARY_DIR}/transpiled/${conf_slug}"
+                    ${PROTOSCALA_TRANSPILE_EXCLUDE_PLATFORM})
         # Each case runs a C++ compiler, so it needs more than the default deadline.
         set_tests_properties("transpiled/${conf_file}" PROPERTIES TIMEOUT 300)
         # The same environment its interpreted twin runs under, so a fixture that
@@ -290,7 +303,8 @@ if(PROTOSCALA_TRANSPILED_TESTS)
                     "$<TARGET_FILE:protoscalac>"
                     "${CMAKE_SOURCE_DIR}/benchmarks/comparable/${bench_file}"
                     "${PROTOSCALA_TRANSPILE_EXCLUDE}"
-                    "${CMAKE_CURRENT_BINARY_DIR}/transpiled-bench/${bench_slug}")
+                    "${CMAKE_CURRENT_BINARY_DIR}/transpiled-bench/${bench_slug}"
+                    ${PROTOSCALA_TRANSPILE_EXCLUDE_PLATFORM})
         set_tests_properties("benchmarks-transpiled/${bench_file}" PROPERTIES TIMEOUT 600)
     endforeach()
     # The three workloads whose live set does not fit the ambient sweep ceiling pin

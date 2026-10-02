@@ -1,0 +1,11 @@
+# tests/transpile-exclude-windows.txt -- the fixtures whose TRANSPILED twin cannot
+# pass on Windows, one per line, in tests/transpile-exclude.txt's format:
+#
+#   <relative fixture path>  <reason-code>  <reason>
+#
+# Read by tests/conformance/run-transpiled.sh on Windows only, after the main list,
+# and checked in both directions like it: a fixture listed here that transpiles,
+# builds and runs correctly on Windows is a FAIL with the message to remove it.
+#
+# Empty: every fixture that runs transpiled on Linux and macOS runs transpiled on
+# Windows too.

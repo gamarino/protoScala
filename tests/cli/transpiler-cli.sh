@@ -9,6 +9,8 @@ PROTOSCALA="${1:?usage: transpiler-cli.sh <protoscala> <tests-dir> <protoscalac>
 TESTS_DIR="${2:?}"
 PROTOSCALAC="${3:?}"
 SCRATCH="${4:?}"
+# shellcheck source=platform.sh
+source "$(dirname "$0")/platform.sh"
 
 fails=0
 check() {  # check <description> <expected-rc> <actual-rc>
@@ -138,46 +140,115 @@ fi
 # --emit-make writes the Makefile, and its LIBS line is exactly the two libraries.
 "$PROTOSCALAC" "$HELLO" -o "$SCRATCH/make" --emit-make >"$SCRATCH/make.out" 2>&1
 check "--emit-make" 0 $?
-if [[ "$(grep '^LIBS' "$SCRATCH/make/Makefile")" != "LIBS     = -lprotoScala -lprotoCore" ]]; then
-    echo "FAIL: unexpected LIBS line: $(grep '^LIBS' "$SCRATCH/make/Makefile")"
-    fails=$((fails + 1))
-fi
-# -Wl,-rpath for every library directory, so the module loads without
-# LD_LIBRARY_PATH. That property is what Task 14 Step 5 verifies end to end.
-grep -q -- '-Wl,-rpath,' "$SCRATCH/make/Makefile" || {
-    echo "FAIL: the Makefile has no -Wl,-rpath entry"; fails=$((fails + 1)); }
-# -O2, not -O3: a generated module is one long function per block.
-grep -q '^CXXFLAGS = -O2 -fPIC -std=c++20$' "$SCRATCH/make/Makefile" || {
-    echo "FAIL: unexpected CXXFLAGS: $(grep '^CXXFLAGS' "$SCRATCH/make/Makefile")"
-    fails=$((fails + 1)); }
+if [[ $PS_WINDOWS -eq 1 ]]; then
+    # NMake syntax, for cl and link from a Developer environment (TranspilerMain.cpp).
+    if [[ "$(grep '^LIBS' "$SCRATCH/make/Makefile")" != "LIBS     = protoScala.lib protoCore.lib" ]]; then
+        echo "FAIL: unexpected LIBS line: $(grep '^LIBS' "$SCRATCH/make/Makefile")"
+        fails=$((fails + 1))
+    fi
+    # The C++ runtime protoScala.dll uses, and C++ exceptions: a module that differs
+    # in either links and then fails at run time.
+    grep -qE '^CXXFLAGS = /nologo /O2 /std:c\+\+20 /EHsc /utf-8 /bigobj /MDd?$' \
+            "$SCRATCH/make/Makefile" || {
+        echo "FAIL: unexpected CXXFLAGS: $(grep '^CXXFLAGS' "$SCRATCH/make/Makefile")"
+        fails=$((fails + 1)); }
+    grep -q '^TARGET = module.dll$' "$SCRATCH/make/Makefile" || {
+        echo "FAIL: the target is not module.dll"; fails=$((fails + 1)); }
+    # The entry points are exported: a DLL exports only what it declares.
+    grep -q 'PROTOSCALA_MODULE_EXPORT void\* proto_module_init()' "$SCRATCH/make/hello-world.cpp" || {
+        echo "FAIL: proto_module_init is not marked PROTOSCALA_MODULE_EXPORT"; fails=$((fails + 1)); }
+else
+    if [[ "$(grep '^LIBS' "$SCRATCH/make/Makefile")" != "LIBS     = -lprotoScala -lprotoCore" ]]; then
+        echo "FAIL: unexpected LIBS line: $(grep '^LIBS' "$SCRATCH/make/Makefile")"
+        fails=$((fails + 1))
+    fi
+    # -Wl,-rpath for every library directory, so the module loads without
+    # LD_LIBRARY_PATH. That property is what Task 14 Step 5 verifies end to end.
+    grep -q -- '-Wl,-rpath,' "$SCRATCH/make/Makefile" || {
+        echo "FAIL: the Makefile has no -Wl,-rpath entry"; fails=$((fails + 1)); }
+    # -O2, not -O3: a generated module is one long function per block.
+    grep -q '^CXXFLAGS = -O2 -fPIC -std=c++20$' "$SCRATCH/make/Makefile" || {
+        echo "FAIL: unexpected CXXFLAGS: $(grep '^CXXFLAGS' "$SCRATCH/make/Makefile")"
+        fails=$((fails + 1)); }
 
-# A directory with whitespace is refused, because make splits words on it.
-PROTOSCALAC_INCLUDE_DIRS="/a b" "$PROTOSCALAC" "$HELLO" -o "$SCRATCH/ws" --emit-make \
-    >"$SCRATCH/ws.out" 2>&1
-check "a whitespace include directory" 1 $?
-grep -q 'whitespace, which make cannot handle' "$SCRATCH/ws.out" || {
-    echo "FAIL: the whitespace message is missing"; fails=$((fails + 1)); }
+    # A directory with whitespace is refused, because make splits words on it.
+    PROTOSCALAC_INCLUDE_DIRS="/a b" "$PROTOSCALAC" "$HELLO" -o "$SCRATCH/ws" --emit-make \
+        >"$SCRATCH/ws.out" 2>&1
+    check "a whitespace include directory" 1 $?
+    grep -q 'whitespace, which make cannot handle' "$SCRATCH/ws.out" || {
+        echo "FAIL: the whitespace message is missing"; fails=$((fails + 1)); }
+fi
 
 # --build-so produces a loadable module, and the interpreter runs it.
 "$PROTOSCALAC" "$HELLO" -o "$SCRATCH/so" --build-so >"$SCRATCH/so.out" 2>&1
 check "--build-so" 0 $?
-[[ -f "$SCRATCH/so/module.so" ]] || { echo "FAIL: --build-so wrote no module.so"; fails=$((fails + 1)); }
-out=$("$PROTOSCALA" --run-module "$SCRATCH/so/module.so" 2>&1)
+[[ -f "$SCRATCH/so/module.$SO" ]] || {
+    echo "FAIL: --build-so wrote no module.$SO"; sed 's/^/  /' "$SCRATCH/so.out"; fails=$((fails + 1)); }
+out=$("$PROTOSCALA" --run-module "$SCRATCH/so/module.$SO" 2>&1)
 check "--run-module of the transpiled hello-world" 0 $?
 if [[ "$out" != "Hello, protoScala!" ]]; then
     echo "FAIL: the transpiled hello-world printed '$out'"
     fails=$((fails + 1))
 fi
-# ldd states the cost honestly (§D2): the module brings a protoScala runtime.
-# macOS has no ldd: otool -L lists the same, as libprotoScala.1.dylib.
-if command -v ldd >/dev/null 2>&1; then
-    deps=$(ldd "$SCRATCH/so/module.so"); runtime='libprotoScala.so.1'
+# The dependencies state the cost honestly (§D2): the module brings a protoScala
+# runtime. ldd on Linux, otool -L on macOS, dumpbin on Windows.
+if [[ $PS_WINDOWS -eq 1 ]]; then
+    runtime='protoScala.dll'
+elif command -v ldd >/dev/null 2>&1; then
+    runtime='libprotoScala.so.1'
 else
-    deps=$(otool -L "$SCRATCH/so/module.so"); runtime='libprotoScala.1.dylib'
+    runtime='libprotoScala.1.dylib'
 fi
-if ! grep -q "$runtime" <<<"$deps"; then
-    echo "FAIL: module.so does not name $runtime"
+if ! library_dependencies "$SCRATCH/so/module.$SO" | grep -q "$runtime"; then
+    echo "FAIL: module.$SO does not name $runtime"
     fails=$((fails + 1))
+fi
+
+# A string constant longer than one string literal may be on every compiler (MSVC:
+# 16380 bytes, 65535 concatenated) compiles, and round-trips: the generated tables
+# carry it as a byte array (CppTables.cpp, kMaxStringLiteralBytes).
+mkdir -p "$SCRATCH/long"
+{
+    printf 'val s = "'
+    for ((i = 0; i < 1500; i++)); do printf 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMN'; done
+    printf '"\n@main def run(): Unit = println(s.length.toString + " " + s.substring(74992))\n'
+} > "$SCRATCH/long/long.scala"
+"$PROTOSCALAC" "$SCRATCH/long/long.scala" -o "$SCRATCH/long" --build-so >"$SCRATCH/long.out" 2>&1
+check "--build-so of a 75000-byte string constant" 0 $?
+out=$("$PROTOSCALA" --run-module "$SCRATCH/long/module.$SO" 2>&1)
+if [[ "$out" != "75000 GHIJKLMN" ]]; then
+    echo "FAIL: the transpiled long string printed '$out'"
+    sed 's/^/  /' "$SCRATCH/long.out"
+    fails=$((fails + 1))
+fi
+
+if [[ $PS_WINDOWS -eq 1 ]]; then
+    # Paths with spaces are quoted in the NMake file rather than refused: an
+    # installation under C:\Program Files must work.
+    spaced="$SCRATCH/dir with space"
+    mkdir -p "$spaced/protoScala"
+    hdr_dirs=$(sed -n 's/^INCLUDES = //p' "$SCRATCH/make/Makefile" | sed 's|/I"\([^"]*\)"|\1\n|g')
+    while IFS= read -r d; do
+        d="${d# }"
+        [[ -f "$d/protoCore.h" ]] && cp "$d/protoCore.h" "$spaced/"
+        [[ -f "$d/protoScala/GeneratedModule.h" ]] && cp "$d/protoScala/GeneratedModule.h" "$spaced/protoScala/"
+    done <<<"$hdr_dirs"
+    PROTOSCALAC_INCLUDE_DIRS="$spaced" "$PROTOSCALAC" "$HELLO" -o "$spaced/out" --build-so \
+        >"$SCRATCH/spaced.out" 2>&1
+    check "--build-so with a directory containing spaces" 0 $?
+    out=$("$PROTOSCALA" --run-module "$spaced/out/module.dll" 2>&1)
+    [[ "$out" == "Hello, protoScala!" ]] || {
+        echo "FAIL: the module built under a directory with spaces printed '$out'"
+        sed 's/^/  /' "$SCRATCH/spaced.out"; fails=$((fails + 1)); }
+
+    # Outside a Developer environment protoscalac finds Visual Studio with vswhere
+    # and sets its environment up for the build.
+    env -u VCINSTALLDIR "$PROTOSCALAC" "$HELLO" -o "$SCRATCH/vswhere" --build-so \
+        >"$SCRATCH/vswhere.out" 2>&1
+    check "--build-so without VCINSTALLDIR (vswhere)" 0 $?
+    [[ -f "$SCRATCH/vswhere/module.dll" ]] || {
+        echo "FAIL: --build-so through vswhere wrote no module.dll"
+        sed 's/^/  /' "$SCRATCH/vswhere.out"; fails=$((fails + 1)); }
 fi
 
 [[ $fails -eq 0 ]] || exit 1

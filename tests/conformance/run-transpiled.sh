@@ -3,14 +3,18 @@
 # protoScala DIFFERENTIAL conformance runner (Phase 7 Task 11).
 #
 # Runs one `.scala` fixture through `protoscalac` instead of the interpreter:
-# transpile, compile the generated C++ with the generated Makefile, load the
-# resulting `.so` with `protoscala --run-module`, and judge the result against the
+# transpile, compile the generated C++ with the generated Makefile (make, or
+# nmake on Windows), load the resulting `.so` (`.dll`) with `protoscala --run-module`, and judge the result against the
 # fixture's own first-line directive. The directive parser and the two verdict
 # functions are COPIED VERBATIM from run.sh, so the two harnesses cannot disagree
 # about what a fixture asks for.
 #
 # Usage:
-#   run-transpiled.sh <protoscala> <protoscalac> <file.scala> <exclude-file> <scratch-dir>
+#   run-transpiled.sh <protoscala> <protoscalac> <file.scala> <exclude-file> <scratch-dir> \
+#                     [<platform-exclude-file>]
+#
+# The optional last file lists the fixtures one platform cannot run transpiled
+# (tests/transpile-exclude-windows.txt); it is read exactly like the main list.
 #
 # Three anti-rot guards, each present because its absence is a way for this
 # harness to pass while proving nothing:
@@ -33,6 +37,10 @@ PROTOSCALAC="${2:?}"
 FILE="${3:?}"
 EXCLUDE_FILE="${4:?}"
 SCRATCH="${5:?}"
+PLATFORM_EXCLUDE_FILE="${6:-}"
+# SO (so or dll) and MAKE_CMD (make, or nmake on Windows).
+# shellcheck source=../cli/platform.sh
+source "$(dirname "$0")/../cli/platform.sh"
 
 if [[ ! -x "$PROTOSCALA" ]]; then
     echo "FAIL: protoscala binary not executable: $PROTOSCALA"
@@ -70,17 +78,20 @@ esac
 # comment. The relative path is matched as a SUFFIX of the fixture path, so the
 # list is written the way a reader writes a fixture name.
 excluded_reason=""
-if [[ -f "$EXCLUDE_FILE" ]]; then
+excluded_by="$(basename "$EXCLUDE_FILE")"
+for list in "$EXCLUDE_FILE" "$PLATFORM_EXCLUDE_FILE"; do
+    [[ -n "$list" && -f "$list" ]] || continue
     while read -r path code reason; do
         [[ -z "${path:-}" || "${path:0:1}" == "#" ]] && continue
         case "$FILE" in
-            *"/$path") excluded_reason="$code  $reason"; break ;;
+            *"/$path") excluded_reason="$code  $reason"; excluded_by="$(basename "$list")"; break ;;
         esac
-    done < "$EXCLUDE_FILE"
-fi
+    done < "$list"
+    [[ -n "$excluded_reason" ]] && break
+done
 
 mkdir -p "$SCRATCH" || { echo "FAIL: cannot create scratch directory $SCRATCH"; exit 1; }
-rm -f "$SCRATCH"/*.cpp "$SCRATCH"/*.o "$SCRATCH"/module.so "$SCRATCH"/Makefile 2>/dev/null
+rm -f "$SCRATCH"/*.cpp "$SCRATCH"/*.o "$SCRATCH"/*.obj "$SCRATCH"/module.* "$SCRATCH"/Makefile 2>/dev/null
 
 stdout_file="$SCRATCH/stdout"
 stderr_file="$SCRATCH/stderr"
@@ -125,7 +136,7 @@ if ! timeout 120s "$PROTOSCALAC" "$ABS_FILE" -o "$SCRATCH" --emit-make >"$transp
     if [[ "$directive" == "EXPECT-ERROR" ]]; then
         if [[ -z "$expected" ]] || grep -q -F -- "$expected" "$stderr_file"; then
             if [[ -n "$excluded_reason" ]]; then
-                echo "FAIL: $FILE_BASE is excluded as $excluded_reason but now works — remove it from $(basename "$EXCLUDE_FILE")"
+                echo "FAIL: $FILE_BASE is excluded as $excluded_reason but now works — remove it from $excluded_by"
                 exit 1
             fi
             echo "transpiled OK: $FILE_BASE (rejected at compile time, as the fixture expects)"
@@ -152,7 +163,7 @@ t1=$(ms_now)
 
 # --- stage 2: compile --------------------------------------------------------
 compile_out="$SCRATCH/compile.log"
-if ! ( cd "$SCRATCH" && timeout 300s make ) >"$compile_out" 2>&1; then
+if ! ( cd "$SCRATCH" && timeout 300s "${MAKE_CMD[@]}" ) >"$compile_out" 2>&1; then
     # Guard 1: a C++ compile failure is a harness FAIL whatever the directive
     # says. An EXPECT-ERROR fixture must not be able to pass on a g++ diagnostic.
     echo "FAIL: the generated C++ did not compile ($FILE_BASE)"
@@ -173,7 +184,7 @@ if [[ -n "${PROTOSCALA_RUN_CWD:-}" ]]; then
 else
     RUN_DIR="$FILE_DIR"
 fi
-( cd "$RUN_DIR" && timeout 90s "$PROTOSCALA" --run-module "$SCRATCH/module.so" </dev/null ) \
+( cd "$RUN_DIR" && timeout 90s "$PROTOSCALA" --run-module "$SCRATCH/module.$SO" </dev/null ) \
     >"$stdout_file" 2>"$stderr_file"
 exit_code=$?
 t3=$(ms_now)
@@ -199,7 +210,7 @@ esac
 
 if [[ -n "$excluded_reason" && $verdict_ok -eq 0 ]]; then
     # Guard 3: the list must not rot.
-    echo "FAIL: $FILE_BASE is excluded as $excluded_reason but now works — remove it from $(basename "$EXCLUDE_FILE")"
+    echo "FAIL: $FILE_BASE is excluded as $excluded_reason but now works — remove it from $excluded_by"
     exit 1
 fi
 if [[ -n "$excluded_reason" ]]; then

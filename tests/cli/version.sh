@@ -104,12 +104,22 @@ if [[ -z "$line" ]]; then
     echo "FAIL: --version printed no 'compiled modules searched:' line"
     exit 1
 fi
-grep -q 'protoscala/modules' <<<"$line" || {
+grep -qE 'protoscala[/\\]modules' <<<"$line" || {
     echo "FAIL: the installed module directory is not in the list: $line"; exit 1; }
 
-line=$(mods_line PROTOSCALA_MODULE_PATH="/nonexistent/aaa:/nonexistent/bbb")
+# The list is separated as PATH is (';' on Windows), and its entries are Windows
+# paths there: Git for Windows' bash would rewrite a POSIX path list in the
+# environment of a native program.
+# shellcheck source=platform.sh
+source "$(dirname "$0")/platform.sh"
+if [[ $PS_WINDOWS -eq 1 ]]; then
+    aaa='C:/nonexistent/aaa'; bbb='C:/nonexistent/bbb'
+else
+    aaa='/nonexistent/aaa'; bbb='/nonexistent/bbb'
+fi
+line=$(mods_line PROTOSCALA_MODULE_PATH="$aaa$PATHSEP$bbb")
 # In order, and both before the installed directory.
-if ! grep -qE 'searched: /nonexistent/aaa /nonexistent/bbb .*protoscala/modules' <<<"$line"; then
+if ! grep -qF "searched: $aaa $bbb " <<<"$line" || ! grep -qE 'protoscala[/\\]modules' <<<"$line"; then
     echo "FAIL: PROTOSCALA_MODULE_PATH is not reported in order, ahead of the install:"
     echo "  $line"
     exit 1

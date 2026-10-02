@@ -17,6 +17,8 @@ PROTOSCALAC="${2:?}"
 CALLER="${3:?}"
 SRC="${4:?}"
 SCRATCH="${5:?}"
+# shellcheck source=../cli/platform.sh
+source "$(dirname "$0")/../cli/platform.sh"
 
 fails=0
 
@@ -51,6 +53,7 @@ require_private_scratch() {
     local p="$1"
     case "$p" in
         /*) ;;
+        [A-Za-z]:/*) ;;   # Windows: CTest names the build tree as C:/...
         *) echo "FAIL: the scratch path must be absolute, got '$p'"; exit 1 ;;
     esac
     case "$p" in
@@ -98,7 +101,7 @@ if ! "$PROTOSCALAC" "$SRC/Exports.scala" -o "$SCRATCH" --build-so >"$SCRATCH/bui
     sed 's/^/  /' "$SCRATCH/build.out"
     exit 1
 fi
-out=$("$CALLER" "$SCRATCH/module.so" 2>&1)
+out=$("$CALLER" "$SCRATCH/module.$SO" 2>&1)
 rc=$?
 if [[ $rc -ne 0 || "$out" != "OK" ]]; then
     echo "FAIL: the foreign caller exited $rc:"

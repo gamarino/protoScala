@@ -67,18 +67,18 @@ cat >"$work/stream.scala" <<'SCALA'
 for line <- Source.stdin.getLines() do
   println("got " + line)
 SCALA
-fifo_in="$work/in.fifo"; fifo_out="$work/out.fifo"
-mkfifo "$fifo_in" "$fifo_out"
-( timeout 30s "$P" "$work/stream.scala" <"$fifo_in" >"$fifo_out" 2>&1 ) &
-runner=$!
-exec 7>"$fifo_in" 8<"$fifo_out"
-echo "one" >&7
-IFS= read -r -t 20 first <&8 || first="(timeout)"
-echo "two" >&7
-exec 7>&-
-IFS= read -r -t 20 second <&8 || second="(timeout)"
-exec 8<&-
-wait "$runner"; rc=$?
+# The two pipes are a coprocess's rather than named FIFOs: Git for Windows' bash
+# emulates a FIFO in a way a native program cannot read, but a coprocess's pipes
+# are the system's own, so the same check runs on every platform.
+coproc STREAM { timeout 30s "$P" "$work/stream.scala" 2>&1; }
+to_program=${STREAM[1]}
+from_program=${STREAM[0]}
+echo "one" >&"$to_program"
+IFS= read -r -t 20 first <&"$from_program" || first="(timeout)"
+echo "two" >&"$to_program"
+exec {to_program}>&-
+IFS= read -r -t 20 second <&"$from_program" || second="(timeout)"
+wait "$STREAM_PID"; rc=$?
 [[ $rc -eq 0 && "$first" == "got one" && "$second" == "got two" ]] ||
     fail "streaming stdin: exit $rc, got '$first' then '$second'"
 
