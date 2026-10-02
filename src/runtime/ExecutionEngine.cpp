@@ -102,7 +102,8 @@ const proto::ProtoObject* ExecutionEngine::callNative(proto::ProtoContext* ctx, 
     // VM and terminate the process (Phase 6 plan A0-7). std::logic_error reaches
     // the std::exception arm and is re-thrown untouched, so D74 survives: a VM
     // defect stays uncatchable.
-    // The four pass-through clauses re-throw after the catch (see runFrame).
+    // Every clause, the translating one included, re-throws after the catch
+    // (see runFrame).
     std::exception_ptr passOn;
     try {
         r = fn(&scope, self, nullptr, list, nullptr);
@@ -115,7 +116,7 @@ const proto::ProtoObject* ExecutionEngine::callNative(proto::ProtoContext* ctx, 
     } catch (const std::exception&) {
         passOn = std::current_exception();  // runLoop translates it, and attaches the source line
     } catch (...) {
-        throw ScalaError("RuntimeException", "native exception");
+        passOn = std::make_exception_ptr(ScalaError("RuntimeException", "native exception"));
     }
     if (passOn) std::rethrow_exception(passOn);
     if (!r) r = PROTO_NONE;
@@ -963,7 +964,8 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
     // call opcode; it is what makes a frame resumable after a cooperative
     // yield (DESIGN §8.3, D43).
     unsigned pendingBase = kNoPendingCall;
-    // Set by the pass-through clauses below and re-thrown after them (runFrame).
+    // Set by every clause below, translating ones included, and re-thrown
+    // after the catch has completed (runFrame).
     std::exception_ptr passOn;
     try {
         for (;;) {
@@ -1309,13 +1311,16 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
         // Record this frame and rethrow; the frames prepend themselves, so the
         // actor's list reads outermost-first (the innermost frame catches first).
         *faultPc = static_cast<std::size_t>(ip - code) - 1;
-        if (pendingBase == kNoPendingCall)
-            throw ScalaError("UnsupportedOperationException",
-                             "await is not supported here: " + mod.name() +
-                                 " cannot be suspended at this instruction");
-        appendSuspendedFrame(&frame, layout_, mod, static_cast<unsigned>(ip - code), pendingBase,
-                             slots);
-        passOn = std::current_exception();
+        if (pendingBase == kNoPendingCall) {
+            passOn = std::make_exception_ptr(
+                ScalaError("UnsupportedOperationException",
+                           "await is not supported here: " + mod.name() +
+                               " cannot be suspended at this instruction"));
+        } else {
+            appendSuspendedFrame(&frame, layout_, mod, static_cast<unsigned>(ip - code),
+                                 pendingBase, slots);
+            passOn = std::current_exception();
+        }
     } catch (ScalaThrow& t) {
         // A Scala exception value: runFrame searches this module's handler table.
         *faultPc = static_cast<std::size_t>(ip - code) - 1;
@@ -1334,32 +1339,32 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
         *faultPc = static_cast<std::size_t>(ip - code) - 1;
         ScalaError se("IllegalArgumentException", e.what());
         se.line = mod.lineAt(*faultPc);
-        throw se;
+        passOn = std::make_exception_ptr(se);
     } catch (const std::out_of_range& e) {
         // Also a std::logic_error subclass: caught by its exact type, as above.
         *faultPc = static_cast<std::size_t>(ip - code) - 1;
         ScalaError se("IndexOutOfBoundsException", e.what());
         se.line = mod.lineAt(*faultPc);
-        throw se;
+        passOn = std::make_exception_ptr(se);
     } catch (const std::overflow_error& e) {
         // Derives from std::runtime_error, so it must precede that clause.
         *faultPc = static_cast<std::size_t>(ip - code) - 1;
         ScalaError se("ArithmeticException", e.what());
         se.line = mod.lineAt(*faultPc);
-        throw se;
+        passOn = std::make_exception_ptr(se);
     } catch (const std::bad_alloc& e) {
         // An Error, not an Exception: `case e: Exception` must not catch it.
         *faultPc = static_cast<std::size_t>(ip - code) - 1;
         ScalaError se("OutOfMemoryError", e.what());
         se.line = mod.lineAt(*faultPc);
-        throw se;
+        passOn = std::make_exception_ptr(se);
     } catch (const std::runtime_error& e) {
         // A protoCore error (e.g. "Objects are not integer types for division.")
         // becomes a Scala RuntimeException; it is never swallowed (DESIGN §7).
         *faultPc = static_cast<std::size_t>(ip - code) - 1;
         ScalaError se("RuntimeException", e.what());
         se.line = mod.lineAt(*faultPc);
-        throw se;
+        passOn = std::make_exception_ptr(se);
     }
     std::rethrow_exception(passOn);
 }
