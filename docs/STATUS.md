@@ -1322,6 +1322,18 @@ corpus. Operands and all three configurations:
 See DESIGN §11 for the full table. Unchanged this phase: R2, R4, R8. **R5 was
 exercised for the first time in Phase 6** — see the three entries below it.
 
+- **Windows (MSVC): everything Linux runs, after the Windows review
+  (2026-10-02).** The interpreter, the REPL, the I/O track and now `protoscalac`
+  (NMake `Makefile`, `nmake`, `cl`, `link`, `module.dll`) build and run on
+  Windows; every test registered on Linux is registered and run on the
+  `windows-2022` CI runner, with no exclusion (`tests/transpile-exclude-windows.txt`
+  is empty). Actor and `Future` bodies get the evaluator's 32 MiB stack there
+  through protoCore 2.9.0's `ProtoSpace::setThreadStackBytes`, which is why
+  protoCore 2.9.0 is the floor on Windows. Platform differences (path lists with
+  `;`, `.dll` modules and plug-ins, no readline, a `.bat` file is not run
+  directly, `cmd.exe` built-ins are not programs for `Process`) are listed in
+  docs/INSTALLATION.md, "Windows (MSVC)"; none of them is a language deviation.
+
 - **An imported member cannot be an assignment target — pre-existing, and now
   easier to hit.** `object Box { var counter = 0 }` then `import Box.*` and
   `counter = 5` fails with `Not found: counter`, because a selector import binds a

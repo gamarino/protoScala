@@ -45,6 +45,17 @@ you want the `Makefile` but would rather run `make` yourself.
 The target is always `module.so`. Rename it to the name you want the module found
 under before you put it on a search path.
 
+**On Windows** the same two commands work from a Developer Command Prompt for Visual
+Studio (or from any prompt, when Visual Studio with its C++ workload is installed:
+`protoscalac` finds it). The `Makefile` is then an NMake file, `nmake`, `cl` and
+`link` build it, and the module is `module.dll`:
+
+```text
+> protoscalac greet.scala --build-so
+> protoscala --run-module module.dll
+Hello from a compiled module!
+```
+
 ## 17.2 What the C++ looks like, and what it does not do
 
 Two things are worth seeing once, because they are the whole design.

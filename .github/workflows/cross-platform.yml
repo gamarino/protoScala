@@ -156,7 +156,8 @@ jobs:
         if: runner.os == 'Windows'
         working-directory: protoScala/build
         run: |
-          cpack -G ZIP
+          # CMake's cpack, by its path: Chocolatey's cpack.exe is also on PATH.
+          "$(dirname "$(command -v cmake)")/cpack" -G ZIP
           zip=$(ls protoscala-*.zip | head -1)
           unzip -l "$zip" | tee zip-contents.txt
           for f in protoscala.exe protoscalac.exe protoScala.dll protoCore-3.dll \

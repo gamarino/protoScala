@@ -6,15 +6,68 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — the Windows review, 2026-10-02
+
+- **`protoscalac` builds modules on Windows.** `--emit-make` writes an NMake
+  `Makefile` there (`cl /O2 /std:c++20 /EHsc /MD`, `link /DLL` against
+  `protoScala.lib protoCore.lib`, every path quoted) and `--build-so` runs
+  `nmake`, from a Developer Command Prompt or through the environment `vswhere`
+  finds, producing `module.dll`. Directory lists are `;`-separated on Windows.
+  The entry points of a generated module carry `PROTOSCALA_MODULE_EXPORT`
+  (new in `<protoScala/GeneratedModule.h>`: `__declspec(dllexport)` on Windows,
+  default visibility elsewhere; an addition, so `PROTOSCALA_ABI_SOVERSION`
+  stays 1). Strings longer than 4096 bytes are emitted as byte arrays rather
+  than literals, on every platform, because MSVC caps a string literal at
+  16380 bytes. Every `transpiled/*` case and the four transpiler CLI checks now
+  run on Windows CI; `tests/transpile-exclude-windows.txt` lists none.
+- **Worker threads get the evaluator's 32 MiB stack on every platform.** The
+  actor workers, which run every actor and `Future` body, are sized through
+  protoCore's `ProtoSpace::setThreadStackBytes`, which protoCore 2.9.0 honours
+  on Linux, macOS and Windows; on Windows they had the 1 MiB default, so a
+  recursion inside an actor overflowed about 30 times sooner than in the main
+  program. **The protoCore floor on Windows is now 2.9.0.**
+- **protoIO 0.2.2 is required** (`find_package(protoIO 0.2.2)`; the sibling
+  tree is checked against the same floor).
+- **Relative library paths load.** `protoscala --run-module module.so`, a
+  relative `PROTOSCALA_MODULE_PATH` entry and a relative provider path are made
+  absolute before they are loaded: POSIX `dlopen` searches the library path, not
+  the working directory, for a name with no slash, and Windows refused every
+  relative path. The Windows `dlerror` stand-in now reports an error once, as
+  POSIX's does, and a plug-in's `.DLL` suffix is matched without regard to case.
+- **The Windows ZIP is self-contained**: protoCore's DLL (whatever file its
+  imported target names, `protoCore-3.dll` since 2.9.0), OpenSSL's two DLLs by
+  the names its found version gives them (configuration fails when they are
+  missing, instead of globbing), OpenSSL's licence, the Visual C++ runtime
+  (`InstallRequiredSystemLibraries`), and protoCore's header and import library
+  for `protoscalac`. NSIS is generated only when `makensis` is found. CI unpacks
+  the ZIP into an empty directory and runs it with only Windows' directories on
+  `PATH`.
+- **Debug and Release no longer mix silently on Windows**: configuration stops
+  when protoCore's package holds no build with the C++ runtime this build uses.
+- **MSVC warnings**: protoScala's own targets build warning-free at `/W3`
+  (`gnu::` attributes behind a macro, the prelude's bytes as `unsigned char`,
+  a size truncation in a file write, `_CRT_SECURE_NO_WARNINGS` for the
+  standard C functions), and Windows CI builds them with `/WX`
+  (`-DPROTOSCALA_MSVC_WARNINGS_AS_ERRORS=ON`).
+- **Tests no longer excluded on Windows**: `cli/io-stdin` streams through a
+  coprocess's pipes instead of named FIFOs, and `cli/io-program` and
+  `cli/version` no longer put POSIX paths in the environment, which Git for
+  Windows' `bash` rewrites. WINDOWS_COUNTS_CHANGELOG
+- `printf` formats in the protoST interop test use `%llu` with a cast for
+  `proto_ulong`; `NOMINMAX` is defined only when it is not already.
+
 ### Added — Windows (MSVC), 2026-10-01
 
 - **Native Windows build.** protoScala, protoCore and protoIO build with Visual
   Studio 2022; `protoscala` runs scripts and the REPL natively and installs
-  with `cmake --install` (or `cpack -G ZIP`). 1413 of 1416 tests pass on
-  Windows 11; the three left fail in the Git Bash harness, not the runtime.
-  The transpiler's module build (`g++`, `make`) is not ported yet. Every
-  Windows difference is behind `WIN32` / `_MSC_VER`; on Linux the suite passes
-  2409/2409 as before. See docs/INSTALLATION.md, "Windows (MSVC)".
+  with `cmake --install` (or `cpack -G ZIP`). At the time 1413 of 1416 tests
+  passed on Windows 11, the three left failing in the Git Bash harness, and the
+  transpiler's module build was not ported; both are closed by the review
+  above. The Windows-only code is behind `WIN32` / `_MSC_VER`, with one
+  exception that applies everywhere: the VM re-throws an exception after its
+  catch clause (`std::rethrow_exception`) instead of inside it (see "Fixed"
+  below); on Linux the suite passed 2409/2409 as before. See
+  docs/INSTALLATION.md, "Windows (MSVC)".
 - `.gitattributes` keeps `*.scala` LF on every platform: a multi-line string
   literal keeps its line endings, so a CRLF checkout changed what programs
   meant.
@@ -34,7 +87,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   clause instead of `throw;` inside it. The two are equivalent under the
   Itanium ABI (Linux, macOS); under MSVC a catch clause runs before the stack
   below it is released, so each re-throw cost several KiB more and the native
-  stack overflowed while the error propagated.
+  stack overflowed while the error propagated. The change is unconditional, on
+  every platform. Since the Windows review the clauses that TRANSLATE an
+  exception (`std::invalid_argument`, `out_of_range`, `overflow_error`,
+  `bad_alloc`, `runtime_error`, a native's non-standard exception, an `await`
+  that cannot suspend) capture the translated `ScalaError` and throw it after
+  the catch as well, instead of inside it.
 
 ### Added — input and output (the I/O track, 2026-09-30)
 

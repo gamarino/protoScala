@@ -20,10 +20,14 @@ executable sees no protoCore at all.)
   the interactive REPL: configuration fails with a `FATAL_ERROR` without it
   (except on Windows, where the REPL uses the console's own line editing).
 - **protoCore 2.7.0 or newer** (2.7.0 is where `proto::proto_long` first exists; the "Why 2.6.1" floors below still hold underneath it), installed, with its CMake package configuration.
-  **2.5.0 is what the packaging sections of this document were verified
-  against; the I/O track (2026-09-30) was built and tested against 2.6.2.** See
-  protoCore's `docs/INSTALLATION.md`.
-- **protoIO 0.1** (the POSIX I/O layer the protoCore runtimes share), either
+  **On Windows the floor is 2.9.0**: it is the release that honours
+  `ProtoSpace::setThreadStackBytes` there, which gives the actor workers the
+  evaluator's 32 MiB stack (§Windows). CI builds and tests against **2.7.0 on
+  Linux** and **2.9.0 on macOS and Windows**; the packaging sections below were
+  verified against 2.5.0. See protoCore's `docs/INSTALLATION.md`.
+- **protoIO 0.2.2 or newer within 0.2** (the I/O layer the protoCore runtimes
+  share; 0.2.2 brings `process::run` options, crash statuses as 128 + signal on
+  Windows too, the Windows certificate store for TLS and a dual-stack listener), either
   installed (`protoio-dev`, or any prefix holding `lib/cmake/protoIO/`, named
   with `-DCMAKE_PREFIX_PATH`), a build tree named with `-DprotoIO_DIR=<protoIO>/
   build_release`, or the source tree checked out beside this one as
@@ -168,27 +172,32 @@ so a protoCore installed into the same prefix is found with no `LD_LIBRARY_PATH`
 installed files above. `--build-so` runs `make` and a C++ compiler, so those two are a
 package **recommendation** rather than a dependency: most users of the interpreter never
 reach that mode, and a hard dependency would pull a toolchain onto every installation.
+On Windows it runs `nmake`, `cl` and `link` from Visual Studio (2022 verified, or its
+Build Tools with the C++ workload): from a Developer Command Prompt directly, and
+otherwise through the environment `vswhere` finds (§Windows).
 
 **Three environment overrides**, each replacing the corresponding baked-in value:
 
 | Variable | Replaces |
 |---|---|
 | `PROTOSCALAC_CXX` | the C++ compiler the generated `Makefile` invokes |
-| `PROTOSCALAC_INCLUDE_DIRS` | the `-I` directories (`:`-separated) |
-| `PROTOSCALAC_LIBRARY_DIRS` | the `-L` / `-rpath` directories (`:`-separated) |
+| `PROTOSCALAC_INCLUDE_DIRS` | the `-I` directories (`:`-separated; `;` on Windows) |
+| `PROTOSCALAC_LIBRARY_DIRS` | the `-L` / `-rpath` directories (`:`-separated; `;` on Windows) |
 
 Without them, `protoscalac` decides between the build tree's directories and the
 installation's by comparing its own location with the build tree's, so a relocated prefix
 keeps working.
 
-**The generated target is always `module.so`.** Rename it to `<module>.so` before putting
-it on a module search path: `CompiledModuleProvider` resolves the logical path `a.b.C` to
-`<base>/a/b/C.so`, so a file still called `module.so` is only reachable through
-`protoscala --run-module ./module.so`.
+**The generated target is always `module.so`** (`module.dll` on Windows). Rename it to
+`<module>.so` before putting it on a module search path: `CompiledModuleProvider` resolves
+the logical path `a.b.C` to `<base>/a/b/C.so`, so a file still called `module.so` is only
+reachable through `protoscala --run-module module.so` (a relative path is taken against
+the working directory).
 
 **Where a compiled module is looked for**, in order:
 
-1. each `:`-separated entry of `PROTOSCALA_MODULE_PATH`;
+1. each `:`-separated (`;` on Windows) entry of `PROTOSCALA_MODULE_PATH`, a relative
+   one against the working directory;
 2. `<prefix>/<libdir>/protoscala/modules`.
 
 `protoscala --version` prints that list. Compiled modules are searched **after** source
@@ -200,10 +209,11 @@ change the meaning of an `import` that already resolved.
 ## Windows (MSVC)
 
 protoScala builds and runs natively on Windows with Visual Studio 2022 (MSVC
-19.44 verified, Windows 11), using the CMake and Ninja that ship with it. Build
-protoCore first (its `docs/INSTALLATION.md`, "Windows (MSVC)") and install it
-into a prefix; protoIO is compiled from the sibling `../protoIO` as on Linux.
-From an "x64 Native Tools Command Prompt":
+19.44 verified, Windows 11 and the `windows-2022` CI runner), using the CMake
+and Ninja that ship with it. Build protoCore **2.9.0 or later** first (its
+`docs/INSTALLATION.md`, "Windows (MSVC)") and install it into a prefix; protoIO
+is compiled from the sibling `../protoIO` as on Linux. From an "x64 Native Tools
+Command Prompt":
 
 ```bat
 set PREFIX=%LOCALAPPDATA%\Programs\proto
@@ -211,20 +221,44 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ^
       -DCMAKE_PREFIX_PATH=%PREFIX% -DCMAKE_INSTALL_PREFIX=%PREFIX% ^
       "-DOPENSSL_ROOT_DIR=C:/Program Files/OpenSSL-Win64"
 cmake --build build
-ctest --test-dir build -j8
+ctest --test-dir build -j4
 cmake --install build
 %PREFIX%\bin\protoscala --version
 ```
 
-Any OpenSSL 3 for Windows with headers and import libraries works as
-`OPENSSL_ROOT_DIR`; the one PostgreSQL ships (`C:/Program Files/PostgreSQL/17`)
-was used for the verification. The build copies the DLLs protoScala needs
-(`protoCore.dll`, `libssl-3-x64.dll`, `libcrypto-3-x64.dll`) into `build/bin/`,
-so `protoscala.exe` and the tests run in place; `cmake --install` puts
-`protoscala.exe`, `protoScala.dll` and the OpenSSL DLLs in `<prefix>/bin`, and
-protoCore's own install adds `protoCore.dll` there. With that one directory on
-`PATH`, `protoscala` runs scripts and the REPL from `cmd.exe` or PowerShell.
-`cpack -G ZIP` produces `protoscala-<version>-win64.zip`.
+**Debug and Release do not mix.** A Debug build uses the debug C++ runtime
+(`/MDd`) and a Release build the release one (`/MD`); `protoScala.dll` and
+protoCore's DLL exchange `std::string` and C++ exceptions, so both must be built
+with the same one. Configuration stops with a message naming both when the
+protoCore package holds no build of the kind requested (CMake would otherwise
+silently pick the other one).
+
+**OpenSSL.** Any OpenSSL 3 for Windows with headers, import libraries and its
+`bin\*.dll` works as `OPENSSL_ROOT_DIR` (the Shining Light build the CI runner
+has, or the one PostgreSQL ships). The two DLLs are looked up by the names the
+version found gives them (`libcrypto-3-x64.dll`, `libssl-3-x64.dll`), and
+configuration **fails** when they are not there, rather than shipping whatever
+a wildcard matched; the version is printed and goes into the name of the
+licence file the package carries. Its licence file is found in the OpenSSL
+directory, or named with `-DPROTOSCALA_OPENSSL_LICENSE_FILE=<file>`.
+
+**What an installation holds.** The build copies the DLLs protoScala needs into
+`build/bin/`, so `protoscala.exe` and the tests run in place. `cmake --install`
+(and `cpack -G ZIP`, which packs the same files) is **self-contained**, because
+Windows has no package manager to bring a dependency in:
+
+| Where | What |
+|---|---|
+| `bin/` | `protoscala.exe`, `protoscalac.exe`, `protoScala.dll`; protoCore's DLL (`protoCore-3.dll` since protoCore 2.9.0 -- whatever file the imported target names); `libcrypto-3-x64.dll`, `libssl-3-x64.dll`; the Visual C++ runtime DLLs (`msvcp140.dll`, `vcruntime140.dll`, ..., through CMake's `InstallRequiredSystemLibraries`, so a machine without the Visual C++ Redistributable runs it too) |
+| `lib/`, `include/` | `protoScala.lib`, `protoCore.lib`, `protoScala/GeneratedModule.h`, `protoCore.h`: what `protoscalac --build-so` compiles and links a module against |
+| `share/doc/protoScala/` | `LICENSE`, `README.md`, `OpenSSL-<version>-LICENSE.txt` |
+
+With that `bin` on `PATH`, `protoscala` runs scripts and the REPL from
+`cmd.exe` or PowerShell. `cpack -G ZIP` produces `protoscala-<version>-win64.zip`;
+CI unpacks it into an empty directory and runs `protoscala.exe` there with only
+Windows' own directories on `PATH`, then builds a module with the unpacked
+`protoscalac.exe` and runs it. An NSIS installer is added to the generators only
+when `makensis` is found.
 
 How Windows differs, by design:
 
@@ -237,27 +271,45 @@ How Windows differs, by design:
 - **UTF-8 throughout.** `protoscala.exe` carries a manifest that makes UTF-8
   the process code page (Windows 10 1903 or later), so arguments, environment
   variables and file names with non-ASCII characters work as on Linux.
-- **Path lists use `;`** (`PROTOSCALA_MODULE_PATH`, `PROTOSCALA_PROVIDERS`),
-  as `PATH` does, since drive letters contain `:`. Provider plug-ins are
-  `.dll` files and export their two ABI functions with
-  `PROTOSCALA_PROVIDER_EXPORT` (`src/umd/ProviderPlugins.h`).
+- **Path lists use `;`** (`PROTOSCALA_MODULE_PATH`, `PROTOSCALA_PROVIDERS`,
+  `PROTOSCALAC_INCLUDE_DIRS`, `PROTOSCALAC_LIBRARY_DIRS`), as `PATH` does,
+  since drive letters contain `:`. Provider plug-ins and compiled modules are
+  `.dll` files (the suffix is matched without regard to case). A plug-in exports
+  its two ABI functions with `PROTOSCALA_PROVIDER_EXPORT`
+  (`src/umd/ProviderPlugins.h`); a module's entry points carry
+  `PROTOSCALA_MODULE_EXPORT` (`<protoScala/GeneratedModule.h>`).
 - **No readline.** The console edits the line and keeps a history itself, so
   the REPL reads plain lines and keeps no history file.
-- **Deep recursion** still raises `StackOverflowError`: the evaluator thread
-  reserves 32 MiB, and the stack limit comes from
-  `GetCurrentThreadStackLimits`.
+- **Deep recursion reaches the same depth everywhere.** The evaluator thread
+  reserves 32 MiB, and so do the actor workers that run every actor and
+  `Future` body: protoScala sets protoCore's `ProtoSpace::setThreadStackBytes`,
+  which protoCore 2.9.0 honours on Windows (whose default is 1 MiB) as on Linux
+  and macOS. `tests/conformance/14-futures/deep-recursion-in-an-actor-and-a-future.scala`
+  checks that a worker recurses as deep as the main program. The stack limit
+  comes from `GetCurrentThreadStackLimits`, and the overflow raises
+  `StackOverflowError`.
+- **Other programs.** `Process(...)` and `"cmd".!` keep Scala's semantics: the
+  command is split on spaces and run directly, **not** through a shell, so a
+  `cmd.exe` built-in such as `dir` or `echo` is not a program there (as on the
+  JVM). protoIO refuses to run a `.bat` or `.cmd` file directly, because
+  `cmd.exe` would re-parse its arguments; run `cmd /c <file>` explicitly when
+  that is what is meant. A child ended by an unhandled exception or by
+  `destroy()` reports 128 + the corresponding signal number, as on POSIX.
+- **`protoscalac` builds modules with the Microsoft toolset**: an NMake
+  `Makefile`, `nmake`, `cl` and `link`, producing `module.dll`
+  (docs/PROTOSCALAC_SPECIFICATION.md §1). It needs the Developer environment,
+  or finds it with `vswhere`.
 
-Not available on Windows yet:
-
-- **`protoscalac`'s module build.** The transpiler drives `g++` and `make`;
-  it has not been ported to MSVC, so the `transpiled/*` tests are off by
-  default there (`PROTOSCALA_TRANSPILED_TESTS`) and the four transpiler CLI
-  checks are not registered.
-- **Test harness.** The script tests run through Git for Windows' `bash`.
-  1413 of 1416 tests pass; the three that do not (`cli/version`,
-  `cli/io-stdin`, `cli/io-program`) fail in the harness, not in protoScala:
-  Git Bash rewrites the POSIX paths those scripts put in environment
-  variables, and an MSYS FIFO does not reach a native program.
+**Test harness.** The script tests run through Git for Windows' `bash`, and
+every test registered on Linux is registered on Windows too, the transpiled
+twins (`transpiled/*`, on when `nmake` is found at configure time) and the
+transpiler CLI checks included. The scripts avoid what that `bash` cannot
+give a native program: it rewrites a POSIX path placed in the environment
+(`/bin/sh` becomes `C:/Program Files/Git/usr/bin/sh`), and a named FIFO it
+creates is not readable by a native program, so `cli/io-stdin` streams
+through a coprocess's pipes. `tests/transpile-exclude-windows.txt` lists the
+fixtures whose transpiled twin cannot pass on Windows (none).
+WINDOWS_COUNTS_PLACEHOLDER
 
 ---
 

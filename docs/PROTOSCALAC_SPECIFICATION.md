@@ -34,8 +34,8 @@ protoscalac <file.scala> [options]
 | Option | Effect |
 |---|---|
 | `--emit-cpp` | generate C++ source only (the default) |
-| `--emit-make` | also write a `Makefile` |
-| `--build-so` | write the `Makefile` and run `make` |
+| `--emit-make` | also write a `Makefile` (NMake syntax on Windows) |
+| `--build-so` | write the `Makefile` and run `make` (`nmake` on Windows) |
 | `--as-module` | module mode: `desugarModule`, no `proto_module_main` |
 | `--as-script` | script mode: `desugar`, emit `proto_module_main` |
 | `--module-name <dotted>` | the logical path the module declares; defaults to the file stem |
@@ -71,15 +71,47 @@ TARGET   = module.so
 - **The target is `module.so`** — rename it to `<module>.so` before putting it on a
   module search path.
 
+**On Windows** the `Makefile` is an NMake file for the Microsoft C++ toolset, with the
+same contents in its terms:
+
+```make
+CXX      = cl
+CXXFLAGS = /nologo /O2 /std:c++20 /EHsc /utf-8 /bigobj /MD
+INCLUDES = /I"<protoScala include>" /I"<protoCore includes>"
+LDFLAGS  = /nologo /DLL /LIBPATH:"<dir>" ...
+LIBS     = protoScala.lib protoCore.lib
+TARGET   = module.dll
+```
+
+- **`/MD`** (`/MDd` when protoScala itself is a Debug build): the C++ runtime
+  `protoScala.dll` uses. A module and the runtime it calls exchange C++ exceptions,
+  so they must share one.
+- **Every path is quoted**, so a directory with spaces (`C:\Program Files\...`) is
+  accepted rather than refused.
+- **`--build-so` needs the toolset's environment.** In a Developer Command Prompt for
+  Visual Studio (`VCINSTALLDIR` set) it runs `nmake` directly. Outside one it asks
+  `vswhere` (installed with every Visual Studio 2017 or later, Build Tools included)
+  for the newest installation with the C++ toolset and runs `vcvars64.bat` for the one
+  command; with neither it stops with a message saying which is missing.
+- There is no rpath: Windows finds `protoScala.dll` and `protoCore-<n>.dll` next to the
+  program that loads the module (`protoscala.exe`), which is where an installation puts
+  them.
+
 **Toolchain resolution.** Both the build tree's directories and the installation's
 are baked in, and the executable decides between them by comparing its own directory
 (`/proc/self/exe`, or `argv0` canonicalised) with the build tree's, so a relocated
 prefix keeps working. Three overrides replace the corresponding value:
 `PROTOSCALAC_CXX`, `PROTOSCALAC_INCLUDE_DIRS`, `PROTOSCALAC_LIBRARY_DIRS`
-(`:`-separated).
+(`:`-separated; `;`-separated on Windows, where a drive letter holds `:`).
 
-**A directory containing whitespace is refused**, because `make` splits words on it:
+**A directory containing whitespace is refused** (outside Windows), because `make`
+splits words on it:
 `protoscalac: directory contains whitespace, which make cannot handle: "<dir>"`.
+
+**Long strings.** A string longer than 4096 bytes (a Scala constant, a name in a
+table) is written into the generated file as a `static const char[]` byte array
+rather than a string literal, on every platform: MSVC caps a literal at 16380 bytes
+and a concatenation of literals at 65535.
 
 **Errors and exit status.** Parse and compile errors print
 `file:line:column: message`; refusals print `file:line: error: message`. Exit 0 on
@@ -92,11 +124,17 @@ the unit is refused, or `make` fails.
 A generated module defines:
 
 ```c
-extern "C" void*       proto_module_init();          // required
-extern "C" const char* proto_module_version_v1();    // optional; "" when none
-extern "C" const char* proto_module_language_v1();   // diagnostic only
-extern "C" int         proto_module_main(int, char**);  // script mode only
+PROTOSCALA_MODULE_EXPORT void*       proto_module_init();          // required
+PROTOSCALA_MODULE_EXPORT const char* proto_module_version_v1();    // optional; "" when none
+PROTOSCALA_MODULE_EXPORT const char* proto_module_language_v1();   // diagnostic only
+PROTOSCALA_MODULE_EXPORT int         proto_module_main(int, char**);  // script mode only
 ```
+
+`PROTOSCALA_MODULE_EXPORT` (`<protoScala/GeneratedModule.h>`) is `extern "C"` plus what
+makes the function visible to the loader: `__declspec(dllexport)` on Windows, where a
+DLL exports only what it declares, and default visibility elsewhere. A hand-written
+module may use it or spell the same thing out. It is an addition to the header, not a
+change: a module built before it still loads (`PROTOSCALA_ABI_SOVERSION` stays 1).
 
 `proto_module_init` takes no arguments, because that is the contract a **hand-written**
 C++ UMD module obeys and Phase 7 must load such a module unchanged. protoScala has no
@@ -113,15 +151,19 @@ three-call recipe, the limits and the test. `Session::withModule` is the host si
 it closes its guards before handing the object over, so a caller that needed a
 protoScala guard would fail rather than pass for the wrong reason.
 
-`protoscala --run-module <path.so> [args...]` loads a module and runs it:
+`protoscala --run-module <path.so> [args...]` loads a module and runs it (a relative
+path is taken against the working directory, as any relative path is; the loader is
+handed an absolute one, because POSIX `dlopen` would search the library path for a
+name without a slash and Windows refuses a relative path):
 `proto_module_init`, then `proto_module_main` when present. Without
 `proto_module_main` it returns 0 and prints nothing; a module has no output of its
 own. A `.so` that defines neither reports
 `not a protoScala module: proto_module_init not found`.
 
 **Importing a compiled module.** `CompiledModuleProvider` (alias `compiled`, GUID
-`protoScala-compiled-v1`) resolves `a.b.C` to `<base>/a/b/C.so` under each base path in
-order: `PROTOSCALA_MODULE_PATH` (`:`-separated) first, then
+`protoScala-compiled-v1`) resolves `a.b.C` to `<base>/a/b/C.so` (`C.dll` on Windows) under each base path in
+order: `PROTOSCALA_MODULE_PATH` (`:`-separated, `;` on Windows; a relative entry is
+taken against the working directory) first, then
 `<prefix>/<libdir>/protoscala/modules`. `protoscala --version` prints the list, because
 that list is the whole surface and a reader who cannot see it cannot tell a missing
 module from a mis-set path.
