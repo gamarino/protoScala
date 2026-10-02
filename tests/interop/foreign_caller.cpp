@@ -86,7 +86,7 @@ int body(proto::ProtoContext* ctx, const proto::ProtoObject* module, void* ud) {
     {
         const proto::ProtoList* args =
             ctx->newList()->appendLast(
-                ctx, proto::ProtoString::fromUTF8String(ctx, "world")->asObject(ctx));
+                ctx, proto::ProtoString::fromUTF8(ctx, "world")->asObject(ctx));
         const proto::ProtoObject* r = callExport(ctx, module, "greet", args);
         if (r) {
             if (!r->isString(ctx)) {
