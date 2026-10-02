@@ -256,10 +256,11 @@ TEST(ProtoSTInterop, AForeignValueIsTheSameObjectOnBothSides) {
     std::printf("NO-COPY PROOF\n");
     std::printf("  protoScala space   = %p\n", (const void*)&session.space());
     std::printf("  protoST space      = %p\n", (const void*)st.space());
-    std::printf("  Counter via Scala  = %p  getHash(scalaCtx) = %lu\n",
-                (const void*)fromScala, fromScala->getHash(&scalaCtx));
-    std::printf("  Counter via ST     = %p  getHash(stCtx)    = %lu\n",
-                (const void*)fromST, fromST->getHash(&stCtx));
+    std::printf("  Counter via Scala  = %p  getHash(scalaCtx) = %llu\n",
+                (const void*)fromScala,
+                static_cast<unsigned long long>(fromScala->getHash(&scalaCtx)));
+    std::printf("  Counter via ST     = %p  getHash(stCtx)    = %llu\n",
+                (const void*)fromST, static_cast<unsigned long long>(fromST->getHash(&stCtx)));
     std::fflush(stdout);
 
     // Two distinct object spaces...
@@ -388,9 +389,9 @@ TEST(ProtoSTInterop, AForeignValueSurvivesACollectionOnBothSides) {
     // host is ~205,000; the figure a helper that forces cycles WITHOUT
     // submitting the young generation reports is 4-7, which is why "> 0" is not
     // the bar (see makeGarbage's comment).
-    std::printf("GC: protoScala's best cycle reclaimed %lu cells "
+    std::printf("GC: protoScala's best cycle reclaimed %llu cells "
                 "(threshold %d)\n",
-                scalaReclaimed, kGarbagePerRound);
+                static_cast<unsigned long long>(scalaReclaimed), kGarbagePerRound);
     std::fflush(stdout);
     EXPECT_GE(scalaReclaimed, static_cast<proto::proto_ulong>(kGarbagePerRound))
         << "protoScala's collector reclaimed " << scalaReclaimed

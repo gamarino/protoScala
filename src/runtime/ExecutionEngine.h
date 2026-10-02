@@ -9,6 +9,7 @@
  * and restores on every exit path (protoClojure src/runtime/Primitives.h:109-170).
  */
 #pragma once
+#include "support/Attributes.h"
 #include "compiler/BytecodeModule.h"
 #include "compiler/Opcodes.h"
 #include "runtime/Errors.h"
@@ -201,7 +202,7 @@ private:
     const proto::ProtoObject* instantiate(proto::ProtoContext* ctx, const proto::ProtoObject** base,
                                           const proto::ProtoString* ctorKey, unsigned argc,
                                           const proto::ProtoSparseList* keywords = nullptr);
-    [[gnu::noinline]] const proto::ProtoObject* makeClass(proto::ProtoContext* ctx,
+    PROTOSCALA_NOINLINE const proto::ProtoObject* makeClass(proto::ProtoContext* ctx,
                                                           const BytecodeModule::Const& spec,
                                                           const proto::ProtoObject* const* base);
     const proto::ProtoObject* makeTuple(proto::ProtoContext* ctx, const proto::ProtoObject* const* elems,
@@ -233,7 +234,7 @@ private:
     const proto::ProtoObject* callNative(proto::ProtoContext* ctx, proto::ProtoMethod fn,
                                          const proto::ProtoObject* self,
                                          const proto::ProtoObject* const* args, unsigned argc);
-    [[gnu::noinline]] const proto::ProtoObject* slowBinary(proto::ProtoContext* ctx, Op op,
+    PROTOSCALA_NOINLINE const proto::ProtoObject* slowBinary(proto::ProtoContext* ctx, Op op,
                                                            const proto::ProtoObject* a,
                                                            const proto::ProtoObject* b);
 };

@@ -26,6 +26,7 @@
  * recursion touches them.
  */
 #pragma once
+#include "support/Attributes.h"
 
 #include "runtime/Errors.h"
 
@@ -68,7 +69,7 @@ extern constinit thread_local std::uintptr_t tl_stackLimit;
 
 // First check of a thread (computes tl_stackLimit), or an exhausted stack
 // (throws StackOverflowError worded for `use`).
-[[gnu::cold, gnu::noinline]]
+PROTOSCALA_COLD PROTOSCALA_NOINLINE
 void checkNativeStackSlow(std::uintptr_t frameAddress, StackUse use);
 } // namespace detail
 
@@ -87,11 +88,12 @@ inline void checkNativeStack(StackUse use = StackUse::Evaluation) {
 #endif
 }
 
-// Raises the default stack size of threads created from now on without an
-// explicit size (std::thread, protoCore's newThread) to kThreadStackBytes,
-// unless it is already larger. Call once at start-up, before any thread is
-// created. Only effective with glibc; elsewhere threads keep the platform
-// default and checkNativeStack still guards them.
+// Gives the threads created from now on kThreadStackBytes of stack, unless
+// they already get more: protoCore's newThread (the actor workers, which run
+// every actor and Future body) through ProtoSpace::setThreadStackBytes on Linux,
+// macOS and Windows with protoCore 2.9.0 or later, and with glibc every other
+// thread too (std::thread). Call once at start-up, before any thread is created.
+// checkNativeStack guards every thread whatever its size.
 void configureThreadStacks();
 
 // Runs `body(arg)` on a new thread whose stack holds kThreadStackBytes (or

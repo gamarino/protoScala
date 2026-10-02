@@ -1,7 +1,9 @@
 #include "runtime/StackGuard.h"
 
 #if defined(_WIN32)
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 #include <process.h>
 #else
@@ -112,7 +114,21 @@ void checkNativeStackSlow(std::uintptr_t frameAddress, StackUse use) {
 } // namespace detail
 
 void configureThreadStacks() {
+#if defined(PROTOCORE_HAS_CURRENT_THREAD_STACK_BYTES) || \
+    (defined(__APPLE__) && defined(PROTOCORE_HAS_THREAD_STACK_BYTES))
+    // The actor workers, and with them every Future and actor body, are
+    // threads protoCore creates (ProtoSpace::newThread). protoCore 2.9.0 gives
+    // them the size set here on Linux, macOS and Windows (2.8.0 on macOS only),
+    // so a recursion reaches the same depth on a worker as on the evaluator
+    // thread whatever the platform's default is: 8 MiB with glibc, 512 KiB for
+    // a macOS secondary thread, 1 MiB on Windows.
+    if (proto::ProtoSpace::threadStackBytes() < kThreadStackBytes)
+        proto::ProtoSpace::setThreadStackBytes(kThreadStackBytes);
+#endif
 #if defined(__GLIBC__)
+    // Any other thread of the process (one std::thread starts, say) inherits
+    // glibc's default; raise that too. Before protoCore 2.9.0 this was also
+    // what sized protoCore's own threads on Linux.
     pthread_attr_t attr;
     if (pthread_getattr_default_np(&attr) != 0) return;
     std::size_t bytes = 0;
@@ -121,10 +137,6 @@ void configureThreadStacks() {
         pthread_setattr_default_np(&attr);
     }
     pthread_attr_destroy(&attr);
-#elif defined(__APPLE__) && defined(PROTOCORE_HAS_THREAD_STACK_BYTES)
-    // macOS has no process-wide default for new threads (a secondary thread
-    // gets 512 KiB); protoCore 2.8.0 gives the threads it creates this size.
-    proto::ProtoSpace::setThreadStackBytes(kThreadStackBytes);
 #endif
 }
 

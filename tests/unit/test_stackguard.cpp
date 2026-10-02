@@ -5,15 +5,25 @@
 using namespace protoScala;
 
 namespace {
+// Infinite recursion is the point of the test.
+#if defined(_MSC_VER) && !defined(__clang__)
+#pragma warning(push)
+#pragma warning(disable : 4717)
+#else
 #pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Winfinite-recursion"  // the point of the test
+#pragma GCC diagnostic ignored "-Winfinite-recursion"
+#endif
 int recurse(int n) {
     checkNativeStack();
     volatile char pad[256];
     pad[0] = static_cast<char>(n);
     return recurse(n + 1) + pad[0];
 }
+#if defined(_MSC_VER) && !defined(__clang__)
+#pragma warning(pop)
+#else
 #pragma GCC diagnostic pop
+#endif
 }
 
 TEST(StackGuard, ShallowCallsDoNotThrow) { EXPECT_NO_THROW(checkNativeStack()); }

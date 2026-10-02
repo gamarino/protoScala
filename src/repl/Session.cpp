@@ -251,9 +251,9 @@ int Session::runModule(const std::string& soPath, const std::vector<std::string>
     //  - ModuleEntryGuard, because proto_module_init takes no arguments -- that
     //    is the contract a hand-written C++ module obeys -- so the context it
     //    allocates in is handed over, not passed.
-    void* handle = dlopen(soPath.c_str(), RTLD_NOW | RTLD_GLOBAL);
+    void* handle = openLibrary(soPath, RTLD_NOW | RTLD_GLOBAL);
     if (!handle) {
-        std::fprintf(stderr, "protoscala: cannot load '%s': %s\n", soPath.c_str(), dlerror());
+        std::fprintf(stderr, "protoscala: cannot load '%s': %s\n", soPath.c_str(), libraryError().c_str());
         return 1;
     }
     using InitFn = void* (*)();
@@ -300,9 +300,9 @@ int Session::runModule(const std::string& soPath, const std::vector<std::string>
 int Session::withModule(const std::string& soPath,
                         int (*fn)(proto::ProtoContext*, const proto::ProtoObject*, void*),
                         void* ud) {
-    void* handle = dlopen(soPath.c_str(), RTLD_NOW | RTLD_GLOBAL);
+    void* handle = openLibrary(soPath, RTLD_NOW | RTLD_GLOBAL);
     if (!handle) {
-        std::fprintf(stderr, "protoscala: cannot load '%s': %s\n", soPath.c_str(), dlerror());
+        std::fprintf(stderr, "protoscala: cannot load '%s': %s\n", soPath.c_str(), libraryError().c_str());
         return 1;
     }
     using InitFn = void* (*)();

@@ -5,6 +5,7 @@
  * ProductPrimitives.cpp and any later primitive file share one definition.
  */
 #pragma once
+#include "support/Attributes.h"
 #include "runtime/Errors.h"
 #include "runtime/ExecutionEngine.h"
 #include "runtime/Values.h"
@@ -39,7 +40,7 @@ inline proto::proto_ulong argCount(ProtoContext* ctx, const ProtoList* args) {
     return args ? args->getSize(ctx) : 0;
 }
 
-[[noreturn, gnu::cold]] inline void wrongArgCount(const char* method, const std::string& expected,
+[[noreturn]] PROTOSCALA_COLD inline void wrongArgCount(const char* method, const std::string& expected,
                                                   proto::proto_ulong got) {
     throw ScalaError("IllegalArgumentException",
                      std::string(method) + " takes " + expected + " argument(s), got " +
@@ -59,7 +60,7 @@ inline const ProtoObject* arg(ProtoContext* ctx, const ProtoList* args, proto::p
     return args->getAt(ctx, static_cast<int>(i));
 }
 
-[[noreturn, gnu::cold]] inline void wrongType(ProtoContext* ctx, const char* method,
+[[noreturn]] PROTOSCALA_COLD inline void wrongType(ProtoContext* ctx, const char* method,
                                               const char* expected, const ProtoObject* v) {
     throw ScalaError("ClassCastException", std::string(method) + " expects " + expected +
                      ", got " + typeName(ctx, layoutOf(), v));

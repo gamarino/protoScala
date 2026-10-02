@@ -794,10 +794,10 @@ bool CppEmitter::emit(const CompiledUnit& unit, const GlobalTable& globals) {
     // `#line` cannot be un-set (a directive of 0 is not valid). Emitting the
     // entry points first means a diagnostic about one of them points at the
     // generated file, where it belongs, with no reset needed.
-    out_ << "extern \"C\" const char* proto_module_version_v1() { return "
+    out_ << "PROTOSCALA_MODULE_EXPORT const char* proto_module_version_v1() { return "
          << tables::quoted(opts_.moduleVersion) << "; }\n"
-         << "extern \"C\" const char* proto_module_language_v1() { return \"protoScala\"; }\n\n"
-         << "extern \"C\" void* proto_module_init() {\n"
+         << "PROTOSCALA_MODULE_EXPORT const char* proto_module_language_v1() { return \"protoScala\"; }\n\n"
+         << "PROTOSCALA_MODULE_EXPORT void* proto_module_init() {\n"
          << "    proto::ProtoContext* ctx = gen::currentContext(\"proto_module_init\");\n"
          << "    gen::linkModule(ctx, kAllBlocks, kAllBlockCount);\n"
          << "    return const_cast<void*>(static_cast<const void*>(\n"
@@ -805,7 +805,7 @@ bool CppEmitter::emit(const CompiledUnit& unit, const GlobalTable& globals) {
          << tables::quoted(opts_.moduleVersion) << ", kExports, kExportCount)));\n"
          << "}\n";
     if (opts_.asScript) {
-        out_ << "\nextern \"C\" int proto_module_main(int argc, char** argv) {\n"
+        out_ << "\nPROTOSCALA_MODULE_EXPORT int proto_module_main(int argc, char** argv) {\n"
              << "    proto::ProtoContext* ctx = gen::currentContext(\"proto_module_main\");\n";
         if (unit.mainKey.empty() && !opts_.appKey.empty()) {
             // `object Main extends App`: the program is the object's initialisation,

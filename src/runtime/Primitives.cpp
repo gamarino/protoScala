@@ -215,7 +215,7 @@ PRIM(any_ne)     { return boolean(self != arg(ctx, args, 0, "ne", 1)); }
 // Numbers (shared by Int, Double and Char receivers)
 // ---------------------------------------------------------------------------
 
-[[noreturn, gnu::cold]] void divisionByZero() { throw ScalaError("ArithmeticException", "/ by zero"); }
+[[noreturn]] PROTOSCALA_COLD void divisionByZero() { throw ScalaError("ArithmeticException", "/ by zero"); }
 
 enum class Arith { Add, Sub, Mul, Div, Mod };
 
@@ -588,7 +588,7 @@ PRIM(string_concat) {
     return asStr(self)->appendLast(ctx, asStr(rhs))->asObject(ctx);
 }
 
-[[noreturn, gnu::cold]] void numberFormat(const std::string& s) {
+[[noreturn]] PROTOSCALA_COLD void numberFormat(const std::string& s) {
     throw ScalaError("NumberFormatException", "For input string: \"" + s + "\"");
 }
 

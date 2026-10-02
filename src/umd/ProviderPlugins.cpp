@@ -5,6 +5,7 @@
 #include "support/Platform.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -20,7 +21,18 @@ namespace protoScala {
 
 namespace {
 
-// The *.so files in `dir`, in sorted order, so the load order is reproducible.
+// Whether `p` names a loadable library. File names are case-insensitive on
+// Windows, where `Provider.DLL` is as much a DLL as `provider.dll`.
+bool isSharedLibrary(const std::filesystem::path& p) {
+    std::string ext = p.extension().string();
+#if defined(_WIN32)
+    for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+#endif
+    return ext == kSharedLibrarySuffix;
+}
+
+// The *.so files in `dir` (*.dll on Windows), in sorted order, so the load
+// order is reproducible.
 void appendSharedObjects(const std::string& dir, std::vector<std::string>* out) {
     std::error_code ec;
     if (!std::filesystem::is_directory(dir, ec)) return;
@@ -28,7 +40,7 @@ void appendSharedObjects(const std::string& dir, std::vector<std::string>* out) 
     for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
         if (ec) break;
         if (!entry.is_regular_file(ec) && !entry.is_symlink()) continue;
-        if (entry.path().extension() == kSharedLibrarySuffix) found.push_back(entry.path().string());
+        if (isSharedLibrary(entry.path())) found.push_back(entry.path().string());
     }
     std::sort(found.begin(), found.end());
     out->insert(out->end(), found.begin(), found.end());
@@ -68,9 +80,9 @@ std::string providerPluginDirectory() {
 std::vector<std::string> describeProviderPlugins() {
     std::vector<std::string> out;
     for (const std::string& path : discoverPluginPaths()) {
-        void* handle = ::dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+        void* handle = openLibrary(path, RTLD_NOW | RTLD_LOCAL);
         if (!handle) {
-            out.push_back(path + " (cannot be loaded: " + ::dlerror() + ")");
+            out.push_back(path + " (cannot be loaded: " + libraryError() + ")");
             continue;
         }
         auto abi = reinterpret_cast<const char* (*)()>(::dlsym(handle, "protoScalaProviderABI"));
@@ -88,10 +100,10 @@ std::vector<std::string> describeProviderPlugins() {
 std::vector<std::string> loadProviderPlugins(proto::ProtoContext* ctx) {
     std::vector<std::string> loaded;
     for (const std::string& path : discoverPluginPaths()) {
-        void* handle = ::dlopen(path.c_str(), RTLD_NOW | RTLD_GLOBAL);
+        void* handle = openLibrary(path, RTLD_NOW | RTLD_GLOBAL);
         if (!handle) {
             std::fprintf(stderr, "protoscala: provider plug-in %s: %s\n", path.c_str(),
-                         ::dlerror());
+                         libraryError().c_str());
             continue;
         }
         auto abi = reinterpret_cast<const char* (*)()>(::dlsym(handle, "protoScalaProviderABI"));

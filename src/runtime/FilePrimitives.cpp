@@ -54,6 +54,7 @@
 
 #include <atomic>
 #include <cctype>
+#include <algorithm>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -66,7 +67,9 @@
 #include <vector>
 
 #if defined(_WIN32)
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 #include <fcntl.h>
 #include <io.h>
@@ -87,6 +90,8 @@
 namespace {
 #if defined(_WIN32)
 using ssize_t = SSIZE_T;
+// The byte count of _read and _write.
+using IoCount = unsigned int;
 using SysStat = struct ::_stat64;
 #ifndef S_ISDIR
 #define S_ISDIR(m) (((m) & _S_IFMT) == _S_IFDIR)
@@ -120,6 +125,7 @@ int sysStat(const std::string& path, SysStat* st) { return ::_wstat64(widePath(p
 int sysUnlink(const std::string& path) { return ::_wunlink(widePath(path).c_str()); }
 #else
 using SysStat = struct stat;
+using IoCount = std::size_t;
 int sysOpen(const std::string& path, int flags, int mode = 0) { return ::open(path.c_str(), flags, mode); }
 int sysFstat(int fd, SysStat* st) { return ::fstat(fd, st); }
 int sysStat(const std::string& path, SysStat* st) { return ::stat(path.c_str(), st); }
@@ -348,7 +354,9 @@ void writeWholeFile(const std::string& path, const std::string& text, bool appen
     FdGuard guard(fd);
     std::size_t off = 0;
     while (off < text.size()) {
-        const ssize_t put = ::write(fd, text.data() + off, text.size() - off);
+        // At most 1 GiB per call, which every platform's count type holds.
+        const std::size_t chunk = std::min<std::size_t>(text.size() - off, std::size_t{1} << 30);
+        const ssize_t put = ::write(fd, text.data() + off, static_cast<IoCount>(chunk));
         if (put < 0) {
             if (errno == EINTR) continue;
             ioFailed(path, errno);   // the guard closes the descriptor

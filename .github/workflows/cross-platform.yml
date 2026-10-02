@@ -109,11 +109,14 @@ jobs:
 
       - name: Configure protoScala
         working-directory: protoScala
+        # On Windows protoScala's own targets build with /WX: a new MSVC warning
+        # fails the build here rather than accumulating.
         run: >
           cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release
           -DPROTOCORE_REQUIRE_PACKAGE=ON
           "-DCMAKE_PREFIX_PATH=$GITHUB_WORKSPACE/prefix$EXTRA_PREFIX"
           ${OPENSSL_ROOT_DIR:+"-DOPENSSL_ROOT_DIR=$OPENSSL_ROOT_DIR"}
+          ${{ runner.os == 'Windows' && '-DPROTOSCALA_MSVC_WARNINGS_AS_ERRORS=ON' || '' }}
 
       - name: Confirm the embedder conformance suite was registered
         working-directory: protoScala

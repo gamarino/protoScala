@@ -36,6 +36,20 @@
 #include <cstddef>
 #include <cstdint>
 
+/**
+ * Marks the extern "C" entry points of a generated module (`proto_module_init`,
+ * `proto_module_main`, `proto_module_version_v1`, `proto_module_language_v1`).
+ * A Windows DLL exports only what it declares exported, so there it is
+ * `__declspec(dllexport)`; an ELF or Mach-O shared object exports every
+ * extern "C" function already, and the visibility attribute keeps that true
+ * under -fvisibility=hidden.
+ */
+#if defined(_WIN32)
+#define PROTOSCALA_MODULE_EXPORT extern "C" __declspec(dllexport)
+#else
+#define PROTOSCALA_MODULE_EXPORT extern "C" __attribute__((visibility("default")))
+#endif
+
 namespace protoScala::gen {
 
 /** Bumped only when this header changes incompatibly; equals PROTOSCALA_ABI_SOVERSION. */

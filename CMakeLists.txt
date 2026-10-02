@@ -19,10 +19,19 @@ include(GNUInstallDirs)
 # Compiler and platform differences, gathered here so the targets below read the
 # same on every platform.  Outside Windows these are the flags and libraries the
 # build always used.
+option(PROTOSCALA_MSVC_WARNINGS_AS_ERRORS
+    "Build protoScala's own targets with /WX (MSVC only; CI turns it on)" OFF)
 if(MSVC)
     # Sources are UTF-8; large generated tables need /bigobj.
     add_compile_options(/utf-8 /bigobj)
-    set(PROTOSCALA_WARNINGS /W3)
+    # /W3 on protoScala's own targets (protoIO and GoogleTest keep their own).
+    # getenv, strerror and the POSIX names read/write/close are used as the C
+    # and POSIX standards define them, so MSVC's "deprecated, use the _s
+    # variant" advice (C4996) is turned off rather than followed.
+    set(PROTOSCALA_WARNINGS /W3 /D_CRT_SECURE_NO_WARNINGS /D_CRT_NONSTDC_NO_DEPRECATE)
+    if(PROTOSCALA_MSVC_WARNINGS_AS_ERRORS)
+        list(APPEND PROTOSCALA_WARNINGS /WX)
+    endif()
 else()
     set(PROTOSCALA_WARNINGS -Wall -Wextra -Wpedantic)
 endif()
@@ -74,6 +83,15 @@ endif()
 # proto::proto_long / proto_ulong, which first exist there.
 set(PROTOCORE_MIN_VERSION      "2.7.0")
 set(PROTOCORE_MIN_VERSION_FULL "2.7.0")
+# 2.9.0 on Windows: ProtoSpace::setThreadStackBytes is honoured there from 2.9.0
+# on, and without it the actor workers -- which run every actor and Future body
+# -- would get Windows' 1 MiB default stack instead of the evaluator's 32 MiB
+# (src/runtime/StackGuard.cpp). It is also the release whose DLL carries its
+# ABI version in its name (protoCore-3.dll).
+if(WIN32)
+    set(PROTOCORE_MIN_VERSION      "2.9.0")
+    set(PROTOCORE_MIN_VERSION_FULL "2.9.0")
+endif()
 set(PROTOCORE_NEXT_MAJOR       "3.0.0")
 set(PROTOCORE_ABI_SOVERSION    "3")
 # The protoCore release that introduced ProtoMPSCQueue. Kept separate from the
@@ -258,6 +276,43 @@ endif()
 
 include_directories(${PROTOCORE_INCLUDE_DIRS} src include ${CMAKE_CURRENT_BINARY_DIR}/generated)
 
+# --- One C++ runtime per process (MSVC) ----------------------------------------
+# A Debug build links the debug C++ runtime (/MDd) and a Release build the
+# release one (/MD). protoScala.dll and protoCore-<n>.dll exchange std::string
+# and C++ exceptions, so the two must be built against the same one: mixing
+# them links, and then fails at run time in ways that do not point here. When
+# protoCore's package holds no configuration of the kind this build is, CMake
+# would silently pick the other one, so that is refused here.
+if(MSVC AND TARGET protoCore::protoCore AND NOT CMAKE_CONFIGURATION_TYPES)
+    get_target_property(_pc_configs protoCore::protoCore IMPORTED_CONFIGURATIONS)
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" _ps_config)
+    set(_pc_has_debug FALSE)
+    set(_pc_has_release FALSE)
+    foreach(_pc_config IN LISTS _pc_configs)
+        if(_pc_config STREQUAL "DEBUG")
+            set(_pc_has_debug TRUE)
+        else()
+            set(_pc_has_release TRUE)
+        endif()
+    endforeach()
+    if(_ps_config STREQUAL "DEBUG" AND _pc_configs AND NOT _pc_has_debug)
+        message(FATAL_ERROR
+            "protoScala is configured as Debug (debug C++ runtime, /MDd), but the protoCore "
+            "package at ${protoCore_DIR} holds only ${_pc_configs} builds (release runtime, "
+            "/MD). Build and install protoCore with -DCMAKE_BUILD_TYPE=Debug, or configure "
+            "protoScala as Release or RelWithDebInfo.")
+    elseif(NOT _ps_config STREQUAL "DEBUG" AND _pc_configs AND NOT _pc_has_release)
+        message(FATAL_ERROR
+            "protoScala is configured as ${CMAKE_BUILD_TYPE} (release C++ runtime, /MD), but "
+            "the protoCore package at ${protoCore_DIR} holds only a Debug build (/MDd). "
+            "Build and install protoCore as Release, or configure protoScala as Debug.")
+    endif()
+    unset(_pc_configs)
+    unset(_ps_config)
+    unset(_pc_has_debug)
+    unset(_pc_has_release)
+endif()
+
 # --- The published ABI of libprotoScala.so (Phase 7 D3) -------------------------
 # One shared library, one installed header. PROTOSCALA_ABI_SOVERSION moves when
 # include/protoScala/GeneratedModule.h changes INCOMPATIBLY, and only then: a
@@ -274,16 +329,30 @@ set(PROTOSCALA_ABI_SOVERSION "1")
 # prefix named with -DCMAKE_PREFIX_PATH, or a build tree named with
 # -DprotoIO_DIR), else the sibling source tree ../protoIO built as part of this
 # one.
-find_package(protoIO 0.1 CONFIG QUIET)
+# 0.2.2 is the floor: process::run with RunOptions, crash codes as 128 + signal on
+# Windows as on POSIX, event-based waits, open files that can be deleted or
+# renamed, the Windows certificate store for TLS, and a listener on both IPv4
+# and IPv6 when no host is named.
+set(PROTOSCALA_PROTOIO_MIN_VERSION "0.2.2")
+find_package(protoIO ${PROTOSCALA_PROTOIO_MIN_VERSION} CONFIG QUIET)
 if(protoIO_FOUND)
     message(STATUS "protoScala: installed protoIO ${protoIO_VERSION} from ${protoIO_DIR}")
 elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../protoIO/CMakeLists.txt")
     message(STATUS "protoScala: no installed protoIO package found; building the sibling ../protoIO")
     add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../protoIO"
                      "${CMAKE_CURRENT_BINARY_DIR}/_protoIO" EXCLUDE_FROM_ALL)
+    # The sibling tree is checked against the same floor a package is.
+    get_directory_property(_protoIO_version
+        DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../protoIO" DEFINITION PROJECT_VERSION)
+    if(_protoIO_version VERSION_LESS PROTOSCALA_PROTOIO_MIN_VERSION)
+        message(FATAL_ERROR
+            "The sibling protoIO at ${CMAKE_CURRENT_SOURCE_DIR}/../protoIO is "
+            "${_protoIO_version}; protoScala requires ${PROTOSCALA_PROTOIO_MIN_VERSION} or later.")
+    endif()
+    unset(_protoIO_version)
 else()
     message(FATAL_ERROR
-        "protoIO not found: install protoio-dev (or name a prefix with "
+        "protoIO ${PROTOSCALA_PROTOIO_MIN_VERSION} or later not found: install protoio-dev (or name a prefix with "
         "-DCMAKE_PREFIX_PATH / -DprotoIO_DIR), or check out "
         "https://github.com/gamarino/protoIO as ../protoIO")
 endif()
@@ -525,15 +594,74 @@ target_compile_options(protoScala PRIVATE ${PROTOSCALA_WARNINGS})
 
 # Windows finds a DLL next to the program that loads it. Copy the DLLs
 # protoScala.dll needs -- protoCore, and OpenSSL through protoIO -- into the
-# build's bin/, so protoscala and the tests run in place.
+# build's bin/, so protoscala and the tests run in place, and install them next
+# to protoscala.exe, so an installation or a ZIP runs on a machine that has
+# neither protoCore nor OpenSSL.
 if(WIN32)
     set(PROTOSCALA_RUNTIME_DLLS "")
+    # protoCore's DLL is whatever file its imported target names (protoCore-3.dll
+    # since 2.9.0, which carries the ABI version in its name), never a spelled-out
+    # file name.
     if(TARGET ${PROTOCORE_LIBRARY})
         list(APPEND PROTOSCALA_RUNTIME_DLLS "$<TARGET_FILE:${PROTOCORE_LIBRARY}>")
     endif()
-    get_filename_component(PROTOSCALA_OPENSSL_BIN "${OPENSSL_INCLUDE_DIR}/../bin" ABSOLUTE)
-    file(GLOB PROTOSCALA_OPENSSL_DLLS
-        "${PROTOSCALA_OPENSSL_BIN}/libcrypto*.dll" "${PROTOSCALA_OPENSSL_BIN}/libssl*.dll")
+    # OpenSSL's two DLLs, by the names the found version gives them
+    # (libcrypto-3-x64.dll and libssl-3-x64.dll for OpenSSL 3 on x64). A glob
+    # would silently ship whatever happened to sit in that directory -- another
+    # version's DLLs, or nothing -- so a DLL that is not there fails the
+    # configuration instead, and the version found is recorded in the package.
+    find_package(OpenSSL REQUIRED)
+    string(REGEX MATCH "^[0-9]+" _ps_openssl_major "${OPENSSL_VERSION}")
+    if(_ps_openssl_major STREQUAL "1")
+        set(_ps_openssl_soversion "1_1")
+    else()
+        set(_ps_openssl_soversion "${_ps_openssl_major}")
+    endif()
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|arm64|aarch64")
+        set(_ps_openssl_arch "-arm64")
+    elseif(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(_ps_openssl_arch "-x64")
+    else()
+        set(_ps_openssl_arch "")
+    endif()
+    get_filename_component(_ps_openssl_root "${OPENSSL_INCLUDE_DIR}/.." ABSOLUTE)
+    set(PROTOSCALA_OPENSSL_DLLS "")
+    foreach(_ps_openssl_lib crypto ssl)
+        set(_ps_dll "lib${_ps_openssl_lib}-${_ps_openssl_soversion}${_ps_openssl_arch}.dll")
+        unset(_ps_found CACHE)
+        find_file(_ps_found "${_ps_dll}" PATHS "${_ps_openssl_root}/bin" "${_ps_openssl_root}"
+                  NO_DEFAULT_PATH)
+        if(NOT _ps_found)
+            message(FATAL_ERROR
+                "OpenSSL ${OPENSSL_VERSION} was found at ${_ps_openssl_root}, but its DLL "
+                "${_ps_dll} is not in ${_ps_openssl_root}/bin. protoScala.dll loads it at run "
+                "time and the package must ship it: point OPENSSL_ROOT_DIR at a complete "
+                "OpenSSL installation (headers, import libraries and bin/*.dll of one version).")
+        endif()
+        list(APPEND PROTOSCALA_OPENSSL_DLLS "${_ps_found}")
+        unset(_ps_found CACHE)
+    endforeach()
+    # OpenSSL's licence travels with its DLLs (Apache-2.0 for OpenSSL 3).
+    file(GLOB PROTOSCALA_OPENSSL_LICENSE
+        "${_ps_openssl_root}/[Ll][Ii][Cc][Ee][Nn][SsCc][Ee]*"
+        "${_ps_openssl_root}/doc/[Ll][Ii][Cc][Ee][Nn][SsCc][Ee]*")
+    if(PROTOSCALA_OPENSSL_LICENSE)
+        list(GET PROTOSCALA_OPENSSL_LICENSE 0 PROTOSCALA_OPENSSL_LICENSE)
+    elseif(DEFINED PROTOSCALA_OPENSSL_LICENSE_FILE AND EXISTS "${PROTOSCALA_OPENSSL_LICENSE_FILE}")
+        set(PROTOSCALA_OPENSSL_LICENSE "${PROTOSCALA_OPENSSL_LICENSE_FILE}")
+    else()
+        message(FATAL_ERROR
+            "OpenSSL's licence file was not found in ${_ps_openssl_root}. The package ships "
+            "OpenSSL's DLLs and must ship its licence with them: name the file with "
+            "-DPROTOSCALA_OPENSSL_LICENSE_FILE=<path>.")
+    endif()
+    message(STATUS "protoScala: ships OpenSSL ${OPENSSL_VERSION}: ${PROTOSCALA_OPENSSL_DLLS}")
+    set(PROTOSCALA_OPENSSL_VERSION "${OPENSSL_VERSION}")
+    unset(_ps_openssl_major)
+    unset(_ps_openssl_soversion)
+    unset(_ps_openssl_arch)
+    unset(_ps_openssl_root)
+    unset(_ps_dll)
     list(APPEND PROTOSCALA_RUNTIME_DLLS ${PROTOSCALA_OPENSSL_DLLS})
     # A target every library depends on, not a post-build step of protoScala:
     # the unit tests link the object libraries directly, and are run to list
@@ -563,26 +691,62 @@ target_compile_options(protoscala PRIVATE ${PROTOSCALA_WARNINGS})
 # tree's toolchain directories and the installation's are baked in, and the
 # executable decides between them by comparing its own directory with
 # PROTOSCALAC_BUILD_BINDIR, so a relocated prefix keeps working.
-list(JOIN PROTOCORE_INCLUDE_DIRS ":" PROTOSCALAC_PROTOCORE_INCLUDES)
+# Lists of directories are separated as PATH is: ';' on Windows, where a drive
+# letter holds ':', and ':' elsewhere. (A ';'-joined string is also what a CMake
+# list already is, so on Windows the JOINs below change nothing.)
+if(WIN32)
+    set(_psc_sep ";")
+else()
+    set(_psc_sep ":")
+endif()
+list(JOIN PROTOCORE_INCLUDE_DIRS "${_psc_sep}" PROTOSCALAC_PROTOCORE_INCLUDES)
 set(PROTOSCALAC_BUILD_INCLUDE_DIRS
-    "${CMAKE_CURRENT_SOURCE_DIR}/include:${PROTOSCALAC_PROTOCORE_INCLUDES}")
-# A generated module links -lprotoScala -lprotoCore, so the build tree's list
+    "${CMAKE_CURRENT_SOURCE_DIR}/include${_psc_sep}${PROTOSCALAC_PROTOCORE_INCLUDES}")
+# A generated module links protoScala and protoCore, so the build tree's list
 # names protoCore's library directory as well as its include directory. With the
 # sibling developer tree that is PROTOCORE_LIB_DIR; with an installed package it
-# is the directory of the imported library, which a prefix outside the linker's
-# default search path (say ~/opt/proto) does not otherwise supply: every
-# transpiled module then failed to link with "cannot find -lprotoCore".
+# is the package's library directory (on Windows the one holding the import
+# library protoCore.lib), which a prefix outside the linker's default search path
+# (say ~/opt/proto) does not otherwise supply: every transpiled module then
+# failed to link with "cannot find -lprotoCore".
 if(DEFINED PROTOCORE_LIB_DIR)
-    set(PROTOSCALAC_BUILD_LIBRARY_DIRS "${CMAKE_BINARY_DIR}:${PROTOCORE_LIB_DIR}")
+    set(_psc_protocore_libdir "${PROTOCORE_LIB_DIR}")
+elseif(DEFINED protoCore_LIB_DIR)
+    set(_psc_protocore_libdir "${protoCore_LIB_DIR}")
 elseif(TARGET protoCore::protoCore)
     get_target_property(_protoCore_location protoCore::protoCore LOCATION)
-    get_filename_component(_protoCore_package_libdir "${_protoCore_location}" DIRECTORY)
-    set(PROTOSCALAC_BUILD_LIBRARY_DIRS "${CMAKE_BINARY_DIR}:${_protoCore_package_libdir}")
+    get_filename_component(_psc_protocore_libdir "${_protoCore_location}" DIRECTORY)
+endif()
+# protoScala's own library in the build tree: libprotoScala.so at the top of the
+# tree, and on Windows the import library protoScala.lib, which an archive
+# output directory pins to the same place for every generator (a generator
+# expression in it keeps a multi-configuration generator from appending a
+# per-configuration subdirectory).
+if(WIN32)
+    set_target_properties(protoScala PROPERTIES ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}$<0:>")
+endif()
+if(_psc_protocore_libdir)
+    set(PROTOSCALAC_BUILD_LIBRARY_DIRS "${CMAKE_BINARY_DIR}${_psc_sep}${_psc_protocore_libdir}")
 else()
     set(PROTOSCALAC_BUILD_LIBRARY_DIRS "${CMAKE_BINARY_DIR}")
 endif()
 set(PROTOSCALAC_INSTALL_INCLUDE_DIRS "../${CMAKE_INSTALL_INCLUDEDIR}")
 set(PROTOSCALAC_INSTALL_LIBRARY_DIRS "../${CMAKE_INSTALL_LIBDIR}")
+# protoscalac decides between the two sets by comparing its own directory with
+# this one. On Windows every executable goes to bin/ (CMAKE_RUNTIME_OUTPUT_DIRECTORY).
+if(CMAKE_RUNTIME_OUTPUT_DIRECTORY)
+    set(PROTOSCALAC_BUILD_BINDIR "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+else()
+    set(PROTOSCALAC_BUILD_BINDIR "${CMAKE_BINARY_DIR}")
+endif()
+# The C++ runtime a module must be compiled for: the one protoScala.dll uses.
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(PROTOSCALAC_MSVC_RUNTIME "/MDd")
+else()
+    set(PROTOSCALAC_MSVC_RUNTIME "/MD")
+endif()
+unset(_psc_sep)
+unset(_psc_protocore_libdir)
 configure_file(src/compiler/protoscalac_paths.h.in generated/protoscalac_paths.h @ONLY)
 
 add_executable(protoscalac
@@ -653,13 +817,43 @@ install(TARGETS protoScala
     LIBRARY       DESTINATION ${CMAKE_INSTALL_LIBDIR}              COMPONENT protoScala
                   NAMELINK_COMPONENT protoScala
     PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/protoScala COMPONENT protoScala)
-# protoIO is linked in statically, but OpenSSL is a DLL on Windows: install it
-# next to protoScala.dll, where Windows looks for it. (protoCore is a package of
-# its own and installs its DLL into its own prefix's bin/.)
-if(WIN32 AND PROTOSCALA_OPENSSL_DLLS)
+# Windows: an installation (and the ZIP made from it) is self-contained, because
+# Windows has no package manager to bring a dependency in.
+#  - protoCore's DLL and OpenSSL's, next to protoscala.exe, where Windows looks
+#    for a program's DLLs. protoIO is linked in statically.
+#  - protoCore's header and import library, which protoscalac --build-so compiles
+#    and links a module against (lib/ and include/, the directories an installed
+#    protoscalac searches).
+#  - OpenSSL's licence, beside protoScala's.
+#  - the Microsoft C++ runtime DLLs (msvcp140.dll, vcruntime140.dll, ...), through
+#    InstallRequiredSystemLibraries, so a machine without the Visual C++
+#    Redistributable runs it too (app-local deployment).
+if(WIN32)
     install(FILES ${PROTOSCALA_OPENSSL_DLLS}
         DESTINATION ${CMAKE_INSTALL_BINDIR}
         COMPONENT protoScala)
+    install(FILES "${PROTOSCALA_OPENSSL_LICENSE}"
+        DESTINATION ${CMAKE_INSTALL_DOCDIR}
+        RENAME "OpenSSL-${PROTOSCALA_OPENSSL_VERSION}-LICENSE.txt"
+        COMPONENT protoScala)
+    if(TARGET protoCore::protoCore)
+        install(FILES "$<TARGET_FILE:protoCore::protoCore>"
+            DESTINATION ${CMAKE_INSTALL_BINDIR}
+            COMPONENT protoScala)
+        install(FILES "$<TARGET_LINKER_FILE:protoCore::protoCore>"
+            DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            COMPONENT protoScala)
+        install(FILES "${protoCore_INCLUDE_DIR}/protoCore.h"
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+            COMPONENT protoScala)
+    endif()
+    set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION ${CMAKE_INSTALL_BINDIR})
+    set(CMAKE_INSTALL_SYSTEM_RUNTIME_COMPONENT protoScala)
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        set(CMAKE_INSTALL_DEBUG_LIBRARIES ON)
+        set(CMAKE_INSTALL_DEBUG_LIBRARIES_ONLY ON)
+    endif()
+    include(InstallRequiredSystemLibraries)
 endif()
 install(EXPORT protoScalaTargets
     FILE protoScalaTargets.cmake NAMESPACE protoScala::
@@ -769,9 +963,18 @@ elseif(UNIX)
     set(CPACK_RPM_PACKAGE_REQUIRES
         "protoCore >= ${PROTOCORE_MIN_VERSION_FULL}, protoCore < ${PROTOCORE_NEXT_MAJOR}")
 elseif(WIN32)
-    # Windows NSIS installer + plain ZIP.
-    # UNVERIFIED: configured and reviewed, never built - no Windows host (D-I6).
-    set(CPACK_GENERATOR "NSIS;ZIP")
+    # A ZIP always (built and unpacked by CI, which runs the unpacked protoscala.exe
+    # with no build directory on PATH), and an NSIS installer when makensis is
+    # there: cpack aborts the whole run when a generator's tool is missing.
+    set(CPACK_GENERATOR "ZIP")
+    find_program(PROTOSCALA_MAKENSIS_EXECUTABLE makensis
+        HINTS "C:/Program Files (x86)/NSIS" "C:/Program Files/NSIS")
+    if(PROTOSCALA_MAKENSIS_EXECUTABLE)
+        list(APPEND CPACK_GENERATOR "NSIS")
+        message(STATUS "CPack: NSIS generator enabled (makensis found)")
+    else()
+        message(STATUS "CPack: NSIS generator disabled (makensis not found)")
+    endif()
     set(CPACK_NSIS_HELP_LINK      "https://github.com/gamarino/protoScala")
     set(CPACK_NSIS_URL_INFO_ABOUT "https://github.com/gamarino/protoScala")
     set(CPACK_NSIS_PACKAGE_NAME   "protoScala")
