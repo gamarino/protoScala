@@ -28,6 +28,20 @@ std::string quoted(std::string_view s) {
     return o.str();
 }
 
+std::string stringRef(std::ostream& defs, std::string_view s, const std::string& arrayName) {
+    if (s.size() <= kMaxStringLiteralBytes) return quoted(s);
+    defs << "static const char " << arrayName << "[] = {";
+    std::size_t col = 0;
+    char b[16];
+    for (unsigned char c : s) {
+        if (col++ % 16 == 0) defs << "\n   ";
+        std::snprintf(b, sizeof b, " '\\x%02x',", c);
+        defs << b;
+    }
+    defs << "\n    '\\x00'};\n";
+    return arrayName;
+}
+
 std::string exactDouble(double d, std::string_view where) {
     if (!(d == d) || std::isinf(d))
         throw std::runtime_error(std::string(where) +
@@ -80,8 +94,11 @@ int StringPool::add(const std::vector<std::string>& v) {
     return first;
 }
 
-void emitConsts(std::ostream& o, const std::string& name, const BytecodeModule& mod,
+void emitConsts(std::ostream& out, const std::string& name, const BytecodeModule& mod,
                 StringPool& pool) {
+    // The records go to `o`; a string too long for a literal goes to `out` first,
+    // as an array the record names (kMaxStringLiteralBytes).
+    std::ostringstream o;
     o << "static const protoScala::gen::ConstRec " << name << "[] = {";
     if (mod.constCount() == 0) {
         // A zero-length array is not valid C++; the count stays 0.
@@ -99,9 +116,9 @@ void emitConsts(std::ostream& o, const std::string& name, const BytecodeModule& 
               << ", .argc = " << c.argc << "u"
               << ", .flags = " << c.flags << "u"
               << ", .exact = " << (c.exact ? "true" : "false")
-              << ", .sval = " << tables::quoted(c.sval)
+              << ", .sval = " << stringRef(out, c.sval, name + "_s" + std::to_string(i))
               << ", .slen = " << c.sval.size() << "u"
-              << ", .key = " << tables::quoted(c.key)
+              << ", .key = " << stringRef(out, c.key, name + "_k" + std::to_string(i))
               << ", .namesFirst = " << namesFirst
               << ", .namesCount = " << c.names.size()
               << ", .fieldsFirst = " << fieldsFirst
@@ -111,6 +128,7 @@ void emitConsts(std::ostream& o, const std::string& name, const BytecodeModule& 
         o << '\n';
     }
     o << "};\n";
+    out << o.str();
 }
 
 void emitHandlers(std::ostream& o, const std::string& name, const BytecodeModule& mod) {
@@ -129,15 +147,19 @@ void emitHandlers(std::ostream& o, const std::string& name, const BytecodeModule
     o << "};\n";
 }
 
-void emitStrings(std::ostream& o, const std::string& name, const StringPool& pool) {
+void emitStrings(std::ostream& out, const std::string& name, const StringPool& pool) {
+    std::ostringstream o;
     o << "static const char* const " << name << "[] = {";
     if (pool.all().empty()) {
         o << " \"\" ";
     } else {
-        for (const std::string& s : pool.all()) o << "\n    " << tables::quoted(s) << ',';
+        std::size_t i = 0;
+        for (const std::string& s : pool.all())
+            o << "\n    " << stringRef(out, s, name + "_" + std::to_string(i++)) << ',';
         o << '\n';
     }
     o << "};\n";
+    out << o.str();
 }
 
 void emitSymbolArrays(std::ostream& o, const std::string& name, std::size_t constCount,

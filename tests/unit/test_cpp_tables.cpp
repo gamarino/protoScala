@@ -12,6 +12,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
@@ -168,6 +169,62 @@ TEST(CppTables, EmittedTablesAreValidCppEvenWhenEmpty) {
     EXPECT_NE(out.find(".entry = &blk0,"), std::string::npos) << out;
     // No table is emitted with a bare `[]` and no initialiser.
     EXPECT_EQ(out.find("[] = {};"), std::string::npos) << out;
+}
+
+// MSVC caps one string literal at 16380 bytes and a concatenation at 65535, so a
+// long Scala string constant (or a long pool string) must not be written as a
+// literal: it becomes a byte array the record points at, on every platform, so
+// the generated file is the same everywhere.
+TEST(CppTables, LongStringsAreByteArraysNotLiterals) {
+    protoScala::GlobalTable globals;
+    for (const auto& n : protoScala::builtinGlobalNames())
+        globals.declare(n, protoScala::BindingKind::Builtin);
+    std::string big;
+    for (int i = 0; i < 70000; ++i) big += static_cast<char>('a' + i % 26);
+    big += "\\n\\u00e9end";   // Scala escapes: a newline and a non-ASCII character
+    protoScala::CompiledUnit cu = compileIt("val s = \"" + big + "\"\n", globals);
+
+    std::ostringstream o;
+    tables::StringPool pool;
+    tables::emitConsts(o, "blk0_consts", *cu.module, pool);
+    tables::emitStrings(o, "blk0_strings", pool);
+    const std::string out = o.str();
+
+    // No literal longer than the emitter's own cap.
+    std::size_t longest = 0, run = 0;
+    bool inLiteral = false;
+    for (std::size_t i = 0; i < out.size(); ++i) {
+        const char c = out[i];
+        if (inLiteral) {
+            if (c == '\\') { ++i; run += 2; continue; }
+            if (c == '"') { inLiteral = false; longest = std::max(longest, run); continue; }
+            ++run;
+        } else if (c == '"' && (i == 0 || out[i - 1] != '\'')) {
+            inLiteral = true;
+            run = 0;
+        }
+    }
+    EXPECT_LE(longest, tables::kMaxStringLiteralBytes);
+
+    // The array round-trips the constant's bytes, and the record names it with its length.
+    std::string expected;
+    for (std::size_t i = 0; i < cu.module->constCount(); ++i)
+        if (cu.module->constAt(i).sval.size() > 70000) expected = cu.module->constAt(i).sval;
+    ASSERT_FALSE(expected.empty());
+    const std::size_t arr = out.find("static const char blk0_consts_s");
+    ASSERT_NE(arr, std::string::npos) << out.substr(0, 400);
+    const std::size_t open = out.find('{', arr), close = out.find("};", open);
+    std::string bytes;
+    for (std::size_t i = open; i < close; ++i) {
+        if (out.compare(i, 3, "'\\x") != 0) continue;
+        bytes += static_cast<char>(std::strtol(out.substr(i + 3, 2).c_str(), nullptr, 16));
+        i += 5;
+    }
+    ASSERT_FALSE(bytes.empty());
+    EXPECT_EQ(bytes.back(), '\0');
+    bytes.pop_back();
+    EXPECT_EQ(bytes, expected);
+    EXPECT_NE(out.find(".slen = " + std::to_string(expected.size()) + "u"), std::string::npos);
 }
 
 }  // namespace

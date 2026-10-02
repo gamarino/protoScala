@@ -22,6 +22,7 @@
 #include <iosfwd>
 #include <string>
 #include <string_view>
+#include <cstddef>
 #include <vector>
 
 namespace protoScala::tables {
@@ -36,6 +37,23 @@ void emitString(std::ostream& o, std::string_view s);
 
 /** `emitString` into a string. */
 std::string quoted(std::string_view s);
+
+/**
+ * The longest string written as a literal into a generated table. MSVC caps one
+ * string literal at 16380 bytes and a concatenation of literals at 65535, so a
+ * longer string (a long Scala constant, a long pool entry) is written as a byte
+ * array instead -- on every platform, so the generated file does not depend on
+ * the compiler that will build it.
+ */
+inline constexpr std::size_t kMaxStringLiteralBytes = 4096;
+
+/**
+ * An expression for `s` that a table entry of type `const char*` can hold: the
+ * quoted literal when `s` fits kMaxStringLiteralBytes, otherwise the name of a
+ * NUL-terminated `static const char <arrayName>[]` that is written to `defs`
+ * (which must precede the table that uses it).
+ */
+std::string stringRef(std::ostream& defs, std::string_view s, const std::string& arrayName);
 
 /**
  * A `double` as a C++ literal that round-trips bit for bit. A hexadecimal
