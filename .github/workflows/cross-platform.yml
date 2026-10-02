@@ -9,7 +9,7 @@ name: Cross-platform
 # Windows, and it also exercises the package path, which ci.yml does not.
 # protoIO is the sibling source tree, compiled into protoScala's build.
 #
-# Refs are pinned like ci.yml's. protoCore 2.9.0 (master, 21889c9): the floor on
+# Refs are pinned like ci.yml's. protoCore 2.9.0 (tag v2.9.0, 21889c9): the floor on
 # Windows, where it honours ProtoSpace::setThreadStackBytes and names its DLL
 # protoCore-3.dll. protoIO 0.2.2 (main, 1611ff9): the floor everywhere. Bump
 # deliberately.
