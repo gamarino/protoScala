@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — protoCore 2.10.2 in CI, 2026-10-03
+
+- **CI builds protoCore 2.10.2** (tag `v2.10.2`, `b7f6d82`) on Linux, macOS
+  and Windows instead of 2.9.4, and protoST at `5badd33` (its own 2.10.2 pin)
+  for the interop test; the floor job stays on 2.7.0 and protoIO on 0.2.2. No
+  source change was needed: the full suite passes locally against 2.10.2
+  (2429/2429, 8 skipped by design). protoScala does not enable protoCore's
+  adaptive heap.
+
 ### Changed — protoCore 2.9.4 in CI, 2026-10-02
 
 - **CI builds protoCore 2.9.4** (tag `v2.9.4`, `9cb0ef5`) on Linux, macOS and
