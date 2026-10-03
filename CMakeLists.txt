@@ -81,17 +81,16 @@ endif()
 # soname move together.
 # 2.7.0: the Windows port spells protoCore's 64-bit integers
 # proto::proto_long / proto_ulong, which first exist there.
-set(PROTOCORE_MIN_VERSION      "2.7.0")
-set(PROTOCORE_MIN_VERSION_FULL "2.7.0")
 # 2.9.0 on Windows: ProtoSpace::setThreadStackBytes is honoured there from 2.9.0
 # on, and without it the actor workers -- which run every actor and Future body
 # -- would get Windows' 1 MiB default stack instead of the evaluator's 32 MiB
 # (src/runtime/StackGuard.cpp). It is also the release whose DLL carries its
 # ABI version in its name (protoCore-3.dll).
-if(WIN32)
-    set(PROTOCORE_MIN_VERSION      "2.9.0")
-    set(PROTOCORE_MIN_VERSION_FULL "2.9.0")
-endif()
+# 2.11.0, the floor on every platform since 2026-10-03: a constructor stores
+# its parameter fields as one write group with ProtoObject::setAttributes
+# (STORE_FIELDS_IF_NEW), which first exists there.
+set(PROTOCORE_MIN_VERSION      "2.11.0")
+set(PROTOCORE_MIN_VERSION_FULL "2.11.0")
 set(PROTOCORE_NEXT_MAJOR       "3.0.0")
 set(PROTOCORE_ABI_SOVERSION    "3")
 # The protoCore release that introduced ProtoMPSCQueue. Kept separate from the
@@ -229,6 +228,17 @@ else()
             "${PROTOCORE_ABI_SOVERSION}. Rebuild ../protoCore from clean.")
     endif()
     unset(_protoCore_abi_file)
+    # The developer tree has no version to check; probe for the newest API the
+    # sources use instead (ProtoObject::setAttributes, protoCore 2.11.0).
+    file(STRINGS "${PROTOCORE_DIR}/headers/protoCore.h" _protoCore_setAttributes
+         REGEX "setAttributes\\(")
+    if(NOT _protoCore_setAttributes)
+        message(FATAL_ERROR
+            "The protoCore tree in ${PROTOCORE_DIR} predates "
+            "ProtoObject::setAttributes (protoCore 2.11.0); protoScala needs "
+            "protoCore ${PROTOCORE_MIN_VERSION_FULL} or later. Update and rebuild it.")
+    endif()
+    unset(_protoCore_setAttributes)
     set(PROTOCORE_INCLUDE_DIRS ${PROTOCORE_DIR} ${PROTOCORE_DIR}/headers)
     # protoCore's embedder conformance suite (P4): a static archive beside
     # libprotoCore in the same build tree.  Optional, so a protoCore older than

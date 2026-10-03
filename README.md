@@ -1130,7 +1130,7 @@ path, as a zero-cost-exceptions ABI should be. See
 ## Building
 
 Prerequisites: a C++20 compiler, CMake ≥ 3.21, libreadline (from Phase 1),
-OpenSSL 3 development files (`libssl-dev`), protoCore 2.7.0 or newer built as a
+OpenSSL 3 development files (`libssl-dev`), protoCore 2.11.0 or newer built as a
 sibling directory (or installed and passed via `-DPROTO_CORE_PREFIX=<prefix>`),
 and protoIO, installed (`protoio-dev`) or checked out as the sibling `../protoIO`,
 which the build then compiles as part of this one.
@@ -1150,7 +1150,7 @@ ctest --test-dir build_release
 ```
 
 On **Windows**, protoScala builds natively with Visual Studio 2022 (MSVC) against
-protoCore 2.9.0 or later and runs scripts and the REPL from `cmd.exe` or PowerShell;
+protoCore 2.11.0 or later and runs scripts and the REPL from `cmd.exe` or PowerShell;
 `protoscalac --build-so` builds a `module.dll` with `nmake`, `cl` and `link`, and
 `cpack -G ZIP` makes a self-contained package. The steps, and what differs there
 (no readline, `;`-separated path lists, the Developer environment `protoscalac`

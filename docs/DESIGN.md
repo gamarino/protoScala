@@ -309,6 +309,21 @@ Performed on the AST before code generation:
   `C.newChild(ctx, /*isMutable=*/false)` and sets the constructor fields; a
   class that declares any `var` field creates mutable instances
   (`newChild(ctx, true)`) so the same handle observes updates.
+- **Parameter fields are one write group** (2026-10-03). Two or more parameter
+  fields are stored by one `STORE_FIELDS_IF_NEW` instead of one
+  `STORE_FIELD_IF_NEW` each: the keys a more-derived constructor already stored
+  are skipped, as before, and the rest are written with one
+  `ProtoObject::setAttributes` (protoCore 2.11.0). The values are the
+  parameters, so nothing runs between the stores and the group is exactly the
+  per-field sequence; an immutable `this` builds its attribute tree once
+  instead of once per field (a five-field case class: 46 cells per
+  construction per field, 24 grouped), and a mutable one is published once.
+  Body `val`s are stored one by one: in the conformance suite, examples and
+  benchmarks (881 files) only 8 runs of two or more consecutive body-`val`
+  stores occur, against 78 parameter-field runs. Assignments to a `var` are
+  calls of its setter `x_=` (overridable, as in Scala), each of which stores
+  one field, so `a = x; b = y` has no run of stores to group.
+  `PROTOSCALA_FIELD_GROUPS=off` restores the per-field stores.
 - Methods are attributes on the class prototype. The dispatch path uses
   interned attribute keys and `getOwnAttributeDirect`-first lookups (the
   protoPython fast-path lesson), relying on protoCore's per-thread attribute

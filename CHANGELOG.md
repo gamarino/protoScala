@@ -6,6 +6,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — constructor parameter fields as one write group; protoCore 2.11.0, 2026-10-03
+
+- **A constructor stores its parameter fields as one write group.** Two or
+  more parameter fields were stored by one `STORE_FIELD_IF_NEW` each, and each
+  built a new immutable `this` (or, for a class with a `var`, published a new
+  version of the mutable one). The compiler now emits one
+  `STORE_FIELDS_IF_NEW` (opcode 82, operand a Names constant): the VM skips the
+  keys a more-derived constructor already stored, exactly as the per-field form
+  did, and writes the rest with one `ProtoObject::setAttributes`
+  (protoCore 2.11.0), which builds the attribute tree once. The values are the
+  parameters themselves, so nothing runs between the stores and no run-time
+  guard is needed: the group is the per-field sequence. Initialisation order is
+  unchanged (parameter fields, then the superclass and trait initialisers, then
+  the body). `PROTOSCALA_FIELD_GROUPS=off` restores the per-field stores.
+  - *Measured* (`case class P5(id: Int, name: String, qty: Int, price: Int,
+    flag: Boolean)`, 50,000 constructions, no collection during the
+    measurement; Release, protoCore 2.12.0): 46 cells per construction per
+    field, 24 grouped.
+  - *Not grouped, with the evidence*: body `val`s (8 runs of two or more in
+    the 881 conformance, example and benchmark files, against 78
+    parameter-field runs) and `var` assignments, which call the overridable
+    setter `x_=` one field at a time. No concurrency test: parameter fields
+    are stored before `this` can reach another thread.
+  - *Transpiled modules*: `protoscalac` emits `gen::storeFieldsIfNew`, an
+    addition to `GeneratedModule.h` (the ABI does not move;
+    `docs/PROTOSCALAC_SPECIFICATION.md` §6).
+  - *Tests*: `FieldGroups.*` in `protoscala_unit_tests` -- the group is
+    emitted for two or more parameters; case classes, an overriding parameter
+    read through `this` by the ancestor's initialiser (fails when the group
+    ignores the keys already stored), a superclass initialiser that sees the
+    parameter fields, and a mutable instance answer the same with the groups
+    on and off; and the cells per construction.
+- **protoCore 2.11.0 is the floor on every platform** (was 2.7.0, 2.9.0 on
+  Windows). A `../protoCore` developer tree without `setAttributes` is refused
+  at configure time. CI builds protoCore 2.12.0 (tag `v2.12.0`, `f969d15`) on
+  Linux, macOS and Windows and 2.11.0 (`69b56af`) in the floor job, and
+  protoST at `36ed1ae` for the interop test. protoScala does not enable
+  protoCore's adaptive heap.
+
 ### Changed — protoCore 2.10.2 in CI, 2026-10-03
 
 - **CI builds protoCore 2.10.2** (tag `v2.10.2`, `b7f6d82`) on Linux, macOS

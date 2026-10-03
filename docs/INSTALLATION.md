@@ -19,13 +19,14 @@ executable sees no protoCore at all.)
   Fedora/RHEL, `brew install readline` on macOS). It is a hard requirement of
   the interactive REPL: configuration fails with a `FATAL_ERROR` without it
   (except on Windows, where the REPL uses the console's own line editing).
-- **protoCore 2.7.0 or newer** (2.7.0 is where `proto::proto_long` first exists; the "Why 2.6.1" floors below still hold underneath it), installed, with its CMake package configuration.
-  **On Windows the floor is 2.9.0**: it is the release that honours
-  `ProtoSpace::setThreadStackBytes` there, which gives the actor workers the
-  evaluator's 32 MiB stack (§Windows). CI builds and tests against **2.10.2 on
-  Linux, macOS and Windows**, and against **2.7.0**, the declared minimum, in
-  one Linux job (the floor job; the Windows minimum, 2.9.0, has no job of its
-  own); the packaging sections below were
+- **protoCore 2.11.0 or newer** (2.11.0 is where `ProtoObject::setAttributes`
+  first exists: a constructor stores its parameter fields as one write group;
+  the earlier floors -- 2.7.0 for `proto::proto_long`, 2.9.0 on Windows for
+  `ProtoSpace::setThreadStackBytes`, and the "Why 2.6.1" ones below -- still
+  hold underneath it), installed, with its CMake package configuration. CI
+  builds and tests against **2.12.0 on Linux, macOS and Windows**, and against
+  **2.11.0**, the declared minimum, in one Linux job (the floor job); the
+  packaging sections below were
   verified against 2.5.0. See protoCore's `docs/INSTALLATION.md`.
 - **protoIO 0.2.2 or newer within 0.2** (the I/O layer the protoCore runtimes
   share; 0.2.2 brings `process::run` options, crash statuses as 128 + signal on
@@ -212,7 +213,7 @@ change the meaning of an `import` that already resolved.
 
 protoScala builds and runs natively on Windows with Visual Studio 2022 (MSVC
 19.44 verified, Windows 11 and the `windows-2022` CI runner), using the CMake
-and Ninja that ship with it. Build protoCore **2.9.0 or later** first (its
+and Ninja that ship with it. Build protoCore **2.11.0 or later** first (its
 `docs/INSTALLATION.md`, "Windows (MSVC)") and install it into a prefix; protoIO
 is compiled from the sibling `../protoIO` as on Linux. From an "x64 Native Tools
 Command Prompt":
