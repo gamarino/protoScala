@@ -312,14 +312,15 @@ give a native program: it rewrites a POSIX path placed in the environment
 creates is not readable by a native program, so `cli/io-stdin` streams
 through a coprocess's pipes. `tests/transpile-exclude-windows.txt` lists the
 fixtures whose transpiled twin cannot pass on Windows (none).
-On the `windows-2022` runner (CI run 37109119193, 2026-10-03, protoCore 2.10.2) **2428 tests
-are registered and the 2425 that CI runs pass** (0 failed, 7 skipped: the
+On the `windows-2022` runner (cross-platform run 37146464535, 2026-10-03, protoCore 2.12.0) **2434 tests
+are registered and the 2431 that CI runs pass** (0 failed, 7 skipped: the
 embedder-conformance rules that need process isolation; the three
 clock-dependent isolate cases run in their own informational job on Linux).
 That includes the 977 `transpiled/*` and 12 `benchmarks-transpiled/*` cases,
-each building a `module.dll` with `cl`. macOS registers the same 2428; Linux
-registers 2429, the one more being `umd/protost-interop`, which needs protoST
-beside the tree.
+each building a `module.dll` with `cl`. macOS registers the same 2434; Linux
+registers 2435 (CI run 37146462690; 2432 run there, against protoCore 2.12.0 and,
+in the floor job, 2.11.0), the one more being `umd/protost-interop`, which needs
+protoST beside the tree.
 
 ---
 
@@ -398,7 +399,7 @@ sibling developer fallback was a hard error.
 | Linux / Debian-Ubuntu | TGZ, DEB | **VERIFIED.** Installed with `dpkg -i` as root in a throwaway `ubuntu:24.04` container; `protoscala` ran a script and `protoscalac --build-so` compiled, linked and produced a loadable `module.so` there, outside any repository, with no `LD_LIBRARY_PATH` and no `PROTOSCALAC_INCLUDE_DIRS` set. |
 | Linux / Fedora-RHEL | TGZ, RPM | **VERIFIED.** `cpack -G RPM` executed in a throwaway `fedora:41` container (glibc 2.40, `rpm` 4.20.1); the RPM installed with `rpm -i` and `protoscala` ran correctly there. This closes the gap left by decision D-I2. |
 | macOS | DragNDrop | **UNVERIFIED.** Configured and reviewed only; there is no macOS host here. Review is not verification. |
-| Windows | ZIP, NSIS | **ZIP VERIFIED IN CI** (2026-10-03, run 37109119193, `windows-2022`, MSVC, protoCore 2.10.2, protoIO 0.2.2, OpenSSL 3.6.4). Built and tested (2425/2425 run, see [Windows (MSVC)](#windows-msvc)); `cpack -G ZIP` builds the ZIP, CI checks it holds protoCore's DLL, OpenSSL's DLLs and licence and the C++ runtime, unpacks it into an empty directory, runs `protoscala.exe` there with only Windows' own directories on `PATH`, and builds and runs a module with the unpacked `protoscalac.exe`. Earlier, by hand (2026-10-01, Windows 11, MSVC 19.44): `cmake --install`, then `protoscala --version`, a script and the REPL from `cmd.exe`. The NSIS installer is generated when `makensis` is found but has not been installed and run. |
+| Windows | ZIP, NSIS | **ZIP VERIFIED IN CI** (2026-10-03, run 37146464535, `windows-2022`, MSVC, protoCore 2.12.0, protoIO 0.2.2, OpenSSL 3.6.4). Built and tested (2431/2431 run, see [Windows (MSVC)](#windows-msvc)); `cpack -G ZIP` builds the ZIP, CI checks it holds protoCore's DLL, OpenSSL's DLLs and licence and the C++ runtime, unpacks it into an empty directory, runs `protoscala.exe` there with only Windows' own directories on `PATH`, and builds and runs a module with the unpacked `protoscalac.exe`. Earlier, by hand (2026-10-01, Windows 11, MSVC 19.44): `cmake --install`, then `protoscala --version`, a script and the REPL from `cmd.exe`. The NSIS installer is generated when `makensis` is found but has not been installed and run. |
 
 ### Packaging and installation defects: the whole list, in one place
 
