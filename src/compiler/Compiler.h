@@ -67,6 +67,13 @@ class Compiler {
 public:
     explicit Compiler(GlobalTable& globals) : globals_(globals) {}
 
+    // Constructor parameter fields as one write group (STORE_FIELDS_IF_NEW).
+    // On by default; PROTOSCALA_FIELD_GROUPS=off in the environment turns the
+    // groups off, and setFieldGroups changes it for code compiled afterwards
+    // (the tests compare both forms in one process).
+    static void setFieldGroups(bool on);
+    static bool fieldGroups();
+
     // The loader an `import` consults (Phase 6 plan A0-1). Left null, an
     // `import` raises "imports are not available here", which is what compiling
     // the prelude and the precompile tool both want: the prelude has no imports.

@@ -368,6 +368,36 @@ inline const proto::ProtoObject* storeFieldIfNew(proto::ProtoContext* ctx,
     return self;
 }
 
+/**
+ * STORE_FIELDS_IF_NEW: STORE_FIELD_IF_NEW for each of `n` distinct keys in
+ * order, written as one group. The keys a more-derived constructor already
+ * stored are skipped, as STORE_FIELD_IF_NEW skips them one by one; the rest
+ * are published as one new version of `self` (ProtoObject::setAttributes):
+ * an immutable `this` builds its attribute tree once instead of once per
+ * field, and a mutable one is published once. `values` must be traced slots
+ * (the operand stack), which keep them reachable while the group allocates.
+ */
+inline const proto::ProtoObject* storeFieldsIfNew(proto::ProtoContext* ctx,
+                                                  const proto::ProtoObject* self,
+                                                  const proto::ProtoString* const* keys,
+                                                  unsigned n,
+                                                  const proto::ProtoObject* const* values) {
+    constexpr unsigned kChunk = 32;
+    const proto::ProtoString* k2[kChunk];
+    const proto::ProtoObject* v2[kChunk];
+    for (unsigned base = 0; base < n; base += kChunk) {
+        unsigned m = 0;
+        for (unsigned k = base; k < n && k < base + kChunk; ++k) {
+            if (self->hasOwnAttribute(ctx, keys[k]) == PROTO_TRUE) continue;
+            k2[m] = keys[k];
+            v2[m] = values[k];
+            ++m;
+        }
+        if (m > 0) self = self->setAttributes(ctx, m, k2, v2);
+    }
+    return self;
+}
+
 /** SET_FIELD: the setter of a `var` field; the instance must be mutable. */
 inline void setField(proto::ProtoContext* ctx, const proto::ProtoObject* obj,
                      const proto::ProtoString* key, const proto::ProtoObject* v) {

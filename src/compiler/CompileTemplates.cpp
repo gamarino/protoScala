@@ -7,6 +7,8 @@
 #include "frontend/Linearizer.h"
 
 #include <algorithm>
+#include <atomic>
+#include <cstdlib>
 #include <functional>
 #include <string_view>
 #include <unordered_set>
@@ -541,6 +543,19 @@ void Compiler::compileInitCall(const ClassInfo& target, const std::vector<NodePt
     emit(Op::STORE_LOCAL, 0, pos, -1);
 }
 
+namespace {
+std::atomic<bool>& fieldGroupsFlag() {
+    static std::atomic<bool> flag{[] {
+        const char* v = std::getenv("PROTOSCALA_FIELD_GROUPS");
+        return !(v && std::string_view(v) == "off");
+    }()};
+    return flag;
+}
+}  // namespace
+
+void Compiler::setFieldGroups(bool on) { fieldGroupsFlag().store(on); }
+bool Compiler::fieldGroups() { return fieldGroupsFlag().load(); }
+
 // <init>(this, params): superclass initialiser, trait initialisers in Scala's
 // order, parameter fields, lazy holders, then the template statements; returns
 // the final `this`.
@@ -588,10 +603,26 @@ void Compiler::compileConstructor(const TemplateDef& t, const ClassInfo& info) {
     // are one slot. Since the subclass stores first, the guard is what makes the
     // override win for the ancestor's own initialiser body -- scalac gives the
     // ancestor a second field and an overridden accessor instead.
-    for (std::size_t k = 0; k < t.ctorParams.size(); ++k) {  // parameter fields
-        emit(Op::PUSH_LOCAL, 1 + k, t.pos, +1);
-        emit(Op::STORE_FIELD_IF_NEW,
-             fn_->mod->addSymbol(info.members.at(t.ctorParams[k].name).key), t.pos, -1);
+    //
+    // Two or more parameter fields are stored as ONE group
+    // (STORE_FIELDS_IF_NEW): the same STORE_FIELD_IF_NEW per key, in order,
+    // published as one new version of `this` (ProtoObject::setAttributes)
+    // instead of one per field. Nothing runs between the stores -- the values
+    // are the parameters -- so the group is exactly the per-field sequence.
+    if (t.ctorParams.size() >= 2 && fieldGroups()) {
+        std::vector<std::string> keys;
+        for (std::size_t k = 0; k < t.ctorParams.size(); ++k) {
+            emit(Op::PUSH_LOCAL, 1 + k, t.pos, +1);
+            keys.push_back(info.members.at(t.ctorParams[k].name).key);
+        }
+        emit(Op::STORE_FIELDS_IF_NEW, fn_->mod->addNames(keys), t.pos,
+             -static_cast<int>(keys.size()));
+    } else {
+        for (std::size_t k = 0; k < t.ctorParams.size(); ++k) {  // parameter fields
+            emit(Op::PUSH_LOCAL, 1 + k, t.pos, +1);
+            emit(Op::STORE_FIELD_IF_NEW,
+                 fn_->mod->addSymbol(info.members.at(t.ctorParams[k].name).key), t.pos, -1);
+        }
     }
     if (info.kind != ClassKind::Trait) {  // a trait's initialiser runs only its own body
         const ClassInfo* super = superclassOf(info);

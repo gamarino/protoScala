@@ -27,6 +27,7 @@ add_executable(protoscala_unit_tests
     test_opcode_ops.cpp
     test_cpp_tables.cpp
     test_compiled_provider.cpp
+    test_field_groups.cpp
 )
 
 target_link_libraries(protoscala_unit_tests
