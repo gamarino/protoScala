@@ -321,6 +321,16 @@ const proto::ProtoObject* storeFieldIfNew(proto::ProtoContext*, const BlockRec&,
                                           const proto::ProtoObject* v);
 void setField(proto::ProtoContext*, const BlockRec&, std::size_t symIdx,
               const proto::ProtoObject* obj, const proto::ProtoObject* v);
+/**
+ * STORE_FIELDS_IF_NEW: a constructor's parameter fields as one write group,
+ * the keys from the Names constant `namesIdx` and the values from the traced
+ * slots `values[0..n)`. An addition to this header, not a change: a module
+ * built against an earlier one still loads, so `kGeneratedModuleABI` does not
+ * move.
+ */
+const proto::ProtoObject* storeFieldsIfNew(proto::ProtoContext*, const BlockRec&,
+                                           std::size_t namesIdx, const proto::ProtoObject* self,
+                                           const proto::ProtoObject* const* values);
 
 bool testType(proto::ProtoContext*, const proto::ProtoObject* v, std::uint32_t typeCode);
 bool testProto(proto::ProtoContext*, const BlockRec&, std::size_t symIdx, const proto::ProtoObject* v);

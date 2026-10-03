@@ -408,6 +408,12 @@ file's signatures moves the soversion, and a module built against the old one fa
 **library's** answer, so a module can compare it with the `kGeneratedModuleABI` it
 was compiled against; comparing the constant with itself would prove nothing.
 
+**Additions since then, none of which breaks an existing module** (so neither the
+soversion nor `kGeneratedModuleABI` moves): `handleCaughtException` (the Windows
+review) and `storeFieldsIfNew` (2026-10-03), which a constructor's grouped parameter
+fields (`STORE_FIELDS_IF_NEW`) call. A module that calls an addition needs a library
+that has it, as with any added symbol.
+
 `ldd module.so` names `libprotoScala.so.1` and `libprotoCore.so.3`. That is §7's
 statement made by a tool rather than asserted by a document.
 

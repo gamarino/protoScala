@@ -647,6 +647,14 @@ const proto::ProtoObject* storeFieldIfNew(proto::ProtoContext* ctx, const BlockR
     return ops::storeFieldIfNew(ctx, self, blk.symbols[symIdx], v);
 }
 
+const proto::ProtoObject* storeFieldsIfNew(proto::ProtoContext* ctx, const BlockRec& blk,
+                                           std::size_t namesIdx, const proto::ProtoObject* self,
+                                           const proto::ProtoObject* const* values) {
+    const ConstRec& c = blk.consts[namesIdx];
+    return ops::storeFieldsIfNew(ctx, self, blk.stringSymbols + c.namesFirst,
+                                 static_cast<unsigned>(c.namesCount), values);
+}
+
 void setField(proto::ProtoContext* ctx, const BlockRec& blk, std::size_t symIdx,
               const proto::ProtoObject* obj, const proto::ProtoObject* v) {
     ops::setField(ctx, obj, blk.symbols[symIdx], v);

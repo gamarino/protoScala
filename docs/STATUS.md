@@ -737,6 +737,7 @@ their reserved ranges.
 | 66 | `INVOKE_INIT` | `[cls this a1..an] -> [this']` | operand: SendSite (constructor key, n); returns the rebuilt instance (D28) |
 | 67 | `STORE_FIELD` | `[v] -> []` | `slot[0] = slot[0].setAttribute(key, v)`; operand: Symbol |
 | 68 | `SET_FIELD` | `[obj v] -> []` | the receiver must be mutable; operand: Symbol |
+| 82 | `STORE_FIELDS_IF_NEW` | `[v1..vn] -> []` | a constructor's parameter fields as one write group: `STORE_FIELD_IF_NEW` for each key in order, published as one version of `slot[0]` (`ProtoObject::setAttributes`); operand: a Names constant (the n keys) |
 | 69 | `SEND_SUPER` | `[this a1..an] -> [r]` | operand: a SuperSite constant (DESIGN §4.4) |
 | 70 | `TEST_TYPE` | `[v] -> [Boolean]` | operand: TypeCode (the built-in types, D29) |
 | 71 | `TEST_PROTO` | `[v] -> [Boolean]` | operand: Symbol (the class's marker key, DESIGN §5.3) |

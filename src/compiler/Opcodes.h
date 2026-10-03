@@ -93,7 +93,13 @@ enum class Op : uint8_t {
     // field clobbers the override for the whole initialiser chain.
     STORE_FIELD_IF_NEW = 81,  // [v] -> []  slot[0].setAttribute(key, v) unless
                               //            slot[0] already has key; operand: Symbol
-    // 82..95   reserved (object model)
+    // A constructor's parameter fields as ONE write group: STORE_FIELD_IF_NEW for
+    // each key in order, published as one new version of `this`
+    // (ProtoObject::setAttributes, protoCore 2.11.0) instead of one per field.
+    // The values are the parameters themselves, so nothing runs between the
+    // stores and the group is exactly the per-field sequence.
+    STORE_FIELDS_IF_NEW = 82, // [v1..vn] -> []  operand: a Names constant (the n keys)
+    // 83..95   reserved (object model)
     // Phase 4: exceptions (DESIGN §7). The protected regions live in the
     // module's handler table, not in the instruction stream.
     THROW          = 96,  // [v] -> throws                v must be a Throwable (A0-5)

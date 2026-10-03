@@ -1219,6 +1219,13 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                         ops::storeFieldIfNew(&frame, slots[0], mod.constAt(operand).symbol, sp[-1]);
                     --sp;
                     continue;
+                case Op::STORE_FIELDS_IF_NEW: {  // a constructor's parameter fields, one group
+                    const auto& keys = mod.constAt(operand).nameSymbols;
+                    const unsigned n = static_cast<unsigned>(keys.size());
+                    slots[0] = ops::storeFieldsIfNew(&frame, slots[0], keys.data(), n, sp - n);
+                    sp -= n;
+                    continue;
+                }
                 case Op::SET_FIELD:  // setters of var fields: the instance is mutable
                     ops::setField(&frame, sp[-2], mod.constAt(operand).symbol, sp[-1]);
                     sp -= 2;

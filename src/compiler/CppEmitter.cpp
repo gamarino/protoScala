@@ -37,6 +37,7 @@ bool isSupported(Op op) {
         case Op::THROW: case Op::RETHROW:
         case Op::MAKE_CLASS: case Op::NEW: case Op::NEW_SPREAD: case Op::INVOKE_INIT:
         case Op::STORE_FIELD: case Op::STORE_FIELD_IF_NEW: case Op::SET_FIELD:
+        case Op::STORE_FIELDS_IF_NEW:
         case Op::SEND_SUPER:
             return true;
         default:
@@ -133,6 +134,8 @@ int CppEmitter::effect(const BytecodeModule& mod, const Decoded& d) {
         case Op::UNCONS: return 1;
         case Op::UNAPPLY_FIELDS:
             return static_cast<int>(mod.constAt(d.operand).names.size()) - 1;
+        case Op::STORE_FIELDS_IF_NEW:
+            return -static_cast<int>(mod.constAt(d.operand).names.size());
         case Op::MAKE_CLASS: {
             const BytecodeModule::Const& c = mod.constAt(d.operand);
             return 1 - static_cast<int>(c.argc + c.names.size());
@@ -331,6 +334,7 @@ std::vector<std::string> CppEmitter::purityReport(const CompiledUnit& unit) {
                 case Op::CALL: case Op::CALL_SPREAD: case Op::CALL_KW: case Op::MAKE_FN:
                 case Op::MAKE_CELL: case Op::PUSH_CELL: case Op::STORE_CELL:
                 case Op::STORE_FIELD: case Op::STORE_FIELD_IF_NEW: case Op::SET_FIELD:
+                case Op::STORE_FIELDS_IF_NEW:
                 case Op::TEST_TYPE: case Op::TEST_PROTO:
                     why = "a protoScala runtime operation";
                     break;
@@ -667,6 +671,13 @@ bool CppEmitter::emitBlock(std::size_t index, const GlobalTable&) {
                 out_ << "S[0] = gen::storeFieldIfNew(C, " << rec << ", " << d.operand << ", S[0], "
                      << st(dep - 1) << ");";
                 break;
+            case Op::STORE_FIELDS_IF_NEW: {
+                // A constructor's parameter fields as one group; `this` is slot 0.
+                const int n = static_cast<int>(mod.constAt(d.operand).names.size());
+                out_ << "S[0] = gen::storeFieldsIfNew(C, " << rec << ", " << d.operand
+                     << ", S[0], &" << st(dep - n) << ");";
+                break;
+            }
             case Op::SET_FIELD:
                 out_ << "gen::setField(C, " << rec << ", " << d.operand << ", " << st(dep - 2)
                      << ", " << st(dep - 1) << ");";

@@ -56,6 +56,7 @@ const char* opName(Op op) {
         case Op::INVOKE_INIT:    return "INVOKE_INIT";
         case Op::STORE_FIELD:    return "STORE_FIELD";
         case Op::STORE_FIELD_IF_NEW: return "STORE_FIELD_IF_NEW";
+        case Op::STORE_FIELDS_IF_NEW: return "STORE_FIELDS_IF_NEW";
         case Op::SET_FIELD:      return "SET_FIELD";
         case Op::SEND_SUPER:     return "SEND_SUPER";
         case Op::TEST_TYPE:      return "TEST_TYPE";
@@ -401,6 +402,7 @@ std::string commentFor(const BytecodeModule& m, Op op, std::uint64_t operand, st
         case Op::INVOKE_INIT:
         case Op::SEND_SUPER:
         case Op::UNAPPLY_FIELDS:
+        case Op::STORE_FIELDS_IF_NEW:
         case Op::SEND_KW:
             return " ; " + formatConst(m.constAt(operand));
         case Op::STORE_FIELD:
