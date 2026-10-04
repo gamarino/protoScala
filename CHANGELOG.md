@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — protoCore 2.14.1 in CI, 2026-10-04
+
+- **CI builds protoCore 2.14.1** (tag `v2.14.1`, `9495155`) on Linux, macOS
+  and Windows instead of 2.12.0: the collector's control law (2.13.0), the
+  sweep's helper threads (2.14.0) and the thread-exit quorum fix (2.14.1);
+  and protoST at `0d9ed15` (its own 2.14.1 pin) for the interop test. The
+  floor job stays on 2.11.0 and protoIO on 0.2.2. No source change was
+  needed: the full suite passes locally against 2.14.1 (2435/2435, 7 skipped
+  by design, ldd-verified, the interop test linking protoST built against
+  2.14.1). protoScala does not enable protoCore's adaptive heap.
+
 ### Changed — constructor parameter fields as one write group; protoCore 2.11.0, 2026-10-03
 
 - **A constructor stores its parameter fields as one write group.** Two or
