@@ -15,7 +15,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   floor job stays on 2.11.0 and protoIO on 0.2.2. No source change was
   needed: the full suite passes locally against 2.14.1 (2435/2435, 7 skipped
   by design, ldd-verified, the interop test linking protoST built against
-  2.14.1). protoScala does not enable protoCore's adaptive heap.
+  2.14.1). CI is green on the branch (CI 37170790272: 2432 on 2.14.1 and on
+  the 2.11.0 floor; cross-platform 37170791972: 2431 on Windows and macOS).
+  protoScala does not enable protoCore's adaptive heap.
 
 ### Changed — constructor parameter fields as one write group; protoCore 2.11.0, 2026-10-03
 

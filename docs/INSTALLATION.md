@@ -312,13 +312,13 @@ give a native program: it rewrites a POSIX path placed in the environment
 creates is not readable by a native program, so `cli/io-stdin` streams
 through a coprocess's pipes. `tests/transpile-exclude-windows.txt` lists the
 fixtures whose transpiled twin cannot pass on Windows (none).
-On the `windows-2022` runner (cross-platform run 37146464535, 2026-10-03, protoCore 2.12.0) **2434 tests
+On the `windows-2022` runner (cross-platform run 37170791972, 2026-10-04, protoCore 2.14.1) **2434 tests
 are registered and the 2431 that CI runs pass** (0 failed, 7 skipped: the
 embedder-conformance rules that need process isolation; the three
 clock-dependent isolate cases run in their own informational job on Linux).
 That includes the 977 `transpiled/*` and 12 `benchmarks-transpiled/*` cases,
 each building a `module.dll` with `cl`. macOS registers the same 2434; Linux
-registers 2435 (CI run 37146462690; 2432 run there, against protoCore 2.12.0 and,
+registers 2435 (CI run 37170790272; 2432 run there, against protoCore 2.14.1 and,
 in the floor job, 2.11.0), the one more being `umd/protost-interop`, which needs
 protoST beside the tree.
 
