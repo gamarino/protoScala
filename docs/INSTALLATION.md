@@ -24,7 +24,7 @@ executable sees no protoCore at all.)
   the earlier floors -- 2.7.0 for `proto::proto_long`, 2.9.0 on Windows for
   `ProtoSpace::setThreadStackBytes`, and the "Why 2.6.1" ones below -- still
   hold underneath it), installed, with its CMake package configuration. CI
-  builds and tests against **2.14.2 on Linux, macOS and Windows**, and against
+  builds and tests against **2.14.5 on Linux, macOS and Windows**, and against
   **2.11.0**, the declared minimum, in one Linux job (the floor job); the
   packaging sections below were
   verified against 2.5.0. See protoCore's `docs/INSTALLATION.md`.

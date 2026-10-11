@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — protoCore 2.14.5 in CI, 2026-10-11
+
+- **CI builds protoCore 2.14.5** (tag `v2.14.5`, `063c6d5`) on Linux, macOS
+  and Windows instead of 2.14.2, and protoST at its new main (`4876884`, its
+  own 2.14.5 pin) for the interop test: the controller's out-of-memory rule
+  uses the live set and the collector's registries outlive static
+  destruction (2.14.4); an embedder exits LeakSanitizer-clean (2.14.5). The
+  floor job stays on 2.11.0 and protoIO on 0.2.2. No source change was
+  needed: the suite passes 2438/2438 locally against 2.14.5 in CI's sibling
+  layout (ldd-verified).
+
 ### Changed — protoCore's adaptive heap controller by default; protoCore 2.14.2 in CI, 2026-10-10
 
 - **Every `Session` runs protoCore's adaptive heap controller.** The
