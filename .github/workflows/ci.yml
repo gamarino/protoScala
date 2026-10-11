@@ -33,7 +33,7 @@ name: CI
 # breaks, which is worth having, but a red build would then have three possible
 # authors; the schedule keeps that signal separate, and the summary records the
 # commits actually used.  The `test` job runs twice: against the pinned
-# protoCore release (2.14.1) and against the declared minimum (2.11.0, its floor
+# protoCore release (2.14.2) and against the declared minimum (2.11.0, its floor
 # entry -- this repository's only floor job, on 2.11.0 on the schedule too).
 
 on:
@@ -57,14 +57,14 @@ env:
   PROTOCORE_REPO: numaes/protoCore
   PROTOST_REPO: gamarino/protoST
   PROTOIO_REPO: gamarino/protoIO
-  # protoCore 2.14.1, SOVERSION 3 (tag v2.14.1, 9495155).  Bump deliberately.
+  # protoCore 2.14.2, SOVERSION 3 (tag v2.14.2, 17bc118).  Bump deliberately.
   # Every job builds it except the floor entry of the `test` job, which builds
   # the declared minimum (2.11.0, see there).
-  PROTOCORE_REF: ${{ github.event_name == 'schedule' && 'master' || '949515598fedc17b74e48ad00163e1844de6e5d2' }}
-  # protoST main (0d9ed15, 2026-10-04: its CI on protoCore 2.14.1; the
+  PROTOCORE_REF: ${{ github.event_name == 'schedule' && 'master' || '17bc118e3af265b84fe322901c9e6b9a448a82d3' }}
+  # protoST main (5f7d8dd, 2026-10-10: its CI on protoCore 2.14.2; the
   # instance-variable write groups, protoCore 2.11.0 floor), the commit
   # protoScala's interop test was last verified against.
-  PROTOST_REF: ${{ github.event_name == 'schedule' && 'main' || '0d9ed15bba8b47d6ebe8b783aed2508f4186dfb8' }}
+  PROTOST_REF: ${{ github.event_name == 'schedule' && 'main' || '5f7d8dd55071b0d8bf3b19d4d1f464046a2db837' }}
   # protoIO 0.2.2 (main, 1611ff9): the I/O layer protoScala and protoST link
   # statically, and protoScala's floor.  Bump deliberately, like protoCore.
   PROTOIO_REF: ${{ github.event_name == 'schedule' && 'main' || '1611ff9cf8d499cdc42a6e108e42ecfc36fd8164' }}
@@ -86,13 +86,13 @@ jobs:
       matrix:
         include:
           - name: Build and test suite
-            # Empty: env.PROTOCORE_REF (2.14.1, or master on the schedule).
+            # Empty: env.PROTOCORE_REF (2.14.2, or master on the schedule).
             protocore_ref: ''
           # THE FLOOR JOB, the only one in this repository. protoCore 2.11.0
           # (tag v2.11.0, 69b56af), SOVERSION 3: PROTOCORE_MIN_VERSION in
           # CMakeLists.txt on every platform (ProtoObject::setAttributes, the
           # constructor field groups). Built on every event, the schedule
-          # included. cross-platform.yml builds 2.14.1 on macOS and Windows.
+          # included. cross-platform.yml builds 2.14.2 on macOS and Windows.
           - name: Build and test suite (protoCore 2.11.0, the declared minimum)
             protocore_ref: 69b56afeee00d843d74f8e67d3add317bc1ce5d3
     steps:
