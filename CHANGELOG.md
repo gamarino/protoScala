@@ -53,7 +53,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   pin) for the interop test. The floor job stays on 2.11.0 and protoIO on
   0.2.2. The full suite passes locally against 2.14.2 (2438/2438, 7 skipped
   by design, ldd-verified; the interop test linked protoST's libraries as
-  built on 2026-10-03 against 2.14.1 -- CI builds protoST at the pin).
+  built on 2026-10-03 against 2.14.1 -- CI builds protoST at the pin). CI is
+  green on the branch: Linux 2435 run of 2438 on 2.14.2 and on the 2.11.0
+  floor (CI 38103313571), macOS and Windows 2434 run of 2437
+  (cross-platform 38103315113).
 
 ### Changed — protoCore 2.14.1 in CI, 2026-10-04
 

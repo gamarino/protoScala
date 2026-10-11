@@ -24,7 +24,7 @@ executable sees no protoCore at all.)
   the earlier floors -- 2.7.0 for `proto::proto_long`, 2.9.0 on Windows for
   `ProtoSpace::setThreadStackBytes`, and the "Why 2.6.1" ones below -- still
   hold underneath it), installed, with its CMake package configuration. CI
-  builds and tests against **2.14.1 on Linux, macOS and Windows**, and against
+  builds and tests against **2.14.2 on Linux, macOS and Windows**, and against
   **2.11.0**, the declared minimum, in one Linux job (the floor job); the
   packaging sections below were
   verified against 2.5.0. See protoCore's `docs/INSTALLATION.md`.
@@ -312,13 +312,13 @@ give a native program: it rewrites a POSIX path placed in the environment
 creates is not readable by a native program, so `cli/io-stdin` streams
 through a coprocess's pipes. `tests/transpile-exclude-windows.txt` lists the
 fixtures whose transpiled twin cannot pass on Windows (none).
-On the `windows-2022` runner (cross-platform run 37170791972, 2026-10-04, protoCore 2.14.1) **2434 tests
-are registered and the 2431 that CI runs pass** (0 failed, 7 skipped: the
+On the `windows-2022` runner (cross-platform run 38103315113, 2026-10-10, protoCore 2.14.2) **2437 tests
+are registered and the 2434 that CI runs pass** (0 failed, 7 skipped: the
 embedder-conformance rules that need process isolation; the three
 clock-dependent isolate cases run in their own informational job on Linux).
 That includes the 977 `transpiled/*` and 12 `benchmarks-transpiled/*` cases,
-each building a `module.dll` with `cl`. macOS registers the same 2434; Linux
-registers 2435 (CI run 37170790272; 2432 run there, against protoCore 2.14.1 and,
+each building a `module.dll` with `cl`. macOS registers the same 2437; Linux
+registers 2438 (CI run 38103313571; 2435 run there, against protoCore 2.14.2 and,
 in the floor job, 2.11.0), the one more being `umd/protost-interop`, which needs
 protoST beside the tree.
 
