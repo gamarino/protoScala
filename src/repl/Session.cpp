@@ -60,9 +60,28 @@ std::string moduleObjectName(const std::string& logicalPath) {
     return dot == std::string::npos ? logicalPath : logicalPath.substr(dot + 1);
 }
 
+// The session's memory policy: protoCore's adaptive heap controller
+// (protoCore docs/GarbageCollector.md, "Adaptive heap controller";
+// README.md, "Memory"). The heap budget is 75 % of the smaller of physical
+// memory and the process memory limit (cgroup on Linux, job object on
+// Windows); a soft limit inside it grows only while the program waits for the
+// collector. Memory is never returned to the operating system.
+// PROTOCORE_HEAP_LIMIT_CELLS=<hard> or <soft>,<hard> sets the budget in cells;
+// PROTOCORE_ADAPTIVE_HEAP=0 applies it as a fixed hard limit instead. Without
+// this call protoCore starts no collection cycle by itself and the heap grows
+// without bound.
+void applyHeapPolicy(proto::ProtoSpace& space) {
+#if defined(PROTOCORE_HAS_ADAPTIVE_HEAP)
+    space.enableAdaptiveHeap();
+#else
+    (void)space;  // protoCore < 2.10: no controller (the floor is 2.11.0)
+#endif
+}
+
 } // namespace
 
 Session::Session() : runtime_(space_), engine_(runtime_.layout()) {
+    applyHeapPolicy(space_);
     installPrimitives(runtime_.rootContext(), runtime_.layout());
     for (const auto& n : builtinGlobalNames()) globals_.declare(n, BindingKind::Builtin);
     // The runtime's own by-name signatures (D47), declared next to the natives

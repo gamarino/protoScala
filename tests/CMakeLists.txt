@@ -71,6 +71,46 @@ set_tests_properties(cli/actors-stress PROPERTIES
     ENVIRONMENT "PROTOCORE_HEAP_LIMIT_CELLS=8000000")
 set_tests_properties(cli/gc-pressure cli/actor-bench-smoke PROPERTIES TIMEOUT 600)
 
+# --- Adaptive heap controller (the default memory policy, Session.cpp) ---------
+# The driver reads protoCore's per-cycle trace (PROTOCORE_HEAP_TRACE=1) from the
+# child's standard error and measures the child's peak RSS. Python 3 drives the
+# checks because it measures a child's peak RSS on Linux, macOS and Windows
+# alike (bash cannot); without a Python 3 interpreter they are not registered.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_FOUND)
+    set(_ah_check "${CMAKE_CURRENT_SOURCE_DIR}/cli/adaptive_heap_check.py")
+    set(_ah_prog "${CMAKE_CURRENT_SOURCE_DIR}/cli/adaptive-heap-garbage.scala")
+    # On by default: nothing in the environment; the rounds allocate well past
+    # the controller's initial 2 M-cell soft limit.
+    add_test(NAME cli/adaptive-heap-on-by-default
+        COMMAND ${Python3_EXECUTABLE} "${_ah_check}" --expect on
+            --sentinel "adaptive heap garbage done"
+            --unset PROTOCORE_ADAPTIVE_HEAP --unset PROTOCORE_HEAP_LIMIT_CELLS
+            --unset PROTOCORE_ADAPTIVE_HEAP_START
+            -- "$<TARGET_FILE:protoscala>" "${_ah_prog}" 20000)
+    # Off with PROTOCORE_ADAPTIVE_HEAP=0: the budget becomes a fixed hard limit.
+    add_test(NAME cli/adaptive-heap-off-by-env
+        COMMAND ${Python3_EXECUTABLE} "${_ah_check}" --expect off
+            --sentinel "adaptive heap garbage done"
+            --set PROTOCORE_ADAPTIVE_HEAP=0 --set PROTOCORE_HEAP_LIMIT_CELLS=1000000
+            --unset PROTOCORE_ADAPTIVE_HEAP_START
+            -- "$<TARGET_FILE:protoscala>" "${_ah_prog}" 20000)
+    # Bounded memory: a 1 M-cell budget (64 MiB of cells), garbage many times
+    # that (at least 10 cycles), and the peak RSS bounded by the budget plus
+    # the interpreter's own footprint.
+    add_test(NAME cli/adaptive-heap-bounded-memory
+        COMMAND ${Python3_EXECUTABLE} "${_ah_check}" --expect on
+            --sentinel "adaptive heap garbage done"
+            --set PROTOCORE_HEAP_LIMIT_CELLS=1000000
+            --unset PROTOCORE_ADAPTIVE_HEAP --unset PROTOCORE_ADAPTIVE_HEAP_START
+            --min-cycles 10 --max-rss-mb 160
+            -- "$<TARGET_FILE:protoscala>" "${_ah_prog}" 100000)
+    set_tests_properties(cli/adaptive-heap-on-by-default cli/adaptive-heap-off-by-env
+        cli/adaptive-heap-bounded-memory PROPERTIES TIMEOUT 300)
+    unset(_ah_check)
+    unset(_ah_prog)
+endif()
+
 add_test(NAME cli/examples
     COMMAND ${PROTOSCALA_SH} "${CMAKE_CURRENT_SOURCE_DIR}/cli/examples.sh" "$<TARGET_FILE:protoscala>"
             "${CMAKE_SOURCE_DIR}")

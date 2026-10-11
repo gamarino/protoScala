@@ -6,6 +6,55 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — protoCore's adaptive heap controller by default; protoCore 2.14.2 in CI, 2026-10-10
+
+- **Every `Session` runs protoCore's adaptive heap controller.** The
+  constructor calls `ProtoSpace::enableAdaptiveHeap` on the session's space
+  (guarded by `PROTOCORE_HAS_ADAPTIVE_HEAP`; every protoCore from the 2.11.0
+  floor has it), so `protoscala`, the REPL and `protoscalac`'s loader collect
+  under heap pressure. Before, protoScala set no limit: protoCore never
+  started a collection by itself and a program grew its heap with every
+  allocation (`tests/cli/adaptive-heap-garbage.scala` with 100000 rounds:
+  3.1 GB peak RSS; protoCore's re-measurement saw `tree_alloc` with six
+  tasks killed at 16 GB). The heap budget is 75 % of the smaller of physical
+  memory and the process memory limit (cgroup on Linux, job object on
+  Windows); a soft limit inside it grows only while the program waits for
+  the collector; **memory is not returned to the operating system**.
+  `PROTOCORE_HEAP_LIMIT_CELLS` sets the budget, `PROTOCORE_ADAPTIVE_HEAP=0`
+  turns the controller off (the budget becomes a fixed hard limit). README,
+  "Memory". Approved by the maintainer (protoCore's final re-measurement,
+  section 7: "adopt"); recorded in docs/DECISIONS-LOG.md.
+  - Tests: `cli/adaptive-heap-on-by-default` (the controller's per-cycle
+    trace appears with nothing in the environment),
+    `cli/adaptive-heap-off-by-env` (only fixed-limit cycles with
+    `PROTOCORE_ADAPTIVE_HEAP=0`) and `cli/adaptive-heap-bounded-memory` (a
+    1 M-cell budget, 100000 rounds -- about 50 times the budget in garbage --,
+    at least 10 cycles, peak RSS at most 160 MB; measured 75 MB), driven by
+    `tests/cli/adaptive_heap_check.py`, which measures the child's peak RSS on
+    Linux, macOS and Windows and needs Python 3 (not registered without it).
+    The first and third fail against the previous build (no controller line;
+    with the variable set, fixed-limit cycles); the second passes there too,
+    because `PROTOCORE_HEAP_LIMIT_CELLS` alone already applied a fixed limit,
+    so it guards the switch, not the adoption.
+  - Measured (DEV12 notebook, synthetic; before and after builds of the same
+    tree against protoCore 2.14.2; medians of 3, interleaved; wall s / peak
+    RSS MB): `tree_alloc` one task 12.83 / 2856 -> 13.13 / 166 (+2.4 %,
+    -94 %); `adaptive-heap-garbage.scala` 100000 rounds 4.26 / 3056 ->
+    4.31 / 146; `list_ops` 0.48 / 321 -> 0.56 / 238 (**+15.6 % wall**,
+    median of 11: the one regression above 10 %; protoCore's re-measurement
+    saw +12 %); `map_build` 0.42 / 184 -> 0.41 / 151; `object_tree`,
+    `fib30`, `tak`, `sum_loop`, `str_concat`, `attr_lookup`, `int_sum_loop`,
+    `range_iterate`, `factorial_100` and `actor-saturation-32` run no cycle
+    and are within -13 to +6 % (sub-second times, run-to-run noise; peak
+    RSS +1 MB).
+- **CI builds protoCore 2.14.2** (tag `v2.14.2`, `17bc118`) on Linux, macOS
+  and Windows instead of 2.14.1 (the collector adjustments, including the
+  controller's live-set floor), and protoST at `5f7d8dd` (its own 2.14.2
+  pin) for the interop test. The floor job stays on 2.11.0 and protoIO on
+  0.2.2. The full suite passes locally against 2.14.2 (2438/2438, 7 skipped
+  by design, ldd-verified; the interop test linked protoST's libraries as
+  built on 2026-10-03 against 2.14.1 -- CI builds protoST at the pin).
+
 ### Changed — protoCore 2.14.1 in CI, 2026-10-04
 
 - **CI builds protoCore 2.14.1** (tag `v2.14.1`, `9495155`) on Linux, macOS
