@@ -565,6 +565,17 @@ anticipated, and that count, not the percentage, is the number worth watching.
 
 ## Performance
 
+**protoCore 2.14.6 (measured 2026-10-12).**  `%` and `/` on Ints reach
+protoCore's `modulo`/`divide`, which no longer allocate a temporary for two
+SmallIntegers: loops of 2,000,000 iterations, the same commit (`dc8d4917`)
+built against protoCore 2.14.5 and 2.14.6, -47 % cycles each (A/A <= 1 %).
+In the general suite (`benchmarks/run_benchmarks.py`, two rounds,
+CPython 3.14.0, Scala 3.9.0 on OpenJDK 25.0.4.1) `object_tree` 394 -> 357 ms
+(2.04x -> 1.84x CPython's time; -10 % cycles) and `list_ops` 530 -> 487 ms;
+the other rows, which do not divide, are unchanged within the spread.
+`list_ops`'s JVM twin failed on OpenJDK 25 (not investigated).  Details:
+[protoCore's report](https://github.com/numaes/protoCore/blob/master/docs/reports/2026-10-12-cross-runtime-int-compare.md).
+
 protoScala is positioned as an agile, interoperable, easily integrable and
 very simple Scala — **not a fast one.** Beating the JVM on integer loops, or
 matching protoClojure's raw actor throughput, are explicit non-goals (see
