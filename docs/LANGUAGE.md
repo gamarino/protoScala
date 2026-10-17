@@ -22,6 +22,14 @@
   accepted), characters (`'a'`, escapes, `\u` unicode), strings (`"..."`,
   triple-quoted `"""..."""`), interpolators `s`, `f`, `raw`, booleans, `null`.
 - Comments: `//` line, `/* ... */` block, **nested**.
+- **Interpreter line:** when `#!` are the first two characters of the file,
+  the first line is skipped, so a script starting with
+  `#!/usr/bin/env protoscala` runs as a command; later lines keep their
+  numbers. Anywhere else `#!` is an operator identifier. This is Scala 3's
+  rule (verified against scalac 3.9.0, which also rejects `#!` after a leading
+  blank or on a later line). protoScala already drops a leading UTF-8
+  byte-order mark, which scalac rejects as an illegal character, so a BOM
+  followed by `#!` is skipped as well.
 - **Significant indentation** (Scala 3 offside rule) and braces, mixable as in
   Scala 3; optional `end` markers (`end if`, `end match`, `end MyClass`, ...).
 - **Leading infix operator:** a line starting with an operator identifier, a

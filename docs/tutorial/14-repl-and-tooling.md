@@ -136,7 +136,9 @@ In an interactive session the input history is saved to
 
 ## 14.5 Running scripts
 
-`protoscala file.scala [args...]` runs a file: first its top-level
+`protoscala file.scala [args...]` runs a file (or `./file.scala [args...]`,
+when it is executable and starts with `#!/usr/bin/env protoscala`: §18.2,
+"Scripts as commands"): first its top-level
 definitions and statements, in order, then its `@main` method. Arguments after
 the file name are passed to `@main` when it declares `args: String*`:
 

@@ -202,6 +202,14 @@ Lexer::Lexer(std::string source) : source_(std::move(source)) {
     // A UTF-8 byte-order mark at the start of the source is not part of it.
     if (source_.compare(0, 3, "\xEF\xBB\xBF") == 0) source_.erase(0, 3);
     computeLineIndents();
+    // An interpreter line (`#!/usr/bin/env protoscala`) makes a script
+    // directly executable. As in Scala 3 it is skipped only when `#!` are the
+    // first two characters of the source; anywhere else they are operator
+    // characters. The newline is kept, so later tokens keep their lines.
+    if (source_.compare(0, 2, "#!") == 0) {
+        pos_ = source_.find('\n');
+        if (pos_ == std::string::npos) pos_ = source_.size();
+    }
 }
 
 bool Lexer::isOpChar(char c) {

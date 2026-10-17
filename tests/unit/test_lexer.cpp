@@ -266,3 +266,19 @@ TEST(Lexer, ADollarEndsAnInterpolationIdentifier) {
     EXPECT_FALSE(t[0].parts[2].isHole); EXPECT_EQ(t[0].parts[2].text, "|");
     EXPECT_TRUE(t[0].parts[3].isHole);  EXPECT_EQ(t[0].parts[3].text, "a_b");
 }
+
+// Scala 3 skips an interpreter line (`#!/usr/bin/env scala`) when `#!` are
+// the first two bytes of the file, and only then: scalac 3.9.0 rejects `#!`
+// after a leading space or on a later line. The newline stays, so later
+// tokens keep their line numbers.
+TEST(Lexer, SkipsLeadingShebangLineOnly) {
+    auto t = rawTokens("#!/usr/bin/env protoscala\nval x = 1");
+    EXPECT_EQ(kinds(t), "KwVal Identifier Equals IntLit EOF");
+    EXPECT_EQ(t[0].pos.line, 2);
+    EXPECT_EQ(t[0].pos.column, 1);
+    EXPECT_EQ(kinds(rawTokens("#!/usr/bin/env protoscala")), "EOF");
+    EXPECT_EQ(kinds(rawTokens("\xEF\xBB\xBF#!x\nval")), "KwVal EOF");
+    // Not at offset 0: ordinary operator characters, as in Scala.
+    EXPECT_EQ(rawTokens(" #!x")[0].text, "#!");
+    EXPECT_EQ(rawTokens("val\n#!x")[1].text, "#!");
+}

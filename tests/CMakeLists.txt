@@ -36,7 +36,7 @@ foreach(cli_test help version unknown-option script-errors main-args
     add_test(NAME cli/${cli_test}
         COMMAND ${PROTOSCALA_SH} "${CMAKE_CURRENT_SOURCE_DIR}/cli/${cli_test}.sh" "$<TARGET_FILE:protoscala>")
 endforeach()
-foreach(cli_test disassemble gc-pressure actor-bench-smoke package)
+foreach(cli_test disassemble gc-pressure actor-bench-smoke package shebang)
     add_test(NAME cli/${cli_test}
         COMMAND ${PROTOSCALA_SH} "${CMAKE_CURRENT_SOURCE_DIR}/cli/${cli_test}.sh" "$<TARGET_FILE:protoscala>"
                 "${CMAKE_CURRENT_SOURCE_DIR}")

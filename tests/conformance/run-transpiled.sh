@@ -57,6 +57,11 @@ fi
 
 # --- the directive, parsed exactly as run.sh parses it ----------------------
 first_line=$(head -n 1 "$FILE")
+# An executable script starts with an interpreter line (`#!/usr/bin/env
+# protoscala`); its directive is then on the second line.
+if [[ "$first_line" == '#!'* ]]; then
+    first_line=$(sed -n 2p "$FILE")
+fi
 directive=""
 expected=""
 case "$first_line" in

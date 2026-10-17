@@ -1241,6 +1241,10 @@ belongs in the object model, not in the interpreter's dispatch loop.
 protoscala examples/hello.scala
 protoscala examples/fib.scala 10
 
+# Run a script as a command: its first line is #!/usr/bin/env protoscala
+chmod +x examples/column.scala examples/sum.scala
+printf 'pump-1 12\npump-2 30\n' | examples/column.scala 2 | examples/sum.scala   # 42
+
 # Start the REPL
 protoscala
 ```

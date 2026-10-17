@@ -769,6 +769,15 @@ agent in an unattended run. JVM behaviour was checked against scalac 3.9.0
 | 2026-09-30 | **The fixture directory is `30-io`**, because `27-predef` already takes the number the design gave (`27-io`) | [agent, pending review] | tests/conformance/30-io/ |
 | 2026-09-30 | **Cold start: the 25 ms budget is no longer met — decision needed.** Measured interleaved against `main` on the same (loaded) host: `hello.scala` ~21 → ~26 ms wall, task clock 16.4 → 20.5 ms; the prelude's own stage timing 1.5 → 3.9 ms, `--version` (no prelude) 3.3 → 4.6 ms from loading OpenSSL. The prelude grew from 322 to about 1,080 lines and its image's reconstruction is linear in its size. Options, for the maintainer: **(a)** a second prelude segment for the I/O surface, loaded when the compiler first meets one of its names (touches name resolution, the REPL, the image tool and the transpiler's module loader); **(b)** keep one prelude and move the budget (the I/O surface is what a scripting language is for); **(c)** make the I/O surface an importable bundled module, which is closer to Scala, where `scala.io.Source`, `scala.sys.process._` and `java.net.Socket` all need an import. Not decided by the agent: it is a runtime limit and an architecture change (CLAUDE.md) | [agent, open — maintainer] | docs/STATUS.md (the I/O track) |
 
+## Interpreter lines (2026-10-17)
+
+The maintainer asked for scripts runnable as commands through a shebang line,
+in protoST, protoClojure and protoScala, in an unattended run.
+
+| Date | Decision | Who | Where |
+|---|---|---|---|
+| 2026-10-17 | **A `#!` interpreter line is skipped only when `#!` are the first two characters of the file** — Scala 3's rule, not Clojure's (where `#!` is a comment anywhere). Verified against scalac 3.9.0: a file starting `#!/usr/bin/env scala` compiles, and `#!` after a leading blank or on a later line is a syntax error (`expression expected`), which `01-lexical/shebang-not-first.scala` pins here too. The check runs after the lexer's existing removal of a UTF-8 byte-order mark (scalac rejects a BOM outright), so a BOM followed by `#!` is skipped too. The newline is kept, so error positions do not move. The fixture runners read the directive from line 2 when line 1 is `#!` | maintainer (the request); rule fixed by Scala 3, implemented by agent | src/frontend/Lexer.cpp, tests/conformance/run*.sh |
+
 ## The Windows review (2026-10-02)
 
 The findings of the review of the Windows port, fixed on `fix/windows-review` in

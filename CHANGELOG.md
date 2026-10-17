@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — scripts run as commands through a `#!` line, 2026-10-17
+
+- **An interpreter line is skipped**, as Scala 3 skips it: when `#!` are the
+  first two characters of a file (after the byte-order mark protoScala
+  already drops, which scalac rejects), the lexer starts
+  at the end of that line and keeps its newline, so positions in errors are
+  unchanged. A script starting with `#!/usr/bin/env protoscala` and made
+  executable runs as a command and chains in pipelines. Before, it failed
+  with `error: Not found: #!/`. Elsewhere `#!` stays an operator identifier,
+  as in scalac 3.9.0 (verified).
+- **Examples:** `examples/column.scala` (the N-th field of each line, usage
+  error with status 2) and `examples/sum.scala` (the total of the integers
+  read, status 1 on a bad line), both executable.
+- **Tests:** the lexer unit test `Lexer.SkipsLeadingShebangLineOnly`;
+  fixtures `01-lexical/shebang-line.scala` and
+  `01-lexical/shebang-not-first.scala` (both also through `protoscalac`) and
+  `tutorial/18-io-script-as-command.scala`; `cli/shebang`, which runs the two
+  examples as commands through `env` in real pipelines (results, exit
+  statuses 1 and 2, an early `head`) and checks the line of an error after
+  the `#!` line; `cli/examples` runs the two filters too. Both fixture
+  runners read the directive from line 2 when line 1 is `#!`.
+- **Docs:** LANGUAGE.md §1, tutorial §18.2 ("Scripts as commands") and §14.5,
+  examples/README.md, README "Usage", STATUS.md, DECISIONS-LOG.md.
+
 ### Changed — protoCore 2.14.5 in CI, 2026-10-11
 
 - **CI builds protoCore 2.14.5** (tag `v2.14.5`, `063c6d5`) on Linux, macOS

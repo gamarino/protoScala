@@ -10,7 +10,8 @@
 # Usage:
 #   run.sh <path-to-protoscala> <test-file.scala>
 #
-# Directive format (first line, a `//` comment followed by the directive):
+# Directive format (first line, a `//` comment followed by the directive; the
+# second line when the first is a `#!` interpreter line):
 #
 #   // EXPECT: <text>        exit 0 and the last non-empty stdout line equals
 #                            <text> exactly.
@@ -43,6 +44,11 @@ if [[ ! -f "$FILE" ]]; then
 fi
 
 first_line=$(head -n 1 "$FILE")
+# An executable script starts with an interpreter line (`#!/usr/bin/env
+# protoscala`); its directive is then on the second line.
+if [[ "$first_line" == '#!'* ]]; then
+    first_line=$(sed -n 2p "$FILE")
+fi
 directive=""
 expected=""
 case "$first_line" in

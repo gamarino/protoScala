@@ -13,6 +13,13 @@ out=$(timeout 60s "$P" "$R/examples/fib.scala" 2>&1); rc=$?
 out=$(timeout 60s "$P" "$R/examples/fib.scala" 10 2>&1); rc=$?
 [[ $rc -eq 0 && "$out" == "fib(10) = 55" ]] || { echo "FAIL fib 10: exit $rc, '$out'"; exit 1; }
 
+# column.scala and sum.scala: two filters, run here through protoscala;
+# tests/cli/shebang.sh runs them as commands through their `#!` line.
+out=$(printf 'pump-1 12\npump-2 30\n' | timeout 60s "$P" "$R/examples/column.scala" 2 | timeout 60s "$P" "$R/examples/sum.scala" 2>&1); rc=$?
+[[ $rc -eq 0 && "$out" == "42" ]] || { echo "FAIL column | sum: exit $rc, '$out'"; exit 1; }
+out=$(timeout 60s "$P" "$R/examples/sum.scala" </dev/null 2>&1); rc=$?
+[[ $rc -eq 0 && "$out" == "0" ]] || { echo "FAIL sum on empty input: exit $rc, '$out'"; exit 1; }
+
 # log-report: the worked example. Only the LAST line is compared, because the
 # report is the program's one deterministic output; anything the runtime writes
 # before it (a warning on stderr, say) must not turn into a false failure.

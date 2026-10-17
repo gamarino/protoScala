@@ -109,6 +109,10 @@ Per [LANGUAGE.md](LANGUAGE.md) §1–§2, the rows delivered in Phase 1:
       `s`/`f`/`raw` interpolators lexed as structured tokens (Phase 3
       executes them; see below).
 - [x] Comments: `//` line, nested `/* ... */` block.
+- [x] An interpreter line (`#!` as the first two characters of the file) is
+      skipped, as in Scala 3, so `#!/usr/bin/env protoscala` scripts run as
+      commands (2026-10-17; `01-lexical/shebang-*.scala`,
+      `tests/cli/shebang.sh`, `examples/column.scala`, `examples/sum.scala`).
 - [x] Significant indentation (offside rule) and braces, mixable; `end`
       markers.
 - [x] `val`, `var`, `lazy val`, `def` (multiple parameter lists, varargs

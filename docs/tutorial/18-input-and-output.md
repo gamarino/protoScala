@@ -102,6 +102,56 @@ and the shell sees exit status 2. `sys.props("user.dir")` is the working
 directory, and `sys.props` holds the handful of the JVM's standard properties
 that mean something here (D127).
 
+### Scripts as commands
+
+A file whose first line is `#!/usr/bin/env protoscala` is a command once it
+is executable: the operating system starts `protoscala` on it, and the
+interpreter line is skipped, as Scala 3 skips it — only when `#!` are the
+very first two characters of the file. This filter adds the integers it reads
+and reports a bad line through its exit status (it is
+[`examples/sum.scala`](../../examples/sum.scala)):
+
+Fixture: [`tests/conformance/tutorial/18-io-script-as-command.scala`](../../tests/conformance/tutorial/18-io-script-as-command.scala)
+
+```scala
+#!/usr/bin/env protoscala
+@main def sum(): Unit =
+  var total = 0L
+  var lineNumber = 0
+  var line = StdIn.readLine()
+  while line != null do
+    lineNumber += 1
+    val text = line.trim
+    if text.nonEmpty then
+      Try(text.toLong) match
+        case Success(value) => total += value
+        case Failure(_) =>
+          Console.err.println(s"sum.scala: line $lineNumber is not a number: $line")
+          sys.exit(1)
+    line = StdIn.readLine()
+  println(total)
+```
+
+With nothing on its input it prints `0`. Made executable, it composes with
+[`examples/column.scala`](../../examples/column.scala) (the N-th field of each
+line) and with the standard tools (`tests/cli/shebang.sh` runs exactly these):
+
+```text
+$ chmod +x column.scala sum.scala
+$ printf 'pump-1 12\npump-2 30\n' | ./column.scala 2 | ./sum.scala
+42
+$ printf '1\nx\n' | ./sum.scala && echo done
+sum.scala: line 2 is not a number: x
+```
+
+`&& echo done` does not run, because the filter exited with status 1. A
+filter also stops as soon as the program reading its output exits, so
+`./column.scala 2 < big.log | head` ends when `head` has its lines.
+`/usr/bin/env` finds `protoscala` on `PATH`. On Linux the interpreter line
+passes a single argument, so an option needs `#!/usr/bin/env -S protoscala
+...`. Windows has no interpreter lines: there the script runs as `protoscala
+sum.scala`, and the line is still skipped.
+
 ## 18.3 Binary files and directories
 
 Text is a `String`; bytes are `Bytes`, protoScala's stand-in for
