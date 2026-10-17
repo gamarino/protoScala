@@ -607,6 +607,26 @@ void render(std::string& out, const Node& n) {
             out += x.qualifier.empty() ? "super" : "(super " + x.qualifier + ")";
             break;
         }
+        case NodeKind::TypeDef: {
+            const auto& x = as<TypeDef>(n);
+            out += "(type";
+            renderMods(out, x.mods);
+            out += ' ' + x.name;
+            if (!x.typeParams.empty()) {
+                out += " [";
+                for (std::size_t k = 0; k < x.typeParams.size(); ++k) {
+                    if (k) out += ' ';
+                    out += x.typeParams[k];
+                }
+                out += ']';
+            }
+            if (x.rhs) {
+                out += " = ";
+                renderType(out, *x.rhs);
+            }
+            out += ')';
+            break;
+        }
         case NodeKind::ExtensionDef: {
             const auto& x = as<ExtensionDef>(n);
             out += "(extension (" + x.receiverName + " ";

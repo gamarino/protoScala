@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — a clean build under GCC 13, 2026-10-17
+
+- **The AST dump prints `type` definitions**, as `(type Pair [A B] = (A, B))`
+  or `(type M)` for an abstract member; it printed nothing for them. Test:
+  `ParserDefs.TypeDefShapes`.
+- **No compiler warnings with GCC 13** (`-Wall -Wextra -Wpedantic`), which
+  reported six in the 0.6.1 package build: the switch above, an unused
+  parameter of `widenDoubleParams`, and four `GlobalBinding` initializers
+  that left `overloads` implicit.
+
 ## [0.6.1] - 2026-10-17
 
 A patch release of everything below, up to the 0.6.0 entry: `#!` scripts,

@@ -1300,7 +1300,7 @@ void Compiler::checkOverloadSets(const CompilationUnit& unit) const {
     }
 }
 
-void Compiler::widenDoubleParams(const std::vector<Param>& params, bool method, SourcePos pos) {
+void Compiler::widenDoubleParams(const std::vector<Param>& params, bool method) {
     const int base = method ? 1 : 0;
     for (std::size_t k = 0; k < params.size(); ++k) {
         const Param& p = params[k];
@@ -1355,7 +1355,7 @@ void Compiler::compileFunction(const std::string& name, const std::vector<Param>
     mod->setArity(arity);
     mod->setVariadic(!params.empty() && params.back().repeated);
     analyseCaptures(params, body);
-    widenDoubleParams(params, method, pos);
+    widenDoubleParams(params, method);
     compileExpr(body);
     emit(Op::RETURN, 0, pos, -1);
     // After the body: the capture list is final, so a default block can mirror it.
@@ -1428,7 +1428,7 @@ bool Compiler::localOrMemberShadows(const std::string& name) {
 // exactly what the qualified spelling emits (plan A0-8: no new opcode).
 std::string Compiler::bindHiddenQualifier(const ModuleExports& mod) {
     const std::string hidden = hiddenModuleName(mod.moduleName);
-    globals_.bind(hidden, GlobalBinding{mod.moduleKind, mod.moduleKey, {}});
+    globals_.bind(hidden, GlobalBinding{mod.moduleKind, mod.moduleKey, {}, {}});
     // So a call through the alias still honours the callee's by-name parameters
     // (D47): byNameMasksOfObjectMember looks the class up as `<name>.type`.
     if (!mod.moduleTypeKey.empty()) globals_.aliasType(hidden + ".type", mod.moduleTypeKey);
@@ -1668,7 +1668,7 @@ void Compiler::compileImport(const Import& imp) {
     // The module itself, under its own name or the `as` alias.
     if (imp.selectors.empty() && trailing.empty()) {
         const std::string bound = imp.moduleAlias.empty() ? mod->moduleName : imp.moduleAlias;
-        globals_.bind(bound, GlobalBinding{mod->moduleKind, mod->moduleKey, {}});
+        globals_.bind(bound, GlobalBinding{mod->moduleKind, mod->moduleKey, {}, {}});
         if (!mod->foreign && !mod->moduleTypeKey.empty())
             globals_.aliasType(bound + ".type", mod->moduleTypeKey);
         return;
@@ -1690,7 +1690,7 @@ void Compiler::compileImport(const Import& imp) {
         const std::string as = s.alias.empty() ? s.name : s.alias;
         if (mod->foreign) {
             globals_.bind(as, GlobalBinding{BindingKind::Val,
-                                            loader_->bindForeignMember(*mod, s.name, s.pos), {}});
+                                            loader_->bindForeignMember(*mod, s.name, s.pos), {}, {}});
             continue;
         }
         // A nested TYPE of the module: alias the type and its companion term, so

@@ -305,6 +305,13 @@ TEST(ParserDefs, DefShapes) {
     EXPECT_EQ(u("def f(x: Int = 1) = x"), "(unit (def f ((x:Int = (int 1))) x))");
 }
 
+// The AST dump printed nothing for a `type` definition before it had a case.
+TEST(ParserDefs, TypeDefShapes) {
+    EXPECT_EQ(u("type Id = Int"), "(unit (type Id = Int))");
+    EXPECT_EQ(u("type Pair[A, B] = (A, B)"), "(unit (type Pair [A B] = (A, B)))");
+    EXPECT_EQ(u("trait T { type M }"), "(unit (trait T (body (type M))))");
+}
+
 TEST(ParserDefs, MainAnnotationAndIndentedBody) {
     EXPECT_EQ(u("@main def hello(): Unit =\n  println(\"hi\")"),
               "(unit (def @main hello (()) : Unit (block (apply println (str \"hi\")))))");

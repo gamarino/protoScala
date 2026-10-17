@@ -591,7 +591,7 @@ void Compiler::compileConstructor(const TemplateDef& t, const ClassInfo& info) {
     }
     // A `Double` parameter widens an integer argument before anything reads it,
     // so `class P(val x: Double)` with `new P(4)` stores 4.0 as scalac does.
-    widenDoubleParams(t.ctorParams, /*method=*/true, t.pos);
+    widenDoubleParams(t.ctorParams, /*method=*/true);
 
     // Parameter fields first, as scalac assigns them: a superclass constructor
     // that calls an overridden method must already see them. compileInitCall

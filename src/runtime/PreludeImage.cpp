@@ -176,7 +176,7 @@ const BytecodeModule& buildPreludeImage(GlobalTable& globals,
     for (std::size_t i = 0; i < d.bindingCount; ++i) {
         const PreludeBindingRec& b = d.bindings[i];
         globals.bind(b.name, GlobalBinding{static_cast<BindingKind>(b.kind), b.key,
-                                           masksAt(b.maskFirst, b.maskCount)});
+                                           masksAt(b.maskFirst, b.maskCount), {}});
     }
     for (std::size_t i = 0; i < d.selectorCount; ++i)
         globals.noteByNameSelector(d.selectors[i].name, {d.selectors[i].mask});
