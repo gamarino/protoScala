@@ -3,6 +3,10 @@
 > Living tracker of the gap between [LANGUAGE.md](LANGUAGE.md) and the
 > implementation. Update it with every change.
 >
+> **Released version 0.6.1 (2026-10-17)**, a patch release of what landed after
+> 0.6.0: Windows (MSVC), input and output, and `#!` scripts as commands; the
+> minor version still names the phase.
+>
 > **Current state (2026-09-27): released version 0.6.0 — Phase 6 complete; Phase 7
 > (the C++ transpiler) is a first cut whose version was deliberately NOT bumped**,
 > with two of its done-when rows unmet: the mutation matrix is partial and the

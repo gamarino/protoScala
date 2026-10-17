@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-17
+
+A patch release of everything below, up to the 0.6.0 entry: `#!` scripts,
+Windows (MSVC), input and output, and the protoCore updates. The minor version
+still names the phase (0.6 = Phase 6). The `.deb` is built in a clean Ubuntu
+24.04 container with GCC 13 against protoCore 2.14.6 and declares
+`protocore (>= 2.14.6)`.
+
 ### Added — scripts run as commands through a `#!` line, 2026-10-17
 
 - **An interpreter line is skipped**, as Scala 3 skips it: when `#!` are the

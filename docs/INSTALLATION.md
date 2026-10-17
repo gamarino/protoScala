@@ -109,7 +109,7 @@ search of `protoCore.h`. The configure output names the version it decided on:
 ```
 
 `protoscala --version` reports the same decision at run time:
-`protoScala 0.6.0 (actor mailboxes: ProtoMPSCQueue)`.
+`protoScala 0.6.1 (actor mailboxes: ProtoMPSCQueue)`.
 
 The earlier probe grepped whichever `protoCore.h` the discovery found first for
 `newMPSCQueue`, so which mailbox implementation was compiled in depended on the

@@ -13,7 +13,7 @@ tracker of what works and of every deviation is [STATUS.md](STATUS.md). How the
 runtime is built is in [DESIGN.md](DESIGN.md); the cross-runtime story is in
 [INTEROP.md](INTEROP.md).
 
-> **What runs today (protoScala 0.6.0).** Every chapter describes what the binary
+> **What runs today (protoScala 0.6.1).** Every chapter describes what the binary
 > runs: values and expressions, `val`/`var`/`lazy val`/`def`, `if`/`while`,
 > lambdas and closures, recursion, integer and string arithmetic, `println` and
 > the REPL — and the whole object model: **classes, objects and companions,
