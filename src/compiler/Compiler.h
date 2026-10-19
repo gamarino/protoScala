@@ -336,7 +336,7 @@ private:
     std::vector<std::string> runtimeChain(const ClassInfo& info) const;
     std::string ctorKeyFor(const ClassInfo& info, std::size_t argc, SourcePos pos) const;
     void compileTemplate(const TemplateDef& t, const ClassInfo& info);
-    void compileConstructor(const TemplateDef& t, const ClassInfo& info);
+    bool compileConstructor(const TemplateDef& t, const ClassInfo& info);
     void compileAuxConstructor(const DefDef& d, const ClassInfo& info);
     void compileSetter(const std::string& fieldKey, const std::string& name, SourcePos pos);
     void compileObjectHolder(const ClassInfo& info, const std::string& termKey, SourcePos pos);

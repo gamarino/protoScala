@@ -380,6 +380,8 @@ const proto::ProtoObject* ExecutionEngine::makeClass(proto::ProtoContext* ctx,
             for (const proto::ProtoString* f : spec.fieldSymbols)
                 fields = fields->appendLast(&scope, f->asObject(&scope));
             shape = shape->setAttribute(&scope, L.fieldsKey, fields->asObject(&scope));
+            if (spec.flags & BytecodeModule::kClassFieldsOnlyInit)
+                shape = shape->setAttribute(&scope, L.fieldsOnlyInitKey, PROTO_TRUE);
         }
     }
     scope.returnValue = shape;

@@ -35,9 +35,11 @@
 #
 08-case-classes/case-class-basics-braces.scala                         D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
 08-case-classes/case-class-basics-indent.scala                         D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
+08-case-classes/copy-derived-is-a-new-instance.scala                   D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
 08-case-classes/copy-parameter-twice.scala                             D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
 08-case-classes/copy-positional-and-named-braces.scala                 D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
 08-case-classes/copy-positional-and-named.scala                        D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
+08-case-classes/copy-runs-the-constructor-when-it-does-more.scala      D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
 08-case-classes/copy-unknown-name.scala                                D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
 13-actors/ask-with-no-reply.scala                                      D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
 13-actors/await-deep-chain.scala                                       D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip

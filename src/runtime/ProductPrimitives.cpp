@@ -173,67 +173,113 @@ PRODUCT_ELEMENT(17) PRODUCT_ELEMENT(18) PRODUCT_ELEMENT(19) PRODUCT_ELEMENT(20)
 PRODUCT_ELEMENT(21) PRODUCT_ELEMENT(22)
 #undef PRODUCT_ELEMENT
 
+// The value copy(...) gives each field: its positional argument, else its
+// named one, else this instance's own value. Answers how many named arguments
+// were used. The values come from `args`, `keywords` and `self`, which the
+// caller keeps reachable.
+proto::proto_ulong copyValues(ProtoContext* ctx, const ProtoObject* self, const ProtoList* fields,
+                              proto::proto_ulong n, proto::proto_ulong positional,
+                              const ProtoList* args, const proto::ProtoSparseList* keywords,
+                              const ProtoObject** out) {
+    proto::proto_ulong named = 0;
+    for (proto::proto_ulong i = 0; i < n; ++i) {
+        const auto key = reinterpret_cast<proto::proto_ulong>(keyAt(ctx, fields, i));
+        if (i < positional) {
+            out[i] = args->getAt(ctx, static_cast<int>(i));
+        } else if (keywords && keywords->has(ctx, key)) {
+            out[i] = keywords->getAt(ctx, key);
+            ++named;
+        } else {
+            out[i] = element(ctx, self, fields, i);
+        }
+    }
+    return named;
+}
+
+// A keyword that named no parameter, or one a positional argument had already
+// given (scalac: "parameter a ... is already instantiated"). The keyword
+// list's keys are the interned names (ProtoSparseList::processElements,
+// protoCore.h).
+[[noreturn]] void rejectCopyKeywords(ProtoContext* ctx, const ProtoList* fields, proto::proto_ulong n,
+                                     proto::proto_ulong positional,
+                                     const proto::ProtoSparseList* keywords) {
+    struct Rejected {
+        const ProtoList* fields;
+        proto::proto_ulong n;
+        proto::proto_ulong positional;
+        std::string message;
+    } rejected{fields, n, positional, {}};
+    keywords->processElements(ctx, &rejected,
+        [](ProtoContext* c, void* receiver, proto::proto_ulong key, const ProtoObject*) {
+            auto* r = static_cast<Rejected*>(receiver);
+            if (!r->message.empty()) return;
+            const std::string name = reinterpret_cast<const ProtoString*>(key)->toStdString(c);
+            for (proto::proto_ulong i = 0; i < r->n; ++i)
+                if (reinterpret_cast<proto::proto_ulong>(keyAt(c, r->fields, i)) == key) {
+                    if (i < r->positional)
+                        r->message = "parameter " + name + " of copy is already instantiated";
+                    return;
+                }
+            r->message = "copy has no parameter named " + name;
+        });
+    throw ScalaError("IllegalArgumentException", rejected.message);
+}
+
 // copy(positional..., name = value...): a new instance through the primary
 // constructor (so its body runs, as in Scala); parameters not given keep
 // this instance's values. Named arguments arrive in protoCore's keyword
 // ProtoSparseList, keyed by the interned name (SEND_KW).
+//
+// When the constructor would only store the values as the fields
+// (kClassFieldsOnlyInit), the new instance is derived from this one instead:
+// one new version with the changed fields replaced (ProtoObject::setAttributes
+// answers a new cell even when nothing changes, so `copy()` is never `eq` to
+// its receiver).
 const ProtoObject* product_copy(ProtoContext* ctx, const ProtoObject* self, const proto::ParentLink*,
                                 const ProtoList* args, const proto::ProtoSparseList* keywords) {
     const RuntimeLayout& L = layoutOf();
     const ProtoList* fields = fieldsOf(ctx, self);
+    const ProtoObject* cls = self->getPrototype(ctx);
     // Scala synthesises no copy for a case object, nor for a case class with a
     // repeated parameter (its primary constructor is variadic).
-    const ProtoObject* init = self->getPrototype(ctx)->getOwnAttributeDirect(ctx, L.initKey);
+    const ProtoObject* init = cls->getOwnAttributeDirect(ctx, L.initKey);
     const BytecodeModule* ctor = init ? compiledModuleOf(ctx, L, init) : nullptr;
     if (!fields || (ctor && ctor->isVariadic()))
         throw ScalaError("NoSuchMethodError", "value copy is not a member of " + typeName(ctx, L, self));
     const proto::proto_ulong n = fields->getSize(ctx);
     const proto::proto_ulong positional = argCount(ctx, args);
     if (positional > n) wrongArgCount("copy", "at most " + std::to_string(n), positional);
+    const proto::proto_ulong givenNames = keywords ? keywords->getSize(ctx) : 0;
+
+    constexpr proto::proto_ulong kDeriveMax = 32;
+    if (n > 0 && n <= kDeriveMax &&
+        cls->getOwnAttributeDirect(ctx, L.fieldsOnlyInitKey) == PROTO_TRUE) {
+        const ProtoObject* values[kDeriveMax];
+        if (copyValues(ctx, self, fields, n, positional, args, keywords, values) != givenNames)
+            rejectCopyKeywords(ctx, fields, n, positional, keywords);
+        const ProtoString* keys[kDeriveMax];
+        const ProtoObject* changed[kDeriveMax];
+        unsigned m = 0;
+        for (proto::proto_ulong i = 0; i < n; ++i) {
+            if (values[i] == element(ctx, self, fields, i)) continue;
+            keys[m] = keyAt(ctx, fields, i);
+            changed[m++] = values[i];
+        }
+        if (m == 0) {  // still a new instance: rewrite the first field with its value
+            keys[0] = keyAt(ctx, fields, 0);
+            changed[0] = values[0];
+            m = 1;
+        }
+        return self->setAttributes(ctx, m, keys, changed);
+    }
+
     ProtoContext scope(ctx->space, ctx);
     scope.resizeAutomaticLocals(static_cast<unsigned>(n));
-    proto::proto_ulong named = 0;
-    for (proto::proto_ulong i = 0; i < n; ++i) {
-        const auto key = reinterpret_cast<proto::proto_ulong>(keyAt(&scope, fields, i));
-        const ProtoObject* v;
-        if (i < positional) {
-            v = args->getAt(&scope, static_cast<int>(i));
-        } else if (keywords && keywords->has(&scope, key)) {
-            v = keywords->getAt(&scope, key);
-            ++named;
-        } else {
-            v = element(&scope, self, fields, i);
-        }
-        scope.setAutomaticLocal(static_cast<unsigned>(i), v);
-    }
-    if (keywords && named != keywords->getSize(&scope)) {
-        // A keyword that named no parameter, or one a positional argument had
-        // already given (scalac: "parameter a ... is already instantiated").
-        // The keyword list's keys are the interned names
-        // (ProtoSparseList::processElements, protoCore.h).
-        struct Rejected {
-            const ProtoList* fields;
-            proto::proto_ulong n;
-            proto::proto_ulong positional;
-            std::string message;
-        } rejected{fields, n, positional, {}};
-        keywords->processElements(&scope, &rejected,
-            [](ProtoContext* c, void* receiver, proto::proto_ulong key, const ProtoObject*) {
-                auto* r = static_cast<Rejected*>(receiver);
-                if (!r->message.empty()) return;
-                const std::string name = reinterpret_cast<const ProtoString*>(key)->toStdString(c);
-                for (proto::proto_ulong i = 0; i < r->n; ++i)
-                    if (reinterpret_cast<proto::proto_ulong>(keyAt(c, r->fields, i)) == key) {
-                        if (i < r->positional)
-                            r->message = "parameter " + name + " of copy is already instantiated";
-                        return;
-                    }
-                r->message = "copy has no parameter named " + name;
-            });
-        throw ScalaError("IllegalArgumentException", rejected.message);
-    }
+    if (copyValues(&scope, self, fields, n, positional, args, keywords,
+                   scope.getAutomaticLocals()) != givenNames)
+        rejectCopyKeywords(&scope, fields, n, positional, keywords);
     const ProtoObject* r = activeCallContext()->engine->construct(
-        &scope, self->getPrototype(&scope), scope.getAutomaticLocals(), static_cast<unsigned>(n));
+        &scope, cls, scope.getAutomaticLocals(), static_cast<unsigned>(n));
     scope.returnValue = r;
     return r;
 }

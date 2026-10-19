@@ -497,9 +497,10 @@ void Compiler::compileTemplate(const TemplateDef& t, const ClassInfo& info) {
         if (p.isVar) setterFor(p.name, p.pos);
     for (const NodePtr& s : t.body)
         if (s->kind == NodeKind::ValDef && as<ValDef>(*s).isVar) setterFor(as<ValDef>(*s).name, s->pos);
+    bool fieldsOnlyInit = false;
     if (info.hasInit) {
         keys.push_back(kPrimaryCtorKey);
-        compileConstructor(t, info);
+        fieldsOnlyInit = compileConstructor(t, info);
     }
     for (const NodePtr& s : t.body) {
         if (s->kind != NodeKind::DefDef || as<DefDef>(*s).name != "this") continue;
@@ -519,7 +520,8 @@ void Compiler::compileTemplate(const TemplateDef& t, const ClassInfo& info) {
                                                                 : 0u) |
                  (info.mutableInstances ? BytecodeModule::kClassMutableInstances : 0u) |
                  (info.kind == ClassKind::Trait ? BytecodeModule::kClassTrait : 0u) |
-                 (info.kind == ClassKind::Object ? BytecodeModule::kClassObject : 0u);
+                 (info.kind == ClassKind::Object ? BytecodeModule::kClassObject : 0u) |
+                 (fieldsOnlyInit ? BytecodeModule::kClassFieldsOnlyInit : 0u);
     emit(Op::MAKE_CLASS, fn_->mod->addClassSpec(spec), t.pos,
          1 - static_cast<int>(chain.size() + keys.size()));
     emit(Op::STORE_GLOBAL, fn_->mod->addSymbol(info.key), t.pos, -1);
@@ -558,8 +560,10 @@ bool Compiler::fieldGroups() { return fieldGroupsFlag().load(); }
 
 // <init>(this, params): superclass initialiser, trait initialisers in Scala's
 // order, parameter fields, lazy holders, then the template statements; returns
-// the final `this`.
-void Compiler::compileConstructor(const TemplateDef& t, const ClassInfo& info) {
+// the final `this`. Answers whether the constructor of a case class with
+// immutable instances does nothing but store its parameters, in order, as its
+// product fields: no widening, initialiser chain, holders or statements.
+bool Compiler::compileConstructor(const TemplateDef& t, const ClassInfo& info) {
     auto mod = std::make_unique<BytecodeModule>();
     mod->setName(info.name + ".<init>");
     mod->setMethod(true);
@@ -591,7 +595,14 @@ void Compiler::compileConstructor(const TemplateDef& t, const ClassInfo& info) {
     }
     // A `Double` parameter widens an integer argument before anything reads it,
     // so `class P(val x: Double)` with `new P(4)` stores 4.0 as scalac does.
+    const std::size_t beforeWidening = mod->code().size();
     widenDoubleParams(t.ctorParams, /*method=*/true);
+    bool fieldsOnly = info.isCase && info.kind == ClassKind::Class && !info.mutableInstances &&
+                      !info.primaryVariadic && mod->code().size() == beforeWidening &&
+                      info.fields.size() == t.ctorParams.size();
+    for (std::size_t k = 0; fieldsOnly && k < t.ctorParams.size(); ++k)
+        fieldsOnly = !t.ctorParams[k].byName &&
+                     info.fields[k] == info.members.at(t.ctorParams[k].name).key;
 
     // Parameter fields first, as scalac assigns them: a superclass constructor
     // that calls an overridden method must already see them. compileInitCall
@@ -624,6 +635,7 @@ void Compiler::compileConstructor(const TemplateDef& t, const ClassInfo& info) {
                  fn_->mod->addSymbol(info.members.at(t.ctorParams[k].name).key), t.pos, -1);
         }
     }
+    const std::size_t afterFields = mod->code().size();
     if (info.kind != ClassKind::Trait) {  // a trait's initialiser runs only its own body
         const ClassInfo* super = superclassOf(info);
         if (super) {
@@ -697,6 +709,7 @@ void Compiler::compileConstructor(const TemplateDef& t, const ClassInfo& info) {
             emit(Op::POP, 0, s->pos, -1);
         }
     }
+    fieldsOnly = fieldsOnly && mod->code().size() == afterFields;
     emit(Op::PUSH_LOCAL, 0, t.pos, +1);
     emit(Op::RETURN, 0, t.pos, -1);
     // A constructor binds named arguments and fills its defaults in its own
@@ -707,6 +720,7 @@ void Compiler::compileConstructor(const TemplateDef& t, const ClassInfo& info) {
     mod->setMaxStack(fs.maxDepth);
     fn_ = saved;
     emit(Op::MAKE_FN, fn_->mod->addBlock(std::move(mod)), t.pos, +1);
+    return fieldsOnly;
 }
 
 // def this(ps) = { this(args); stats }: `<initN>(this, ps)`.

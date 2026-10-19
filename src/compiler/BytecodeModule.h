@@ -50,6 +50,10 @@ public:
     enum ClassFlag : std::uint32_t {
         kClassCase = 1, kClassCaseObject = 2, kClassMutableInstances = 4, kClassTrait = 8,
         kClassObject = 16,
+        // The primary constructor only stores its parameters as the product
+        // fields (Compiler::compileConstructor): `copy` may then derive the
+        // new instance from the receiver instead of running the constructor.
+        kClassFieldsOnlyInit = 32,
     };
 
     struct Const {
