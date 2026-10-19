@@ -4,6 +4,9 @@
 // fold result, the built length and the filtered length, so a silently wrong
 // collection surface fails the run instead of reading as a fast one.
 // The three numbers were computed with tools/scala3-3.9.0, never by hand.
+// The fold is into a Long: the total (9999900000) does not fit an Int, so a
+// fold into an Int overflows on the JVM (1409965408) while protoScala's
+// integers never overflow (LANGUAGE.md, D1), and the two disagreed.
 
 def build(n: Int): List[Int] =
   var xs = List[Int]()
@@ -17,5 +20,5 @@ def build(n: Int): List[Int] =
   val xs = build(100000)
   val doubled = xs.map(_ * 2)
   val evens = xs.filter(_ % 2 == 0)
-  val total = doubled.foldLeft(0)(_ + _)
+  val total = doubled.foldLeft(0L)(_ + _)
   println(total.toString + " " + xs.length + " " + evens.length)
