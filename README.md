@@ -567,6 +567,22 @@ anticipated, and that count, not the percentage, is the number worth watching.
 
 ## Performance
 
+**protoCore 2.14.7 (measured 2026-10-19).** 2.14.7 changes the write path: a
+new value for an existing key copies the root-to-key path without rebalancing,
+and allocating a cell no longer takes a spinlock. The same binaries on
+protoCore 2.14.6 and 2.14.7, each run loading a fresh copy of the library,
+three rounds: `benchmarks/run_benchmarks.py` moves the ratio to CPython 3.14
+by -0.6 % (geomean of 12 workloads) and to Scala 3.9.0 on OpenJDK 25 by +1.3 %
+(11), within the spread. A `var` write costs 2,500 cycles and a case-class
+`copy` about 9,600, most of it protoScala's call path (four calls per `copy`),
+not the data structure: the same copy-update in protoCore itself takes 48-335
+ns. `list_ops`'s JVM twin fails because it folds into an `Int` and the total
+overflows on the JVM (protoScala's integers never overflow, D1); folding into
+a `Long` fixes the benchmark. Measured under TLP's battery power profile
+(powersave, EPP balance_power): compare ratios, not absolute times, with older
+figures. Details: [protoCore's
+report](https://github.com/numaes/protoCore/blob/master/docs/reports/2026-10-18-write-path.md).
+
 **protoCore 2.14.6 (measured 2026-10-13).**  `%` and `/` on Ints reach
 protoCore's `modulo`/`divide`, which no longer allocate a temporary for two
 SmallIntegers: loops of 2,000,000 iterations, the same commit (`dc8d4917`)
