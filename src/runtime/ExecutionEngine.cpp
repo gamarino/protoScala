@@ -127,7 +127,8 @@ const proto::ProtoObject* ExecutionEngine::callNative(proto::ProtoContext* ctx, 
 const proto::ProtoObject* ExecutionEngine::invoke(proto::ProtoContext* ctx,
                                                   const proto::ProtoObject* callee,
                                                   const proto::ProtoObject* const* args,
-                                                  unsigned argc) {
+                                                  unsigned argc,
+                                                  const proto::ProtoObject** resultSlot) {
     if (callee == PROTO_NONE) throw ScalaError("NullPointerException", "cannot call null");
     if (const BytecodeModule* m = compiledModuleOf(ctx, layout_, callee)) {
         if (m->isMethod()) {  // a bound method: its receiver travels in slot 0
@@ -140,13 +141,13 @@ const proto::ProtoObject* ExecutionEngine::invoke(proto::ProtoContext* ctx,
             const proto::ProtoObject** a = scope.getAutomaticLocals();
             a[0] = self;
             for (unsigned k = 0; k < argc; ++k) a[k + 1] = args[k];
-            const proto::ProtoObject* r = execute(&scope, *m, a, argc + 1, caps);
-            scope.returnValue = r;
+            const proto::ProtoObject* r = execute(&scope, *m, a, argc + 1, caps, nullptr, resultSlot);
+            if (!resultSlot) scope.returnValue = r;
             return r;
         }
         const proto::ProtoObject* caps =
             m->captureCount() ? callee->getOwnAttributeDirect(ctx, layout_.capturesKey) : nullptr;
-        return execute(ctx, *m, args, argc, caps);
+        return execute(ctx, *m, args, argc, caps, nullptr, resultSlot);
     }
     if (callee->isMethod(ctx))
         return callNative(ctx, callee->asMethod(ctx), callee->asMethodSelf(ctx), args, argc);
@@ -235,7 +236,9 @@ const proto::ProtoObject* ExecutionEngine::callMember(proto::ProtoContext* ctx,
         if (mod->isMethod() && !m->getOwnAttributeDirect(ctx, L.selfKey)) {
             // `obj.m` for a method with parameters: eta-expansion (D10).
             if (select && mod->arity() > 1 && !mod->isVariadic()) return bindMethod(ctx, m, base[0]);
-            return execute(ctx, *mod, base, argc + 1, nullptr);
+            // base[0], the receiver's slot, receives the result (dispatch's
+            // contract: base is the caller's traced, writable slots).
+            return execute(ctx, *mod, base, argc + 1, nullptr, nullptr, base);
         }
         if (select) return m;                        // a function-valued field
         return invoke(ctx, m, base + 1, argc);       // obj.f(args) = obj.f.apply(args)
@@ -686,7 +689,8 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                                                    const proto::ProtoObject* const* args,
                                                    unsigned argc,
                                                    const proto::ProtoObject* captures,
-                                                   const proto::ProtoSparseList* keywords) {
+                                                   const proto::ProtoSparseList* keywords,
+                                                   const proto::ProtoObject** resultSlot) {
     checkNativeStack();
     // A TRANSPILED block (Phase 7): the body is a proto::ProtoMethod and there are
     // no code words to run. Everything above this line and below it is unchanged,
@@ -764,7 +768,12 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
     // runFrame, never runLoop: the module's handler table must be active for
     // this frame, and the handler body must run outside the C++ catch (A0-3).
     const proto::ProtoObject* out = runFrame(frame, mod, slots, slots + stackBase, mod.code().data());
-    frame.returnValue = out;
+    if (resultSlot) {
+        *resultSlot = out;
+        frame.returnValue = PROTO_NONE;   // RETURN set it; the slot roots `out`
+    } else {
+        frame.returnValue = out;
+    }
     return out;
 }
 
@@ -1028,7 +1037,7 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                     const proto::ProtoObject** base = sp - operand - 1;
                     pendingBase = static_cast<unsigned>(base - slots);
                     const proto::ProtoObject* r =
-                        invoke(&frame, base[0], base + 1, static_cast<unsigned>(operand));
+                        invoke(&frame, base[0], base + 1, static_cast<unsigned>(operand), base);
                     pendingBase = kNoPendingCall;
                     base[0] = r;
                     sp = base + 1;

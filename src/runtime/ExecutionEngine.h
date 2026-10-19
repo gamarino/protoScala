@@ -52,8 +52,11 @@ public:
 
     // Calls any Scala callable: compiled function, native method, or any
     // value with an `apply` method (DESIGN §5.1). `args` must be rooted.
+    // `resultSlot`, when given, is a traced slot of the caller that will hold
+    // the result (see execute).
     const proto::ProtoObject* invoke(proto::ProtoContext* ctx, const proto::ProtoObject* callable,
-                                     const proto::ProtoObject* const* args, unsigned argc);
+                                     const proto::ProtoObject* const* args, unsigned argc,
+                                     const proto::ProtoObject** resultSlot = nullptr);
 
     // Like invoke, but installs this engine's ActiveCallContext (entry from
     // C++ code that is not itself running inside the VM, e.g. the @main call).
@@ -227,10 +230,20 @@ private:
     [[noreturn]] void throwMissingMember(proto::ProtoContext* ctx, const proto::ProtoObject* receiver,
                                          const proto::ProtoString* name) const;
 
+    // The result must stay rooted while the frame's context is destroyed: its
+    // destructor submits the frame's young generation, and a collection can
+    // run there. A caller that holds the result in one of its own traced
+    // slots passes that slot as `resultSlot`; the frame stores the result
+    // there before it ends, which allocates nothing. Otherwise the frame
+    // anchors it through ProtoContext::returnValue, a ReturnReference cell in
+    // the caller's young chain that keeps the result alive until the caller
+    // submits that chain -- one cell per call, so a caller that calls many
+    // times holds every result until then.
     const proto::ProtoObject* execute(proto::ProtoContext* parent, const BytecodeModule& mod,
                                       const proto::ProtoObject* const* args, unsigned argc,
                                       const proto::ProtoObject* captures,
-                                      const proto::ProtoSparseList* keywords = nullptr);
+                                      const proto::ProtoSparseList* keywords = nullptr,
+                                      const proto::ProtoObject** resultSlot = nullptr);
     const proto::ProtoObject* callNative(proto::ProtoContext* ctx, proto::ProtoMethod fn,
                                          const proto::ProtoObject* self,
                                          const proto::ProtoObject* const* args, unsigned argc);
