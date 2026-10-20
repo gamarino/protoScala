@@ -567,6 +567,48 @@ anticipated, and that count, not the percentage, is the number worth watching.
 
 ## Performance
 
+**protoCore 2.14.8 and copy by derivation (measured 2026-10-20).** The
+comparable suite (`benchmarks/run_benchmarks.py`), three rounds, each loading a
+fresh copy of protoCore 2.14.8, commit `257b61bf`, RelWithDebInfo; medians of
+the three rounds. The ratio is protoScala's time over the competitor's
+(< 1: protoScala is faster), cold process, start-up included. Load average
+2.8-5.9 throughout: a busy desktop, so compare ratios, not milliseconds.
+
+| Workload | protoScala ms | CPython 3.14 ms | Scala 3.9.0 / OpenJDK 25 ms | ÷ CPython | ÷ JVM |
+|---|---:|---:|---:|---:|---:|
+| `int_sum_loop` | 33.0 | 37.6 | 195.1 | 0.88 | 0.17 |
+| `fib` | 64.9 | 44.8 | 200.3 | 1.45 | 0.32 |
+| `str_concat` | 29.6 | 32.5 | 202.8 | 0.91 | 0.15 |
+| `range_iterate` | 33.2 | 37.6 | 200.7 | 0.88 | 0.17 |
+| `tak` | 35.0 | 34.9 | 186.9 | 1.00 | 0.19 |
+| `fib30` | 443.8 | 182.2 | 200.0 | 2.44 | 2.22 |
+| `sum_loop` | 88.3 | 89.8 | 205.9 | 0.98 | 0.43 |
+| `factorial_100` | 26.0 | 35.0 | 217.4 | 0.74 | 0.12 |
+| `attr_lookup` | 49.2 | 43.3 | 200.7 | 1.14 | 0.25 |
+| `object_tree` | 357.6 | 192.0 | 219.1 | 1.86 | 1.63 |
+| `list_ops` | 508.0 | 2043.4 | 275.8 | 0.25 | 1.84 |
+| `map_build` | 339.4 | 77.2 | 346.2 | 4.40 | 0.98 |
+| `case_copy` (new) | 1155.4 | 1588.2 | 283.4 | 0.73 | 4.08 |
+| **Geomean** (13) | | | | **1.09** | **0.49** |
+
+Against the 2.14.7 run, `fib30` moves from 3.09x to 2.44x CPython's time and
+from 2.81x to 2.22x the JVM's: protoCore 2.14.8's context slot stack (no
+heap allocation for a call's slots). The other rows are within the
+spread. `list_ops` now folds into a `Long` and runs on the JVM too.
+`case_copy` is new: 500000 `copy` updates of a four-field case class,
+against a frozen dataclass and `dataclasses.replace` on CPython. `copy`
+of a case class whose constructor only stores its fields now derives the
+new instance from the receiver: one `setAttributes`, instead of running
+the constructor through three nested calls. A case-class `copy` allocates
+about 3 cells instead of 13. Interleaved runs of
+`case_copy`, 7 per side, the commit before and after: 1359 -> 980 ms
+(-28 %; the loop's arithmetic and checksum are included). The JVM is
+still 4x faster on it: protoScala's remaining cost is the call with named
+arguments, which builds a positional list and a keyword list per call.
+Reports: [r1](benchmarks/reports/2026-10-20-suite-2148-r1.md),
+[r2](benchmarks/reports/2026-10-20-suite-2148-r2.md),
+[r3](benchmarks/reports/2026-10-20-suite-2148-r3.md).
+
 **protoCore 2.14.7 (measured 2026-10-19).** 2.14.7 changes the write path: a
 new value for an existing key copies the root-to-key path without rebalancing,
 and allocating a cell no longer takes a spinlock. The same binaries on
