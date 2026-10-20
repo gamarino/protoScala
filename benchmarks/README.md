@@ -27,6 +27,7 @@ automatically, D1).
 | `factorial_100.scala` | `100!` as a `BigInt` (158 digits) | protoClojure `factorial-100.clj`, `comparable/python/factorial_100.py` |
 | `attr_lookup.scala` | 3 field reads × 100000 | protoPython `attr_lookup.py` (`BENCH_N=100000`), protoST `attr_lookup.st` |
 | `object_tree.scala` | build, path-copy and fold a 131071-object case-class tree | `comparable/python/object_tree.py` |
+| `case_copy.scala` | 500000 `copy` updates of a four-field case class | `comparable/python/case_copy.py` (frozen `dataclass`, `dataclasses.replace`) |
 
 `comparable/python/` holds the CPython/protopy twins of the protoClojure
 workloads, which protoPython's suite does not have, and of `object_tree`.
@@ -36,6 +37,11 @@ the deep-object-graph, persistent-structure workload DESIGN §1 names as the
 kind of work protoScala is for (attribute lookup, structural sharing and
 pattern matching over an immutable graph), as opposed to the integer loops
 that dominate the rest of the table.
+
+`case_copy` measures the paradigm's own write: every update is a new version
+of an immutable case class made with `copy`, never a mutation. Python's idiom
+for the same operation is a frozen dataclass and `dataclasses.replace`; the
+JVM runs the same `.scala` file.
 
 Every comparable file is also a CTest case (`benchmarks/<file>`): it runs once
 through the conformance runner and must print its `EXPECT` value, so a broken

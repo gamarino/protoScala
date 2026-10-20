@@ -150,6 +150,13 @@ WORKLOADS = [
      "py": (PY_TWINS_DIR / "map_build.py", {}, "50000 1249975000 50000"),
      "st": None,
      "clj": None},
+    # The paradigm's own write: a case-class copy, not a mutation (Python's
+    # twin is a frozen dataclass and dataclasses.replace).
+    {"name": "case_copy", "scala": "case_copy.scala",
+     "what": "500000 copy-updates of a four-field case class", "origin": "protoScala",
+     "py": (PY_TWINS_DIR / "case_copy.py", {}, "333333 83333166667 248001884"),
+     "st": None,
+     "clj": None},
 ]
 
 # Workloads of the sibling suites that protoScala cannot express yet: each one
