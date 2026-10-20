@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — protoCore 3.0.0: natives read their arguments in place, 2026-10-20
+
+- **Built against protoCore 3.0.0** (SOVERSION 4), now the declared minimum
+  on every platform: natives receive protoCore's `ProtoArguments` /
+  `ProtoKeywordArguments` descriptors (protoCore
+  `docs/CALLING_CONVENTION.md`), and the transpiler's generated entry points
+  take them too.
+- **A call to a native no longer builds a `ProtoList`.**  `callMember`,
+  `callWithReceiver` and a call site's native pass a descriptor over the
+  arguments where they sit, in the operand stack; `callNative` and a
+  transpiled native entry copy them into the call scope's slots (the
+  thread's slot stack, no allocation), since their caller may hold them in a
+  C++ array.
+- **A call with named arguments no longer builds a `ProtoSparseList`.**
+  `SiteKeywords` lays the (interned name, value) pairs over the values the
+  site left on the operand stack; the engine reads them as a
+  `ProtoKeywordArguments`.
+- Interleaved A/B against main on protoCore 2.14.8, three rounds with A/A,
+  cycles: `copy` probes -39 % and -42 %, `case_copy` -35 %, `map_build`
+  -15 %, `fib30` -12 %, `object_tree` -12 %, `list_ops` -8 %, the call probe
+  -5 %, `attr_lookup` -3 %; every case faster.
+
 ### Fixed — a clean build under GCC 13, 2026-10-17
 
 - **The AST dump prints `type` definitions**, as `(type Pair [A B] = (A, B))`

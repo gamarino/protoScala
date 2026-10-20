@@ -179,7 +179,7 @@ PRODUCT_ELEMENT(21) PRODUCT_ELEMENT(22)
 // caller keeps reachable.
 proto::proto_ulong copyValues(ProtoContext* ctx, const ProtoObject* self, const ProtoList* fields,
                               proto::proto_ulong n, proto::proto_ulong positional,
-                              const ProtoList* args, const proto::ProtoSparseList* keywords,
+                              const proto::ProtoArguments* args, const proto::ProtoKeywordArguments* keywords,
                               const ProtoObject** out) {
     proto::proto_ulong named = 0;
     for (proto::proto_ulong i = 0; i < n; ++i) {
@@ -202,7 +202,7 @@ proto::proto_ulong copyValues(ProtoContext* ctx, const ProtoObject* self, const 
 // protoCore.h).
 [[noreturn]] void rejectCopyKeywords(ProtoContext* ctx, const ProtoList* fields, proto::proto_ulong n,
                                      proto::proto_ulong positional,
-                                     const proto::ProtoSparseList* keywords) {
+                                     const proto::ProtoKeywordArguments* keywords) {
     struct Rejected {
         const ProtoList* fields;
         proto::proto_ulong n;
@@ -236,7 +236,7 @@ proto::proto_ulong copyValues(ProtoContext* ctx, const ProtoObject* self, const 
 // answers a new cell even when nothing changes, so `copy()` is never `eq` to
 // its receiver).
 const ProtoObject* product_copy(ProtoContext* ctx, const ProtoObject* self, const proto::ParentLink*,
-                                const ProtoList* args, const proto::ProtoSparseList* keywords) {
+                                const proto::ProtoArguments* args, const proto::ProtoKeywordArguments* keywords) {
     const RuntimeLayout& L = layoutOf();
     const ProtoList* fields = fieldsOf(ctx, self);
     const ProtoObject* cls = self->getPrototype(ctx);
@@ -286,7 +286,7 @@ const ProtoObject* product_copy(ProtoContext* ctx, const ProtoObject* self, cons
 
 // The elements of `t` from the arguments: _1 .. _n.
 const ProtoObject* fillTuple(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* t,
-                             const ProtoList* args, proto::proto_ulong n) {
+                             const proto::ProtoArguments* args, proto::proto_ulong n) {
     for (proto::proto_ulong k = 0; k < n; ++k)
         t = t->setAttribute(ctx, L.tupleFieldKey[k + 1], args->getAt(ctx, static_cast<int>(k)));
     return t;

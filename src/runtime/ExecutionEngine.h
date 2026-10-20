@@ -194,14 +194,14 @@ private:
                                        const BytecodeModule::Const& site) const;
     const proto::ProtoObject* callWithReceiver(proto::ProtoContext* ctx, const proto::ProtoObject* method,
                                                const proto::ProtoObject** base, unsigned argc,
-                                               const proto::ProtoSparseList* keywords = nullptr);
+                                               const proto::ProtoKeywordArguments* keywords = nullptr);
     const proto::ProtoObject* bindMethod(proto::ProtoContext* ctx, const proto::ProtoObject* method,
                                          const proto::ProtoObject* receiver);
     const proto::ProtoObject* forceMember(proto::ProtoContext* ctx, const proto::ProtoObject* holder,
                                           const proto::ProtoObject* receiver);
     const proto::ProtoObject* instantiate(proto::ProtoContext* ctx, const proto::ProtoObject** base,
                                           const proto::ProtoString* ctorKey, unsigned argc,
-                                          const proto::ProtoSparseList* keywords = nullptr);
+                                          const proto::ProtoKeywordArguments* keywords = nullptr);
     PROTOSCALA_NOINLINE const proto::ProtoObject* makeClass(proto::ProtoContext* ctx,
                                                           const BytecodeModule::Const& spec,
                                                           const proto::ProtoObject* const* base);
@@ -221,7 +221,7 @@ private:
     // IllegalArgumentException for an unknown name, a duplicate and a missing
     // argument — each naming what was expected and what arrived (plan A0-11).
     void bindKeywordsAndDefaults(proto::ProtoContext& frame, const BytecodeModule& mod,
-                                 const proto::ProtoSparseList* keywords,
+                                 const proto::ProtoKeywordArguments* keywords,
                                  const proto::ProtoObject** slots, unsigned positional);
     bool testType(proto::ProtoContext* ctx, TypeCode code, const proto::ProtoObject* v) const;
     [[noreturn]] void throwMissingMember(proto::ProtoContext* ctx, const proto::ProtoObject* receiver,
@@ -230,7 +230,7 @@ private:
     const proto::ProtoObject* execute(proto::ProtoContext* parent, const BytecodeModule& mod,
                                       const proto::ProtoObject* const* args, unsigned argc,
                                       const proto::ProtoObject* captures,
-                                      const proto::ProtoSparseList* keywords = nullptr);
+                                      const proto::ProtoKeywordArguments* keywords = nullptr);
     const proto::ProtoObject* callNative(proto::ProtoContext* ctx, proto::ProtoMethod fn,
                                          const proto::ProtoObject* self,
                                          const proto::ProtoObject* const* args, unsigned argc);

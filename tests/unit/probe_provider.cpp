@@ -50,7 +50,7 @@ std::string describe(proto::ProtoContext* ctx, const proto::ProtoObject* v) {
 // the pointer word) and fail silently for one too long to embed, which is
 // exactly the trap the convention documents.
 const proto::ProtoObject* keywordNamed(proto::ProtoContext* ctx,
-                                       const proto::ProtoSparseList* keywords, const char* name) {
+                                       const proto::ProtoKeywordArguments* keywords, const char* name) {
     if (!keywords) return nullptr;
     const auto* sym = proto::ProtoString::createSymbol(ctx, name);
     const auto key = reinterpret_cast<std::uintptr_t>(sym);
@@ -64,8 +64,8 @@ const proto::ProtoObject* keywordNamed(proto::ProtoContext* ctx,
 // keywordParameters. `aVeryLongKeywordName` is accepted under the same name so a
 // second fixture can use a parameter name too long to embed in a pointer word.
 const proto::ProtoObject* probe_echo(proto::ProtoContext* ctx, const proto::ProtoObject*,
-                                     const proto::ParentLink*, const proto::ProtoList* positional,
-                                     const proto::ProtoSparseList* keywords) {
+                                     const proto::ParentLink*, const proto::ProtoArguments* positional,
+                                     const proto::ProtoKeywordArguments* keywords) {
     std::string out = "echo";
     if (positional && positional->getSize(ctx) > 0)
         out += " a=" + describe(ctx, positional->getAt(ctx, 0));
@@ -79,16 +79,16 @@ const proto::ProtoObject* probe_echo(proto::ProtoContext* ctx, const proto::Prot
 // A native that throws a C++ exception, so a fixture can show that it arrives at
 // the Scala call site as a catchable RuntimeException with its message intact.
 const proto::ProtoObject* probe_boom(proto::ProtoContext*, const proto::ProtoObject*,
-                                     const proto::ParentLink*, const proto::ProtoList*,
-                                     const proto::ProtoSparseList*) {
+                                     const proto::ParentLink*, const proto::ProtoArguments*,
+                                     const proto::ProtoKeywordArguments*) {
     throw std::runtime_error("provider exploded");
 }
 
 // A native that throws something that is NOT a std::exception. Without the last
 // clause of the boundary shape this escapes the VM and terminates the process.
 const proto::ProtoObject* probe_throwInt(proto::ProtoContext*, const proto::ProtoObject*,
-                                        const proto::ParentLink*, const proto::ProtoList*,
-                                        const proto::ProtoSparseList*) {
+                                        const proto::ParentLink*, const proto::ProtoArguments*,
+                                        const proto::ProtoKeywordArguments*) {
     throw 42;
 }
 

@@ -152,7 +152,7 @@ const ProtoObject* text(ProtoContext* ctx, std::string_view bytes) {
 // Bytes (D126)
 // ---------------------------------------------------------------------------
 
-std::string bufArg(ProtoContext* ctx, const ProtoList* args, proto::proto_ulong i, const char* method) {
+std::string bufArg(ProtoContext* ctx, const proto::ProtoArguments* args, proto::proto_ulong i, const char* method) {
     return io::byteBufferArg(ctx, args->getAt(ctx, static_cast<int>(i)), method);
 }
 

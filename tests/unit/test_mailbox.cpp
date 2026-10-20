@@ -48,8 +48,8 @@ struct ProducerJob {
 ProducerJob g_jobs[8];
 
 const proto::ProtoObject* producerEntry(proto::ProtoContext* ctx, const proto::ProtoObject*,
-                                        const proto::ParentLink*, const proto::ProtoList* args,
-                                        const proto::ProtoSparseList*) {
+                                        const proto::ParentLink*, const proto::ProtoArguments* args,
+                                        const proto::ProtoKeywordArguments*) {
     const ProducerJob& j = g_jobs[proto::asSmallInt(args->getAt(ctx, 0))];
     for (int i = 0; i < j.count; ++i) {
         proto::ProtoContext scope(&*ctx->space, ctx);

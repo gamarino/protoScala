@@ -33,8 +33,8 @@ name: CI
 # breaks, which is worth having, but a red build would then have three possible
 # authors; the schedule keeps that signal separate, and the summary records the
 # commits actually used.  The `test` job runs twice: against the pinned
-# protoCore release (2.14.5) and against the declared minimum (2.11.0, its floor
-# entry -- this repository's only floor job, on 2.11.0 on the schedule too).
+# protoCore release (3.0.0) and against the declared minimum (3.0.0, its floor
+# entry -- this repository's only floor job, on 3.0.0 on the schedule too).
 
 on:
   push:
@@ -57,10 +57,11 @@ env:
   PROTOCORE_REPO: numaes/protoCore
   PROTOST_REPO: gamarino/protoST
   PROTOIO_REPO: gamarino/protoIO
-  # protoCore 2.14.5, SOVERSION 3 (tag v2.14.5, 063c6d5).  Bump deliberately.
-  # Every job builds it except the floor entry of the `test` job, which builds
-  # the declared minimum (2.11.0, see there).
-  PROTOCORE_REF: ${{ github.event_name == 'schedule' && 'master' || '063c6d55e11fd4439758578d664c869aaa3a596a' }}
+  # protoCore 3.0.0, SOVERSION 4 (branch feature/args-calling-convention,
+  # cf52f9f): methods receive ProtoArguments / ProtoKeywordArguments.  Bump
+  # deliberately.  It is also the declared minimum, which the floor entry of
+  # the `test` job builds.
+  PROTOCORE_REF: ${{ github.event_name == 'schedule' && 'master' || 'cf52f9f5056919bb07326afc7159d5b3d78c03a3' }}
   # protoST main (4876884, 2026-10-11: its CI on protoCore 2.14.5; the
   # instance-variable write groups, protoCore 2.11.0 floor), the commit
   # protoScala's interop test was last verified against.
@@ -86,15 +87,15 @@ jobs:
       matrix:
         include:
           - name: Build and test suite
-            # Empty: env.PROTOCORE_REF (2.14.5, or master on the schedule).
+            # Empty: env.PROTOCORE_REF (3.0.0, or master on the schedule).
             protocore_ref: ''
-          # THE FLOOR JOB, the only one in this repository. protoCore 2.11.0
-          # (tag v2.11.0, 69b56af), SOVERSION 3: PROTOCORE_MIN_VERSION in
-          # CMakeLists.txt on every platform (ProtoObject::setAttributes, the
-          # constructor field groups). Built on every event, the schedule
-          # included. cross-platform.yml builds 2.14.5 on macOS and Windows.
-          - name: Build and test suite (protoCore 2.11.0, the declared minimum)
-            protocore_ref: 69b56afeee00d843d74f8e67d3add317bc1ce5d3
+          # THE FLOOR JOB, the only one in this repository. protoCore 3.0.0
+          # (cf52f9f), SOVERSION 4: PROTOCORE_MIN_VERSION in CMakeLists.txt on
+          # every platform (the descriptor calling convention). Built on every
+          # event, the schedule included. cross-platform.yml builds 3.0.0 on
+          # macOS and Windows.
+          - name: Build and test suite (protoCore 3.0.0, the declared minimum)
+            protocore_ref: cf52f9f5056919bb07326afc7159d5b3d78c03a3
     steps:
       - name: Check out protoScala
         uses: actions/checkout@v4

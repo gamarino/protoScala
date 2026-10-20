@@ -19,8 +19,8 @@
     const ProtoObject* name([[maybe_unused]] ProtoContext* ctx,                     \
                             [[maybe_unused]] const ProtoObject* self,               \
                             const proto::ParentLink*,                               \
-                            [[maybe_unused]] const ProtoList* args,                 \
-                            const proto::ProtoSparseList*)
+                            [[maybe_unused]] const proto::ProtoArguments* args,     \
+                            const proto::ProtoKeywordArguments*)
 
 namespace protoScala::prim {
 
@@ -36,7 +36,7 @@ inline const RuntimeLayout& layoutOf() { return *activeCallContext()->layout; }
 // Arguments
 // ---------------------------------------------------------------------------
 
-inline proto::proto_ulong argCount(ProtoContext* ctx, const ProtoList* args) {
+inline proto::proto_ulong argCount(ProtoContext* ctx, const proto::ProtoArguments* args) {
     return args ? args->getSize(ctx) : 0;
 }
 
@@ -47,14 +47,14 @@ inline proto::proto_ulong argCount(ProtoContext* ctx, const ProtoList* args) {
                      std::to_string(got));
 }
 
-inline void expectArgs(ProtoContext* ctx, const ProtoList* args, const char* method,
+inline void expectArgs(ProtoContext* ctx, const proto::ProtoArguments* args, const char* method,
                        proto::proto_ulong n) {
     const proto::proto_ulong got = argCount(ctx, args);
     if (got != n) wrongArgCount(method, std::to_string(n), got);
 }
 
 // Argument `i` of a call that must receive exactly `expected` arguments.
-inline const ProtoObject* arg(ProtoContext* ctx, const ProtoList* args, proto::proto_ulong i,
+inline const ProtoObject* arg(ProtoContext* ctx, const proto::ProtoArguments* args, proto::proto_ulong i,
                               const char* method, proto::proto_ulong expected) {
     expectArgs(ctx, args, method, expected);
     return args->getAt(ctx, static_cast<int>(i));

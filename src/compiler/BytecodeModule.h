@@ -30,11 +30,13 @@ class ProtoString;
 class ParentLink;
 class ProtoList;
 class ProtoSparseList;
+class ProtoArguments;
+class ProtoKeywordArguments;
 // The same declaration protoCore.h makes. Repeated rather than included so this
 // header keeps its one dependency (Opcodes.h); a mismatch would be a compile
 // error at every call site, not a silent one.
 typedef const ProtoObject* (*ProtoMethod)(ProtoContext*, const ProtoObject*, const ParentLink*,
-                                          const ProtoList*, const ProtoSparseList*);
+                                          const proto::ProtoArguments*, const proto::ProtoKeywordArguments*);
 }
 
 namespace protoScala {

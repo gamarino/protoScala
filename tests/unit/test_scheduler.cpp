@@ -47,7 +47,7 @@ std::atomic<long long> g_handlerCalls{0};
 
 // A handler written as a native method: (state, msg) => (state + msg, state + msg).
 const ProtoObject* addHandler(ProtoContext* ctx, const ProtoObject*, const proto::ParentLink*,
-                              const ProtoList* args, const proto::ProtoSparseList*) {
+                              const proto::ProtoArguments* args, const proto::ProtoKeywordArguments*) {
     g_handlerCalls.fetch_add(1, std::memory_order_relaxed);
     const long long s = proto::asSmallInt(args->getAt(ctx, 0));
     const long long m = proto::asSmallInt(args->getAt(ctx, 1));
@@ -94,7 +94,7 @@ const ProtoObject* g_raceActor = nullptr;
 constexpr int kSenders = 4, kPer = 2000;
 
 const ProtoObject* senderEntry(ProtoContext* ctx, const ProtoObject*, const proto::ParentLink*,
-                               const ProtoList*, const proto::ProtoSparseList*) {
+                               const proto::ProtoArguments*, const proto::ProtoKeywordArguments*) {
     for (int i = 0; i < kPer; ++i) tell(ctx, g_raceActor, 1, Band::Medium);
     return PROTO_NONE;
 }

@@ -582,7 +582,7 @@ const ProtoObject* strictText(ProtoContext* ctx, const SourceState& st, const Pi
     return makeString(ctx, p.bytes);
 }
 
-long long handleArg(ProtoContext* ctx, const ProtoList* args, const char* method) {
+long long handleArg(ProtoContext* ctx, const proto::ProtoArguments* args, const char* method) {
     return intArg(ctx, arg(ctx, args, 0, method, 1), method);
 }
 
@@ -813,7 +813,7 @@ PRIM(prim_file_mkdirs) {
 // __fileMove(from, to, replace) / __fileCopy(from, to, replace) -> Unit.
 // java.nio.file.Files' rule: an existing target is refused with a
 // FileAlreadyExistsException naming it, unless the caller asked to replace it.
-const ProtoObject* moveOrCopy(ProtoContext* ctx, const ProtoList* args, const char* method, bool copy) {
+const ProtoObject* moveOrCopy(ProtoContext* ctx, const proto::ProtoArguments* args, const char* method, bool copy) {
     expectArgs(ctx, args, method, 3);
     const std::string from = stringArg(ctx, args->getAt(ctx, 0), method);
     const std::string to = stringArg(ctx, args->getAt(ctx, 1), method);

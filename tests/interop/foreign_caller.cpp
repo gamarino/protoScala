@@ -46,7 +46,8 @@ const proto::ProtoObject* callExport(proto::ProtoContext* ctx, const proto::Prot
         fail(std::string("'") + name + "' has no method pointer");
         return nullptr;
     }
-    return m(ctx, fn->asMethodSelf(ctx), nullptr, args, nullptr);
+    const proto::ProtoListArguments positional(ctx, args);
+    return m(ctx, fn->asMethodSelf(ctx), nullptr, &positional, nullptr);
 }
 
 long long asInt(proto::ProtoContext* ctx, const proto::ProtoObject* v, const char* what) {

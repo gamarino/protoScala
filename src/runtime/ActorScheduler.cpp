@@ -52,8 +52,8 @@ unsigned ActorScheduler::configuredWorkerCount() {
 // The thread entry protoCore calls: the scheduler travels as a SmallInteger,
 // exactly as a BytecodeModule address does in MAKE_FN.
 static const proto::ProtoObject* workerEntry(proto::ProtoContext* ctx, const proto::ProtoObject*,
-                                             const proto::ParentLink*, const proto::ProtoList* args,
-                                             const proto::ProtoSparseList*) {
+                                             const proto::ParentLink*, const proto::ProtoArguments* args,
+                                             const proto::ProtoKeywordArguments*) {
     if (!args || args->getSize(ctx) == 0) return PROTO_NONE;
     auto* s = reinterpret_cast<ActorScheduler*>(args->getAt(ctx, 0)->asLong(ctx));
     s->workerLoop(ctx);

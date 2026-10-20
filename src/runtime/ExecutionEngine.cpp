@@ -87,8 +87,13 @@ const proto::ProtoObject* ExecutionEngine::callNative(proto::ProtoContext* ctx, 
                                                       const proto::ProtoObject* self,
                                                       const proto::ProtoObject* const* args,
                                                       unsigned argc) {
-    proto::ProtoContext scope(ctx->space, ctx);
-    const proto::ProtoList* list = scope.newList(argc, args);
+    // `args` need not be traced memory (a native may call back with a C++
+    // array), so they are copied into the scope's slots, which the collector
+    // traces and the thread's slot stack provides without allocation; the
+    // native reads them there (protoCore's array call form).
+    proto::ProtoContext scope(ctx->space, ctx, nullptr, nullptr, nullptr, nullptr, argc);
+    for (unsigned k = 0; k < argc; ++k) scope.setAutomaticLocal(k, args[k]);
+    const proto::ProtoArguments list(scope.getAutomaticLocals(), argc);
     // A native that re-enters the VM raises the depth for everything it calls,
     // and the destructor lowers it on unwinding too, so a FutureYield passing
     // through does not leave it raised (D43, A0-2).
@@ -106,7 +111,7 @@ const proto::ProtoObject* ExecutionEngine::callNative(proto::ProtoContext* ctx, 
     // (see runFrame).
     std::exception_ptr passOn;
     try {
-        r = fn(&scope, self, nullptr, list, nullptr);
+        r = fn(&scope, self, nullptr, &list, nullptr);
     } catch (FutureYield&) {
         passOn = std::current_exception();  // a cooperative suspension, not an error
     } catch (ScalaThrow&) {
@@ -254,13 +259,14 @@ const proto::ProtoObject* ExecutionEngine::callWithReceiver(proto::ProtoContext*
                                                             const proto::ProtoObject* m,
                                                             const proto::ProtoObject** base,
                                                             unsigned argc,
-                                                            const proto::ProtoSparseList* keywords) {
+                                                            const proto::ProtoKeywordArguments* keywords) {
     if (m->isMethod(ctx)) {
         if (keywords) {
+            // The arguments sit in traced slots at base + 1: read in place.
             proto::ProtoContext scope(ctx->space, ctx);
-            const proto::ProtoList* positional = scope.newList(argc, base + 1);
+            const proto::ProtoArguments positional(base + 1, argc);
             const proto::ProtoObject* r =
-                m->asMethod(ctx)(&scope, base[0], nullptr, positional, keywords);
+                m->asMethod(ctx)(&scope, base[0], nullptr, &positional, keywords);
             scope.returnValue = r ? r : PROTO_NONE;
             return r ? r : PROTO_NONE;
         }
@@ -312,7 +318,7 @@ const proto::ProtoObject* ExecutionEngine::instantiate(proto::ProtoContext* ctx,
                                                        const proto::ProtoObject** base,
                                                        const proto::ProtoString* ctorKey,
                                                        unsigned argc,
-                                                       const proto::ProtoSparseList* keywords) {
+                                                       const proto::ProtoKeywordArguments* keywords) {
     const RuntimeLayout& L = layout_;
     const proto::ProtoObject* cls = base[0];
     // Mutability is inherited: a subclass of a class with a `var` field also
@@ -444,33 +450,47 @@ namespace {
 // exactly the right structure rather than a compromise. ProtoMap exists for
 // arbitrary COLLECTABLE object keys, which is a different problem — the same
 // principle that makes ProtoTuple interned and perennial.
-const proto::ProtoSparseList* keywordsOfSite(proto::ProtoContext* ctx,
-                                             const proto::ProtoObject** base,
-                                             const BytecodeModule::Const& site) {
-    const proto::ProtoSparseList* keywords = ctx->newSparseList();
-    for (std::size_t k = 0; k < site.nameSymbols.size(); ++k)
-        keywords = keywords->setAt(ctx, reinterpret_cast<proto::proto_ulong>(site.nameSymbols[k]),
-                                   base[1 + site.argc + k]);
-    return keywords;
-}
+// The named arguments of a call site: (interned name, value) pairs over the
+// values the site left on the operand stack, which the collector traces, so
+// nothing is allocated (protoCore's ProtoKeywordArguments). More names than
+// kInline go to a vector.
+struct SiteKeywords {
+    static constexpr std::size_t kInline = 8;
+    proto::ProtoKeywordArgument inlinePairs[kInline];
+    std::vector<proto::ProtoKeywordArgument> more;
+    proto::ProtoKeywordArguments args;
+
+    SiteKeywords(const proto::ProtoObject* const* base, const BytecodeModule::Const& site)
+        : args(fill(base, site), static_cast<unsigned>(site.nameSymbols.size())) {}
+    SiteKeywords(const SiteKeywords&) = delete;
+    SiteKeywords& operator=(const SiteKeywords&) = delete;
+
+private:
+    proto::ProtoKeywordArgument* fill(const proto::ProtoObject* const* base,
+                                      const BytecodeModule::Const& site) {
+        const std::size_t n = site.nameSymbols.size();
+        proto::ProtoKeywordArgument* pairs = inlinePairs;
+        if (n > kInline) {
+            more.resize(n);
+            pairs = more.data();
+        }
+        for (std::size_t k = 0; k < n; ++k) pairs[k] = {site.nameSymbols[k], base[1 + site.argc + k]};
+        return pairs;
+    }
+};
 
 // The name of the first keyword key that is not one of the callee's parameter
 // names. Recovering the name from the key is a cast, and that is only sound
-// because the key IS an interned symbol's address (see keywordsOfSite).
+// because the key IS an interned symbol's address (see SiteKeywords).
 std::string unmatchedKeywordName(proto::ProtoContext* ctx, const BytecodeModule& mod,
-                                 const proto::ProtoSparseList* keywords) {
+                                 const proto::ProtoKeywordArguments* keywords) {
     const auto& symbols = mod.paramNameSymbols();
-    const proto::ProtoSparseListIterator* it = keywords->getIterator(ctx);
-    while (it && it->hasNext(ctx)) {
-        const proto::proto_ulong key = it->nextKey(ctx);
+    for (unsigned i = 0; i < keywords->count(); ++i) {
+        const proto::ProtoString* name = keywords->pairs()[i].name;
         bool known = false;
         for (const proto::ProtoString* s : symbols)
-            if (reinterpret_cast<proto::proto_ulong>(s) == key) { known = true; break; }
-        if (!known) return reinterpret_cast<const proto::ProtoString*>(key)->toStdString(ctx);
-        // `advance` is a non-const member of ProtoSparseListIterator, and
-        // getIterator hands back a const pointer: the cast is protoCore's own
-        // iteration idiom, not a mutation of a shared structure.
-        it = const_cast<proto::ProtoSparseListIterator*>(it)->advance(ctx);
+            if (s == name) { known = true; break; }
+        if (!known) return name->toStdString(ctx);
     }
     return "?";
 }
@@ -478,7 +498,7 @@ std::string unmatchedKeywordName(proto::ProtoContext* ctx, const BytecodeModule&
 }  // namespace
 
 void ExecutionEngine::bindKeywordsAndDefaults(proto::ProtoContext& frame, const BytecodeModule& mod,
-                                              const proto::ProtoSparseList* keywords,
+                                              const proto::ProtoKeywordArguments* keywords,
                                               const proto::ProtoObject** slots,
                                               unsigned positional) {
     const auto& symbols = mod.paramNameSymbols();
@@ -553,13 +573,15 @@ const proto::ProtoObject* ExecutionEngine::sendKeywords(proto::ProtoContext* ctx
         if (mod->isMethod() && !m->getOwnAttributeDirect(&scope, layout_.selfKey)) {
             // A method of the receiver: `this` travels in slot 0, so the
             // positional arguments start at base[0] (the receiver itself).
-            const proto::ProtoSparseList* keywords = keywordsOfSite(&scope, base, site);
+            const SiteKeywords siteKeywords(base, site);
+        const proto::ProtoKeywordArguments* keywords = &siteKeywords.args;
             const proto::ProtoObject* r = execute(&scope, *mod, base, site.argc + 1, nullptr, keywords);
             scope.returnValue = r;
             return r;
         }
         // A function-valued member (or a bound method): call it as a value.
-        const proto::ProtoSparseList* keywords = keywordsOfSite(&scope, base, site);
+        const SiteKeywords siteKeywords(base, site);
+        const proto::ProtoKeywordArguments* keywords = &siteKeywords.args;
         const proto::ProtoObject* caps =
             mod->captureCount() ? m->getOwnAttributeDirect(&scope, layout_.capturesKey) : nullptr;
         const proto::ProtoObject* r =
@@ -573,9 +595,11 @@ const proto::ProtoObject* ExecutionEngine::sendKeywords(proto::ProtoContext* ctx
         throw ScalaError("IllegalArgumentException",
                          plainName(site.sval) + " is not a method of " +
                              typeName(ctx, layout_, receiver) + ", so it takes no named arguments");
-    const proto::ProtoList* positional = scope.newList(site.argc, base + 1);
-    const proto::ProtoSparseList* keywords = keywordsOfSite(&scope, base, site);
-    const proto::ProtoObject* r = m->asMethod(ctx)(&scope, receiver, nullptr, positional, keywords);
+    // The arguments and the keyword values sit in the operand stack: read in place.
+    const proto::ProtoArguments positional(base + 1, site.argc);
+    const SiteKeywords siteKeywords(base, site);
+    const proto::ProtoKeywordArguments* keywords = &siteKeywords.args;
+    const proto::ProtoObject* r = m->asMethod(ctx)(&scope, receiver, nullptr, &positional, keywords);
     if (!r) r = PROTO_NONE;
     scope.returnValue = r;
     return r;
@@ -590,7 +614,8 @@ const proto::ProtoObject* ExecutionEngine::callKeywords(proto::ProtoContext* ctx
     const proto::ProtoObject* callee = base[0];
     if (callee == PROTO_NONE) throw ScalaError("NullPointerException", "cannot call null");
     proto::ProtoContext scope(ctx->space, ctx);
-    const proto::ProtoSparseList* keywords = keywordsOfSite(&scope, base, site);
+    const SiteKeywords siteKeywords(base, site);
+        const proto::ProtoKeywordArguments* keywords = &siteKeywords.args;
     if (const BytecodeModule* mod = compiledModuleOf(&scope, layout_, callee)) {
         const proto::ProtoObject* caps =
             mod->captureCount() ? callee->getOwnAttributeDirect(&scope, layout_.capturesKey) : nullptr;
@@ -614,9 +639,9 @@ const proto::ProtoObject* ExecutionEngine::callKeywords(proto::ProtoContext* ctx
         return r;
     }
     if (callee->isMethod(ctx)) {
-        const proto::ProtoList* positional = scope.newList(site.argc, base + 1);
+        const proto::ProtoArguments positional(base + 1, site.argc);  // the operand stack, in place
         const proto::ProtoObject* r = callee->asMethod(ctx)(
-            &scope, callee->asMethodSelf(ctx), nullptr, positional, keywords);
+            &scope, callee->asMethodSelf(ctx), nullptr, &positional, keywords);
         if (!r) r = PROTO_NONE;
         scope.returnValue = r;
         return r;
@@ -688,7 +713,7 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
                                                    const proto::ProtoObject* const* args,
                                                    unsigned argc,
                                                    const proto::ProtoObject* captures,
-                                                   const proto::ProtoSparseList* keywords) {
+                                                   const proto::ProtoKeywordArguments* keywords) {
     checkNativeStack();
     // A TRANSPILED block (Phase 7): the body is a proto::ProtoMethod and there are
     // no code words to run. Everything above this line and below it is unchanged,
@@ -705,12 +730,14 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
         const bool method = mod.isMethod();
         const proto::ProtoObject* self = method ? (argc ? args[0] : PROTO_NONE) : captures;
         const unsigned skip = method ? 1u : 0u;
-        proto::ProtoContext scope(parent->space, parent);
-        const proto::ProtoList* positional =
-            scope.newList(argc > skip ? argc - skip : 0u, args + skip);
-        scope.returnValue = positional->asObject(&scope);
+        // Copied into the scope's slots (traced, from the slot stack): `args`
+        // need not be traced memory.
+        const unsigned n = argc > skip ? argc - skip : 0u;
+        proto::ProtoContext scope(parent->space, parent, nullptr, nullptr, nullptr, nullptr, n);
+        for (unsigned k = 0; k < n; ++k) scope.setAutomaticLocal(k, args[skip + k]);
+        const proto::ProtoArguments positional(scope.getAutomaticLocals(), n);
         NativeDepthGuard depth;
-        const proto::ProtoObject* r = entry(&scope, self, nullptr, positional, keywords);
+        const proto::ProtoObject* r = entry(&scope, self, nullptr, &positional, keywords);
         if (!r) r = PROTO_NONE;
         scope.returnValue = r;
         return r;
@@ -1165,7 +1192,8 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                         base[0] = instantiate(&frame, base, site.symbol, site.argc);
                     } else {
                         proto::ProtoContext scope(frame.space, &frame);
-                        const proto::ProtoSparseList* keywords = keywordsOfSite(&scope, base, site);
+                        const SiteKeywords siteKeywords(base, site);
+        const proto::ProtoKeywordArguments* keywords = &siteKeywords.args;
                         base[0] = instantiate(&frame, base, site.symbol, site.argc, keywords);
                     }
                     pendingBase = kNoPendingCall;

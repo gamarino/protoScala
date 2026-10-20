@@ -224,7 +224,7 @@ enum class Arith { Add, Sub, Mul, Div, Mod };
 // `/` truncates toward zero and `%` takes the sign of the dividend (protoCore
 // Integer::divide / Integer::modulo, as Java).
 const ProtoObject* arith(ProtoContext* ctx, Arith op, const char* method,
-                         const ProtoObject* self, const ProtoList* args) {
+                         const ProtoObject* self, const proto::ProtoArguments* args) {
     const ProtoObject* rhs = arg(ctx, args, 0, method, 1);
     if (op == Arith::Add && proto::ProtoObject::isStringTagFast(rhs)) {
         const ProtoObject* lhs = toScalaString(ctx, layoutOf(), self);
@@ -252,7 +252,7 @@ const ProtoObject* arith(ProtoContext* ctx, Arith op, const char* method,
 enum class Cmp { Lt, Le, Gt, Ge };
 
 const ProtoObject* compare(ProtoContext* ctx, Cmp op, const char* method,
-                           const ProtoObject* self, const ProtoList* args) {
+                           const ProtoObject* self, const proto::ProtoArguments* args) {
     const ProtoObject* x = widenChar(self);
     const ProtoObject* y = numberArg(ctx, arg(ctx, args, 0, method, 1), method);
     const auto c = x->partialCompare(ctx, y);  // IEEE: NaN compares false
@@ -268,7 +268,7 @@ const ProtoObject* compare(ProtoContext* ctx, Cmp op, const char* method,
 // Scala `max` / `min` (java.lang.Math semantics when a Double is involved:
 // NaN wins, and max(-0.0, 0.0) is 0.0).
 const ProtoObject* maxMin(ProtoContext* ctx, bool isMax, const char* method,
-                          const ProtoObject* self, const ProtoList* args) {
+                          const ProtoObject* self, const proto::ProtoArguments* args) {
     const ProtoObject* x = widenChar(self);
     const ProtoObject* y = numberArg(ctx, arg(ctx, args, 0, method, 1), method);
     if (isDoubleFast(x) || isDoubleFast(y)) {
@@ -311,12 +311,12 @@ PRIM(num_pos) { expectArgs(ctx, args, "unary_+", 0); return widenChar(self); }
 
 // Conversions installed under several names: one thin wrapper per name, so
 // an argument-count error names the method that was called.
-const ProtoObject* identity(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+const ProtoObject* identity(ProtoContext* ctx, const ProtoObject* self, const proto::ProtoArguments* args,
                             const char* method) {
     expectArgs(ctx, args, method, 0);
     return self;
 }
-const ProtoObject* toDouble(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+const ProtoObject* toDouble(ProtoContext* ctx, const ProtoObject* self, const proto::ProtoArguments* args,
                             const char* method) {
     expectArgs(ctx, args, method, 0);
     return ctx->fromDouble(widenChar(self)->asDouble(ctx));
@@ -356,7 +356,7 @@ PRIM(int_not) { expectArgs(ctx, args, "unary_~", 0); return widenChar(self)->bit
 // width there is no width to mask to, and masking to 5 or 6 bits would be
 // choosing one of Scala's two answers arbitrarily. A negative amount is an error
 // rather than a wrap-around.
-int shiftAmount(ProtoContext* ctx, const ProtoList* args, const char* method) {
+int shiftAmount(ProtoContext* ctx, const proto::ProtoArguments* args, const char* method) {
     const long long n = intArg(ctx, arg(ctx, args, 0, method, 1), method);
     if (n < 0 || n > INT_MAX)
         throw ScalaError("IllegalArgumentException",
@@ -412,7 +412,7 @@ const ProtoObject* integralToInt(ProtoContext* ctx, double t, const char* method
 }
 
 const ProtoObject* doubleToInteger(ProtoContext* ctx, const ProtoObject* self,
-                                   const ProtoList* args, const char* method) {
+                                   const proto::ProtoArguments* args, const char* method) {
     expectArgs(ctx, args, method, 0);
     return integralToInt(ctx, std::trunc(doubleSelf(ctx, self)), method);
 }
@@ -439,7 +439,7 @@ PRIM(double_isInfinite) {
 // Boolean
 // ---------------------------------------------------------------------------
 
-bool booleanArg(ProtoContext* ctx, const ProtoList* args, const char* method) {
+bool booleanArg(ProtoContext* ctx, const proto::ProtoArguments* args, const char* method) {
     const ProtoObject* v = arg(ctx, args, 0, method, 1);
     if (v != PROTO_TRUE && v != PROTO_FALSE) wrongType(ctx, method, "a Boolean", v);
     return v == PROTO_TRUE;
@@ -459,7 +459,7 @@ bool asciiDigit(char32_t c) { return c >= '0' && c <= '9'; }
 bool asciiUpper(char32_t c) { return c >= 'A' && c <= 'Z'; }
 bool asciiLower(char32_t c) { return c >= 'a' && c <= 'z'; }
 
-const ProtoObject* codePoint(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+const ProtoObject* codePoint(ProtoContext* ctx, const ProtoObject* self, const proto::ProtoArguments* args,
                              const char* method) {
     expectArgs(ctx, args, method, 0);
     return widenChar(self);
@@ -502,7 +502,7 @@ PRIM(string_length) { expectArgs(ctx, args, "length", 0); return ctx->fromIntege
 PRIM(string_isEmpty) { expectArgs(ctx, args, "isEmpty", 0); return boolean(stringLength(ctx, self) == 0); }
 PRIM(string_nonEmpty) { expectArgs(ctx, args, "nonEmpty", 0); return boolean(stringLength(ctx, self) != 0); }
 
-const ProtoObject* charAt(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+const ProtoObject* charAt(ProtoContext* ctx, const ProtoObject* self, const proto::ProtoArguments* args,
                           const char* method) {
     const long long i = intArg(ctx, arg(ctx, args, 0, method, 1), method);
     const long long n = stringLength(ctx, self);
@@ -787,7 +787,7 @@ PRIM(string_capitalize) {
 }
 
 // A single position, taken with getAt / getSlice: no flattening.
-const ProtoObject* stringEnd(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+const ProtoObject* stringEnd(ProtoContext* ctx, const ProtoObject* self, const proto::ProtoArguments* args,
                              bool wantLast, const char* method) {
     expectArgs(ctx, args, method, 0);
     const long long n = stringLength(ctx, self);
@@ -937,7 +937,7 @@ PRIM(string_count) {
     return ctx->fromInteger(hits);
 }
 
-const ProtoObject* stringAllAny(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+const ProtoObject* stringAllAny(ProtoContext* ctx, const ProtoObject* self, const proto::ProtoArguments* args,
                                 bool wantAll, const char* method) {
     const ProtoObject* p = arg(ctx, args, 0, method, 1);
     const long long n = stringLength(ctx, self);
@@ -1023,7 +1023,7 @@ bool accepted(ProtoContext* ctx, const ProtoList* preds, const ProtoObject* x) {
 
 enum class WithFilterOp { Map, FlatMap, Foreach };
 
-const ProtoObject* withFilterApply(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+const ProtoObject* withFilterApply(ProtoContext* ctx, const ProtoObject* self, const proto::ProtoArguments* args,
                                    WithFilterOp op, const char* method) {
     const RuntimeLayout& L = layoutOf();
     const ProtoObject* f = arg(ctx, args, 0, method, 1);
@@ -1045,8 +1045,9 @@ PRIM(withFilter_map)     { return withFilterApply(ctx, self, args, WithFilterOp:
 PRIM(withFilter_flatMap) { return withFilterApply(ctx, self, args, WithFilterOp::FlatMap, "flatMap"); }
 PRIM(withFilter_foreach) { return withFilterApply(ctx, self, args, WithFilterOp::Foreach, "foreach"); }
 
-// The `List` companion: List(xs*) is the argument list itself; List.empty.
-PRIM(listCompanion_apply) { return args ? args->asObject(ctx) : ctx->newList()->asObject(ctx); }
+// The `List` companion: List(xs*) is the arguments as a list (built once in
+// bulk, asList); List.empty.
+PRIM(listCompanion_apply) { return args ? args->asList(ctx)->asObject(ctx) : ctx->newList()->asObject(ctx); }
 PRIM(listCompanion_empty) { expectArgs(ctx, args, "empty", 0); return ctx->newList()->asObject(ctx); }
 
 // ---------------------------------------------------------------------------
@@ -1249,8 +1250,8 @@ void installPrimitives(ProtoContext* ctx, const RuntimeLayout& L) {
 // because it is the one native in the tree that USES its fifth parameter and the
 // macro discards it.
 const ProtoObject* prim_kwprobe_call(ProtoContext* ctx, const ProtoObject*,
-                                     const proto::ParentLink*, const ProtoList* args,
-                                     const proto::ProtoSparseList* keywords) {
+                                     const proto::ParentLink*, const proto::ProtoArguments* args,
+                                     const proto::ProtoKeywordArguments* keywords) {
     const RuntimeLayout& L = layoutOf();
     std::string out = "pos=[";
     const proto::proto_ulong n = args ? args->getSize(ctx) : 0;
@@ -1259,19 +1260,13 @@ const ProtoObject* prim_kwprobe_call(ProtoContext* ctx, const ProtoObject*,
         out += show(ctx, L, args->getAt(ctx, static_cast<int>(i)));
     }
     out += "] kw=[";
-    // Sorted by name, so the report is deterministic whatever order the keys
-    // happen to sit in (a ProtoSparseList orders by key word, i.e. by address).
+    // Sorted by name, so the report is deterministic whatever order the call
+    // passed the keywords in.
     std::vector<std::pair<std::string, std::string>> pairs;
     if (keywords) {
-        const proto::ProtoSparseListIterator* it = keywords->getIterator(ctx);
-        while (it && it->hasNext(ctx)) {
-            const proto::proto_ulong key = it->nextKey(ctx);
-            const ProtoObject* v = it->nextValue(ctx);
-            const auto* symbol = reinterpret_cast<const proto::ProtoString*>(key);
-            pairs.emplace_back(symbol->toStdString(ctx), show(ctx, L, v));
-            // `advance` is a non-const member and getIterator hands back a const
-            // pointer: the cast is protoCore's own iteration idiom.
-            it = const_cast<proto::ProtoSparseListIterator*>(it)->advance(ctx);
+        for (unsigned i = 0; i < keywords->count(); ++i) {
+            const proto::ProtoKeywordArgument& kw = keywords->pairs()[i];
+            pairs.emplace_back(kw.name->toStdString(ctx), show(ctx, L, kw.value));
         }
     }
     std::sort(pairs.begin(), pairs.end());

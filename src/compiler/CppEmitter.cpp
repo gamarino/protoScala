@@ -419,8 +419,8 @@ bool CppEmitter::emitBlock(std::size_t index, const GlobalTable&) {
     // line, because a constructor cannot wrap the code that follows it.
     out_ << "static const proto::ProtoObject* " << n
          << "(proto::ProtoContext* ctx, const proto::ProtoObject* self,\n"
-         << "        const proto::ParentLink* pl, const proto::ProtoList* args,\n"
-         << "        const proto::ProtoSparseList* kwargs) {\n"
+         << "        const proto::ParentLink* pl, const proto::ProtoArguments* args,\n"
+         << "        const proto::ProtoKeywordArguments* kwargs) {\n"
          << "    return gen::enterMethod(&" << n << "_body, ctx, self, pl, args, kwargs);\n"
          << "}\n\n";
 
@@ -428,8 +428,8 @@ bool CppEmitter::emitBlock(std::size_t index, const GlobalTable&) {
     line(mod, 0);
     out_ << "static const proto::ProtoObject* " << n
          << "_body(proto::ProtoContext* ctx, const proto::ProtoObject* self,\n"
-         << "        const proto::ParentLink*, const proto::ProtoList* args,\n"
-         << "        const proto::ProtoSparseList* kwargs) {\n"
+         << "        const proto::ParentLink*, const proto::ProtoArguments* args,\n"
+         << "        const proto::ProtoKeywordArguments* kwargs) {\n"
          << "    gen::Frame F(ctx, " << n << "_rec, self, args, kwargs);\n"
          << "    proto::ProtoContext* C = F.ctx();\n"
          << "    const proto::ProtoObject** S = F.slots();\n"
@@ -770,10 +770,10 @@ bool CppEmitter::emit(const CompiledUnit& unit, const GlobalTable& globals) {
     for (const tables::FlatBlock& b : flat_) {
         out_ << "static const proto::ProtoObject* " << b.cppName
              << "(proto::ProtoContext*, const proto::ProtoObject*, const proto::ParentLink*,\n"
-             << "        const proto::ProtoList*, const proto::ProtoSparseList*);\n"
+             << "        const proto::ProtoArguments*, const proto::ProtoKeywordArguments*);\n"
              << "static const proto::ProtoObject* " << b.cppName
              << "_body(proto::ProtoContext*, const proto::ProtoObject*, const proto::ParentLink*,\n"
-             << "        const proto::ProtoList*, const proto::ProtoSparseList*);\n";
+             << "        const proto::ProtoArguments*, const proto::ProtoKeywordArguments*);\n";
     }
     out_ << '\n';
 

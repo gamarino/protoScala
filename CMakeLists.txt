@@ -89,10 +89,12 @@ endif()
 # 2.11.0, the floor on every platform since 2026-10-03: a constructor stores
 # its parameter fields as one write group with ProtoObject::setAttributes
 # (STORE_FIELDS_IF_NEW), which first exists there.
-set(PROTOCORE_MIN_VERSION      "2.11.0")
-set(PROTOCORE_MIN_VERSION_FULL "2.11.0")
-set(PROTOCORE_NEXT_MAJOR       "3.0.0")
-set(PROTOCORE_ABI_SOVERSION    "3")
+# 3.0.0: methods receive their arguments as ProtoArguments /
+# ProtoKeywordArguments descriptors (protoCore docs/CALLING_CONVENTION.md).
+set(PROTOCORE_MIN_VERSION      "3.0.0")
+set(PROTOCORE_MIN_VERSION_FULL "3.0.0")
+set(PROTOCORE_NEXT_MAJOR       "4.0.0")
+set(PROTOCORE_ABI_SOVERSION    "4")
 # The protoCore release that introduced ProtoMPSCQueue. Kept separate from the
 # floor above so the two can be reasoned about independently.
 set(PROTOSCALA_PMQ_MIN_PROTOCORE "2.1.0")

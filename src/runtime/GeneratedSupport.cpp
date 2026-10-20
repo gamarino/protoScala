@@ -234,8 +234,8 @@ void linkModule(proto::ProtoContext* ctx, const BlockRec* const* blocks, std::si
 
 const proto::ProtoObject* enterMethod(proto::ProtoMethod body, proto::ProtoContext* ctx,
                                       const proto::ProtoObject* self, const proto::ParentLink* pl,
-                                      const proto::ProtoList* args,
-                                      const proto::ProtoSparseList* kwargs) {
+                                      const proto::ProtoArguments* args,
+                                      const proto::ProtoKeywordArguments* kwargs) {
     // §D6 site 2: a transpiled function is a proto::ProtoMethod, so from the VM's
     // point of view it is a foreign callable and presents the same boundary every
     // other native method does.
@@ -270,8 +270,8 @@ const proto::ProtoObject* runModuleBody(proto::ProtoContext* ctx, proto::ProtoMe
         {
             // The top level runs FIRST: it is what binds the module's globals, and an
             // exported function may read one on its first call.
-            const proto::ProtoList* none = scope.newList();
-            const proto::ProtoObject* r = body(&scope, nullptr, nullptr, none, nullptr);
+            const proto::ProtoArguments none(nullptr, 0);
+            const proto::ProtoObject* r = body(&scope, nullptr, nullptr, &none, nullptr);
             scope.returnValue = r ? r : PROTO_NONE;
         }
         // The module object: one object carrying a proto::ProtoMethod cell per exported
@@ -371,7 +371,7 @@ int runApp(proto::ProtoContext* ctx, const char* appKey) {
 }
 
 Frame::Frame(proto::ProtoContext* parent, const BlockRec& blk, const proto::ProtoObject* self,
-             const proto::ProtoList* args, const proto::ProtoSparseList* kwargs)
+             const proto::ProtoArguments* args, const proto::ProtoKeywordArguments* kwargs)
     : frame_(parent->space, parent) {
     // The same guard ExecutionEngine::execute opens with, and for the same
     // reason: deep recursion must raise StackOverflowError rather than run off the

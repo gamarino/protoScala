@@ -407,7 +407,7 @@ PRIM(futureObject_failed) {
 // layouts are each correct, where one shared global would have installed
 // whichever was written last (and raced while doing it).
 const ProtoObject* threadEntry(ProtoContext* ctx, const ProtoObject*, const proto::ParentLink*,
-                               const ProtoList* args, const proto::ProtoSparseList*) {
+                               const proto::ProtoArguments* args, const proto::ProtoKeywordArguments*) {
     if (!args || args->getSize(ctx) < 3) return PROTO_NONE;
     const ProtoObject* handle = args->getAt(ctx, 0);
     auto* engine = reinterpret_cast<ExecutionEngine*>(

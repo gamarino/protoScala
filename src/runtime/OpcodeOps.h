@@ -96,7 +96,7 @@ struct Engine {
     static const proto::ProtoObject* instantiate(ExecutionEngine& e, proto::ProtoContext* ctx,
                                                  const proto::ProtoObject** base,
                                                  const proto::ProtoString* ctorKey, unsigned argc,
-                                                 const proto::ProtoSparseList* keywords) {
+                                                 const proto::ProtoKeywordArguments* keywords) {
         return e.instantiate(ctx, base, ctorKey, argc, keywords);
     }
     static const proto::ProtoObject* makeClass(ExecutionEngine& e, proto::ProtoContext* ctx,

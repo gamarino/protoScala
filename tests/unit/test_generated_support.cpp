@@ -105,14 +105,14 @@ TEST_F(Facade, CurrentContextRefusesOutsideAModuleEntry) {
 // emitter will write one: every value in a traced slot, nothing in a C++ local
 // across a call.
 const proto::ProtoObject* twoArgBody(proto::ProtoContext* ctx, const proto::ProtoObject* self,
-                                     const proto::ParentLink*, const proto::ProtoList* args,
-                                     const proto::ProtoSparseList* kwargs);
+                                     const proto::ParentLink*, const proto::ProtoArguments* args,
+                                     const proto::ProtoKeywordArguments* kwargs);
 
 gen::BlockRec twoArgRec{};
 
 const proto::ProtoObject* twoArgBody(proto::ProtoContext* ctx, const proto::ProtoObject* self,
-                                     const proto::ParentLink*, const proto::ProtoList* args,
-                                     const proto::ProtoSparseList* kwargs) {
+                                     const proto::ParentLink*, const proto::ProtoArguments* args,
+                                     const proto::ProtoKeywordArguments* kwargs) {
     gen::Frame F(ctx, twoArgRec, self, args, kwargs);
     proto::ProtoContext* C = F.ctx();
     const proto::ProtoObject** S = F.slots();
@@ -140,7 +140,8 @@ TEST_F(Facade, FrameBindsParametersAndIsCallableAsAProtoMethod) {
     const proto::ProtoList* args =
         scope.newList()->appendLast(&scope, c()->fromInteger(2))->appendLast(&scope, c()->fromInteger(40));
     scope.returnValue = args->asObject(&scope);
-    const proto::ProtoObject* r = fn->asMethod(&scope)(&scope, nullptr, nullptr, args, nullptr);
+    const proto::ProtoListArguments positional(&scope, args);
+    const proto::ProtoObject* r = fn->asMethod(&scope)(&scope, nullptr, nullptr, &positional, nullptr);
     EXPECT_EQ(r->asLong(&scope), 42);
 
     // And the interpreter reaches it by the path it already has for a native.

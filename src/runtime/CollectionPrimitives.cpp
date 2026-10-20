@@ -484,7 +484,7 @@ long long clampIndex(long long n, long long size) { return n < 0 ? 0 : (n > size
 #define SEQ_NAMED(fn, helper, method) \
     PRIM(fn) { return helper(ctx, self, args, method); }
 
-const ProtoObject* seqLength(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+const ProtoObject* seqLength(ProtoContext* ctx, const ProtoObject* self, const proto::ProtoArguments* args,
                              const char* method) {
     const RuntimeLayout& L = layoutOf();
     expectArgs(ctx, args, method, 0);
@@ -920,7 +920,7 @@ PRIM(prim_seq_flatten) {
 
 // --- conversions -----------------------------------------------------------
 
-const ProtoObject* seqToList(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+const ProtoObject* seqToList(ProtoContext* ctx, const ProtoObject* self, const proto::ProtoArguments* args,
                              const char* method) {
     const RuntimeLayout& L = layoutOf();
     expectArgs(ctx, args, method, 0);
@@ -990,7 +990,7 @@ PRIM(prim_foldPartial_apply) {
 }
 
 // xs.foldLeft(z, f) folds directly; xs.foldLeft(z)(f) gets the one-shot applier.
-const ProtoObject* foldEntry(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+const ProtoObject* foldEntry(ProtoContext* ctx, const ProtoObject* self, const proto::ProtoArguments* args,
                              bool left, const char* method) {
     const RuntimeLayout& L = layoutOf();
     const proto::proto_ulong n = argCount(ctx, args);
@@ -1103,7 +1103,7 @@ int compareValues(ProtoContext* ctx, const ProtoObject* a, const ProtoObject* b,
 }
 
 const ProtoObject* extremum(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* self,
-                            const ProtoList* args, const ProtoObject* keyFn, bool wantMax,
+                            const proto::ProtoArguments* args, const ProtoObject* keyFn, bool wantMax,
                             const char* method) {
     (void)args;
     const ProtoList* xs = seqData(ctx, L, self, method);
@@ -1249,7 +1249,7 @@ PRIM(prim_vector_equals) {
     return boolean(valuesEqual(ctx, layoutOf(), self, arg(ctx, args, 0, "equals", 1)));
 }
 
-const ProtoObject* vectorHash(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+const ProtoObject* vectorHash(ProtoContext* ctx, const ProtoObject* self, const proto::ProtoArguments* args,
                               const char* method) {
     expectArgs(ctx, args, method, 0);
     return proto::makeSmallInt(scalaHash(ctx, layoutOf(), self));
@@ -1260,7 +1260,7 @@ SEQ_NAMED(prim_vector_hashHash, vectorHash, "##")
 PRIM(prim_vectorCompanion_apply) {
     const RuntimeLayout& L = layoutOf();
     proto::ProtoContext scope(ctx->space, ctx);
-    const ProtoList* data = args ? args : scope.newList();
+    const ProtoList* data = args ? args->asList(&scope) : scope.newList();
     scope.returnValue = data->asObject(&scope);
     return newVector(&scope, L, data);
 }
@@ -1454,7 +1454,7 @@ PRIM(prim_map_getOrElse) {
     return v ? v : args->getAt(ctx, 1);
 }
 
-const ProtoObject* mapContains(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+const ProtoObject* mapContains(ProtoContext* ctx, const ProtoObject* self, const proto::ProtoArguments* args,
                                const char* method) {
     const RuntimeLayout& L = layoutOf();
     const ProtoObject* k = arg(ctx, args, 0, method, 1);
@@ -1477,7 +1477,7 @@ long long entryCount(ProtoContext* ctx, const proto::ProtoMap* data) {
     return n;
 }
 
-const ProtoObject* mapSize(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+const ProtoObject* mapSize(ProtoContext* ctx, const ProtoObject* self, const proto::ProtoArguments* args,
                            const char* method) {
     const RuntimeLayout& L = layoutOf();
     expectArgs(ctx, args, method, 0);
@@ -1501,7 +1501,7 @@ PRIM(prim_map_nonEmpty) {
 
 // D58: the order is ascending hash, deterministic for a given key set but
 // unrelated to insertion order or to Scala's, so every fixture sorts.
-const ProtoObject* mapEntries(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+const ProtoObject* mapEntries(ProtoContext* ctx, const ProtoObject* self, const proto::ProtoArguments* args,
                               const char* method, int what) {
     const RuntimeLayout& L = layoutOf();
     expectArgs(ctx, args, method, 0);
@@ -1554,7 +1554,7 @@ PRIM(prim_map_updated) {
     return mapPut(ctx, L, self, k, args->getAt(ctx, 1), "updated");
 }
 
-const ProtoObject* mapMinus(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+const ProtoObject* mapMinus(ProtoContext* ctx, const ProtoObject* self, const proto::ProtoArguments* args,
                             const char* method) {
     const RuntimeLayout& L = layoutOf();
     const ProtoObject* k = arg(ctx, args, 0, method, 1);
@@ -1622,7 +1622,7 @@ const proto::ProtoMap* asKeyedData(ProtoContext* ctx, const RuntimeLayout& L,
     return data;
 }
 
-const ProtoObject* bulk(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+const ProtoObject* bulk(ProtoContext* ctx, const ProtoObject* self, const proto::ProtoArguments* args,
                         BulkOp op, const char* method) {
     const RuntimeLayout& L = layoutOf();
     const bool set = selfIsSet(ctx, L, self);
@@ -1653,21 +1653,21 @@ const ProtoObject* bulk(ProtoContext* ctx, const ProtoObject* self, const ProtoL
 PRIM(prim_map_concat) { return bulk(ctx, self, args, BulkOp::Add, "++"); }
 PRIM(prim_map_removeAll) { return bulk(ctx, self, args, BulkOp::Remove, "--"); }
 
-const ProtoObject* setUnion(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+const ProtoObject* setUnion(ProtoContext* ctx, const ProtoObject* self, const proto::ProtoArguments* args,
                             const char* method) {
     return bulk(ctx, self, args, BulkOp::Add, method);
 }
 SEQ_NAMED(prim_set_union, setUnion, "union")
 SEQ_NAMED(prim_set_or, setUnion, "|")
 
-const ProtoObject* setIntersect(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+const ProtoObject* setIntersect(ProtoContext* ctx, const ProtoObject* self, const proto::ProtoArguments* args,
                                 const char* method) {
     return bulk(ctx, self, args, BulkOp::KeepCommon, method);
 }
 SEQ_NAMED(prim_set_intersect, setIntersect, "intersect")
 SEQ_NAMED(prim_set_and, setIntersect, "&")
 
-const ProtoObject* setDiff(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+const ProtoObject* setDiff(ProtoContext* ctx, const ProtoObject* self, const proto::ProtoArguments* args,
                            const char* method) {
     return bulk(ctx, self, args, BulkOp::KeepMissing, method);
 }
@@ -1879,7 +1879,7 @@ PRIM(prim_map_flatMap) {
     return wrapMap(&scope, L, out, set);
 }
 
-const ProtoObject* mapFilter(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+const ProtoObject* mapFilter(ProtoContext* ctx, const ProtoObject* self, const proto::ProtoArguments* args,
                              bool keep, const char* method) {
     const RuntimeLayout& L = layoutOf();
     const ProtoObject* f = arg(ctx, args, 0, method, 1);
@@ -2003,7 +2003,7 @@ PRIM(prim_map_keySet) {
 
 // D58: ascending-hash order, deterministic for a given key set and unrelated to
 // Scala's, so the rendering is pinned only by fixtures that sort first.
-const ProtoObject* mapShow(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+const ProtoObject* mapShow(ProtoContext* ctx, const ProtoObject* self, const proto::ProtoArguments* args,
                            const char* method) {
     const RuntimeLayout& L = layoutOf();
     expectArgs(ctx, args, method, 0);
@@ -2105,7 +2105,7 @@ void hashVisit(ProtoContext* ctx, void* raw, const ProtoObject* k, const ProtoOb
     s->acc ^= h;
 }
 
-const ProtoObject* keyedHash(ProtoContext* ctx, const ProtoObject* self, const ProtoList* args,
+const ProtoObject* keyedHash(ProtoContext* ctx, const ProtoObject* self, const proto::ProtoArguments* args,
                              const char* method) {
     const RuntimeLayout& L = layoutOf();
     expectArgs(ctx, args, method, 0);

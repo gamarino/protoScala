@@ -182,8 +182,8 @@ int runApp(proto::ProtoContext* ctx, const char* appKey);
  */
 const proto::ProtoObject* enterMethod(proto::ProtoMethod body, proto::ProtoContext* ctx,
                                       const proto::ProtoObject* self, const proto::ParentLink* pl,
-                                      const proto::ProtoList* args,
-                                      const proto::ProtoSparseList* kwargs);
+                                      const proto::ProtoArguments* args,
+                                      const proto::ProtoKeywordArguments* kwargs);
 
 /** One exported top-level function: its Scala name and the block that is its body. */
 struct ExportRec {
@@ -233,7 +233,7 @@ const proto::ProtoObject* runModuleBody(proto::ProtoContext* ctx, proto::ProtoMe
 class Frame {
 public:
     Frame(proto::ProtoContext* parent, const BlockRec& blk, const proto::ProtoObject* self,
-          const proto::ProtoList* args, const proto::ProtoSparseList* kwargs);
+          const proto::ProtoArguments* args, const proto::ProtoKeywordArguments* kwargs);
     ~Frame();
     Frame(const Frame&) = delete;
     Frame& operator=(const Frame&) = delete;
