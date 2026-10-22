@@ -8,7 +8,9 @@
  * implements an opcode; if a body appears here that is not a forward, that is the
  * failure mode Phase 7 §D1 exists to prevent.
  *
- * The two `translateForeignException` sites of §D6 are here and nowhere else:
+ * The two boundary sites of §D6 are here and nowhere else (`leaveProtoScala`, the
+ * `translateForeignException` shape plus the materialisation of a ScalaError into
+ * a proto::ProtoException, DESIGN §7):
  * `runModuleBody` (site 1, `proto_module_init` across a `dlopen` boundary) and
  * `enterMethod` (site 2, a transpiled function is a `proto::ProtoMethod` and is
  * therefore a foreign callable from the VM's point of view). The emitter writes
@@ -20,6 +22,7 @@
 #include "compiler/BytecodeModule.h"
 #include "compiler/Opcodes.h"
 #include "runtime/Errors.h"
+#include "runtime/ErrorFactory.h"
 #include "runtime/FutureYield.h"
 #include "runtime/ExecutionEngine.h"
 #include "runtime/GeneratedModuleEntry.h"
@@ -238,7 +241,10 @@ const proto::ProtoObject* enterMethod(proto::ProtoMethod body, proto::ProtoConte
                                       const proto::ProtoKeywordArguments* kwargs) {
     // §D6 site 2: a transpiled function is a proto::ProtoMethod, so from the VM's
     // point of view it is a foreign callable and presents the same boundary every
-    // other native method does.
+    // other native method does. A call from the VM keeps the lazy ScalaError: it
+    // is materialised only where a handler exists, which matters for a
+    // StackOverflowError raised at depth, whose materialisation needs stack. Only a
+    // call from a FOREIGN caller materialises it here, below.
     return translateForeignException([&]() -> const proto::ProtoObject* {
         if (activeCallContext()) return body(ctx, self, pl, args, kwargs);
         // No context: the call came from a foreign runtime through an exported cell.
@@ -253,7 +259,11 @@ const proto::ProtoObject* enterMethod(proto::ProtoMethod body, proto::ProtoConte
         }
         if (!engine || !layout) noActiveContext("enterMethod");
         ExecutionEngine::ActiveCallGuard active(engine, layout);
-        return body(ctx, self, pl, args, kwargs);
+        // Materialised while the host's engine is still active, so the foreign
+        // caller receives an instance of the prelude class, never a ScalaError.
+        return leaveProtoScala(ctx, [&]() -> const proto::ProtoObject* {
+            return body(ctx, self, pl, args, kwargs);
+        });
     });
 }
 
@@ -264,7 +274,7 @@ const proto::ProtoObject* runModuleBody(proto::ProtoContext* ctx, proto::ProtoMe
     // §D6 site 1: proto_module_init is called across a dlopen boundary, and an
     // exception escaping a dlopen'd initializer must be translated exactly once,
     // by the same template every other foreign entry uses.
-    return translateForeignException([&]() -> const proto::ProtoObject* {
+    return leaveProtoScala(ctx, [&]() -> const proto::ProtoObject* {
         proto::ProtoContext scope(ctx->space, ctx);
         const RuntimeLayout& L = layoutOf("runModuleBody");
         {
@@ -310,19 +320,14 @@ int runMain(proto::ProtoContext* ctx, const char* mainKey, bool takesArgs, int a
         scope.setAutomaticLocal(k, makeString(&scope, argv[k]));
     try {
         eng.callTopLevel(&scope, scope.getAutomaticLocal(n), scope.getAutomaticLocals(), n);
-    } catch (const ScalaThrow& t) {
+    } catch (const proto::ProtoException& t) {
         // The same shape Session::evaluate produces, reported through the
         // VALUE's own toString, so a user-defined class says what its class says
         // and the differential harness compares identical text.
         std::fflush(stdout);
-        std::string text;
-        try {
-            proto::ProtoContext show(ctx->space, ctx);
-            text = eng.showTopLevel(&show, t.value);
-        } catch (...) {
-            text = "<exception whose toString failed>";
-        }
-        std::fprintf(stderr, "<module>:%d: error: %s\n", t.line, text.c_str());
+        proto::ProtoContext show(ctx->space, ctx);
+        const std::string text = describeThrown(&show, t.value());
+        std::fprintf(stderr, "<module>:%d: error: %s\n", thrownLine(t), text.c_str());
         return 1;
     } catch (const ScalaError& e) {
         std::fflush(stdout);
@@ -350,16 +355,11 @@ int runApp(proto::ProtoContext* ctx, const char* appKey) {
     try {
         // Forcing the lazy holder runs the object's body, which is the program.
         eng.force(&scope, holder);
-    } catch (const ScalaThrow& t) {
+    } catch (const proto::ProtoException& t) {
         std::fflush(stdout);
-        std::string text;
-        try {
-            proto::ProtoContext show(ctx->space, ctx);
-            text = eng.showTopLevel(&show, t.value);
-        } catch (...) {
-            text = "<exception whose toString failed>";
-        }
-        std::fprintf(stderr, "<module>:%d: error: %s\n", t.line, text.c_str());
+        proto::ProtoContext show(ctx->space, ctx);
+        const std::string text = describeThrown(&show, t.value());
+        std::fprintf(stderr, "<module>:%d: error: %s\n", thrownLine(t), text.c_str());
         return 1;
     } catch (const ScalaError& e) {
         std::fflush(stdout);
@@ -664,8 +664,8 @@ void throwValue(proto::ProtoContext* ctx, const proto::ProtoObject* v) {
     ops::throwValue(ctx, layoutOf("throwValue"), v);
 }
 
-void rethrow(proto::ProtoContext*, const BlockRec& blk, const proto::ProtoObject* v) {
-    ops::rethrow(v, blk.name ? blk.name : "a generated block");
+void rethrow(proto::ProtoContext* ctx, const BlockRec& blk, const proto::ProtoObject* v) {
+    ops::rethrow(ctx, v, blk.name ? blk.name : "a generated block");
 }
 
 const HandlerRec* handlerFor(const BlockRec& blk, std::size_t pc) {
@@ -711,15 +711,15 @@ const HandlerRec* handleCaught(proto::ProtoContext* ctx, const BlockRec& blk, st
         // checks -- though FutureYield is not a std::exception, so it could not be
         // caught by any arm below.
         throw;
-    } catch (ScalaThrow& t) {
+    } catch (const proto::ProtoException& t) {
+        // Every language value: a Scala throw, a module's error, protoCore's own
+        // (built by the error factory). protoCore pins it while it is in flight; the
+        // slots below are where the handler body reads it, and they are traced.
         const HandlerRec* h = handlerFor(blk, pc);
         if (!h) throw;
-        // Re-root before anything can allocate: the frames below this one are already
-        // destroyed, so this context is the only thing the collector sees the payload
-        // through (plan A0-2, escalation E1).
-        ctx->returnValue = t.value;
-        slots[pendingSlot] = t.value;
-        slots[h->slot] = t.value;
+        ctx->returnValue = t.value();
+        slots[pendingSlot] = t.value();
+        slots[h->slot] = t.value();
         return h;
     } catch (const ScalaError& e) {
         // Before the std:: arms: ScalaError IS a std::runtime_error, and translating it
@@ -729,7 +729,8 @@ const HandlerRec* handleCaught(proto::ProtoContext* ctx, const BlockRec& blk, st
         if (!h) throw;
         return h;
     } catch (const std::invalid_argument& e) {
-        // The three std:: arms the interpreter names, in its order. invalid_argument and
+        // The std:: arms translate a C++ library's errors (protoCore raises none
+        // since 3.0.0). The three the interpreter names, in its order. invalid_argument and
         // out_of_range derive from std::logic_error and are translated, so they must
         // precede the logic_error arm below -- which is what keeps D74 from swallowing
         // them and what keeps them from escaping as defects.
@@ -759,7 +760,7 @@ const HandlerRec* handleCaught(proto::ProtoContext* ctx, const BlockRec& blk, st
         // subclasses the interpreter translates, and that order is load-bearing.
         throw;
     } catch (const std::runtime_error& e) {
-        // A protoCore error becomes a Scala RuntimeException, and is never swallowed.
+        // A C++ runtime error becomes a Scala RuntimeException, and is never swallowed.
         const HandlerRec* h =
             deliver(ctx, blk, pc, slots, pendingSlot, "RuntimeException", e.what());
         if (!h) throw ScalaError("RuntimeException", e.what());

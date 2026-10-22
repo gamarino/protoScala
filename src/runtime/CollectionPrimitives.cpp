@@ -1096,6 +1096,10 @@ int compareValues(ProtoContext* ctx, const ProtoObject* a, const ProtoObject* b,
                          std::string(method) + " needs comparable elements; use sortWith");
     try {
         return x->compare(ctx, y);
+    } catch (const proto::ProtoException&) {
+        // protoCore's TypeMismatch for operands it cannot order (3.0.0).
+        throw ScalaError("IllegalArgumentException",
+                         std::string(method) + " needs comparable elements; use sortWith");
     } catch (const std::exception&) {
         throw ScalaError("IllegalArgumentException",
                          std::string(method) + " needs comparable elements; use sortWith");

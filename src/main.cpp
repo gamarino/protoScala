@@ -124,9 +124,19 @@ struct ScriptJob {
 int runJob(void* p) {
     auto* job = static_cast<ScriptJob*>(p);
     protoScala::Session session;
-    if (job->disassemble) return session.disassemble(job->path);
-    if (job->runModule) return session.runModule(job->path, job->args);
-    return session.runScript(job->path, job->args);
+    // The session reports every uncaught exception value itself. This clause is
+    // the last line: a proto::ProtoException must not outlive the ProtoSpace that
+    // pins its value, so none may leave this function, where `session` -- and
+    // its space -- still exists.
+    try {
+        if (job->disassemble) return session.disassemble(job->path);
+        if (job->runModule) return session.runModule(job->path, job->args);
+        return session.runScript(job->path, job->args);
+    } catch (const proto::ProtoException&) {
+        std::fflush(stdout);
+        std::fprintf(stderr, "protoscala: uncaught exception\n");
+        return 1;
+    }
 }
 
 } // namespace
@@ -171,16 +181,16 @@ int main(int argc, char** argv) {
         // No arguments: start the interactive REPL.
         return protoScala::runOnEvaluatorThread([](void*) { return protoScala::runRepl(); },
                                                 nullptr);
-    } catch (const protoScala::ScalaThrow&) {
-        // An uncaught Scala exception that escaped the session's own report (a
-        // throw from a thread body, say): the session prints the class and
-        // message, so this arm only has to distinguish it from a VM defect.
-        std::fflush(stdout);
-        std::fprintf(stderr, "protoscala: uncaught exception\n");
-        return 1;
     } catch (const std::exception& e) {
+        // A VM or compiler defect (D74). A proto::ProtoException never reaches
+        // here: runJob and the REPL's session catch every one while their space
+        // is alive.
         std::fflush(stdout);
         std::fprintf(stderr, "protoscala: internal error: %s\n", e.what());
+        return 1;
+    } catch (...) {
+        std::fflush(stdout);
+        std::fprintf(stderr, "protoscala: internal error: a non-standard C++ exception\n");
         return 1;
     }
 }

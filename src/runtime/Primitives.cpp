@@ -128,6 +128,18 @@ PRIM(prim_class_name_of) {
     return str(ctx, typeName(ctx, layoutOf(), v));
 }
 
+// __isInstanceOf(v, type): a type pattern whose type is a VALUE (D133), such as
+// a foreign module's error prototype in `case e: g.NegativeRadius`. The test is
+// protoCore's prototype chain, the one every language on protoCore selects
+// exceptions by (protoCore docs/EXCEPTIONS.md). Scala's null is an instance of
+// nothing, and a type that is not an object has no instances.
+PRIM(prim_is_instance_of) {
+    const ProtoObject* v = arg(ctx, args, 0, "__isInstanceOf", 2);
+    const ProtoObject* type = args->getAt(ctx, 1);
+    if (v == PROTO_NONE || type == PROTO_NONE || !isObjectCellFast(type)) return PROTO_FALSE;
+    return v->isInstanceOf(ctx, type) == PROTO_TRUE ? PROTO_TRUE : PROTO_FALSE;
+}
+
 // __fmt(lit0, v0, spec0, lit1, v1, spec1, ..., litN): the compiled form of an
 // f-interpolator (Compiler::compileFormat). Arity is always 3k + 1. The
 // specifiers were already validated at compile time, so a parse failure here is
@@ -168,10 +180,11 @@ PRIM(prim_try_of) {
     try {
         slot[0] = engine->invoke(&scope, f, nullptr, 0);
         slot[1] = engine->invoke(&scope, L.hooks.success, &slot[0], 1);
-    } catch (const ScalaThrow& t) {
-        // A Scala `throw` from the block: the exception value travels straight
-        // into Failure, with no translation (D44 retired).
-        slot[0] = t.value;
+    } catch (const proto::ProtoException& t) {
+        // A Scala `throw` from the block, a module's error or protoCore's: the
+        // exception value travels straight into Failure, with no translation
+        // (D44 retired).
+        slot[0] = t.value();
         slot[1] = engine->invoke(&scope, L.hooks.failure, slot, 1);
     } catch (const ScalaError& e) {
         // A native failure: materialised into the prelude class its name means.
@@ -1138,7 +1151,7 @@ void installPrimitives(ProtoContext* ctx, const RuntimeLayout& L) {
     static constexpr MethodEntry globals[] = {
         {"println", &prim_println}, {"print", &prim_print}, {"__raise", &prim_raise},
         {"__fmt", &prim_fmt}, {"__tryOf", &prim_try_of},
-        {"__classNameOf", &prim_class_name_of},
+        {"__classNameOf", &prim_class_name_of}, {"__isInstanceOf", &prim_is_instance_of},
         {"__installExtension", &prim_install_extension}};
     static constexpr MethodEntry any[] = {
         {"toString", &any_toString}, {"equals", &any_equals}, {"==", &any_eqeq},

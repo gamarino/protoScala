@@ -121,6 +121,12 @@ std::vector<std::string> loadProviderPlugins(proto::ProtoContext* ctx) {
         int rc = 1;
         try {
             rc = translateForeignException([&] { return reg(ctx->space); });
+        } catch (const proto::ProtoException&) {
+            // A language value raised by the registration code: the plug-in is
+            // broken, and a broken plug-in never stops the runtime from starting.
+            std::fprintf(stderr, "protoscala: provider plug-in %s failed: it raised an exception\n",
+                         path.c_str());
+            continue;
         } catch (const ScalaError& e) {
             std::fprintf(stderr, "protoscala: provider plug-in %s failed: %s\n", path.c_str(),
                          e.what());

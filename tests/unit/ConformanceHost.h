@@ -12,6 +12,7 @@
 
 #include "EvalHarness.h"
 #include "runtime/ActorScheduler.h"
+#include "umd/ForeignBoundary.h"
 
 #include <protoCoreConformance.h>
 
@@ -189,6 +190,50 @@ public:
         return got == "1";
     }
 
+    // --- rule 14 ------------------------------------------------------------
+    //
+    // A module's error type is caught by prototype, through protoScala's own
+    // `try`/`catch`. The two values are bound to Scala globals and the handler
+    // names the type as a value (`case e: conformanceErrorType`, D133), which is
+    // how a protoScala program names a module's type it imported. The handler is
+    // compiled and run by the session's own compiler and engine; a value that
+    // does not match is re-raised by the cascade's RETHROW and leaves through
+    // leaveProtoScala, the boundary every protoScala exit takes, so the case sees
+    // the ProtoException with the same value.
+    int catchForeignError(const proto::ProtoObject* errorType, const proto::ProtoObject* raising,
+                          const proto::ProtoObject** caught) override {
+        if (!foreignGlobalsDeclared_) {
+            for (const char* decl : {"var conformanceErrorType: Any = null",
+                                     "var conformanceRaising: Any = null",
+                                     "var conformanceCaught: Any = null"})
+                harness_.eval(decl);
+            foreignGlobalsDeclared_ = true;
+        }
+        setGlobal("conformanceErrorType", errorType);
+        setGlobal("conformanceRaising", raising);
+        setGlobal("conformanceCaught", PROTO_NONE);
+        proto::ProtoContext ctx(&harness_.space(), mainContext());
+        const proto::ProtoObject* r = protoScala::leaveProtoScala(&ctx, [&] {
+            return harness_.evalValue(
+                "try { conformanceRaising(); 0 }\n"
+                "catch { case e: conformanceErrorType => conformanceCaught = e; 1 }");
+        });
+        if (r != proto::makeSmallInt(1)) return -1;
+        *caught = getGlobal("conformanceCaught");
+        return 1;
+    }
+
+    // An unhandled Scala exception leaves protoScala as a ProtoException carrying
+    // the Scala exception object: `throw new RuntimeException(...)`, evaluated by
+    // the engine, through the same embedder boundary as above.
+    int escapeLanguageError() override {
+        proto::ProtoContext ctx(&harness_.space(), mainContext());
+        (void) protoScala::leaveProtoScala(&ctx, [&] {
+            return harness_.evalValue("throw new RuntimeException(\"escaped from protoScala\")");
+        });
+        return -1;
+    }
+
     // --- rules 2 and 11 ----------------------------------------------------
     //
     // NOT IMPLEMENTED, deliberately, and the case therefore reports
@@ -208,6 +253,20 @@ public:
     EvalHarness& harness() { return harness_; }
 
 private:
+    void setGlobal(const char* name, const proto::ProtoObject* v) {
+        proto::ProtoContext ctx(&harness_.space(), mainContext());
+        const protoScala::GlobalBinding* b = harness_.globals().binding(name);
+        harness_.runtime().layout().globals->setAttribute(
+            &ctx, proto::ProtoString::createSymbol(&ctx, b->key.c_str()), v);
+    }
+    const proto::ProtoObject* getGlobal(const char* name) {
+        proto::ProtoContext ctx(&harness_.space(), mainContext());
+        const protoScala::GlobalBinding* b = harness_.globals().binding(name);
+        const proto::ProtoObject* v = harness_.runtime().layout().globals->getOwnAttributeDirect(
+            &ctx, proto::ProtoString::createSymbol(&ctx, b->key.c_str()));
+        return v ? v : PROTO_NONE;
+    }
+
     proto::proto_ulong evalUntilConsumed(proto::proto_ulong requestedCells,
                                     const char* snippet) {
         const proto::proto_long floor = inUse() + (proto::proto_long) (requestedCells + requestedCells / 2);
@@ -226,6 +285,7 @@ private:
 
     EvalHarness  harness_;
     bool          actorReady_ = false;
+    bool          foreignGlobalsDeclared_ = false;
     proto::proto_ulong delivered_  = 0;
 };
 

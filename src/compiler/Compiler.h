@@ -364,6 +364,11 @@ private:
     // Pushes a Boolean: is the value in `slot` a T? Returns false (emitting
     // nothing) when every value matches, which only `Any` in a pattern does.
     bool compileTypeTest(const TypeTree& t, int slot, SourcePos pos, bool inPattern);
+    // D133: the expression a type name denotes when it names a VALUE (a local, a
+    // member or a global, possibly through a dotted path such as `g.NegativeRadius`
+    // with `g` an imported module) rather than a type; nullptr when its head is no
+    // value in scope. A type pattern on it tests protoCore's prototype chain.
+    NodePtr valueNamedByType(const std::string& dotted, SourcePos pos);
     void compileInstanceOf(const Node& value, const TypeTree& t, bool cast, SourcePos pos);
 };
 

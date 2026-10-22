@@ -450,15 +450,63 @@ bool Compiler::compileTypeTest(const TypeTree& t, int slot, SourcePos pos, bool 
     if (code == builtin.end() && name.rfind("Function", 0) == 0 && name.size() > 8 &&
         name.find_first_not_of("0123456789", 8) == std::string::npos)
         code = builtin.find("Function");  // Function0..Function22
-    emit(Op::PUSH_LOCAL, static_cast<std::uint64_t>(slot), pos, +1);
     if (code != builtin.end()) {
+        emit(Op::PUSH_LOCAL, static_cast<std::uint64_t>(slot), pos, +1);
         emit(Op::TEST_TYPE, static_cast<std::uint64_t>(code->second), pos, 0);
         return true;
     }
-    const ClassInfo* c = globals_.findType(name);
-    if (!c) throw CompileError("Not found: type " + name, pos);
-    emit(Op::TEST_PROTO, fn_->mod->addSymbol(c->key), pos, 0);
-    return true;
+    if (const ClassInfo* c = globals_.findType(name)) {
+        // A protoScala class: the per-class marker attribute, the fast path.
+        emit(Op::PUSH_LOCAL, static_cast<std::uint64_t>(slot), pos, +1);
+        emit(Op::TEST_PROTO, fn_->mod->addSymbol(c->key), pos, 0);
+        return true;
+    }
+    // D133: a name that is not a type but a VALUE in scope -- a foreign module's
+    // error type, `case e: g.NegativeRadius` after `import example.geometry as g`,
+    // or a member import of it. A foreign module binds no ClassInfo (D94), so its
+    // types are protoCore prototypes, and the test is protoCore's own: is the value
+    // on the scrutinee's prototype chain (ProtoObject::isInstanceOf). scalac
+    // rejects a value in type position, so no valid Scala program changes meaning.
+    if (t.kind == TypeTree::Kind::Name) {
+        if (NodePtr typeValue = valueNamedByType(t.name, pos)) {
+            compileIdent(Ident(pos, "__isInstanceOf"));
+            emit(Op::PUSH_LOCAL, static_cast<std::uint64_t>(slot), pos, +1);
+            compileExpr(*typeValue);
+            emit(Op::CALL, 2, pos, -2);
+            return true;
+        }
+    }
+    throw CompileError("Not found: type " + name, pos);
+}
+
+NodePtr Compiler::valueNamedByType(const std::string& dotted, SourcePos pos) {
+    std::vector<std::string> parts;
+    std::size_t start = 0;
+    for (;;) {
+        const std::size_t dot = dotted.find('.', start);
+        parts.push_back(dotted.substr(start, dot == std::string::npos ? dot : dot - start));
+        if (dot == std::string::npos) break;
+        start = dot + 1;
+    }
+    for (const std::string& p : parts)
+        if (p.empty()) return nullptr;
+    const std::string& head = parts.front();
+    bool isValue = false;
+    for (FunctionState* f = fn_; f && !isValue; f = f->parent)
+        if (findInFunction(f, head)) isValue = true;
+    if (!isValue && memberOf(head)) isValue = true;
+    if (!isValue)
+        for (const std::string& candidate : scopedNames(head))
+            if (const GlobalBinding* g = globals_.binding(candidate)) {
+                // A builtin global (`println`, `List`) is not a module error type.
+                isValue = g->kind != BindingKind::Builtin;
+                break;
+            }
+    if (!isValue) return nullptr;
+    NodePtr n = std::make_unique<Ident>(pos, head);
+    for (std::size_t k = 1; k < parts.size(); ++k)
+        n = std::make_unique<Select>(pos, std::move(n), parts[k]);
+    return n;
 }
 
 // x.isInstanceOf[T] / x.asInstanceOf[T] (LANGUAGE §3): only the class of T is

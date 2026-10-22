@@ -8,6 +8,7 @@
 #include "EvalHarness.h"
 #include "compiler/BytecodeModule.h"
 #include "runtime/Errors.h"
+#include "runtime/ErrorFactory.h"
 #include "runtime/FutureYield.h"
 #include "umd/ForeignBoundary.h"
 
@@ -19,20 +20,22 @@
 using namespace protoScala;
 using protoScala::test::EvalHarness;
 
-// runLoop catches `const std::runtime_error&` and turns it into a
-// RuntimeException. If ScalaThrow ever became a runtime_error, every Scala
-// `throw` would be silently rewritten into a RuntimeException and every
-// user-defined exception class would stop being catchable by its own name.
-TEST(ScalaThrowShape, IsNotARuntimeError) {
-    static_assert(std::is_base_of_v<std::exception, ScalaThrow>);
-    static_assert(!std::is_base_of_v<std::runtime_error, ScalaThrow>);
-    static_assert(!std::is_base_of_v<std::logic_error, ScalaThrow>);
+// ScalaThrow is protoCore's one exception type, proto::ProtoException, with the
+// source line added (protoCore 3.0.0). ProtoException does not derive from
+// std::exception, so neither does ScalaThrow: runLoop's std:: arms, written for
+// C++ library errors, can never rewrite a Scala `throw` into a RuntimeException,
+// and every user-defined exception class stays catchable by its own name.
+TEST(ScalaThrowShape, IsAProtoExceptionAndNotAStdException) {
+    static_assert(std::is_base_of_v<proto::ProtoException, ScalaThrow>);
+    static_assert(!std::is_base_of_v<std::exception, ScalaThrow>);
+    EvalHarness h;
     try {
-        throw ScalaThrow(nullptr);
-    } catch (const std::runtime_error&) {
-        FAIL() << "ScalaThrow was caught as a std::runtime_error";
-    } catch (const ScalaThrow&) {
-        SUCCEED();
+        throw ScalaThrow(h.runtime().rootContext(), PROTO_TRUE);
+    } catch (const std::exception&) {
+        FAIL() << "ScalaThrow was caught as a std::exception";
+    } catch (const proto::ProtoException& e) {
+        EXPECT_EQ(e.value(), PROTO_TRUE);
+        EXPECT_EQ(thrownLine(e), 0);
     }
 }
 
@@ -233,17 +236,27 @@ TEST(ForeignBoundary, AFutureYieldPassesThroughUntouched) {
                  FutureYield);
 }
 
-TEST(ForeignBoundary, AScalaThrowKeepsItsValue) {
-    // ScalaThrow IS a std::exception. Without its clause the std::exception arm
-    // would rewrite every Scala exception crossing a module boundary into a
-    // RuntimeException, losing its class and its payload.
-    const proto::ProtoObject* marker = PROTO_TRUE;
+TEST(ForeignBoundary, AProtoExceptionPassesThroughUntouched) {
+    // A language value -- a Scala throw, a module's error, protoCore's own -- is
+    // never translated: the same value comes out, and a ProtoException raised
+    // outside protoScala is not rewritten into a ScalaThrow.
+    EvalHarness h;
+    proto::ProtoContext* ctx = h.runtime().rootContext();
+    const proto::ProtoObject* marker = ctx->newObject(false);
     try {
         translateForeignException(
-            [&]() -> const proto::ProtoObject* { throw ScalaThrow(marker); });
+            [&]() -> const proto::ProtoObject* { throw ScalaThrow(ctx, marker); });
         FAIL() << "expected a ScalaThrow";
     } catch (const ScalaThrow& t) {
-        EXPECT_EQ(t.value, marker);
+        EXPECT_EQ(t.value(), marker);
+    }
+    try {
+        translateForeignException([&]() -> const proto::ProtoObject* { ctx->raise(marker); });
+        FAIL() << "expected a ProtoException";
+    } catch (const ScalaThrow&) {
+        FAIL() << "a module's ProtoException was rewritten into a ScalaThrow";
+    } catch (const proto::ProtoException& e) {
+        EXPECT_EQ(e.value(), marker);
     }
 }
 
@@ -314,4 +327,143 @@ TEST(ForeignBoundary, TheTemplateInstantiatesForEveryReturnTypeTheSitesNeed) {
     int side = 0;
     translateForeignException([&] { side = 7; });  // void
     EXPECT_EQ(side, 7);
+}
+
+// ---------------------------------------------------------------------------
+// protoCore's errors through the error factory, the boundary rule, and module
+// error types (protoCore 3.0.0 unified exceptions; DESIGN §7)
+// ---------------------------------------------------------------------------
+
+TEST(ErrorFactory, EveryKindMapsToAPreludeClass) {
+    EXPECT_STREQ(scalaClassForErrorKind(proto::ProtoErrorKind::InvalidArgument),
+                 "NumberFormatException");
+    EXPECT_STREQ(scalaClassForErrorKind(proto::ProtoErrorKind::TypeMismatch),
+                 "ClassCastException");
+    EXPECT_STREQ(scalaClassForErrorKind(proto::ProtoErrorKind::Overflow), "ArithmeticException");
+    EXPECT_STREQ(scalaClassForErrorKind(proto::ProtoErrorKind::DivisionByZero),
+                 "ArithmeticException");
+    EXPECT_STREQ(scalaClassForErrorKind(proto::ProtoErrorKind::ArityMismatch),
+                 "IllegalArgumentException");
+}
+
+// protoCore's own division, raised from C++ with no Scala code on the stack: the
+// value is built by the factory as the prelude's class, through the engine bound
+// to the space, and Scala's toString names it.
+TEST(ErrorFactory, AProtoCoreErrorArrivesAsTheScalaClass) {
+    EvalHarness h;
+    const RuntimeLayout& L = h.runtime().layout();
+    proto::ProtoContext ctx(&h.space(), h.runtime().rootContext());
+    try {
+        (void) ctx.fromLong(1)->divide(&ctx, ctx.fromLong(0));
+        FAIL() << "1 / 0 returned";
+    } catch (const proto::ProtoException& e) {
+        EXPECT_EQ(e.value()->isInstanceOf(&ctx, L.hooks.throwableClasses.at("ArithmeticException")),
+                  PROTO_TRUE);
+        ExecutionEngine::ActiveCallGuard active(h.engine(), &L);
+        const std::string shown = describeThrown(&ctx, e.value());
+        EXPECT_EQ(shown.rfind("ArithmeticException", 0), 0u) << shown;
+    } catch (...) {
+        FAIL() << "1 / 0 raised something that is not a ProtoException";
+    }
+}
+
+TEST(ErrorFactory, TheFactoryAnswersAnInstanceForEveryKind) {
+    EvalHarness h;
+    const RuntimeLayout& L = h.runtime().layout();
+    proto::ProtoContext ctx(&h.space(), h.runtime().rootContext());
+    for (int k = 0; k < proto::kProtoErrorKindCount; ++k) {
+        const auto kind = static_cast<proto::ProtoErrorKind>(k);
+        const proto::ProtoObject* v = scalaErrorFactory(&ctx, kind, "for the test");
+        ASSERT_NE(v, nullptr);
+        ASSERT_NE(v, PROTO_NONE);
+        EXPECT_EQ(v->isInstanceOf(&ctx, L.hooks.throwableClasses.at(scalaClassForErrorKind(kind))),
+                  PROTO_TRUE)
+            << scalaClassForErrorKind(kind);
+    }
+}
+
+// The boundary rule: a ScalaError never leaves protoScala. leaveProtoScala turns
+// it, and every std::exception the boundary translates, into a ProtoException
+// carrying an instance of the prelude class, with the source line kept.
+TEST(ErrorFactory, LeavingProtoScalaMaterialisesAScalaError) {
+    EvalHarness h;
+    const RuntimeLayout& L = h.runtime().layout();
+    proto::ProtoContext ctx(&h.space(), h.runtime().rootContext());
+    try {
+        leaveProtoScala(&ctx, []() -> const proto::ProtoObject* {
+            ScalaError e("IllegalStateException", "not now");
+            e.line = 12;
+            throw e;
+        });
+        FAIL() << "returned";
+    } catch (const proto::ProtoException& e) {
+        EXPECT_EQ(e.value()->isInstanceOf(&ctx, L.hooks.throwableClasses.at("IllegalStateException")),
+                  PROTO_TRUE);
+        EXPECT_EQ(thrownLine(e), 12);
+    } catch (...) {
+        FAIL() << "a ScalaError left protoScala as something else";
+    }
+    try {
+        leaveProtoScala(&ctx, []() -> const proto::ProtoObject* {
+            throw std::runtime_error("legacy failure");
+        });
+        FAIL() << "returned";
+    } catch (const proto::ProtoException& e) {
+        EXPECT_EQ(e.value()->isInstanceOf(&ctx, L.hooks.runtimeException), PROTO_TRUE);
+        ExecutionEngine::ActiveCallGuard active(h.engine(), &L);
+        EXPECT_EQ(describeThrown(&ctx, e.value()), "RuntimeException: legacy failure");
+    }
+    // D74 still holds across this boundary.
+    EXPECT_THROW(leaveProtoScala(&ctx, []() -> const proto::ProtoObject* {
+                     throw std::logic_error("compiler bug");
+                 }),
+                 std::logic_error);
+}
+
+namespace {
+// The value the raising method below throws, as a module's method would.
+const proto::ProtoObject* g_moduleError = nullptr;
+const proto::ProtoObject* raiseModuleError(proto::ProtoContext* ctx, const proto::ProtoObject*,
+                                           const proto::ParentLink*, const proto::ProtoArguments*,
+                                           const proto::ProtoKeywordArguments*) {
+    ctx->raise(g_moduleError);
+}
+}  // namespace
+
+// D133: a type pattern that names a VALUE tests protoCore's prototype chain, so
+// an error type defined outside protoScala -- here prototypes built in C++,
+// standing for a module's -- is caught by name, through its base type too, and a
+// handler for an unrelated type lets it leave with the same value.
+TEST(ForeignTypes, ATypePatternOnAValueSelectsByPrototypeChain) {
+    EvalHarness h;
+    for (const char* decl : {"var moduleError: Any = null", "var notFound: Any = null",
+                             "var unrelated: Any = null", "var raising: Any = null"})
+        h.eval(decl);
+    const RuntimeLayout& L = h.runtime().layout();
+    proto::ProtoContext ctx(&h.space(), h.runtime().rootContext());
+    auto setGlobal = [&](const char* name, const proto::ProtoObject* v) {
+        const GlobalBinding* b = h.globals().binding(name);
+        ASSERT_NE(b, nullptr) << name;
+        L.globals->setAttribute(&ctx, proto::ProtoString::createSymbol(&ctx, b->key.c_str()), v);
+    };
+    const proto::ProtoObject* base = ctx.newObject(false);
+    const proto::ProtoObject* sub = base->newChild(&ctx);
+    g_moduleError = sub->newChild(&ctx);
+    setGlobal("moduleError", base);
+    setGlobal("notFound", sub);
+    setGlobal("unrelated", ctx.newObject(false));
+    setGlobal("raising", ctx.fromMethod(nullptr, &raiseModuleError));
+    EXPECT_EQ(h.eval("try { raising(); 0 } catch { case e: notFound => 1 }"), "1");
+    EXPECT_EQ(h.eval("try { raising(); 0 } catch { case e: moduleError => 2 }"), "2");
+    EXPECT_EQ(h.eval("try { try { raising(); 0 } catch { case e: unrelated => 3 } } "
+                     "catch { case e: notFound => 4 }"), "4");
+    // A Scala class is no ancestor of it: `case e: Exception` does not run (D134).
+    EXPECT_EQ(h.eval("try { try { raising(); 0 } catch { case e: Exception => 5 } } "
+                     "catch { case e: moduleError => 6 }"), "6");
+    // The caught value is the very object raised, and `throw` re-raises it.
+    EXPECT_EQ(h.eval("try { try { raising(); 0 } catch { case e: moduleError => throw e } } "
+                     "catch { case e: notFound => 7 }"), "7");
+    EXPECT_EQ(h.eval("(try { raising(); null } catch { case e: notFound => e }).isInstanceOf[notFound]"),
+              "true");
+    g_moduleError = nullptr;
 }

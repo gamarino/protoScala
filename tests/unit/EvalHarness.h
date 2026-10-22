@@ -6,6 +6,7 @@
 #include "frontend/Desugar.h"
 #include "frontend/Parser.h"
 #include "runtime/Errors.h"
+#include "runtime/ErrorFactory.h"
 #include "runtime/ExecutionEngine.h"
 #include "runtime/Prelude.h"
 #include "runtime/Primitives.h"
@@ -30,7 +31,11 @@ public:
         proto::ProtoContext ctx(&space_, runtime_.rootContext());
         loadPrelude(&ctx, engine_, globals_, modules_);
         bindPreludeHooks(&ctx, runtime_.mutableLayout(), globals_);
+        installErrorFactory(&space_, &engine_, &runtime_.layout());
     }
+    ~EvalHarness() { uninstallErrorFactory(&space_, &engine_); }
+    EvalHarness(const EvalHarness&) = delete;
+    EvalHarness& operator=(const EvalHarness&) = delete;
 
     Runtime& runtime() { return runtime_; }
     ExecutionEngine* engine() { return &engine_; }
@@ -52,12 +57,13 @@ public:
             const auto* key = proto::ProtoString::createSymbol(&ctx, cu.resultKey.c_str());
             const proto::ProtoObject* v = runtime_.layout().globals->getOwnAttributeDirect(&ctx, key);
             return engine_.showTopLevel(&ctx, v ? v : PROTO_NONE);  // a Scala toString may throw
-        } catch (const ScalaThrow& t) {
-            // An uncaught Scala exception reads like a ScalaError report, so a
+        } catch (const proto::ProtoException& t) {
+            // An uncaught exception value reads like a ScalaError report, so a
             // test can assert on "error: RuntimeException: boom" either way.
             try {
                 proto::ProtoContext ctx2(&space_, runtime_.rootContext());
-                return std::string("error: ") + engine_.showTopLevel(&ctx2, t.value);
+                ExecutionEngine::ActiveCallGuard active(&engine_, &runtime_.layout());
+                return std::string("error: ") + describeThrown(&ctx2, t.value());
             } catch (...) {
                 return "error: <exception whose toString failed>";
             }

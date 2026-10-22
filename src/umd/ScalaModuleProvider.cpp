@@ -64,7 +64,7 @@ const proto::ProtoObject* ScalaModuleProvider::tryLoad(const std::string& logica
     // through the mandatory boundary shape so a caller in ANOTHER runtime
     // receives a translated exception rather than a C++ one crossing an ABI it
     // did not compile.
-    return translateForeignException([&]() -> const proto::ProtoObject* {
+    return leaveProtoScala(ctx, [&]() -> const proto::ProtoObject* {
         try {
             const LoadedModule& m = host->loadModuleFile(ctx, abs, logicalPath);
             return m.object ? m.object : PROTO_NONE;

@@ -146,6 +146,13 @@ private:
     // be handed to whichever runtime asked second (A0-4).
     const ModuleExports& loadForeign(const std::string& providerSpec,
                                      const std::string& logicalPath, SourcePos pos);
+    // An unprefixed import that no `.scala` file and no compiled module answers:
+    // asked of the space's resolution chain (ProtoSpace::getImportModule), where
+    // an embedder or a provider plug-in may have put a provider of its own
+    // (INTEROP §3, "none | resolution chain"). Returns nullptr on a miss. The
+    // module binds as a FOREIGN one, as a prefixed import's does.
+    const ModuleExports* loadThroughResolutionChain(const std::string& logicalPath,
+                                                    SourcePos pos);
     ModuleExports collectExports(const GlobalTable& table, const std::string& objectName) const;
     const proto::ProtoObject* forceGlobal(proto::ProtoContext* ctx, const std::string& key);
 

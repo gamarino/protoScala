@@ -587,17 +587,21 @@ conformance fixtures are therefore live, not `XFAIL`.
 
 ## 7. Exceptions
 
-- `throw e` raises a C++ exception `ScalaThrow` whose payload is rooted in a
-  slot of the throwing frame's context and re-rooted in the catching frame.
+- `throw e` raises a C++ exception `ScalaThrow` — since protoCore 3.0.0 a
+  subclass of `proto::ProtoException`, the one exception type of every language
+  on protoCore — whose payload protoCore pins while it is in flight (see
+  "protoCore 3.0.0" at the end of this section; the re-rooting described below is
+  how it was done before).
 - `try { } catch { case ... } finally { }`: each module carries a handler
   table (pc range → handler pc); the VM catches `ScalaThrow` at the frame that
   owns the range, runs the `catch` cases as a pattern match and rethrows on no
   match. `finally` runs on every exit path.
 - Scala has no resumable exceptions, so protoST's separate handler stack is
   not needed.
-- Native errors (`std::runtime_error` from protoCore, stack overflow, bad
+- Native errors (a C++ library's `std::runtime_error`, stack overflow, bad
   arguments) are translated to Scala exceptions (`RuntimeException`,
   `StackOverflowError`, `IllegalArgumentException`); they are never swallowed.
+  protoCore's own errors are built as Scala exceptions by the error factory.
 - Control-flow signals (e.g. `FutureYield`, §8) do not derive from
   `std::exception`, so no generic handler can intercept them.
 
@@ -658,7 +662,8 @@ boundary and terminates the process.
 |---|---|---|
 | `ScalaError(cls, msg)` from any native throw site | an instance of the prelude class named `cls` | `runFrame`, **lazily**: the handler search runs first, so the uncaught path allocates nothing — it may be dying of `OutOfMemoryError` |
 | `ScalaError` whose `cls` names no prelude class | `RuntimeException(cls + ": " + msg)`, keeping the original name | `materialiseError` |
-| protoCore `std::runtime_error` | `RuntimeException(what())` | `runLoop` |
+| protoCore's own error (protoCore ≥ 3.0.0: a `ProtoException`) | the factory's class: see "protoCore 3.0.0" below | the space's error factory |
+| a C++ `std::runtime_error` from a native or a module | `RuntimeException(what())` | `runLoop` |
 | `std::invalid_argument` | `IllegalArgumentException(what())` | `runLoop`, caught by its **exact** type |
 | `std::out_of_range` | `IndexOutOfBoundsException(what())` | `runLoop`, caught by its **exact** type |
 | `std::overflow_error` | `ArithmeticException(what())` | `runLoop`, **before** the `runtime_error` clause |
@@ -677,10 +682,13 @@ is load-bearing**:
 1. `catch (FutureYield&) { throw; }` — a cooperative suspension, not an error. It
    is not a `std::exception` and must be first anyway, because a later
    `catch (...)` would eat it and the actor would never resume.
-2. `catch (ScalaThrow&) { throw; }` — a Scala exception already in flight.
-   `ScalaThrow` *is* a `std::exception`, so without this clause the
-   `std::exception` arm would rewrite every Scala exception crossing a module
-   boundary into a `RuntimeException`, losing its class and its payload.
+2. `catch (const proto::ProtoException&) { throw; }` — a language value already
+   in flight: a Scala throw, a module's error, protoCore's own. (Until protoCore
+   3.0.0 this clause was `catch (ScalaThrow&)`, and `ScalaThrow` *was* a
+   `std::exception`, so without it the `std::exception` arm would have rewritten
+   every Scala exception crossing a module boundary into a `RuntimeException`.
+   `ProtoException` is not a `std::exception`; the clause stays first so that the
+   last-resort `catch (...)` can never eat one.)
 3. `catch (ScalaError&) { throw; }` — already a translation; re-translating it
    would replace a precise class name with `RuntimeException`.
 4. `catch (const std::logic_error&) { throw; }` — **D74**: a compiler or VM defect
@@ -704,10 +712,66 @@ process.
 `std::logic_error`, so they are caught by their exact types and the engine carries
 **no `std::logic_error` clause at all**: that is what keeps D74 true, and
 `tests/unit/test_exceptions.cpp` (`NativeTranslation.AVmDefectIsNotCatchable`)
-pins it. `ScalaThrow` derives from `std::exception` and deliberately **not** from
-`std::runtime_error`, because `runLoop`'s protoCore bridge would otherwise rewrite
-every Scala `throw` into a `RuntimeException`; a `static_assert` and a throw/catch
-test pin that too.
+pins it. `ScalaThrow` derives from `proto::ProtoException` and therefore from no
+`std::` class, because `runLoop`'s `std::` arms would otherwise rewrite every Scala
+`throw` into a `RuntimeException`; a `static_assert` and a throw/catch test pin that
+too (`ScalaThrowShape.IsAProtoExceptionAndNotAStdException`).
+
+**protoCore 3.0.0: one exception type, selected by prototype (2026-10-21).**
+protoCore 3.0.0 makes `proto::ProtoException` the C++ exception every language on
+it throws, and the value's prototype chain its type (protoCore
+`docs/EXCEPTIONS.md`). protoScala follows it in five points.
+
+1. *The carrier.* `ScalaThrow` derives from `proto::ProtoException` and adds only
+   the source line. protoCore pins the value in a root set of its space for as
+   long as a copy of the exception exists, so the re-rooting through
+   `ProtoContext::returnValue` above is no longer needed on the throw path.
+   `ProtoException` does not derive from `std::exception`, so the `std::` arms
+   below can never rewrite a Scala `throw`.
+2. *The handlers.* Every handler catches `const proto::ProtoException&`, never only
+   `ScalaThrow`: `runFrame` and the transpiled frame's `handleCaught` enter the
+   handler with the value, and the handler body — a pattern cascade — selects. A
+   protoScala class is still tested with its marker attribute (TEST_PROTO, the fast
+   path); a type pattern that names a **value**, such as a module's error type
+   (`import example.geometry as g` … `case e: g.NegativeRadius`, or a member
+   import), tests protoCore's prototype chain through the builtin `__isInstanceOf`
+   (**D133**). A value that matches no case is re-raised with the same value
+   (RETHROW). A module's error is not below Scala's `Throwable`, so
+   `case e: Exception` does not catch it (**D134**). A plain `ProtoException`
+   reaching `runLoop` from protoCore or a C++ module is re-raised as a `ScalaThrow`
+   of the same value so it gets a source line; another runtime's subclass passes
+   untouched.
+3. *protoCore's errors.* `Session` installs an error factory
+   (`src/runtime/ErrorFactory.cpp`) once the prelude classes exist. It builds the
+   instance the way `new C(message)` would, through the engine active on the
+   thread or, on a thread running no Scala code, the engine bound to the space:
+
+   | `ProtoErrorKind` | Scala class | JVM precedent |
+   |---|---|---|
+   | `DivisionByZero` | `ArithmeticException` | `1 / 0` on `Int` |
+   | `Overflow` | `ArithmeticException` | `Math.toIntExact`, `longValueExact` |
+   | `InvalidArgument` | `NumberFormatException` (an `IllegalArgumentException`) | `Integer.parseInt("ten")` |
+   | `TypeMismatch` | `ClassCastException` | a failed cast |
+   | `ArityMismatch` | `IllegalArgumentException` | a bad argument list |
+
+   The message is protoCore's. The factory never throws: if no engine is
+   reachable, or the prelude is not yet bound, it answers protoCore's default
+   shape (a child of the kind's prototype with `message`, plus `name`).
+4. *The boundary rule.* `ScalaError` remains protoScala's internal, lazy form of a
+   native error — materialised only once a handler exists, so the uncaught path
+   allocates nothing — and it never leaves protoScala. Every entry a caller outside
+   protoScala can make (a UMD provider's `tryLoad`, a transpiled module's
+   initialiser, a transpiled function's method cell called by a foreign caller) goes through
+   `leaveProtoScala` (`src/umd/ForeignBoundary.h`): the six-clause shape above, and
+   then a `ScalaError` — the form every translated `std::exception` takes — is
+   materialised into a `ScalaThrow` carrying the prelude instance and the line.
+5. *The top level.* `Session` (scripts, the REPL, `--run-module`), `runMain` /
+   `runApp` of a transpiled program, a `Thread` body, an actor turn and a future
+   continuation report an uncaught exception value with its own `toString`; a
+   foreign value without one is reported as `name: message` from its attributes.
+   A `ProtoException` must not outlive its space, so `main.cpp` catches it inside
+   `runJob`, while the session still exists. A thread body reports any other C++
+   exception rather than terminating; `std::logic_error` is still a defect (D74).
 
 ---
 

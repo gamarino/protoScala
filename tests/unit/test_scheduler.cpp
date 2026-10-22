@@ -195,7 +195,7 @@ TEST(Futures, AFailedFutureRaisesItsError) {
     } catch (const ScalaThrow& t) {
         // Phase 4: the payload IS the exception value, raised as it is, so the
         // report goes through the instance's own toString (D44 retired).
-        EXPECT_EQ(world().engine()->showTopLevel(&ctx, t.value), "ArithmeticException: / by zero");
+        EXPECT_EQ(world().engine()->showTopLevel(&ctx, t.value()), "ArithmeticException: / by zero");
     }
 }
 

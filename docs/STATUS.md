@@ -652,6 +652,31 @@ are quoted in the commit that made each change.
 - [x] In-scope corpus rate **181/601 = 30.1 % → 191/601 = 31.8 %**, **zero
       regressions** across all 1654 files, and the three internal errors gone.
 
+### protoCore 3.0.0 — the unified exception model (2026-10-21)
+
+Per DESIGN §7 ("protoCore 3.0.0: one exception type, selected by prototype").
+
+- [x] **`ScalaThrow` is a `proto::ProtoException`**; every handler catches the
+      base type and selects by the value's prototype chain. protoCore pins the
+      value in flight, so the per-frame re-rooting is gone.
+- [x] **protoCore's own errors arrive as Scala classes** through the error
+      factory installed by `Session` (and the unit-test harness): division by
+      zero and overflow as `ArithmeticException`, a malformed literal as
+      `NumberFormatException`, a type mismatch as `ClassCastException`, an arity
+      error as `IllegalArgumentException`.
+- [x] **A module's error type is caught by name** (D133), through an import:
+      `case e: g.NegativeRadius`. Fixture:
+      `tests/conformance/25-interop/geometry-module-errors.scala`, against
+      protoCore's own example module, loaded through a plug-in.
+- [x] **No `ScalaError` and no `std::` exception leaves protoScala**:
+      `leaveProtoScala` materialises them at every provider entry, a transpiled
+      module's initialiser and a transpiled function entered by a foreign caller. A C++ `std::exception` from a module becomes
+      `RuntimeException` carrying `what()`, as before.
+- [x] **Unprefixed imports reach the space's resolution chain** after the
+      `.scala` and compiled-module lookups, as INTEROP §3 documented.
+- [x] **Conformance rule 14**: all four `exception.*` cases pass
+      (`catchForeignError`, `escapeLanguageError` in `tests/unit/ConformanceHost.h`).
+
 ## Not yet implemented
 
 - A `class`, `trait` or `object` nested in a **`class`** or **`trait`**, a local
@@ -993,7 +1018,7 @@ recycled.
 | D91 | A module **is an `object`**: `util/Shapes.scala` becomes `object Shapes`, its classes are `Shapes.Point` with their companions, and its name comes from the **file** rather than from anything written inside it. A module may not define an `@main`, which is refused (`a module may not define an @main method`) rather than ignored, because a silently ignored `@main` would be a trap. An `import` and an `extension` written in a module stay outside that synthetic object — neither is a member of anything — so an extension in a module sees the module's globals and not its members | A0-2 | (perm) |
 | D92 | A **wildcard import of a foreign module** (`import py.numpy.*`) is refused: a foreign object's attribute names cannot be enumerated through the API this runtime uses, and guessing a name set would fail silently later. The message names the working spelling (`import numpy.{a, b}`). Named selectors work | A0-4 | later |
 | D93 | `given` selectors (`import M.given`, `import M.{given T}`, `import M.{a => _}`) are parsed and **ignored**, as every other given is (D3): there are no type classes to resolve, so nothing is bound and nothing is an error | A0-6 | later |
-| D94 | A **foreign module binds no types**: `new`, a type pattern and `isInstanceOf` on a class reached through `py.`, `js.`, `st.` or `clj.` are unavailable, because a foreign value carries no `ClassInfo`. Its members resolve by name at run time, which is what DESIGN §5's type-mapping table already says ("other objects → dynamic objects") | A0-4 | (perm) |
+| D94 | A **foreign module binds no types**: `new`, a type pattern and `isInstanceOf` on a class reached through `py.`, `js.`, `st.` or `clj.` are unavailable, because a foreign value carries no `ClassInfo`. Its members resolve by name at run time, which is what DESIGN §5's type-mapping table already says ("other objects → dynamic objects"). A type pattern may name a foreign member as a VALUE, and then tests its prototype chain (D133, 2026-10-21) | A0-4 | (perm) |
 | D95 | `--disassemble` **resolves imports**, and therefore runs the top level of every module the file imports: a file cannot be compiled without its imports, and an import is resolved by loading (D90) | A0-1 | (perm) |
 | D96 | An `import` is **hoisted to its compilation unit**. A top-level import is processed before every other declaration and is visible for the whole unit; an import written inside a block or a template body is compiled where it is found and its binding **outlives that block**, so it is visible from there to the end of the unit. Scala scopes an import lexically. Lexical scoping needs a scope-aware name resolver the compiler does not have, and D82's extensions have exactly the same shape, so the two are scoped together or not at all | A0-6, A0-11 | later |
 ### Track F deviations — recorded 2026-09-25, pending review
@@ -1144,6 +1169,13 @@ in [DECISIONS-LOG.md](DECISIONS-LOG.md) under "The I/O track".
 | D130 | **Sockets keep java.net's names, with simplified streams.** Reading and writing are methods of the socket (`readLine`, `read(n)`, `readBytes(n)`, `readAll`, `write`, `writeBytes`) instead of an `InputStream`/`OutputStream` pair; `read(n)` and `readBytes(n)` wait for n characters or bytes, or the end (`DataInputStream.readFully`'s semantics), where `InputStream.read` answers what has arrived. `new Socket(host, port, connectTimeoutMs)` takes the connect timeout that Java passes to `connect`. `new ServerSocket(port, host, backlog)` puts the host second (Java: port, backlog, address). `tryAccept(ms)` answers an `Option[Socket]`, because `accept()` and `accept(ms)` cannot coexist without overloading (D31); `accept()` with `setSoTimeout` raises `SocketTimeoutException("Accept timed out")`, as Java's does. `DatagramSocket.send(data, host, port)` and `receive(): Datagram` replace `DatagramPacket`. An address is a `String`: there is no `InetAddress`. TLS is `startTls(serverName)` on a connected socket, where Java wraps it with an `SSLSocketFactory`. `Socket(h, p)` without `new` works through a companion `apply` (D41 does not apply to prelude classes that define one). No `shutdownInput`/`shutdownOutput`, no socket options beyond the timeout | I/O track | later |
 | D131 | **The HTTP client is requests-scala's shape, not all of it.** Named arguments match requests-scala's (`headers`, `params`, `data`, `readTimeout`, `maxRedirects`, `check`), but the **positional** order is protoScala's own (`send(method, url, headers, params, data, ...)`; `post(url, data, headers, params, ...)`), and a named call is refused by the transpiler (D121). `readTimeout` bounds the connection and every wait (there is no separate `connectTimeout`); `data` is a `String`, `Bytes` or a `Map` sent as a form; there is no `auth`, cookie handling, proxy, compression, keep-alive, session or streaming. The object is `Requests`, bound also as `requests` so code copied from requests-scala runs unchanged. The response class is `HttpResponse`, because `Response` is the server's. A network failure raises the I/O classes of D124 instead of `requests.TimeoutException` / `requests.UnknownHostException`; `check = true` raises `RequestFailedException` for a 4xx or 5xx status, as requests-scala does | I/O track | later |
 | D132 | **The HTTP server is protoScala's own, small one.** Scala has no standard server; the design fixed `HttpServer(port) { req => Response(...) }` with `start`, `startInBackground`, `stop` and `port`. One request per connection (`connection: close`), no TLS, no routing, no streaming bodies. Connections are served on 16 actors, round robin, so a slow request delays the ones queued behind it on the same actor; the actors live for the session (D46). A connection has 30 s for each wait. The default host is `127.0.0.1`, not every interface, and the default body limit is 64 MiB | I/O track | later |
+
+### Unified exceptions deviations — protoCore 3.0.0, recorded 2026-10-21, pending review
+
+| id | Deviation | Plan | Revisit |
+|---|---|---|---|
+| D133 | **A type pattern may name a value** — `case e: g.NegativeRadius` with `g` an imported module, or a member-imported `NegativeRadius` — and then tests protoCore's prototype chain (`ProtoObject::isInstanceOf`), the test every language on protoCore selects exceptions by. It is how a module's error type, which is a protoCore object and not a class (D94), is caught by name. scalac rejects a value in type position, so no valid Scala program changes meaning. The same holds for `isInstanceOf[T]` and `asInstanceOf[T]` | unified exceptions (protoCore 3.0.0) | (perm) |
+| D134 | **A module's error value is not a Scala `Throwable`**: `case e: Exception` and `case e: Throwable` do not catch it, because its prototype is not below Scala's `Throwable`; `case e =>`, a handler naming the module's type (D133) and `Try` do. `throw e` re-raises a caught foreign value as it is. Scala catches every thrown value with `case e: Throwable`, because on the JVM everything thrown is one | unified exceptions (protoCore 3.0.0) | maintainer review (DECISIONS-LOG, 2026-10-21) |
 
 ### Phase 7 — packaging, 2026-09-27
 

@@ -34,10 +34,12 @@ std::string describe(proto::ProtoContext* ctx, const proto::ProtoObject* v) {
     if (v == PROTO_TRUE) return "true";
     if (v == PROTO_FALSE) return "false";
     if (const proto::ProtoString* s = v->asString(ctx)) return s->toStdString(ctx);
-    // asIntegerString throws when the receiver is not an integer, which for a
-    // test double is the right amount of effort.
+    // asIntegerString raises protoCore's TypeMismatch (a proto::ProtoException)
+    // when the receiver is not an integer, which for a test double is the right
+    // amount of effort.
     try {
         if (const proto::ProtoString* n = v->asIntegerString(ctx)) return n->toStdString(ctx);
+    } catch (const proto::ProtoException&) {
     } catch (const std::exception&) {
     }
     return "?";

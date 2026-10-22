@@ -368,7 +368,9 @@ const proto::ProtoObject* materialise(proto::ProtoContext*, const char* cls, con
  *    D74 keeps it uncatchable. Note the order — `std::invalid_argument` and
  *    `std::out_of_range` derive from `std::logic_error` and ARE translated, exactly as
  *    the interpreter translates them, so they must be caught before it.
- *  - `ScalaThrow` yields its value; `ScalaError` and the `std::` errors the interpreter
+ *  - every `proto::ProtoException` (a Scala `throw`, a module's error, protoCore's own
+ *    error built by the space's error factory) yields its value; `ScalaError` and the
+ *    `std::` errors the interpreter
  *    names — `invalid_argument` → `IllegalArgumentException`, `out_of_range` →
  *    `IndexOutOfBoundsException`, `overflow_error` → `ArithmeticException`, `bad_alloc`
  *    → `OutOfMemoryError`, any other `runtime_error` → `RuntimeException` — yield a

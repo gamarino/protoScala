@@ -100,15 +100,22 @@ int body(proto::ProtoContext* ctx, const proto::ProtoObject* module, void* ud) {
         }
     }
 
-    // A function that raises: the exception must cross the boundary as a C++ exception
-    // the caller can catch by protoCore's own convention, not abort the process.
+    // A function that raises: the exception must cross the boundary as protoCore's
+    // one exception type, proto::ProtoException carrying the language's exception
+    // object (protoCore 3.0.0, docs/EXCEPTIONS.md), not as a std:: exception and not
+    // by aborting the process.
     {
         const proto::ProtoList* args = ctx->newList()->appendLast(ctx, ctx->fromInteger(0));
         bool threw = false;
         try {
             (void)callExport(ctx, module, "reciprocal", args);
-        } catch (const std::exception&) {
+        } catch (const proto::ProtoException& e) {
             threw = true;
+            if (!e.value() || e.value() == PROTO_NONE)
+                fail("reciprocal(0) raised a ProtoException carrying no value");
+        } catch (const std::exception& e) {
+            threw = true;
+            fail(std::string("reciprocal(0) left the module as a std:: exception: ") + e.what());
         }
         if (!threw) fail("reciprocal(0) did not raise");
     }

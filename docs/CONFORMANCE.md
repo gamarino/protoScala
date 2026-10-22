@@ -227,6 +227,24 @@ The patch is saved at
 what the mechanism reading is worth, and no more. The kernel change is still the
 maintainer's, and nothing in this repository depends on it.
 
+## Rule 14 — one exception type, selected by prototype (2026-10-21, protoCore 3.0.0)
+
+All four `exception.*` cases pass. `catchForeignError` binds the module's error
+type and its raising method to two Scala globals and evaluates, with protoScala's
+own compiler and engine, `try { conformanceRaising(); 0 } catch { case e:
+conformanceErrorType => conformanceCaught = e; 1 }` — a type pattern naming a
+value, which tests the prototype chain (D133). For an unrelated type the cascade's
+RETHROW re-raises the same value and it leaves through `leaveProtoScala`, the
+boundary every exit from protoScala takes. `escapeLanguageError` evaluates `throw
+new RuntimeException(...)` through the same boundary.
+
+What this does not prove: the RETHROW raises a NEW `ScalaThrow` carrying the same
+value, so the case's "same value" holds but a foreign runtime's own subclass of
+`ProtoException` would not survive a non-matching protoScala `catch`
+(DECISIONS-LOG, 2026-10-21). And the cases exercise `ExecutionEngine::run` wrapped
+by the host in `leaveProtoScala`; protoScala's command-line `Session` reports an
+uncaught exception rather than letting it leave.
+
 ## What the adaptor does not prove
 
 **`forEachThreadKind` is deliberately not implemented**, so `thread.registered`

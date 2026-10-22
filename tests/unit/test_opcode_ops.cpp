@@ -287,7 +287,7 @@ TEST_F(Ops, ThrowRequiresAThrowableAndRethrowRequiresASavedValue) {
         ops::throwValue(c(), L(), ex);
         FAIL() << "throwValue returned";
     } catch (const protoScala::ScalaThrow& t) {
-        EXPECT_EQ(t.value, ex);
+        EXPECT_EQ(t.value(), ex);
     }
     try {
         ops::throwValue(c(), L(), i(1));
@@ -302,9 +302,9 @@ TEST_F(Ops, ThrowRequiresAThrowableAndRethrowRequiresASavedValue) {
     } catch (const protoScala::ScalaError& err) {
         EXPECT_EQ(err.className(), "NullPointerException");
     }
-    EXPECT_THROW(ops::rethrow(ex, "blk0"), protoScala::ScalaThrow);
+    EXPECT_THROW(ops::rethrow(c(), ex, "blk0"), protoScala::ScalaThrow);
     // RETHROW with nothing saved is a compiler defect, not a Scala exception.
-    EXPECT_THROW(ops::rethrow(PROTO_NONE, "blk0"), std::logic_error);
+    EXPECT_THROW(ops::rethrow(c(), PROTO_NONE, "blk0"), std::logic_error);
 }
 
 // --- STORE_FIELD / STORE_FIELD_IF_NEW / SET_FIELD -----------------------

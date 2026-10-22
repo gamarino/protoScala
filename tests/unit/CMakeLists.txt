@@ -62,6 +62,38 @@ else()
     set_target_properties(protoscala_probe_provider PROPERTIES PREFIX "" SUFFIX ".so")
 endif()
 
+# protoCore's example geometry module (protoCore/examples/exceptions), brought in
+# through a provider plug-in for the unified-exceptions fixture
+# tests/conformance/25-interop/geometry-module-errors.scala. The module is
+# protoCore's own shared library, built by protoCore's tree; only the two plug-in
+# symbols are protoScala's. When the sibling build does not have it (an installed
+# protoCore, or one configured without its examples) the plug-in is not built and
+# the fixture is registered DISABLED, never silently passing.
+set(_pc_examples "${CMAKE_SOURCE_DIR}/../protoCore")
+find_library(PROTOCORE_EXAMPLE_GEOMETRY_LIBRARY NAMES protocore_example_geometry
+    PATHS "${_pc_examples}/build_release/examples/exceptions" NO_DEFAULT_PATH)
+find_path(PROTOCORE_EXAMPLE_GEOMETRY_INCLUDE_DIR NAMES GeometryModule.h
+    PATHS "${_pc_examples}/examples/exceptions/geometry_module" NO_DEFAULT_PATH)
+unset(_pc_examples)
+if(PROTOCORE_EXAMPLE_GEOMETRY_LIBRARY AND PROTOCORE_EXAMPLE_GEOMETRY_INCLUDE_DIR)
+    add_library(protoscala_geometry_provider MODULE geometry_provider_plugin.cpp)
+    target_include_directories(protoscala_geometry_provider PRIVATE
+        "${CMAKE_SOURCE_DIR}/src" "${PROTOCORE_EXAMPLE_GEOMETRY_INCLUDE_DIR}"
+        ${PROTOCORE_INCLUDE_DIRS})
+    target_link_libraries(protoscala_geometry_provider PRIVATE
+        "${PROTOCORE_EXAMPLE_GEOMETRY_LIBRARY}" ${PROTOCORE_LIBRARY})
+    target_compile_options(protoscala_geometry_provider PRIVATE ${PROTOSCALA_WARNINGS})
+    if(WIN32)
+        set_target_properties(protoscala_geometry_provider PROPERTIES PREFIX "" SUFFIX ".dll")
+    else()
+        set_target_properties(protoscala_geometry_provider PROPERTIES PREFIX "" SUFFIX ".so")
+    endif()
+    message(STATUS "protoScala: protoCore's example geometry module found; its plug-in is built")
+else()
+    message(STATUS "protoScala: protoCore's example geometry module not found; "
+                   "25-interop/geometry-module-errors.scala is disabled")
+endif()
+
 # The UMD tests need their own process for the same reason the scheduler tests
 # do -- one runtime per process (R5) -- and they construct a second Session to
 # prove the provider is registered exactly once. They are the only unit tests

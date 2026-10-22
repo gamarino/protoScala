@@ -6,6 +6,7 @@
 #include "compiler/GlobalTable.h"
 #include "runtime/ActorScheduler.h"
 #include "runtime/Errors.h"
+#include "runtime/ErrorFactory.h"
 #include "runtime/FutureYield.h"
 #include "runtime/Futures.h"
 #include "runtime/Mailbox.h"
@@ -236,8 +237,8 @@ PRIM(cont_map) {
             const ProtoObject* v = futures::valueOf(ctx, L, source);
             const ProtoObject* r = activeCallContext()->engine->invoke(ctx, body, &v, 1);
             futures::complete(ctx, L, derived, r, false);
-        } catch (ScalaThrow& t) {
-            futures::completeWith(ctx, L, derived, t.value);
+        } catch (const proto::ProtoException& t) {
+            futures::completeWith(ctx, L, derived, t.value());
         } catch (ScalaError& e) {
             futures::completeError(ctx, L, derived, e.className().c_str(), e.message());
         }
@@ -279,8 +280,8 @@ PRIM(cont_flatMap) {
         else
             futures::onComplete(&scope, L, inner,
                                 makeCont(&scope, L, &cont_forward, derived, nullptr, inner));
-    } catch (ScalaThrow& t) {
-        futures::completeWith(ctx, L, derived, t.value);
+    } catch (const proto::ProtoException& t) {
+        futures::completeWith(ctx, L, derived, t.value());
     } catch (ScalaError& e) {
         futures::completeError(ctx, L, derived, e.className().c_str(), e.message());
     }
@@ -301,8 +302,8 @@ PRIM(cont_recover) {
         const ProtoObject* e = futures::errorOf(ctx, L, source);
         const ProtoObject* r = activeCallContext()->engine->invoke(ctx, body, &e, 1);
         futures::complete(ctx, L, derived, r, false);
-    } catch (ScalaThrow& t) {
-        futures::completeWith(ctx, L, derived, t.value);
+    } catch (const proto::ProtoException& t) {
+        futures::completeWith(ctx, L, derived, t.value());
     } catch (ScalaError& e) {
         futures::completeError(ctx, L, derived, e.className().c_str(), e.message());
     }
@@ -420,15 +421,26 @@ const ProtoObject* threadEntry(ProtoContext* ctx, const ProtoObject*, const prot
     try {
         const ProtoObject* body = handle->getOwnAttributeDirect(ctx, L.bodyKey);
         engine->invoke(ctx, body, nullptr, 0);
-    } catch (ScalaThrow& t) {
+    } catch (const proto::ProtoException& t) {
         // A throwing thread body reports and joins; it never terminates the
-        // process (plan A0-7 invariant 6).
+        // process (plan A0-7 invariant 6). Any language value, a module's error
+        // included, ends here: a thread entry is a top level.
+        const std::string text = describeThrown(ctx, t.value());
         std::fflush(stdout);
-        std::fprintf(stderr, "protoscala: thread failed: %s\n",
-                     engine->showTopLevel(ctx, t.value).c_str());
+        std::fprintf(stderr, "protoscala: thread failed: %s\n", text.c_str());
     } catch (ScalaError& e) {
         std::fflush(stdout);
         std::fprintf(stderr, "protoscala: thread failed: %s\n", e.what());
+    } catch (FutureYield&) {
+        throw;  // a cooperative suspension, never an error (as before)
+    } catch (const std::logic_error&) {
+        throw;  // D74: a VM defect is not a thread failure
+    } catch (const std::exception& e) {
+        std::fflush(stdout);
+        std::fprintf(stderr, "protoscala: thread failed: %s\n", e.what());
+    } catch (...) {
+        std::fflush(stdout);
+        std::fprintf(stderr, "protoscala: thread failed: a non-standard C++ exception\n");
     }
     return PROTO_NONE;
 }

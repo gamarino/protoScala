@@ -417,7 +417,69 @@ runs (D75): the shutdown diagnostic reports how many actors are parked, and that
 is the only notice. Scala has no equivalent situation, and making it otherwise
 would mean running arbitrary user code during shutdown.
 
-## 11.9 For the Python or JavaScript developer
+## 11.9 Errors from a module
+
+A module written in C++ or in another language on protoCore defines its own error
+types, and raises them the way every language on protoCore does: as one C++
+exception type, `proto::ProtoException`, whose type is the thrown value's
+**prototype chain**. protoCore's example geometry module (in protoCore's
+`examples/exceptions/`) is such a module: `GeometryError`, with `NegativeRadius`
+and `DegenerateTriangle` below it. Its error types are values it exports, not
+Scala classes, so a handler names them **through the import**, as a member of the
+module's path or by a member import, and the pattern tests the chain (D133):
+
+Fixture: [`tests/conformance/tutorial/11-exceptions-from-a-module.scala`](../../tests/conformance/tutorial/11-exceptions-from-a-module.scala)
+
+```scala
+import example.geometry as g
+
+@main def run(): Unit =
+  def area(r: Int): String =
+    try "area " + g.circleArea(r)
+    catch
+      case e: g.NegativeRadius => "rejected: " + e.message
+      case e: g.GeometryError  => "geometry error: " + e.name
+  println(area(-1))
+  val parsed =
+    try g.parseRadius("ten").toString
+    catch case e: NumberFormatException => "not a number"
+  val legacy =
+    try g.legacyArea(-1).toString
+    catch case e: RuntimeException => e.getMessage
+  println(parsed + "; " + legacy)
+```
+
+```text
+rejected: circleArea: the radius -1.000000 is negative
+not a number; legacyArea: negative radius
+```
+
+Three kinds of failure arrive here, each as what a Scala programmer would expect:
+
+- the module's **own error** is the module's object, caught by its type or by its
+  base type (`g.GeometryError` would catch the `NegativeRadius` too). Its
+  attributes are read by name: `e.message`, `e.name`;
+- an error **protoCore** raises on the module's behalf — `parseRadius` asks
+  protoCore to parse `"ten"` — arrives as the Scala class protoScala maps it to:
+  a malformed number is a `NumberFormatException`, a division by zero an
+  `ArithmeticException` (the table is in DESIGN §7);
+- a **C++ exception** the module throws, which is a defect of the module and not
+  a language value, arrives as a `RuntimeException` carrying its message.
+
+One difference from the JVM: a module's error is **not** a Scala `Throwable`, so
+`case e: Exception` and `case e: Throwable` do not catch it (D134). `case e =>`
+does, and so does `Try`.
+
+To run it, the geometry module must be reachable from the import: a provider
+plug-in registers it with protoCore and adds it to the space's resolution chain
+(INTEROP §3.1 and §9). From a protoScala build directory:
+
+```text
+PROTOSCALA_PROVIDERS=build_release/tests/unit/protoscala_geometry_provider.so \
+  build_release/protoscala tests/conformance/tutorial/11-exceptions-from-a-module.scala
+```
+
+## 11.10 For the Python or JavaScript developer
 
 | Python | JavaScript | protoScala |
 |---|---|---|
@@ -439,7 +501,7 @@ clause is a **pattern**, so the test and the extraction are one thing; there is
 no `except` body that has to re-examine the exception and re-`raise` when it turns
 out not to be the one it wanted.
 
-## 11.10 What differs from Scala 3 in this area
+## 11.11 What differs from Scala 3 in this area
 
 - **D72** — a `finally` body that itself throws replaces the in-flight exception.
   Scala does the same but warns; protoScala has no warnings.
@@ -462,6 +524,10 @@ out not to be the one it wanted.
   correctly. What is not implemented is the multi-level variant: with two or more
   nested `try` constructs, an inner handler may see an exception raised by an
   outer cleanup during a `return`.
+- **D133** — a type pattern may name a **value**, such as a module's error type
+  (`case e: g.NegativeRadius`); scalac rejects a value in type position.
+- **D134** — a module's error value is not a Scala `Throwable`, so
+  `case e: Throwable` does not catch it (§11.9).
 - There are **no stack traces**, no `NonFatal`, and no `ControlThrowable`. An
   uncaught exception reports `file:line: error: <Class>: <message>` and exits 1.
 

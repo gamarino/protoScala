@@ -1,6 +1,7 @@
 #include "runtime/Futures.h"
 #include "runtime/ActorScheduler.h"
 #include "runtime/Errors.h"
+#include "runtime/ErrorFactory.h"
 #include "runtime/ExecutionEngine.h"
 #include "runtime/FutureYield.h"
 #include "runtime/Values.h"
@@ -98,11 +99,10 @@ const proto::ProtoObject* errorOf(proto::ProtoContext* ctx, const RuntimeLayout&
 // ScalaThrow of that value and nothing is translated or reconstructed (D44
 // retired). A future failed with no value at all can only come from a VM defect.
 void raiseError(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* err) {
-    (void)ctx;
     (void)L;
     if (!err || err == PROTO_NONE)
         throw ScalaError("RuntimeException", "a future failed without an exception value");
-    throw ScalaThrow(err);
+    throw ScalaThrow(ctx, err);
 }
 
 const proto::ProtoObject* result(proto::ProtoContext* ctx, const RuntimeLayout& L,
@@ -185,6 +185,13 @@ bool addWaiter(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::Pr
 
 namespace {
 
+// A continuation that throws is reported and does not stop the others (D48).
+void reportContinuationFailure(proto::ProtoContext* ctx, const proto::ProtoException& e) {
+    const std::string text = describeThrown(ctx, e.value());
+    std::fflush(stdout);
+    std::fprintf(stderr, "protoscala: future continuation failed: %s\n", text.c_str());
+}
+
 // Runs every continuation registered on a completed future. Called by
 // complete() on the completing thread and by onComplete() when the future is
 // already done (D48).
@@ -208,6 +215,8 @@ void runContinuations(proto::ProtoContext* ctx, const RuntimeLayout& L,
         scope.returnValue = arg;
         try {
             callHook(&scope, list->getAt(&scope, static_cast<int>(i)), &arg, 1);
+        } catch (const proto::ProtoException& e) {
+            reportContinuationFailure(&scope, e);
         } catch (ScalaError& e) {
             std::fflush(stdout);
             std::fprintf(stderr, "protoscala: future continuation failed: %s\n", e.what());
@@ -228,6 +237,8 @@ void onComplete(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::P
             ActorTurnPause pause;
             try {
                 callHook(&scope, fn, &arg, 1);
+            } catch (const proto::ProtoException& e) {
+                reportContinuationFailure(&scope, e);
             } catch (ScalaError& e) {
                 std::fflush(stdout);
                 std::fprintf(stderr, "protoscala: future continuation failed: %s\n", e.what());

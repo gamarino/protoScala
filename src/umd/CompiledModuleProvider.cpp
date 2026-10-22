@@ -115,7 +115,7 @@ const proto::ProtoObject* CompiledModuleProvider::tryLoad(const std::string& log
 
     // From here the file exists, so every failure is a real one and is translated
     // exactly once, by the template every foreign entry uses.
-    return translateForeignException([&]() -> const proto::ProtoObject* {
+    return leaveProtoScala(ctx, [&]() -> const proto::ProtoObject* {
         void* handle = openLibrary(found, RTLD_NOW | RTLD_GLOBAL);
         if (!handle)
             throw ScalaError("ImportError", "cannot load '" + found + "': " + libraryError());

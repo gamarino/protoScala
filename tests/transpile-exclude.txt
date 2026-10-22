@@ -23,7 +23,7 @@
 # Counts by code:
 #   D113    40
 #   D121    35
-#   D123    87
+#   D123    89
 #
 #   D113  await: cooperative suspension snapshots a bytecode frame, and a transpiled
 #         frame has no ip to record. Detected by SEND-site name, so a user method
@@ -126,6 +126,7 @@
 25-interop/a-provider-failure-is-catchable.scala                       D123   an import is resolved at transpile time and is not re-performed at load time
 25-interop/a-provider-failure-that-is-not-an-exception-is-catchable.scala D123   an import is resolved at transpile time and is not re-performed at load time
 25-interop/a-two-segment-prefix-path.scala                             D123   an import is resolved at transpile time and is not re-performed at load time
+25-interop/geometry-module-errors.scala                                D123   an import is resolved at transpile time and is not re-performed at load time
 25-interop/no-clj-provider.scala                                       D123   an import is resolved at transpile time and is not re-performed at load time
 25-interop/no-js-provider.scala                                        D123   an import is resolved at transpile time and is not re-performed at load time
 25-interop/no-py-provider.scala                                        D123   an import is resolved at transpile time and is not re-performed at load time
@@ -177,6 +178,7 @@ tutorial/05-functions-named-argument-errors.scala                      D121   ke
 tutorial/05-functions-named-arguments.scala                            D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
 tutorial/07-case-basics.scala                                          D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
 tutorial/11-exceptions-await-a-failed-future.scala           D113  await: cooperative suspension snapshots a bytecode frame, and a transpiled frame has no ip
+tutorial/11-exceptions-from-a-module.scala                             D123   an import is resolved at transpile time and is not re-performed at load time
 tutorial/11-exceptions-in-an-actor.scala                               D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
 tutorial/13-actors-await.scala                                         D113   cooperative suspension snapshots a bytecode frame; a transpiled frame has no ip
 tutorial/13-actors-catch-a-failed-await.scala                D113  await: cooperative suspension snapshots a bytecode frame, and a transpiled frame has no ip

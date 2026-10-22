@@ -67,7 +67,7 @@ protoScala registers a **second** provider since Phase 7:
 | `js.` | `provider:js` | `import js.d3 as d3` |
 | `st.` | `provider:st` | `import st.PumpTwin as Twin` |
 | `clj.` | `provider:clj` | `import clj.core as clj` |
-| none | resolution chain (`provider:scala` first) | `import util.Strings` |
+| none | resolution chain (`provider:scala` first) | `import util.Strings`, `import example.geometry as g` |
 
 **An `import` does not always reach a module at all.** Plain Scala's member
 import — `import Color.*`, `import Obj.{a, b}` — takes names out of something
@@ -199,13 +199,18 @@ list seen as a Scala `Seq` is wrapped, not copied).
 - **The boundary catch shape is mandatory at every UMD and foreign-call site.**
   One template, `src/umd/ForeignBoundary.h`, six clauses in this order, and the
   order is the contract: `FutureYield` (not a `std::exception`, and first anyway,
-  or a `catch (...)` would eat a cooperative suspension); `ScalaThrow` (a Scala
-  exception already in flight, which the `std::exception` arm would rewrite into a
-  `RuntimeException`); `ScalaError` (already a translation); **`std::logic_error`
+  or a `catch (...)` would eat a cooperative suspension); `proto::ProtoException`
+  (a language value already in flight — a Scala throw, a module's error,
+  protoCore's own — passed through untouched); `ScalaError` (already a
+  translation); **`std::logic_error`
   re-thrown** (D74: a VM defect must never be catchable, and `std::logic_error`
   *is* a `std::exception`); `std::exception`, carrying `what()` across; and
   `catch (...)`, which says "native exception" rather than inventing a message.
-  There is one unit test per clause.
+  There is one unit test per clause. An entry a caller outside protoScala can
+  make (a provider's `tryLoad`, a transpiled function's cell called from another runtime) uses
+  `leaveProtoScala`, which adds one step: a `ScalaError` is materialised into a
+  `ProtoException` carrying the prelude exception, so nothing but a
+  `ProtoException` ever leaves protoScala (§9).
 - **A provider must not resolve its runtime from `ctx->space`.** This was the
   measured ceiling on co-residency, and Track Y removed it. `tryLoad(path, ctx)`
   receives the *caller's* context, and each runtime owns its own `ProtoSpace`, so
@@ -518,3 +523,54 @@ Two further limits, stated so nobody infers more:
 
 Both limits are unchanged by §8.2: what that test proves is the *call*, not
 co-residency across spaces and not freedom from the runtime the module links.
+
+## 9. Errors across the boundary (protoCore 3.0.0)
+
+protoCore 3.0.0 gives every language one C++ exception, `proto::ProtoException`,
+whose type is the thrown value's prototype chain (protoCore `docs/EXCEPTIONS.md`).
+protoScala's own exceptions are `ProtoException`s (DESIGN §7), so a module or a
+runtime on the other side of a UMD boundary catches them with no knowledge of
+protoScala, and protoScala catches theirs the same way.
+
+**Catching a module's error type.** A module's error types are protoCore objects
+it exports, not classes (D94). A Scala handler names one through the import, as a
+type member of the module's path or as a member import, and the pattern tests the
+prototype chain (D133):
+
+```scala
+import example.geometry as g
+import example.geometry.{GeometryError}
+
+try g.circleArea(-1)
+catch
+  case e: g.NegativeRadius => println("negative: " + e.message)
+  case e: GeometryError    => println("another geometry error")
+```
+
+A subtype is caught by a handler for its base type; a handler for an unrelated
+type does not run, and the error leaves it with the same value. A module's error is
+not below Scala's `Throwable`, so `case e: Exception` and `case e: Throwable` do not
+catch it (D134); `case e =>` and `Try` do. Its attributes (`e.message`, `e.name` for
+the geometry module) are read by name, late-bound like every foreign member.
+
+**What else arrives as what.**
+
+| Raised by the module | Arrives in Scala as |
+|---|---|
+| a `ProtoException` whose value is the module's own error object | that object, selected by its chain (D133) |
+| protoCore's own error (e.g. `parseRadius("ten")`: a malformed literal) | the Scala class the error factory maps it to — `NumberFormatException` here (DESIGN §7) |
+| a C++ `std::exception` (e.g. `legacyArea(-1)`'s `std::runtime_error`) | `RuntimeException` carrying `what()` — a module defect, not a language value |
+| anything else thrown in C++ | `RuntimeException("native exception")` |
+
+**What leaves protoScala.** A Scala exception that a foreign caller does not handle
+leaves as the `ProtoException` carrying the Scala exception object, never as a
+string or a `std::runtime_error`: `leaveProtoScala` materialises protoScala's
+internal `ScalaError` at every entry a foreign caller can make.
+
+**Reaching a module that is not a protoScala one.** An unprefixed import that no
+`.scala` file and no compiled module answers is asked of the space's resolution
+chain (`ProtoSpace::getImportModule`, with the dotted path written with `/`). A
+provider plug-in (§3.1) can register a provider and append its
+`provider:<alias>` entry to the chain in `protoScalaRegisterProviders`, which is
+how `tests/unit/geometry_provider_plugin.cpp` brings protoCore's example geometry
+module in for `tests/conformance/25-interop/geometry-module-errors.scala`.

@@ -332,7 +332,7 @@ TEST_F(Guarded, AScalaThrowValueIsReRootedAndDelivered) {
     const proto::ProtoObject* v = gen::materialise(c(), "IllegalStateException", "nope");
     ctx->returnValue = v;
     try {
-        throw protoScala::ScalaThrow(v);
+        throw protoScala::ScalaThrow(c(), v);
     } catch (...) {
         const gen::HandlerRec* h = caught(0, slots);
         ASSERT_NE(h, nullptr);

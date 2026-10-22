@@ -120,11 +120,11 @@ MUTS = {
         '''    } catch (const std::logic_error&) {
         throw;   // mutated: moved AHEAD of the two subclasses the interpreter translates
     } catch (const std::invalid_argument& e) {'''),
- 'R2': ('src/runtime/GeneratedSupport.cpp',   # the value is not re-rooted before use
-        '''        ctx->returnValue = t.value;
-        slots[pendingSlot] = t.value;
-        slots[h->slot] = t.value;''',
-        '''        slots[h->slot] = t.value;'''),
+ 'R2': ('src/runtime/GeneratedSupport.cpp',   # the value is not written where the frame reads it
+        '''        ctx->returnValue = t.value();
+        slots[pendingSlot] = t.value();
+        slots[h->slot] = t.value();''',
+        '''        slots[h->slot] = t.value();'''),
  'R3': ('src/compiler/CppEmitter.cpp',   # no pc tracking: the search reads a stale pc
         '''        if (guarded && canThrow(d.op)) out_ << "    pc = " << d.pc << ";\\n";''',
         '''        if (false) out_ << "    pc = " << d.pc << ";\\n";'''),

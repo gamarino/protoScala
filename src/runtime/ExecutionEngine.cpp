@@ -13,6 +13,7 @@
 #include <new>
 #include <stdexcept>
 #include <string>
+#include <typeinfo>
 #include <vector>
 
 namespace protoScala {
@@ -101,7 +102,8 @@ const proto::ProtoObject* ExecutionEngine::callNative(proto::ProtoContext* ctx, 
     const proto::ProtoObject* r = nullptr;
     // The C++ boundary to a native. runLoop's chain below already translates
     // every std:: exception through DESIGN §7's table, and already passes
-    // FutureYield and ScalaThrow through, so the one clause that was missing is
+    // FutureYield and every proto::ProtoException (a Scala throw, a module's
+    // error, protoCore's own) through, so the one clause that was missing is
     // the last resort: a native from a dlopen'd provider plug-in that throws
     // something which is not a std::exception at all would otherwise escape the
     // VM and terminate the process (Phase 6 plan A0-7). std::logic_error reaches
@@ -114,8 +116,8 @@ const proto::ProtoObject* ExecutionEngine::callNative(proto::ProtoContext* ctx, 
         r = fn(&scope, self, nullptr, &list, nullptr);
     } catch (FutureYield&) {
         passOn = std::current_exception();  // a cooperative suspension, not an error
-    } catch (ScalaThrow&) {
-        passOn = std::current_exception();  // a Scala exception already in flight
+    } catch (const proto::ProtoException&) {
+        passOn = std::current_exception();  // a language value in flight, untouched
     } catch (ScalaError&) {
         passOn = std::current_exception();  // a native throw site's own translation
     } catch (const std::exception&) {
@@ -938,14 +940,16 @@ const proto::ProtoObject* ExecutionEngine::runFrame(proto::ProtoContext& frame,
         std::exception_ptr passOn;
         try {
             return runLoop(frame, mod, slots, sp, ip, &faultPc);
-        } catch (ScalaThrow& t) {
-            // Re-root before anything allocates: the frames below this one have
-            // already been destroyed, so this context's returnValue is the only
-            // thing the collector can see the payload through (plan A0-2, E1).
-            frame.returnValue = t.value;
+        } catch (const proto::ProtoException& t) {
+            // Every language value arrives here: a Scala throw, an error a module
+            // raised, protoCore's own (built by the error factory). protoCore pins
+            // the value while the exception is in flight; enterHandler moves it
+            // into a traced slot before the handler body allocates. The handler
+            // body selects by the value's chain and RETHROWs what it does not
+            // match (CompilePatterns.cpp).
             const BytecodeModule::Handler* h = mod.handlerFor(faultPc);
             if (h) {
-                sp = enterHandler(mod, slots, *h, t.value, &ip);
+                sp = enterHandler(mod, slots, *h, t.value(), &ip);
                 continue;   // leaves the catch block: the handler body then runs with
                             // NO live C++ handler, so it suspends like any other code
             }
@@ -954,7 +958,7 @@ const proto::ProtoObject* ExecutionEngine::runFrame(proto::ProtoContext& frame,
             const BytecodeModule::Handler* h = mod.handlerFor(faultPc);
             if (h) {
                 const proto::ProtoObject* v = materialiseError(&frame, e);
-                frame.returnValue = v;
+                frame.returnValue = v;   // rooted until enterHandler stores it in a slot
                 sp = enterHandler(mod, slots, *h, v, &ip);
                 continue;
             }
@@ -974,7 +978,7 @@ const proto::ProtoObject* ExecutionEngine::runFrameRaising(proto::ProtoContext& 
     // ipOffset - 1, which is the index runLoop's own catch reports (plan A0-3).
     frame.returnValue = payload;
     const BytecodeModule::Handler* h = mod.handlerFor(ipOffset - 1);
-    if (!h) throw ScalaThrow(payload);
+    if (!h) throw ScalaThrow(&frame, payload);
     const Instr* ip = nullptr;
     const proto::ProtoObject** newSp = enterHandler(mod, slots, *h, payload, &ip);
     return runFrame(frame, mod, slots, newSp, ip);
@@ -1329,7 +1333,7 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                     // A Catch cascade that matched nothing, or a Finally body that
                     // has finished: re-raise the value the handler saved in slot
                     // `operand` (plan A0-4).
-                    ops::rethrow(slots[operand], mod.name());
+                    ops::rethrow(&frame, slots[operand], mod.name());
             }
             // Every handled opcode continues the loop or returns; reaching this
             // point means the module holds an opcode value the VM does not know
@@ -1363,12 +1367,30 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
         *faultPc = static_cast<std::size_t>(ip - code) - 1;
         if (t.line == 0) t.line = mod.lineAt(*faultPc);
         passOn = std::current_exception();
+    } catch (const proto::ProtoException& e) {
+        // A language value raised outside protoScala's own throw sites: protoCore's
+        // error (built by the error factory as a Scala class), a module's error, or
+        // another runtime's. A plain ProtoException carries nothing but its value,
+        // so it is re-raised as a ScalaThrow of the SAME value to give it this
+        // source line (D14's report shape). A subclass of another runtime may
+        // carry its own state, so it passes through untouched.
+        *faultPc = static_cast<std::size_t>(ip - code) - 1;
+        if (typeid(e) == typeid(proto::ProtoException)) {
+            ScalaThrow t(&frame, e.value());
+            t.line = mod.lineAt(*faultPc);
+            passOn = std::make_exception_ptr(t);
+        } else {
+            passOn = std::current_exception();
+        }
     } catch (ScalaError& e) {
         *faultPc = static_cast<std::size_t>(ip - code) - 1;
         if (e.line == 0) e.line = mod.lineAt(*faultPc);
         passOn = std::current_exception();
     } catch (const std::invalid_argument& e) {
-        // protoCore argument errors (e.g. asIntegerString with a bad base).
+        // The std:: arms below translate C++ library errors -- a native's, or a
+        // UMD module's (a foreign C++ exception is a module defect, not a language
+        // value). protoCore itself no longer throws them since 3.0.0: its errors
+        // are ProtoExceptions, handled above.
         // Caught by its EXACT type: std::invalid_argument derives from
         // std::logic_error, and a std::logic_error is a VM or compiler defect
         // that must stay uncatchable, so this file never carries a
@@ -1396,8 +1418,9 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
         se.line = mod.lineAt(*faultPc);
         passOn = std::make_exception_ptr(se);
     } catch (const std::runtime_error& e) {
-        // A protoCore error (e.g. "Objects are not integer types for division.")
-        // becomes a Scala RuntimeException; it is never swallowed (DESIGN §7).
+        // A C++ runtime error from a native or a module (e.g. the geometry
+        // example's legacyArea) becomes a Scala RuntimeException carrying what();
+        // it is never swallowed (DESIGN §7).
         *faultPc = static_cast<std::size_t>(ip - code) - 1;
         ScalaError se("RuntimeException", e.what());
         se.line = mod.lineAt(*faultPc);

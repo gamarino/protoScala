@@ -501,6 +501,7 @@ add_library(protoscala_runtime OBJECT
     src/runtime/HttpPrimitives.cpp
     src/runtime/ActorScheduler.cpp
     src/runtime/Futures.cpp
+    src/runtime/ErrorFactory.cpp
     src/runtime/Mailbox.cpp
     src/runtime/Prelude.cpp
     src/runtime/PreludeImage.cpp

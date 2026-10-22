@@ -456,22 +456,36 @@ inline void uncons(proto::ProtoContext* ctx, const proto::ProtoObject* listObj,
 
 /**
  * THROW. Only a `Throwable` may be thrown (Scala's rule), tested with the Phase 2
- * per-class marker attribute and not with protoCore's `isInstanceOf` (R3).
+ * per-class marker attribute and not with protoCore's `isInstanceOf` (R3) --
+ * except a FOREIGN object, one that no Scala class built: a module's error value
+ * a handler caught (`case e: g.GeometryError => log(e); throw e`) is re-raised
+ * as it is (D134). Scala values that are not Throwables are still refused.
  */
 [[noreturn]] inline void throwValue(proto::ProtoContext* ctx, const RuntimeLayout& L,
                                     const proto::ProtoObject* v) {
     if (v == PROTO_NONE) throw ScalaError("NullPointerException", "throw null");
-    if (v->getAttribute(ctx, L.throwableKey) != PROTO_TRUE)
+    const bool foreign = isObjectCellFast(v) && !isScalaInstance(ctx, L, v) &&
+                         !compiledModuleOf(ctx, L, v) && !v->isMethod(ctx) &&
+                         v->isInstanceOf(ctx, L.anyProto) != PROTO_TRUE;
+    if (!foreign && v->getAttribute(ctx, L.throwableKey) != PROTO_TRUE)
         throw ScalaError("IllegalArgumentException",
                          "throw expects a Throwable, got " + typeName(ctx, L, v));
-    throw ScalaThrow(v);
+    throw ScalaThrow(ctx, v);
 }
 
-/** RETHROW: re-raise the value a handler saved in a slot (plan A0-4). */
-[[noreturn]] inline void rethrow(const proto::ProtoObject* v, std::string_view where) {
+/**
+ * RETHROW: re-raise the value a handler saved in a slot (plan A0-4). The handler
+ * body runs outside the C++ catch clause (runFrame), so the exception object is
+ * gone by now and `throw;` is not available: a new ScalaThrow carries the SAME
+ * value, which is what selection by prototype looks at. Any value is re-raised,
+ * a foreign one included -- THROW's Throwable rule is about what a program may
+ * throw, and this value was already in flight.
+ */
+[[noreturn]] inline void rethrow(proto::ProtoContext* ctx, const proto::ProtoObject* v,
+                                 std::string_view where) {
     if (!v || v == PROTO_NONE)
         throw std::logic_error("RETHROW with no saved exception in " + std::string(where));
-    throw ScalaThrow(v);
+    throw ScalaThrow(ctx, v);
 }
 
 // ---------------------------------------------------------------------------

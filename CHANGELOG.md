@@ -6,6 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — protoCore 3.0.0: one exception type, selected by prototype, 2026-10-21
+
+- **A Scala exception is a `proto::ProtoException`.** `ScalaThrow` derives from
+  protoCore's one exception type and keeps only its source line; protoCore pins
+  the value in flight, so the per-frame re-rooting is gone. Every handler (the
+  interpreter's and the transpiled frame's, `Try`, futures, actors, threads, the
+  session) catches the base type, so an error raised by protoCore, by a C++
+  module or by another runtime is caught like a Scala one.
+- **protoCore's errors arrive as Scala classes**, through an error factory each
+  session installs: a division by zero or an overflow as `ArithmeticException`,
+  a malformed integer as `NumberFormatException`, a type mismatch as
+  `ClassCastException`, an arity error as `IllegalArgumentException`. They used to
+  arrive as `RuntimeException` (a `std::runtime_error` from protoCore) or as the
+  class the `std::` exception's type implied.
+- **A module's error type is caught by name** (D133): `case e: g.NegativeRadius`
+  after `import example.geometry as g`, or after a member import. The pattern tests
+  protoCore's prototype chain. A module's error is not a Scala `Throwable`, so
+  `case e: Exception` does not catch it; `throw e` re-raises a caught one (D134).
+- **Nothing but a `ProtoException` leaves protoScala.** A provider entry, a
+  transpiled module's initialiser and a transpiled function entered from another
+  runtime materialise protoScala's internal `ScalaError` first; a foreign caller of
+  a transpiled function that raised used to receive a `std::runtime_error`.
+- **An unprefixed import reaches the space's resolution chain** after the `.scala`
+  and compiled-module lookups, as INTEROP §3 documented, so a provider an embedder
+  or a plug-in adds is importable: `import example.geometry as g`.
+- An uncaught module error is reported as `file:line: error: <name>: <message>`
+  from its attributes.
+- Conformance rule 14: `catchForeignError` and `escapeLanguageError` are
+  implemented; the four `exception.*` cases pass.
+- Tests: `25-interop/geometry-module-errors.scala` and the tutorial's §11.9 run
+  against protoCore's example geometry module through a test-only provider
+  plug-in; `ErrorFactory.*`, `ForeignTypes.*` and the reworked `ScalaThrowShape` /
+  `ForeignBoundary` unit tests; `protoscala-foreign-caller` now requires a
+  `ProtoException`.
+
 ### Changed — protoCore 3.0.0: natives read their arguments in place, 2026-10-20
 
 - **Built against protoCore 3.0.0** (SOVERSION 4), now the declared minimum

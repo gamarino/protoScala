@@ -1,5 +1,6 @@
 #include "runtime/ActorScheduler.h"
 #include "runtime/Errors.h"
+#include "runtime/ErrorFactory.h"
 #include "runtime/ExecutionEngine.h"
 #include "runtime/FutureYield.h"
 #include "runtime/Futures.h"
@@ -337,15 +338,16 @@ void ActorScheduler::deliver(proto::ProtoContext* ctx, ActorState* a,
         setCurrentActor(nullptr);
         *suspended = true;
         return;
-    } catch (ScalaThrow& t) {
+    } catch (const proto::ProtoException& t) {
         // DESIGN §8.4: the ask's future fails WITH THE EXCEPTION VALUE, the error
         // is reported, the actor keeps its previous state and stays alive
-        // (plan A0-7 invariant 6). Rooted before completeWith allocates.
-        call.returnValue = t.value;
+        // (plan A0-7 invariant 6). Any language value, a module's error included.
+        // Rooted before completeWith allocates.
+        call.returnValue = t.value();
+        const std::string text = describeThrown(&call, t.value());
         std::fflush(stdout);
-        std::fprintf(stderr, "protoscala: actor handler failed: %s\n",
-                     engine_->showTopLevel(&call, t.value).c_str());
-        if (slot[3] != PROTO_NONE) futures::completeWith(&call, L, slot[3], t.value);
+        std::fprintf(stderr, "protoscala: actor handler failed: %s\n", text.c_str());
+        if (slot[3] != PROTO_NONE) futures::completeWith(&call, L, slot[3], t.value());
     } catch (ScalaError& e) {
         // A native failure: materialised into a Throwable by completeError, so
         // the ask's Failure always carries a real exception value.
@@ -413,12 +415,12 @@ void ActorScheduler::resumeSuspendedTurn(proto::ProtoContext* ctx, ActorState* a
     } catch (FutureYield&) {
         if (slot[2] != PROTO_NONE) actor->setAttribute(&turn, L.turnFutureKey, slot[2]);
         yielded = true;
-    } catch (ScalaThrow& t) {
-        turn.returnValue = t.value;
+    } catch (const proto::ProtoException& t) {
+        turn.returnValue = t.value();
+        const std::string text = describeThrown(&turn, t.value());
         std::fflush(stdout);
-        std::fprintf(stderr, "protoscala: actor handler failed: %s\n",
-                     engine_->showTopLevel(&turn, t.value).c_str());
-        if (slot[2] != PROTO_NONE) futures::completeWith(&turn, L, slot[2], t.value);
+        std::fprintf(stderr, "protoscala: actor handler failed: %s\n", text.c_str());
+        if (slot[2] != PROTO_NONE) futures::completeWith(&turn, L, slot[2], t.value());
     } catch (ScalaError& e) {
         std::fflush(stdout);
         std::fprintf(stderr, "protoscala: actor handler failed: %s\n", e.what());

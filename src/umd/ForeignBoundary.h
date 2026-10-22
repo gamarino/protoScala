@@ -8,10 +8,11 @@
  *  - FutureYield is NOT a std::exception and must be first anyway: a later
  *    catch(...) would eat a cooperative suspension and the actor would never
  *    resume.
- *  - ScalaThrow IS a std::exception (and deliberately not a std::runtime_error).
- *    Without this clause the std::exception arm would rewrite every Scala
- *    exception crossing a module boundary into a RuntimeException, losing its
- *    class and its payload.
+ *  - proto::ProtoException -- a Scala throw (ScalaThrow), a module's error,
+ *    protoCore's own, another runtime's -- is a language value and passes
+ *    through untouched. It does not derive from std::exception, so the arms
+ *    below could not catch it anyway; the clause is first so that a reader sees
+ *    it is never translated, and so that the catch(...) arm can never eat it.
  *  - ScalaError is already a translation; re-translating it would replace a
  *    precise class name with RuntimeException.
  *  - std::logic_error must NOT be translated and must NOT be catchable (D74):
@@ -36,9 +37,11 @@
  */
 #pragma once
 #include "runtime/Errors.h"
+#include "runtime/ErrorFactory.h"
 #include "runtime/FutureYield.h"
 
 #include <exception>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 
@@ -51,7 +54,7 @@ auto translateForeignException(Call&& call) -> decltype(call()) {
         return call();
     }
     catch (FutureYield&)            { passOn = std::current_exception(); }  // a cooperative suspension, not an error
-    catch (ScalaThrow&)             { passOn = std::current_exception(); }  // a Scala exception already in flight
+    catch (const proto::ProtoException&) { passOn = std::current_exception(); }  // a language value in flight
     catch (ScalaError&)             { passOn = std::current_exception(); }  // a native throw site's own translation
     catch (const std::logic_error&) { passOn = std::current_exception(); }  // D74: a VM defect stays uncatchable
     catch (const std::exception& e) {
@@ -61,6 +64,29 @@ auto translateForeignException(Call&& call) -> decltype(call()) {
         passOn = std::make_exception_ptr(ScalaError("RuntimeException", "native exception"));
     }
     std::rethrow_exception(passOn);
+}
+
+/*
+ * leaveProtoScala — translateForeignException for an entry that a caller OUTSIDE
+ * protoScala may have made: a UMD provider's tryLoad, a transpiled module's
+ * initialiser, a transpiled function entered by a foreign caller through its exported method cell.
+ *
+ * On top of the shape above, a ScalaError (protoScala's internal, lazy form, and
+ * the form every translated std::exception takes) is materialised into a
+ * ScalaThrow carrying an instance of the prelude class it names, so the caller
+ * only ever receives a proto::ProtoException (protoCore's rule 5, DESIGN §7's
+ * boundary rule). Materialising is done after the catch clause has completed,
+ * for the MSVC reason given above.
+ */
+template <typename Call>
+auto leaveProtoScala(proto::ProtoContext* ctx, Call&& call) -> decltype(call()) {
+    std::optional<ScalaError> pending;
+    try {
+        return translateForeignException(std::forward<Call>(call));
+    } catch (const ScalaError& e) {
+        pending.emplace(e);
+    }
+    raiseAtBoundary(ctx, *pending);
 }
 
 } // namespace protoScala

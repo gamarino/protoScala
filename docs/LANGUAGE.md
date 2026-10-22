@@ -203,6 +203,18 @@ sees every file, socket and process failure and nothing else (D97, D124). `Asser
 a failed `assert` or a `???` (§4.4). A defect in protoScala itself is **not** in
 this tree and is not catchable (D74).
 
+**Errors that are not in this tree (protoCore 3.0.0).** Every exception on protoCore
+is one C++ type whose type is the value's prototype chain, so an error raised by a
+module (in C++ or in another language) is that module's own object. A handler
+names its type through the import — `case e: g.NegativeRadius` after
+`import example.geometry as g`, or a member-imported name — and the pattern tests
+the chain (D133). Such an error is not below `Throwable`, so `case e: Exception`
+does not catch it (D134); `case e =>` and `Try` do. protoCore's own errors are
+instances of the classes above: a division by zero or an overflow an
+`ArithmeticException`, a malformed number a `NumberFormatException`, a type
+mismatch a `ClassCastException`, an arity error an `IllegalArgumentException`
+(DESIGN §7, INTEROP §9).
+
 ### 3.2 Imports, and modules (Phase 6, corrected by Track X)
 
 `import` has **two** meanings here, and until Track X this section documented

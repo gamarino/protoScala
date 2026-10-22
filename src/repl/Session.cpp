@@ -9,6 +9,7 @@
 #include "runtime/Primitives.h"
 #include "runtime/Values.h"
 #include "umd/ForeignBoundary.h"
+#include "runtime/ErrorFactory.h"
 #include "umd/Prefixes.h"
 #include "umd/ProviderPlugins.h"
 #include "umd/CompiledModuleProvider.h"
@@ -92,6 +93,10 @@ Session::Session() : runtime_(space_), engine_(runtime_.layout()) {
     proto::ProtoContext ctx(&space_, runtime_.rootContext());
     loadPrelude(&ctx, engine_, globals_, modules_);
     bindPreludeHooks(&ctx, runtime_.mutableLayout(), globals_);
+    // protoCore's own errors arrive as the prelude's classes from here on
+    // (ErrorFactory.h). Installed once the classes exist, before any thread
+    // other than this one can run code in the space.
+    installErrorFactory(&space_, &engine_, &runtime_.layout());
     // The table every module is compiled from: a COPY, so it shares the key
     // counters and a module's names can never collide with a session global
     // (A0-16). Taken here, after the prelude and before any user unit.
@@ -116,6 +121,7 @@ Session::~Session() {
     // AFTER the workers are joined by shutdown(): a worker can still be
     // importing until then, and the provider would find a dangling host.
     unregisterModuleHost(&space_, this);
+    uninstallErrorFactory(&space_, &engine_);
     std::fflush(stdout);
 }
 
@@ -162,6 +168,16 @@ EvalStatus Session::evaluate(const std::string& source, const std::string& sourc
         std::fflush(stdout);
         std::fprintf(stderr, "%s: error: %s\n", sourceName.c_str(), e.what());
         return EvalStatus::Error;
+    } catch (const proto::ProtoException& t) {
+        // A language value raised while compiling (a module's top level or a
+        // provider that an import reached, through a path not translated into a
+        // CompileError): reported, never let out of the session, whose space it
+        // must not outlive.
+        proto::ProtoContext show(&space_, runtime_.rootContext());
+        std::fflush(stdout);
+        std::fprintf(stderr, "%s: error: %s\n", sourceName.c_str(),
+                     showThrown(&show, t.value()).c_str());
+        return EvalStatus::Error;
     }
 
     proto::ProtoContext ctx(&space_, runtime_.rootContext());
@@ -177,13 +193,14 @@ EvalStatus Session::evaluate(const std::string& source, const std::string& sourc
         // object without running it, which is what Scala's REPL does too.
         else if (!cu.appKey.empty() && mainArgs)
             forceGlobal(&ctx, cu.appKey);
-    } catch (const ScalaThrow& t) {
-        // An uncaught Scala exception, reported through the VALUE's own
-        // toString, so a user-defined class says what its class says. The engine
-        // must be active for that, and it is: this is the thread that ran it.
+    } catch (const proto::ProtoException& t) {
+        // An uncaught exception value -- a Scala throw, a module's error,
+        // protoCore's own -- reported through the VALUE's own toString, so a
+        // user-defined class says what its class says. The engine must be active
+        // for that, and it is: this is the thread that ran it.
         std::fflush(stdout);
-        std::fprintf(stderr, "%s:%d: error: %s\n", sourceName.c_str(), t.line,
-                     showThrown(&ctx, t.value).c_str());
+        std::fprintf(stderr, "%s:%d: error: %s\n", sourceName.c_str(), thrownLine(t),
+                     showThrown(&ctx, t.value()).c_str());
         return EvalStatus::Error;
     } catch (const ScalaError& e) {
         std::fflush(stdout);
@@ -221,10 +238,10 @@ EvalStatus Session::evaluate(const std::string& source, const std::string& sourc
                 outcome->echo.push_back("val " + cu.resultName + " = " +
                                         showResult(&ctx, global(cu.resultKey)));
         }
-    } catch (const ScalaThrow& t) {  // a toString that throws
+    } catch (const proto::ProtoException& t) {  // a toString that throws
         std::fflush(stdout);
         std::fprintf(stderr, "%s: error: %s\n", sourceName.c_str(),
-                     showThrown(&ctx, t.value).c_str());
+                     showThrown(&ctx, t.value()).c_str());
         return EvalStatus::Error;
     } catch (const ScalaError& e) {  // a toString that throws
         std::fflush(stdout);
@@ -254,11 +271,10 @@ void Session::callMain(proto::ProtoContext* ctx, const std::string& mainKey, boo
 }
 
 std::string Session::showThrown(proto::ProtoContext* ctx, const proto::ProtoObject* v) {
-    try {
-        return engine_.showTopLevel(ctx, v);
-    } catch (...) {
-        return "<exception whose toString failed>";
-    }
+    // A foreign value (a module's error) has no Scala toString: describeThrown
+    // reads its `name` and `message`. It needs this session's engine active.
+    ExecutionEngine::ActiveCallGuard active(&engine_, &runtime_.layout());
+    return describeThrown(ctx, v);
 }
 
 int Session::runModule(const std::string& soPath, const std::vector<std::string>& args) {
@@ -302,10 +318,10 @@ int Session::runModule(const std::string& soPath, const std::vector<std::string>
             for (std::string& a : owned) argv.push_back(a.data());
             rc = mainFn(static_cast<int>(argv.size()), argv.empty() ? nullptr : argv.data());
         }
-    } catch (const ScalaThrow& t) {
+    } catch (const proto::ProtoException& t) {
         std::fflush(stdout);
-        std::fprintf(stderr, "%s:%d: error: %s\n", soPath.c_str(), t.line,
-                     showThrown(&ctx, t.value).c_str());
+        std::fprintf(stderr, "%s:%d: error: %s\n", soPath.c_str(), thrownLine(t),
+                     showThrown(&ctx, t.value()).c_str());
         return 1;
     } catch (const ScalaError& e) {
         std::fflush(stdout);
@@ -340,10 +356,10 @@ int Session::withModule(const std::string& soPath,
             ctx.returnValue = static_cast<const proto::ProtoObject*>(init());
         }
         return fn(&ctx, ctx.returnValue, ud);
-    } catch (const ScalaThrow& t) {
+    } catch (const proto::ProtoException& t) {
         std::fflush(stdout);
-        std::fprintf(stderr, "%s:%d: error: %s\n", soPath.c_str(), t.line,
-                     showThrown(&ctx, t.value).c_str());
+        std::fprintf(stderr, "%s:%d: error: %s\n", soPath.c_str(), thrownLine(t),
+                     showThrown(&ctx, t.value()).c_str());
         return 1;
     } catch (const ScalaError& e) {
         std::fflush(stdout);
@@ -587,23 +603,63 @@ const ModuleExports& Session::load(const std::string& providerSpec, const std::s
         // PROTOSCALAC_SPECIFICATION §8 records it.
         if (!findCompiledModuleFile(logicalPath).empty())
             return loadForeign("provider:compiled", logicalPath, pos);
+        if (const ModuleExports* chained = loadThroughResolutionChain(logicalPath, pos))
+            return *chained;
         throw CompileError("ImportError: no module found for '" + logicalPath + "' (tried " +
                                triedPathsOf(logicalPath, importerDir) + ")",
                            pos);
     }
     try {
         return loadModuleFile(&ctx, abs, logicalPath).exports;
-    } catch (const ScalaThrow& t) {
+    } catch (const proto::ProtoException& t) {
         // The module's own top level threw. Report it as an import failure with
         // the thrown value's own toString, so a reader sees what actually failed.
         throw CompileError("ImportError: " + logicalPath + " failed to initialise: " +
-                               showThrown(&ctx, t.value),
+                               showThrown(&ctx, t.value()),
                            pos);
     } catch (const ScalaError& e) {
         throw CompileError(std::string("ImportError: ") + e.what(), pos);
     } catch (const std::runtime_error& e) {
         throw CompileError(std::string("ImportError: ") + e.what(), pos);
     }
+}
+
+const ModuleExports* Session::loadThroughResolutionChain(const std::string& logicalPath,
+                                                         SourcePos pos) {
+    // protoCore's logical paths are '/'-separated; an import writes them dotted.
+    std::string path = logicalPath;
+    std::replace(path.begin(), path.end(), '.', '/');
+    const std::string cacheKey = "chain:" + path;
+    if (auto it = foreignModules_.find(cacheKey); it != foreignModules_.end()) return &it->second;
+
+    proto::ProtoContext ctx(&space_, runtime_.rootContext());
+    const RuntimeLayout& L = runtime_.layout();
+    const proto::ProtoObject* wrapper = nullptr;
+    try {
+        // Every provider in the chain is foreign code: the boundary shape applies.
+        wrapper = translateForeignException([&]() -> const proto::ProtoObject* {
+            return space_.getImportModule(&ctx, path.c_str(), "exports");
+        });
+    } catch (const proto::ProtoException& t) {
+        throw CompileError("ImportError: " + showThrown(&ctx, t.value()), pos);
+    } catch (const ScalaError& e) {
+        throw CompileError(std::string("ImportError: ") + e.what(), pos);
+    }
+    if (!wrapper || wrapper == PROTO_NONE) return nullptr;
+    ctx.returnValue = wrapper;
+    const proto::ProtoObject* mod = wrapper->getAttribute(&ctx, L.exportsKey);
+    if (!mod || mod == PROTO_NONE) return nullptr;
+
+    // getImportModule already published the module through SharedModuleCache and
+    // rooted it (P3); the session binds it exactly as loadForeign does.
+    ModuleExports ex;
+    ex.foreign = true;
+    ex.moduleKind = BindingKind::Val;
+    ex.moduleName = moduleObjectName(logicalPath);
+    ex.moduleKey = "__module" + std::to_string(++moduleCounter_) + "$" + ex.moduleName;
+    L.globals->setAttribute(&ctx, proto::ProtoString::createSymbol(&ctx, ex.moduleKey.c_str()),
+                            mod);
+    return &foreignModules_.emplace(cacheKey, std::move(ex)).first->second;
 }
 
 const ModuleExports& Session::loadForeign(const std::string& providerSpec,
@@ -637,6 +693,10 @@ const ModuleExports& Session::loadForeign(const std::string& providerSpec,
         // exception escaping it into this frame would cross an ABI this binary
         // did not compile (A0-7).
         mod = translateForeignException([&] { return provider->tryLoad(logicalPath, &ctx); });
+    } catch (const proto::ProtoException& t) {
+        // The provider raised a language value (its own ImportError, a module's
+        // error): an import failure, reported with the value's text.
+        throw CompileError("ImportError: " + showThrown(&ctx, t.value()), pos);
     } catch (const ScalaError& e) {
         throw CompileError(std::string("ImportError: ") + e.what(), pos);
     }
@@ -696,6 +756,8 @@ std::string Session::bindForeignMember(const ModuleExports& mod, const std::stri
     try {
         v = translateForeignException(
             [&]() -> const proto::ProtoObject* { return obj->getAttribute(&ctx, memberKey); });
+    } catch (const proto::ProtoException& t) {
+        throw CompileError("ImportError: " + showThrown(&ctx, t.value()), pos);
     } catch (const ScalaError& e) {
         throw CompileError(std::string("ImportError: ") + e.what(), pos);
     }

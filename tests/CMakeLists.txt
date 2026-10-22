@@ -181,6 +181,16 @@ foreach(conf_file ${PROTOSCALA_CONFORMANCE_FILES})
         set_tests_properties("conformance/${conf_file}" PROPERTIES
             ENVIRONMENT
             "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/28-member-imports/_modules")
+    elseif(conf_file STREQUAL "tutorial/11-exceptions-from-a-module.scala")
+        # Chapter 11.9: protoCore's example geometry module, through its plug-in
+        # (tests/unit/geometry_provider_plugin.cpp), as in 25-interop.
+        if(TARGET protoscala_geometry_provider)
+            set_tests_properties("conformance/${conf_file}" PROPERTIES
+                ENVIRONMENT
+                "PROTOSCALA_PROVIDERS=$<TARGET_FILE:protoscala_geometry_provider>")
+        else()
+            set_tests_properties("conformance/${conf_file}" PROPERTIES DISABLED TRUE)
+        endif()
     elseif(conf_file MATCHES "^tutorial/(16-|18-io-|00-readme-10min-(scala|pyjs)-files)")
         # Track F. The chapter-16 snippets name their files the way a reader
         # would (`"notes.txt"`), so each one is run from a private directory of
@@ -206,7 +216,17 @@ foreach(conf_file ${PROTOSCALA_CONFORMANCE_FILES})
         # points at the test double built by tests/unit (Task 6). Every other
         # 25-interop fixture runs with NO provider loaded, which is what makes
         # `no provider registered for '<alias>'` the honest expected message.
-        if(conf_file MATCHES "^25-interop/(stand-in-|a-provider-failure)")
+        # The geometry fixture loads protoCore's example module through its own
+        # plug-in (tests/unit/geometry_provider_plugin.cpp).
+        if(conf_file STREQUAL "25-interop/geometry-module-errors.scala")
+            if(TARGET protoscala_geometry_provider)
+                set_tests_properties("conformance/${conf_file}" PROPERTIES
+                    ENVIRONMENT
+                    "PROTOSCALA_PROVIDERS=$<TARGET_FILE:protoscala_geometry_provider>")
+            else()
+                set_tests_properties("conformance/${conf_file}" PROPERTIES DISABLED TRUE)
+            endif()
+        elseif(conf_file MATCHES "^25-interop/(stand-in-|a-provider-failure)")
             set_tests_properties("conformance/${conf_file}" PROPERTIES
                 ENVIRONMENT
                 "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/25-interop/_modules;PROTOSCALA_PROVIDERS=$<TARGET_FILE:protoscala_probe_provider>")
