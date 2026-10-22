@@ -495,3 +495,307 @@ TEST(ProtoSTInterop, AProtoScalaProgramBindsAMemberOfAProtoSTModule) {
     EXPECT_NE(session.runScript("absent.scala", {}), 0)
         << "a member the module does not define was accepted";
 }
+
+// ===========================================================================
+// Calling protoST from protoScala, and exceptions crossing both ways (D135).
+//
+// A protoST method is protoST bytecode, not a proto::ProtoMethod; protoST
+// installs one protoCore method on its Object prototype, `__st_send__`, and a
+// Scala call on a protoST object sends the Smalltalk message through it, with
+// the selector mapped by umd/SmalltalkSelector.h. In the other direction,
+// protoST's call form `f apply(x)` reaches the native `apply` every protoScala
+// function value carries, which re-enters protoScala's own space.
+//
+// Each program prints what it observed and the test compares the whole output,
+// so a wrong handler, a missing `ensure:` or a copied value changes a line.
+// ===========================================================================
+namespace {
+
+// The protoST side of every case below.
+const char* const kSendLib =
+    "\"-- send_lib.st --\"\n"
+    "Object subclass: #Counter instanceVariableNames: 'value'.\n"
+    "Error subclass: #CounterOverflow.\n"
+    "Error subclass: #UnrelatedError.\n"
+    "Counter >> initialize\n"
+    "  value := 0.\n"
+    "\n"
+    "Counter >> increment\n"
+    "  value := value + 1.\n"
+    "  value > 2 ifTrue: [ ^ CounterOverflow new signal: 'counter overflow' ].\n"
+    "  ^ value.\n"
+    "\n"
+    "Counter >> value ^ value.\n"
+    "Counter >> at: k put: v ^ v.\n"
+    "Counter class >> boom ^ CounterOverflow new signal: 'boom'.\n"
+    "Counter class >> call: f with: x ^ f apply(x).\n"
+    "Counter class >> adder ^ [:x :y | x + y].\n"
+    "Counter class >> rescue: f ^ [ f apply() ] on: Exception do: [:e | e ].\n"
+    "Counter class >> rescueUnrelated: f\n"
+    "  ^ [ f apply() ] on: UnrelatedError do: [:e | 'wrong handler' ].\n"
+    "\n"
+    "Counter >> guard: f log: l\n"
+    "  ^ [ f apply() ] ensure: [ value := value + 100. l apply('st ensure') ].\n"
+    "\n"
+    "Counter >> overflowGuarded: l\n"
+    "  ^ [ CounterOverflow new signal: 'guarded overflow' ]\n"
+    "      ensure: [ value := value + 1000. l apply('st ensure') ].\n";
+
+// Runs `script` (written to `file`) with protoST's send_lib importable, and
+// answers its exit status; stdout and stderr are captured into the two strings.
+//
+// Each run gets a module of its own name. A loaded module is a process-level
+// entity (INTEROP §6), so a second test importing `send_lib` would be handed the
+// namespace the first test's STRuntime -- destroyed since -- built.
+int runWithSendLib(const std::string& file, const std::string& script, std::string* out,
+                   std::string* err = nullptr) {
+    static int serial = 0;
+    const std::string lib = "send_lib_" + std::to_string(++serial);
+    writeFile(lib + ".st", kSendLib);
+    ::setenv("STPATH", ".", 1);
+    ::setenv("PROTOST_LIB", PROTOST_KERNEL_LIB, 1);
+    std::string body = script;
+    for (std::size_t at = body.find("st.send_lib"); at != std::string::npos;
+         at = body.find("st.send_lib", at + 3 + lib.size()))
+        body.replace(at, 11, "st." + lib);
+    writeFile(file, body);
+    protoST::STRuntime st;
+    protoScala::Session session;
+    std::fflush(stdout);
+    std::fflush(stderr);
+    testing::internal::CaptureStdout();
+    testing::internal::CaptureStderr();
+    const int status = session.runScript(file, {});
+    std::fflush(stdout);
+    std::fflush(stderr);
+    *out = testing::internal::GetCapturedStdout();
+    const std::string e = testing::internal::GetCapturedStderr();
+    if (err) *err = e;
+    else if (!e.empty()) std::fprintf(stderr, "%s", e.c_str());
+    return status;
+}
+
+}  // namespace
+
+// The calls themselves: `new` runs `initialize` (0); a unary message with and
+// without `()`; a keyword selector by the `_` rule (`at_put` -> `at:put:`) and by
+// backticks; an argument comes back as the same cell (`eq`); Smalltalk calls a
+// Scala function with an argument (40); a Smalltalk block reaching Scala is
+// called with its own message, `value:value:` (42).
+TEST(ProtoSTInterop, ScalaSendsSmalltalkMessages) {
+    std::string out, err;
+    const int status = runWithSendLib("send_calls.scala",
+        "import st.send_lib.Counter\n"
+        "\n"
+        "@main def run(): Unit =\n"
+        "  val c = Counter.`new`()\n"
+        "  println(c.value())\n"
+        "  println(c.increment())\n"
+        "  println(c.increment)\n"
+        "  println(c.value)\n"
+        "  val probe = List(1, 2)\n"
+        "  println(c.at_put(1, probe) eq probe)\n"
+        "  println(c.`at:put:`(2, \"x\"))\n"
+        "  println(Counter.call_with((x: Int) => x * 10, 4))\n"
+        "  println(Counter.adder().value_value(40, 2))\n",
+        &out, &err);
+    EXPECT_EQ(status, 0) << err;
+    EXPECT_EQ(out, "0\n1\n2\n2\ntrue\nx\n40\n42\n") << err;
+}
+
+// (1) An Error defined and signalled in Smalltalk, handled nowhere in protoST,
+// is caught in Scala by the imported class as a type pattern (D133), not by an
+// unrelated protoST class nor by RuntimeException, and by Throwable and
+// Exception (D134). Each `catch` lists the wrong handlers FIRST, so a wrong
+// selection prints a "wrong" line instead of the expected one.
+TEST(ProtoSTInterop, ASmalltalkErrorIsCaughtInScalaByItsClass) {
+    std::string out, err;
+    const int status = runWithSendLib("st_error.scala",
+        "import st.send_lib.{Counter, CounterOverflow, UnrelatedError}\n"
+        "\n"
+        "@main def run(): Unit =\n"
+        "  val c = Counter.`new`()\n"
+        "  c.increment()\n"
+        "  c.increment()\n"
+        "  try c.increment()\n"
+        "  catch\n"
+        "    case e: UnrelatedError   => println(\"wrong: UnrelatedError\")\n"
+        "    case e: RuntimeException => println(\"wrong: RuntimeException\")\n"
+        "    case e: CounterOverflow  => println(\"CounterOverflow: \" + e.messageText())\n"
+        "  try c.increment()\n"
+        "  catch\n"
+        "    case e: Throwable => println(\"Throwable: \" + e.messageText)\n"
+        "  try c.increment()\n"
+        "  catch\n"
+        "    case e: Exception => println(\"Exception: \" + e.messageText())\n"
+        "  try Counter.boom()\n"
+        "  catch\n"
+        "    case e: CounterOverflow => println(\"class side: \" + e.messageText())\n"
+        "  val escaped =\n"
+        "    try\n"
+        "      try c.increment()\n"
+        "      catch case e: RuntimeException => \"wrong: RuntimeException\"\n"
+        "    catch case e: CounterOverflow => \"passed RuntimeException\"\n"
+        "  println(escaped)\n",
+        &out, &err);
+    EXPECT_EQ(status, 0) << err;
+    EXPECT_EQ(out,
+              "CounterOverflow: counter overflow\n"
+              "Throwable: counter overflow\n"
+              "Exception: counter overflow\n"
+              "class side: boom\n"
+              "passed RuntimeException\n")
+        << err;
+}
+
+// (2) The reverse: a Scala exception thrown by a Scala function that Smalltalk
+// calls (`f apply()`) is caught in Smalltalk by `on: Exception do:`, whose
+// handler answers the very exception, and passes a handler for an unrelated
+// protoST class to reach the Scala caller.
+// (3) Identity, both ways: the value a handler on the other side catches is the
+// same object, compared with `eq` -- a Scala exception that went through a
+// protoST handler, and a protoST Error that Scala caught and rethrew into a
+// protoST handler.
+TEST(ProtoSTInterop, AScalaExceptionCrossesSmalltalkUnchanged) {
+    std::string out, err;
+    const int status = runWithSendLib("scala_error.scala",
+        "import st.send_lib.{Counter, CounterOverflow}\n"
+        "\n"
+        "@main def run(): Unit =\n"
+        "  val boom = new IllegalStateException(\"from scala\")\n"
+        "  val back = Counter.rescue(() => throw boom)\n"
+        "  println(\"rescued by on: Exception do: \" + (back eq boom) + \" \" + back.getMessage)\n"
+        "  try Counter.rescueUnrelated(() => throw boom)\n"
+        "  catch\n"
+        "    case e: IllegalStateException => println(\"passed UnrelatedError: \" + (e eq boom))\n"
+        "  val c = Counter.`new`()\n"
+        "  c.increment()\n"
+        "  c.increment()\n"
+        "  val overflow: Any = try c.increment() catch case e: CounterOverflow => e\n"
+        "  val again = Counter.rescue(() => throw overflow.asInstanceOf[Throwable])\n"
+        "  println(\"protoST error round trip: \" + (again eq overflow))\n",
+        &out, &err);
+    EXPECT_EQ(status, 0) << err;
+    EXPECT_EQ(out,
+              "rescued by on: Exception do: true from scala\n"
+              "passed UnrelatedError: true\n"
+              "protoST error round trip: true\n")
+        << err;
+}
+// Nested: Scala -> Smalltalk (`rescue:`, which installs `on: Exception do:`) ->
+// a Scala function -> Smalltalk again, where the Error is signalled. The inner
+// send hides the outer protoST handler while it runs, because Scala frames lie
+// between them; the Error must still reach that handler once the Scala function
+// returns into protoST, and not escape to the Scala caller.
+TEST(ProtoSTInterop, ASmalltalkErrorRaisedThroughScalaReachesTheOuterSmalltalkHandler) {
+    std::string out, err;
+    const int status = runWithSendLib("nested.scala",
+        "import st.send_lib.{Counter, CounterOverflow}\n"
+        "\n"
+        "@main def run(): Unit =\n"
+        "  val c = Counter.`new`()\n"
+        "  c.increment()\n"
+        "  c.increment()\n"
+        "  val r =\n"
+        "    try Counter.rescue(() => c.increment())\n"
+        "    catch case e: CounterOverflow => \"wrong: escaped to Scala\"\n"
+        "  println(r.isInstanceOf[CounterOverflow])\n"
+        "  println(r.messageText())\n",
+        &out, &err);
+    EXPECT_EQ(status, 0) << err;
+    EXPECT_EQ(out, "true\ncounter overflow\n") << err;
+}
+
+// (4) `ensure:` and `finally` both run during a cross-runtime unwind, innermost
+// first, whichever runtime raised: a Scala exception unwinding through a
+// Smalltalk `ensure:`, and a Smalltalk Error unwinding through a Scala
+// `finally`. The `ensure:` block reports through a Scala closure, so the order
+// is visible in one list; it also bumps the counter, read back afterwards.
+TEST(ProtoSTInterop, EnsureAndFinallyRunDuringACrossRuntimeUnwind) {
+    std::string out, err;
+    const int status = runWithSendLib("unwind.scala",
+        "import st.send_lib.{Counter, CounterOverflow}\n"
+        "\n"
+        "@main def run(): Unit =\n"
+        "  var trail = List[String]()\n"
+        "  val log = (s: String) => trail = trail :+ s\n"
+        "  val g = Counter.`new`()\n"
+        "  try\n"
+        "    try g.guard_log(() => throw new IllegalStateException(\"unwind\"), log)\n"
+        "    finally log(\"scala finally\")\n"
+        "  catch case e: IllegalStateException => log(\"caught \" + e.getMessage)\n"
+        "  println(trail)\n"
+        "  println(g.value())\n"
+        "  trail = List[String]()\n"
+        "  val h = Counter.`new`()\n"
+        "  try\n"
+        "    try h.overflowGuarded(log)\n"
+        "    finally log(\"scala finally\")\n"
+        "  catch case e: CounterOverflow => log(\"caught \" + e.messageText())\n"
+        "  println(trail)\n"
+        "  println(h.value())\n",
+        &out, &err);
+    EXPECT_EQ(status, 0) << err;
+    EXPECT_EQ(out,
+              "List(st ensure, scala finally, caught unwind)\n"
+              "100\n"
+              "List(st ensure, scala finally, caught guarded overflow)\n"
+              "1000\n")
+        << err;
+}
+
+// (3), the C++ half: protoScala's own ProtoException subclass, ScalaThrow, keeps
+// its extra -- the source line of the throw -- across protoST (rule E3). Nothing
+// catches the exception, so the top level reports it, and the report names the
+// line of the `throw` (4), not the line of the call into protoST (6): a copy into
+// a new exception at either boundary would lose the line, and the first protoScala
+// frame it reached afterwards would stamp its own.
+TEST(ProtoSTInterop, AScalaThrowKeepsItsLineAcrossSmalltalk) {
+    std::string out, err;
+    const int status = runWithSendLib("line.scala",
+        "import st.send_lib.Counter\n"
+        "\n"
+        "def fail(): Unit =\n"
+        "  throw new IllegalStateException(\"thrown on line 4\")\n"
+        "@main def run(): Unit =\n"
+        "  Counter.rescueUnrelated(() => fail())\n",
+        &out, &err);
+    EXPECT_NE(status, 0);
+    EXPECT_NE(err.find("line.scala:4:"), std::string::npos) << err;
+    EXPECT_NE(err.find("IllegalStateException: thrown on line 4"), std::string::npos) << err;
+}
+
+// The one-thread restriction applies to a send as it does to an import (D26):
+// a call into protoST from a thread other than the one that constructed it is
+// refused with a message, never run on protoST's root context.
+TEST(ProtoSTInterop, ASendFromAnotherThreadIsRefused) {
+    writeFile("thread_lib.st", "Object subclass: #Counter instanceVariableNames: 'value'.\n");
+    ::setenv("STPATH", ".", 1);
+    protoST::STRuntime st;
+    protoScala::Session session;
+    proto::ModuleProvider* stProvider =
+        proto::ProviderRegistry::instance().getProviderForSpec("provider:st");
+    ASSERT_NE(stProvider, nullptr);
+    proto::ProtoContext scalaCtx(&session.space(), nullptr);
+    const proto::ProtoObject* module = stProvider->tryLoad("thread_lib", &scalaCtx);
+    ASSERT_NE(module, PROTO_NONE);
+    const proto::ProtoObject* counter = module->getAttribute(
+        &scalaCtx, proto::ProtoString::createSymbol(&scalaCtx, "Counter"));
+    ASSERT_NE(counter, PROTO_NONE);
+
+    std::string message;
+    std::thread other([&] {
+        proto::ProtoContext ctx(&session.space(), nullptr);
+        const proto::ProtoObject* args[] = {reinterpret_cast<const proto::ProtoObject*>(
+            proto::ProtoString::createSymbol(&ctx, "new"))};
+        try {
+            counter->call(&ctx, nullptr, proto::ProtoString::createSymbol(&ctx, "__st_send__"),
+                          counter, args, 1);
+        } catch (const std::exception& e) {
+            message = e.what();
+        }
+    });
+    other.join();
+    EXPECT_NE(message.find("thread that constructed the protoST runtime"), std::string::npos)
+        << "unexpected message: " << message;
+}

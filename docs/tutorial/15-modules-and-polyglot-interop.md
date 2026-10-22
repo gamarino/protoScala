@@ -384,11 +384,120 @@ provider behind it: **`st`**. In a process that also holds a protoST runtime,
 `import st.<module>` loads a Smalltalk module, its members bind by name, and the
 values are literally the same objects protoST holds — the test that proves it
 prints the same cell address and the same identity hash read from each runtime.
-That is the claim in the paragraph above, verified rather than promised. It also
-has limits worth knowing before you rely on it: a foreign **value** crosses, but
-*calling* a protoST method from protoScala does not work (protoST interprets its
-own methods), and the import must happen on the thread that built the protoST
-runtime. `docs/INTEROP.md` §6 lists them all.
+That is the claim in the paragraph above, verified rather than promised. You can
+also **call** those objects, and protoST can call your Scala functions back
+(§15.5.1). It has limits worth knowing before you rely on it — the import and every
+call must happen on the thread that built the protoST runtime, for one — and
+`docs/INTEROP.md` §6 lists them all.
+
+### 15.5.1 Calling a Smalltalk object
+
+A call on a protoST object sends it a Smalltalk message. Smalltalk names a
+message with keywords (`transfer: 30 to: b`) and a Scala name cannot contain `:`,
+so the name is mapped by one rule: with no argument the name is the message
+(`b.balance()` sends `balance`); with *n* arguments a name of *n* parts separated
+by `_` gives one keyword per part (`a.transfer_to(30, b)` sends `transfer:to:`);
+otherwise one argument adds one colon (`a.deposit(100)` sends `deposit:`). When the
+rule does not give the selector you need, write it in backticks:
+``a.`transfer:to:`(30, b)``. Instances are made with the message `new`, which is a
+keyword in Scala and so is written in backticks too.
+
+Here is a Smalltalk module, `bank.st`:
+
+```smalltalk
+Object subclass: #Account instanceVariableNames: 'balance'.
+Error subclass: #InsufficientFunds.
+Account >> initialize
+  balance := 0.
+
+Account >> balance ^ balance.
+Account >> deposit: amount
+  balance := balance + amount.
+  ^ balance.
+
+Account >> withdraw: amount
+  amount > balance ifTrue: [ ^ InsufficientFunds new signal: 'insufficient funds' ].
+  balance := balance - amount.
+  ^ balance.
+
+Account >> transfer: amount to: other
+  self withdraw: amount.
+  ^ other deposit: amount.
+
+Account >> report: aFunction
+  ^ aFunction apply(balance).
+```
+
+and a Scala program that uses it:
+
+Fixture: [`tests/conformance/tutorial/15-modules-calling-smalltalk.scala`](../../tests/conformance/tutorial/15-modules-calling-smalltalk.scala)
+
+```scala
+import st.bank.{Account, InsufficientFunds}
+
+@main def run(): Unit =
+  val a = Account.`new`()
+  val b = Account.`new`()
+  println(a.deposit(100))
+  println(a.transfer_to(30, b))
+  println(b.balance())
+  println(a.report((n: Int) => s"balance is $n"))
+  try a.withdraw(1000)
+  catch case e: InsufficientFunds => println("caught: " + e.messageText())
+```
+
+```text
+100
+30
+30
+balance is 70
+caught: insufficient funds
+```
+
+Four things happen across the boundary, and none of them copies anything:
+
+- **The values are the same objects.** `b` is the protoST object itself, and the
+  number and the string go across as they are. `eq` is identity on both sides,
+  and the other members every Scala value has (`==`, `hashCode`, `toString`, …)
+  keep their Scala meaning; `a.printString()` sends Smalltalk's own.
+- **Smalltalk calls Scala.** `report:` receives a Scala function and calls it with
+  Smalltalk's call form, `aFunction apply(balance)`. The function runs as Scala,
+  and its result comes back to the Smalltalk method.
+- **A Smalltalk error is caught in Scala by its class.** `InsufficientFunds` is a
+  Smalltalk class, imported like any member, and `case e: InsufficientFunds`
+  selects the error by its class chain. `case e: Exception` would catch it too, as
+  it catches any error another language raises (§11.9); `RuntimeException` would
+  not. Its text is the Smalltalk message `messageText`.
+- **It works the other way round.** A Scala exception thrown inside a function
+  Smalltalk called is caught in Smalltalk by `on: Exception do:`, and the handler
+  receives the very Scala exception; if no Smalltalk handler takes it, it reaches
+  your `catch` unchanged. `ensure:` blocks and `finally` blocks on the way out all
+  run, innermost first.
+
+To run it you need a process that holds a protoST runtime: the shipped
+`protoscala` links no other runtime of the family (§15.5). The test tree builds a
+host that does, and runs this fixture with it:
+
+```text
+PROTOST_LIB=../protoST/lib STPATH=tests/conformance/tutorial/_smalltalk \
+  build_release/tests/unit/protoscala_protost_host tests/conformance/tutorial/15-modules-calling-smalltalk.scala
+```
+
+**Coming from Python or JavaScript.** Think of `a.transfer_to(30, b)` as a method
+call whose name happens to be spelled in pieces: the pieces are the parts of
+Smalltalk's selector, and the arguments go in order. There is no proxy object,
+no marshalling and no event loop between the two languages: the call runs on your
+thread and returns its result.
+
+**Coming from Scala.** This is dynamic dispatch by name, like a call on any
+foreign value (D94): the compiler checks nothing about `Account`'s messages, and a
+message the object does not understand raises Smalltalk's `MessageNotUnderstood`
+at run time, which your `catch` sees like any other foreign error. Write `()` on a
+message with no argument (`b.balance()`), as Scala 3 asks for a method declared
+with `()`. `new Account()` is not available — a foreign class is not a Scala type
+(D94) — and named arguments are refused, because a Smalltalk message has none.
+INTEROP §4.1 has the whole rule, and §6 what it does not cover yet (a protoST
+call-form method, a protoST actor, a call from another thread).
 
 The other three — `py`, `js` and `clj` — have no provider. protoPython registers
 the aliases `native`, `python_stdlib`, `compiled` and `hpy` — none of them `py` —

@@ -5,7 +5,10 @@
 > modules, registers itself as a UMD provider, routes the four family prefixes,
 > and loads provider plug-ins by `dlopen`. **One family prefix now has a provider
 > behind it — `st`** — and a protoScala program imports a protoST module, reads its
-> members and shares its values with no copy at the boundary (§6). `py`, `js` and
+> members and shares its values with no copy at the boundary (§6). Since D135 it
+> also **calls** them: a Scala call on a protoST object sends the Smalltalk
+> message, protoST calls a Scala function back, and exceptions cross both ways
+> (§4.1, §9.1). `py`, `js` and
 > `clj` still have no provider, so `import py.numpy` compiles, routes, and reports
 > `no provider registered for 'py'`. §3 says exactly what routes where, §6 says
 > what cross-runtime interop does and does not cover, and ROADMAP's **Track Y** is
@@ -168,6 +171,70 @@ keyword `ProtoSparseList`. Returned values are used directly — no copies, no
 conversions — except where a language-level wrapper is needed (a foreign
 list seen as a Scala `Seq` is wrapped, not copied).
 
+### 4.1 Calling a protoST object (D135)
+
+A protoST method is not a `proto::ProtoMethod`: it is an object carrying
+`__bc_ptr__`, which only protoST's `ExecutionEngine` can run. protoST therefore
+installs **one** protoCore method on its root `Object` prototype,
+`__st_send__` (protoST `src/modules/STForeignSend.h`), so every protoST class and
+instance answers it. Its contract is language-neutral and needs protoCore alone:
+`self` is the receiver, positional argument 0 is the exact Smalltalk selector,
+the rest are the message's arguments. protoScala calls it whenever a Scala call
+reaches a protoST object — a receiver whose chain answers `__st_send__` with a
+protoCore method — and the member it found is not something Scala can call (a
+protoST method object or a primitive marker), or there is no such member at all
+(every keyword selector).
+
+**Selector mapping** (`src/umd/SmalltalkSelector.h`; mapping a caller's surface is
+the caller's concern, so it lives on the Scala side):
+
+| Scala call | Smalltalk message | Rule |
+|---|---|---|
+| ``d.`at:put:`(k, v)`` | `at:put:` | a name with `:` is the selector; one `:` per argument |
+| `a + b` | `+` | an operator is a binary selector (one argument) |
+| `c.increment()` | `increment` | no argument: unary |
+| `d.at_put(k, v)`, `c.inject_into(0, f)` | `at:put:`, `inject:into:` | n arguments, n parts split on `_` |
+| `c.add(x)`, `c.add_item(x)` | `add:`, `add_item:` | otherwise, one argument: the name plus `:` |
+| ``Counter.`new`()`` | `new` | `new` is a Scala keyword, so it is written in backticks |
+
+Anything else (two arguments and a one-part name) is refused with an
+`IllegalArgumentException` that names the backtick form. The members of Scala's
+`Any` — `eq`, `ne`, `==`, `!=`, `equals`, `hashCode`, `##`, `toString` — keep
+their Scala meaning on a protoST object (`a eq b` is identity whatever `a` is);
+`c.printString()` sends Smalltalk's own. `new Counter()` stays unavailable (D94):
+instance creation is the message `` `new` ``, which runs `initialize` as
+Smalltalk's `new` does.
+
+A message with no argument is best written with `()`, as Scala 3 requires for a
+method declared with `()`: `c.value()`. `c.value` also sends it once the session
+has met a protoST object (an `st.` import, or any send that reached one); before
+that a read without an argument list is a plain attribute read, because probing
+every field read of every program for `__st_send__` measured +48 % instructions
+on an `Int` field loop (D135).
+
+A Smalltalk block that reaches Scala is a protoST object like any other: it is
+called with its own messages, `blk.value()`, `blk.value(x)` (`value:`) or
+`blk.value_value(x, y)` (`value:value:`). Applying it as a function, `blk(x)`,
+sends `apply:`, which a block does not understand.
+
+**Values cross unchanged, in both directions**: the arguments are the caller's
+cells, the result is protoST's, and `eq` holds across the boundary. Named
+arguments are refused (`a Smalltalk message takes no named arguments`).
+
+**protoST calling Scala.** Every protoScala function value carries a native
+`apply`, so protoST's call form reaches it: `f apply()` or `f apply(x)` inside a
+Smalltalk method runs the Scala function. A call that arrives with a context of
+protoST's space re-enters protoScala's own space, on the current protoScala
+context of the thread that made the call into protoST (`ForeignCallMark`), and
+leaves as `proto::ProtoException` only (`leaveProtoScala`). A unary send such as
+`f value` does not call it: protoST reads a non-method attribute for a unary
+send, and only the call form calls a protoCore method.
+
+**Where the message runs.** On protoST's own current context, on the thread that
+constructed the protoST runtime (protoST D26): a send from any other thread — an
+actor worker, a future — is refused with a message, as an import is. A send to a
+protoST actor is refused too, since an actor's messages are asynchronous.
+
 ## 5. Type mapping
 
 | protoCore value | Scala view |
@@ -273,20 +340,35 @@ list seen as a Scala `Seq` is wrapped, not copied).
 
 - **What cross-runtime interop does NOT cover today**, stated so nobody infers
   more than was built:
-  - **Values, not calls.** A protoST class or object crosses as a value and its
-    attributes read back through protoScala's context, and a write through one
-    runtime's context is seen through the other's. That needs protoCore with the
-    process-global mutable table (merged after 2.5.0; protoCore
+  - **Values, and calls through one entry.** A protoST class or object crosses
+    as a value and its attributes read back through protoScala's context, and a
+    write through one runtime's context is seen through the other's. That needs
+    protoCore with the process-global mutable table (merged after 2.5.0; protoCore
     `docs/GLOBAL_MUTABLE_TABLE.md`): with protoCore 2.5.0 a mutable object read
     through the other space's context answered another object's state, with no
     error (protoST K4). Test: `ProtoSTInterop.AForeignObjectsStateIsReadThroughTheCallersContext`.
-    A protoST cell that protoScala keeps in its own structures must also stay
-    reachable in protoST's space (for example through a mutable object);
-    protoCore does not trace one space's roots from another. **Calling a protoST method from protoScala does not
-    work**: a protoST method is an object carrying `__bc_ptr__` that protoST's own
-    `ExecutionEngine` interprets on SEND, not a `proto::ProtoMethod` protoCore can
-    dispatch. A foreign callable needs to be a protoCore method, as the plug-in
-    fixtures in `tests/conformance/25-interop/` are.
+    Calls work since D135 through protoST's `__st_send__` (§4.1), and protoST calls
+    a Scala function through its native `apply`. What that does **not** cover:
+    - **The collector, for a value created by a call.** A protoST object that a
+      call creates (`` Counter.`new`() ``) and that protoScala holds only in its own
+      frames or immutable structures is not reachable in protoST's space, and
+      protoCore does not trace one space's roots from another
+      (GLOBAL_MUTABLE_TABLE "Limitations"); the same holds for a Scala value
+      protoST keeps. It is anchored in protoST's root context until that
+      context's next young-generation submission, and no longer. No test runs a
+      protoST collection while protoScala holds such a value; a long-lived one
+      must be kept reachable in protoST (for example in a protoST collection).
+    - **protoST call-form methods** (`Counter >> incr(by, factor = 1)`) are
+      stored under their bare name and bind named arguments; `c.incr(2)` maps to
+      `incr:` and is not understood. Only unary, binary and keyword methods are
+      reachable.
+    - **`getMessage` on a protoST exception** is a Smalltalk message protoST does
+      not understand; its text is `e.messageText()` (§9.1).
+    - **A module outlives the runtime that built it.** A loaded module is a
+      process-level entity, so a second `STRuntime` in the same process is handed
+      the first one's namespace for the same module name, with the first runtime's
+      classes. The interop tests give each case its own module name for that
+      reason; one protoST runtime per process (below) is the supported shape.
   - **One thread.** A protoST module's top level runs on protoST's root context,
     which only the thread that constructed the runtime may allocate on (protoST
     D26), and a foreign caller has no context of its own in that space. An import
@@ -429,9 +511,10 @@ provider-local change, and it is not protoScala's to make.
 
 Track Y proved two things, and the second is what Phase 7 answers. Values cross a
 runtime boundary **without copying** — one cell, two `ProtoSpace`s, the same address
-and the same `getHash` printed from both sides — and a foreign runtime **cannot call**
-a protoST method, because a protoST method is `__bc_ptr__` plus protoST's own engine
-rather than a `proto::ProtoMethod`. protoScala had exactly the same shape: a compiled
+and the same `getHash` printed from both sides — and a foreign runtime **could not
+call** a protoST method, because a protoST method is `__bc_ptr__` plus protoST's own
+engine rather than a `proto::ProtoMethod`. (protoST has since added one protoCore
+method, `__st_send__`, that sends any message — §4.1.) protoScala had exactly the same shape: a compiled
 function is an object carrying a bytecode-module address, and only
 `ExecutionEngine::execute` can run it.
 
@@ -575,3 +658,46 @@ provider plug-in (§3.1) can register a provider and append its
 `provider:<alias>` entry to the chain in `protoScalaRegisterProviders`, which is
 how `tests/unit/geometry_provider_plugin.cpp` brings protoCore's example geometry
 module in for `tests/conformance/25-interop/geometry-module-errors.scala`.
+
+### 9.1 Errors between protoScala and protoST (D135)
+
+The same model holds between two runtimes, with no module in between, and
+`umd/protost-interop` tests each direction:
+
+- **A Smalltalk Error in Scala.** An Error a protoST method signals and nothing in
+  protoST handles leaves the send as the `ProtoException` carrying the Error
+  object (protoST's `UnhandledSTException`). A Scala handler names the imported
+  class as a type (D133) — `import st.lib.{Counter, CounterOverflow}`, then
+  `case e: CounterOverflow` — and the test is the prototype chain, so a handler
+  for an unrelated protoST class and `RuntimeException` do not take it, while
+  `Throwable` and `Exception` do (D134). Its text is the Smalltalk message
+  `e.messageText()`. (`ASmalltalkErrorIsCaughtInScalaByItsClass`)
+- **A Scala exception in Smalltalk.** A Scala function protoST calls
+  (`f apply()`) that throws reaches protoST's native-call boundary as a
+  `ProtoException`, and protoST signals its value: `on: Exception do:` catches it
+  and the handler receives the very Scala exception object; `on: UnrelatedError do:`
+  does not, and the exception reaches the Scala caller unchanged.
+  (`AScalaExceptionCrossesSmalltalkUnchanged`)
+- **Identity and E3.** The value a handler on the other side receives is the
+  same object (`eq`), in both directions, including a protoST Error that Scala
+  caught and threw into a protoST handler. An exception no handler selects is
+  rethrown unchanged by both runtimes: a `ScalaThrow` that crossed protoST still
+  reports the line of its `throw` (`AScalaThrowKeepsItsLineAcrossSmalltalk`), and
+  protoST's own suite passes a C++ subclass carrying an extra through
+  `ensure:` and an unrelated handler and back (`test_cross_runtime_send.cpp`).
+- **Cleanup.** `ensure:` and `finally` both run during a cross-runtime unwind,
+  innermost first, whichever runtime raised
+  (`EnsureAndFinallyRunDuringACrossRuntimeUnwind`).
+- **Nested calls.** Scala → Smalltalk → a Scala function → Smalltalk again: the
+  inner send hides the handlers of the protoST code above it while it runs,
+  because Scala frames lie between them and an unwind to one of them would have
+  to cross those frames. An Error the inner send does not handle therefore leaves
+  it as a plain `ProtoException` with the same value, which protoST signals again
+  where the Scala function returns into it, so the outer `on: Exception do:` still
+  takes it (`ASmalltalkErrorRaisedThroughScalaReachesTheOuterSmalltalkHandler`).
+  The value is unchanged; protoST's own description and trace of that Error are
+  computed again if nothing takes it there.
+- **What cannot cross.** A protoST non-local return, `retry`, `resume:` or Future
+  yield that would leave the send is reported as an error, because there is no
+  protoST frame on the Scala side to resume; a protoScala `await` inside a function
+  protoST called does not suspend (D43).

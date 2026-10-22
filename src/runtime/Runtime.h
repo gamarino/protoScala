@@ -15,6 +15,7 @@
 #pragma once
 #include "compiler/ClassInfo.h"  // the type-key constants and kMaxTupleArity
 
+#include <atomic>
 #include <string>
 #include <unordered_map>
 
@@ -165,6 +166,18 @@ struct RuntimeLayout {
     // process this phase makes possible (protoST's prim_Import_from records the
     // bug).
     const proto::ProtoString* exportsKey = nullptr;        // "exports"
+    // Sending a Smalltalk message to a protoST object (INTEROP §6.2, D135): the
+    // protoCore method protoST installs on its root Object prototype. Its
+    // presence on a receiver's chain is what makes the receiver a protoST object.
+    const proto::ProtoString* stSendKey = nullptr;         // "__st_send__"
+    // Set once this session has met a protoST object (an `st.` import, or a
+    // send that reached one). Until then a member read with no argument list
+    // does not probe its receiver for `stSendKey`, so a program that never
+    // touches protoST pays nothing for that probe on its field reads (D135).
+    mutable std::atomic<bool> smalltalkSeen{false};
+    // The space this layout belongs to. A native that another runtime may call
+    // (Function.apply) compares the caller's space with it.
+    proto::ProtoSpace* space = nullptr;
 
     // Prelude values the natives construct, resolved after the prelude is
     // compiled (a REPL redefinition gives `Some#1`, so a name cannot be

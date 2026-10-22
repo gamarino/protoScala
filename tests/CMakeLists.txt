@@ -181,6 +181,23 @@ foreach(conf_file ${PROTOSCALA_CONFORMANCE_FILES})
         set_tests_properties("conformance/${conf_file}" PROPERTIES
             ENVIRONMENT
             "PROTOSCALA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/28-member-imports/_modules")
+    elseif(conf_file STREQUAL "tutorial/15-modules-calling-smalltalk.scala")
+        # Chapter 15.5.1: calling protoST. The shipped binary links no protoST, so
+        # the fixture runs under the test-only host that constructs a protoST
+        # runtime (tests/unit/protost_host.cpp), with protoST's kernel and the
+        # fixture's Smalltalk module directory named in the environment.
+        if(TARGET protoscala_protost_host)
+            set_tests_properties("conformance/${conf_file}" PROPERTIES DISABLED TRUE)
+            add_test(NAME "conformance/${conf_file}#protost"
+                COMMAND ${PROTOSCALA_SH} "${CMAKE_CURRENT_SOURCE_DIR}/conformance/run.sh"
+                        "$<TARGET_FILE:protoscala_protost_host>"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/conformance/${conf_file}")
+            set_tests_properties("conformance/${conf_file}#protost" PROPERTIES
+                ENVIRONMENT
+                "PROTOST_LIB=${CMAKE_SOURCE_DIR}/../protoST/lib;STPATH=${CMAKE_CURRENT_SOURCE_DIR}/conformance/tutorial/_smalltalk")
+        else()
+            set_tests_properties("conformance/${conf_file}" PROPERTIES DISABLED TRUE)
+        endif()
     elseif(conf_file STREQUAL "tutorial/11-exceptions-from-a-module.scala")
         # Chapter 11.9: protoCore's example geometry module, through its plug-in
         # (tests/unit/geometry_provider_plugin.cpp), as in 25-interop.

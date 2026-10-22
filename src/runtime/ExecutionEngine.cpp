@@ -7,11 +7,13 @@
 #include "runtime/FutureYield.h"
 #include "runtime/StackGuard.h"
 #include "runtime/Values.h"
+#include "umd/SmalltalkSelector.h"
 #include "protoCore.h"
 
 #include <cmath>
 #include <exception>
 #include <new>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <typeinfo>
@@ -64,6 +66,68 @@ ExecutionEngine::ActiveCallGuard::~ActiveCallGuard() {
 }
 
 unsigned ExecutionEngine::nativeReentryDepth() { return tl_nativeDepth; }
+
+namespace {
+// The innermost outstanding foreign call on this thread (ForeignCallMark).
+thread_local proto::ProtoThread* tl_foreignCallThread = nullptr;
+thread_local const proto::ProtoSpace* tl_foreignCallSpace = nullptr;
+} // namespace
+
+ExecutionEngine::ForeignCallMark::ForeignCallMark(proto::ProtoContext* caller)
+    : savedThread_(tl_foreignCallThread), savedSpace_(tl_foreignCallSpace) {
+    tl_foreignCallThread = caller->thread;
+    tl_foreignCallSpace = caller->space;
+}
+ExecutionEngine::ForeignCallMark::~ForeignCallMark() {
+    tl_foreignCallThread = savedThread_;
+    tl_foreignCallSpace = savedSpace_;
+}
+
+proto::ProtoContext* ExecutionEngine::foreignReentryContext(const proto::ProtoSpace* scalaSpace) {
+    if (!tl_foreignCallThread || tl_foreignCallSpace != scalaSpace) return nullptr;
+    proto::ProtoContext* current = tl_foreignCallThread->getCurrentContext();
+    return current && current->space == scalaSpace ? current : nullptr;
+}
+
+const proto::ProtoObject* ExecutionEngine::smalltalkEntryOf(proto::ProtoContext* ctx,
+                                                            const proto::ProtoObject* receiver) const {
+    if (receiver == PROTO_NONE || !isObjectCellFast(receiver)) return nullptr;
+    const proto::ProtoObject* e = receiver->getAttribute(ctx, layout_.stSendKey);
+    if (!e || e == PROTO_NONE || !e->isMethod(ctx)) return nullptr;
+    layout_.smalltalkSeen.store(true, std::memory_order_relaxed);
+    return e;
+}
+
+// A Smalltalk message (D135). The selector and the arguments travel as the
+// entry's positional arguments, in traced slots; the values are the cells
+// themselves, in both directions. callNative is the boundary: a protoST error
+// arrives as the ProtoException carrying it and passes through untouched, a
+// refusal (another thread, an actor) as a std::exception the frame translates.
+const proto::ProtoObject* ExecutionEngine::sendSmalltalk(proto::ProtoContext* ctx,
+                                                         const proto::ProtoObject* entry,
+                                                         const proto::ProtoObject** base,
+                                                         const proto::ProtoString* name,
+                                                         unsigned argc) {
+    // A member of Scala's Any (eq, ne, ==, !=, equals, hashCode, ##, toString)
+    // keeps its Scala meaning on a protoST object: every value has them, and
+    // `a eq b` is identity whatever `a` is. Everything else is a message.
+    const proto::ProtoObject* universal = layout_.anyProto->getAttribute(ctx, name);
+    if (universal && universal != PROTO_NONE && universal->isMethod(ctx))
+        return callNative(ctx, universal->asMethod(ctx), base[0], base + 1, argc);
+    std::string why;
+    const std::optional<std::string> selector =
+        smalltalkSelector(plainName(name->toStdString(ctx)), argc, &why);
+    if (!selector) throw ScalaError("IllegalArgumentException", why);
+    proto::ProtoContext scope(ctx->space, ctx, nullptr, nullptr, nullptr, nullptr, argc + 1);
+    scope.setAutomaticLocal(0, reinterpret_cast<const proto::ProtoObject*>(
+                                   proto::ProtoString::createSymbol(&scope, selector->c_str())));
+    for (unsigned k = 0; k < argc; ++k) scope.setAutomaticLocal(k + 1, base[k + 1]);
+    ForeignCallMark mark(&scope);
+    const proto::ProtoObject* r =
+        callNative(&scope, entry->asMethod(&scope), base[0], scope.getAutomaticLocals(), argc + 1);
+    scope.returnValue = r;
+    return r;
+}
 ExecutionEngine::NativeDepthGuard::NativeDepthGuard() { ++tl_nativeDepth; }
 ExecutionEngine::NativeDepthGuard::~NativeDepthGuard() { --tl_nativeDepth; }
 
@@ -198,7 +262,12 @@ const proto::ProtoObject* ExecutionEngine::dispatch(proto::ProtoContext* ctx,
     const proto::ProtoObject* m = receiver->getAttribute(ctx, name);
     if (!m || m == PROTO_NONE) {
         // PROTO_NONE is also a stored null: probe presence (DESIGN §4.1).
-        if (receiver->hasAttribute(ctx, name) != PROTO_TRUE) throwMissingMember(ctx, receiver, name);
+        if (receiver->hasAttribute(ctx, name) != PROTO_TRUE) {
+            // A keyword selector is never an attribute name (D135).
+            if (const proto::ProtoObject* st = smalltalkEntryOf(ctx, receiver))
+                return sendSmalltalk(ctx, st, base, name, argc);
+            throwMissingMember(ctx, receiver, name);
+        }
         if (argc == 0 && !applied) return PROTO_NONE;
         throw ScalaError("NullPointerException", "cannot call null");
     }
@@ -221,7 +290,7 @@ const proto::ProtoObject* ExecutionEngine::dispatch(proto::ProtoContext* ctx,
                 throw ScalaError("NoSuchMethodError", "method " + plainName(name->toStdString(ctx)) +
                                                           " does not take parameters");
             }
-    return callMember(ctx, m, base, argc, applied);
+    return callMember(ctx, m, base, argc, applied, name);
 }
 
 // Calls the value `m` found for a member of the receiver base[0]: a native
@@ -230,7 +299,7 @@ const proto::ProtoObject* ExecutionEngine::dispatch(proto::ProtoContext* ctx,
 const proto::ProtoObject* ExecutionEngine::callMember(proto::ProtoContext* ctx,
                                                       const proto::ProtoObject* m,
                                                       const proto::ProtoObject** base, unsigned argc,
-                                                      bool applied) {
+                                                      bool applied, const proto::ProtoString* name) {
     const RuntimeLayout& L = layout_;
     // `select`: the site wrote no argument list, so a member that is not a
     // method yields its value instead of being applied (`c.f` vs `c.f()`).
@@ -254,6 +323,22 @@ const proto::ProtoObject* ExecutionEngine::callMember(proto::ProtoContext* ctx,
         base[0] = v;  // the receiver is no longer needed; keep v rooted
         return invoke(ctx, v, base + 1, argc);
     }
+    // A member Scala cannot call. On a protoST object it is one of its methods --
+    // an object carrying protoST bytecode, or a primitive marker (a large
+    // integer) -- and the call sends it as a Smalltalk message (D135). A call
+    // with an argument list probes the receiver at once: Scala has no other
+    // meaning left for it. A read with NO argument list -- `c.value`, which is
+    // also how every Scala field is read -- probes only once the session has met
+    // a protoST object, and then only for a member that could be a protoST
+    // method. Measured, 5M reads, instructions: an Int field read +48 % when
+    // every read probed the receiver; with the member tests below, +1.5 % for an
+    // Int field and +24 % for a field holding a Scala object, which is why a
+    // session that never meets protoST skips them all.
+    if (name &&
+        (!select || (L.smalltalkSeen.load(std::memory_order_relaxed) &&
+                     (isLargeIntFast(m) || (isObjectCellFast(m) && isForeignObject(ctx, L, m))))))
+        if (const proto::ProtoObject* st = smalltalkEntryOf(ctx, base[0]))
+            return sendSmalltalk(ctx, st, base, name, argc);
     if (select) return m;                            // a field
     return send(ctx, m, L.applyName, base + 1, argc);  // obj.x(args) with x an object: x.apply(args)
 }
@@ -570,6 +655,11 @@ const proto::ProtoObject* ExecutionEngine::sendKeywords(proto::ProtoContext* ctx
                          "cannot invoke '" + plainName(site.sval) + "' on null");
     const proto::ProtoString* name = siteName(ctx, receiver, site);
     const proto::ProtoObject* m = receiver->getAttribute(ctx, name);
+    if (!m || m == PROTO_NONE || (!m->isMethod(ctx) && !compiledModuleOf(ctx, layout_, m)))
+        if (smalltalkEntryOf(ctx, receiver))
+            throw ScalaError("IllegalArgumentException",
+                             plainName(site.sval) +
+                                 ": a Smalltalk message takes no named arguments");
     if (!m || m == PROTO_NONE) throwMissingMember(ctx, receiver, name);
     proto::ProtoContext scope(ctx->space, ctx);
     if (const BytecodeModule* mod = compiledModuleOf(&scope, layout_, m)) {

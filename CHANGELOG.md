@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — calling protoST objects, and exceptions between the two runtimes, 2026-10-21
+
+- **A Scala call on a protoST object sends the Smalltalk message** (D135), through
+  `__st_send__`, the one protoCore method protoST now installs on its `Object`.
+  The name is mapped by rule: `c.increment()` sends `increment`, `d.at_put(k, v)`
+  sends `at:put:`, `c.add(x)` sends `add:`, and a backtick name is the selector
+  itself (``d.`at:put:`(k, v)``). Instances are made with ``Counter.`new`()``.
+  Scala's `Any` members (`eq`, `==`, `hashCode`, `toString`, …) keep their Scala
+  meaning. Values cross unchanged both ways. Sends run on the thread that
+  constructed the protoST runtime only; named arguments, protoST actors and
+  protoST call-form methods are not supported (INTEROP §4.1, §6).
+- **protoST calls Scala functions** with its call form, `f apply(x)`: the native
+  `apply` of a function value re-enters protoScala's own space when another
+  runtime calls it, and leaves as a `ProtoException` only.
+- **Exceptions cross both ways, selected by prototype** (INTEROP §9.1): a Smalltalk
+  Error is caught in Scala by the imported class (`case e: CounterOverflow`), by
+  `Throwable` and by `Exception`, and not by an unrelated class or
+  `RuntimeException`; a Scala exception is caught in Smalltalk by
+  `on: Exception do:`; the value is the same object; `ensure:` and `finally` both
+  run during the unwind; a `ScalaThrow` keeps its line across protoST (E3). Tests:
+  seven new cases in `umd/protost-interop`, protoST's `test_cross_runtime_send.cpp`,
+  and the tutorial fixture `15-modules-calling-smalltalk.scala`, run under a
+  test-only host that links protoST.
+- **Cost.** A member read without an argument list probes its receiver for
+  `__st_send__` only after the session has met a protoST object; measured on 5M
+  field reads against `4a295c70`: +1.6 % instructions (`Int` field) and +2.5 %
+  (field holding an object) in a program that never touches protoST. The
+  alternatives are in DECISIONS-LOG, open for the maintainer.
+
 ### Changed — protoCore 3.0.0: one exception type, selected by prototype, 2026-10-21
 
 - **A Scala exception is a `proto::ProtoException`.** `ScalaThrow` derives from

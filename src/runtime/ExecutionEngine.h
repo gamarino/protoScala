@@ -97,6 +97,28 @@ public:
         bool wasSet_;
     };
 
+    // A call protoScala makes into another runtime on this thread (a Smalltalk
+    // send, D135). It records the calling context's protoCore thread for the
+    // call's duration, so a protoScala function that runtime calls back
+    // (Function.apply from a context of ITS space) re-enters on the current
+    // protoScala context instead of running Scala code in the other space.
+    // Nests: the innermost outstanding call wins.
+    class ForeignCallMark {
+    public:
+        explicit ForeignCallMark(proto::ProtoContext* caller);
+        ~ForeignCallMark();
+        ForeignCallMark(const ForeignCallMark&) = delete;
+        ForeignCallMark& operator=(const ForeignCallMark&) = delete;
+
+    private:
+        proto::ProtoThread* savedThread_;
+        const proto::ProtoSpace* savedSpace_;
+    };
+    // The protoScala context a call from another runtime re-enters on: the
+    // current context, in `scalaSpace`, of the thread that made the innermost
+    // outstanding foreign call; nullptr when no such call is outstanding.
+    static proto::ProtoContext* foreignReentryContext(const proto::ProtoSpace* scalaSpace);
+
     // Native frames between the running bytecode frame and here: 1 while a
     // native method runs, more when a native re-entered the VM. `await` refuses
     // to suspend above 1, because the extra C++ frames cannot be snapshotted (D43).
@@ -190,9 +212,12 @@ private:
     const proto::ProtoObject* dispatch(proto::ProtoContext* ctx, const proto::ProtoObject** base,
                                        const proto::ProtoString* name, unsigned argc,
                                        bool applied = false);
+    // `name` is the member's name, for a send on a protoST object (D135); nullptr
+    // where no such send can arise (a super send).
     const proto::ProtoObject* callMember(proto::ProtoContext* ctx, const proto::ProtoObject* member,
                                          const proto::ProtoObject** base, unsigned argc,
-                                         bool applied = false);
+                                         bool applied = false,
+                                         const proto::ProtoString* name = nullptr);
     // The name a send site uses on this receiver: a private member's
     // class-qualified key, or the site's plain fallback name (D5).
     const proto::ProtoString* siteName(proto::ProtoContext* ctx, const proto::ProtoObject* receiver,
@@ -228,6 +253,18 @@ private:
     void bindKeywordsAndDefaults(proto::ProtoContext& frame, const BytecodeModule& mod,
                                  const proto::ProtoKeywordArguments* keywords,
                                  const proto::ProtoObject** slots, unsigned positional);
+    // protoST's send entry on `receiver` (a proto::ProtoMethod), or nullptr when
+    // the receiver is not a protoST object (D135).
+    const proto::ProtoObject* smalltalkEntryOf(proto::ProtoContext* ctx,
+                                               const proto::ProtoObject* receiver) const;
+    // `receiver.name(args)` on a protoST object: maps the name to a Smalltalk
+    // selector (umd/SmalltalkSelector.h) and sends it through `entry`. base[0]
+    // is the receiver, base[1..argc] the arguments.
+    PROTOSCALA_NOINLINE const proto::ProtoObject* sendSmalltalk(proto::ProtoContext* ctx,
+                                                              const proto::ProtoObject* entry,
+                                                              const proto::ProtoObject** base,
+                                                              const proto::ProtoString* name,
+                                                              unsigned argc);
     bool testType(proto::ProtoContext* ctx, TypeCode code, const proto::ProtoObject* v) const;
     [[noreturn]] void throwMissingMember(proto::ProtoContext* ctx, const proto::ProtoObject* receiver,
                                          const proto::ProtoString* name) const;

@@ -6,6 +6,7 @@
 #include "runtime/Hashing.h"
 #include "runtime/PrimitiveSupport.h"
 #include "runtime/Values.h"
+#include "umd/ForeignBoundary.h"
 #include "protoCore.h"
 
 #include <algorithm>
@@ -1074,8 +1075,42 @@ PRIM(listCompanion_empty) { expectArgs(ctx, args, "empty", 0); return ctx->newLi
 // Function
 // ---------------------------------------------------------------------------
 
+// `f.apply(args)`, and the protoCore method through which ANOTHER runtime calls
+// a protoScala function value: protoST's call form `f apply(x)` reaches it with
+// a context of protoST's space (D135). Such a call re-enters protoScala's own
+// space, on the current protoScala context of the thread that made the call
+// into that runtime (ForeignCallMark), and leaves as protoCore's exception
+// only (leaveProtoScala). A foreign call outside any call protoScala made is
+// refused: there is no protoScala context on this thread to run it in.
+const ProtoObject* callFromForeignRuntime(ProtoContext* ctx, const ProtoObject* self,
+                                          const proto::ProtoArguments* args) {
+    const ActiveCallContext* active = activeCallContext();
+    ProtoContext* parent =
+        active ? ExecutionEngine::foreignReentryContext(active->layout->space) : nullptr;
+    if (!parent)
+        throw std::runtime_error(
+            "a protoScala function was called from another runtime outside a call protoScala "
+            "made into that runtime on this thread");
+    const proto::proto_ulong n = argCount(ctx, args);
+    ProtoContext scope(parent->space, parent, nullptr, nullptr, nullptr, nullptr,
+                       static_cast<size_t>(n));
+    for (proto::proto_ulong i = 0; i < n; ++i)
+        scope.setAutomaticLocal(static_cast<unsigned>(i), args->getAt(ctx, static_cast<int>(i)));
+    const ProtoObject* r = leaveProtoScala(&scope, [&] {
+        // The foreign runtime's frames are on the native stack: an `await` inside
+        // must not suspend across them (D43).
+        ExecutionEngine::NativeDepthGuard depth;
+        return active->engine->invoke(&scope, self, scope.getAutomaticLocals(),
+                                      static_cast<unsigned>(n));
+    });
+    scope.returnValue = r;
+    return r;
+}
+
 PRIM(function_apply) {
-    ExecutionEngine* engine = activeCallContext()->engine;
+    const ActiveCallContext* active = activeCallContext();
+    if (!active || ctx->space != active->layout->space) return callFromForeignRuntime(ctx, self, args);
+    ExecutionEngine* engine = active->engine;
     const proto::proto_ulong n = argCount(ctx, args);
     ProtoContext scope(ctx->space, ctx);
     scope.resizeAutomaticLocals(static_cast<unsigned>(n));

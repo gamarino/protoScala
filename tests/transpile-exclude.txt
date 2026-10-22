@@ -191,6 +191,7 @@ tutorial/15-modules-a-cycle.scala                                      D123   an
 tutorial/15-modules-a-missing-member.scala                             D123   an import is resolved at transpile time and is not re-performed at load time
 tutorial/15-modules-a-missing-module.scala                             D123   an import is resolved at transpile time and is not re-performed at load time
 tutorial/15-modules-an-imported-type-is-a-type.scala                   D123   an import is resolved at transpile time and is not re-performed at load time
+tutorial/15-modules-calling-smalltalk.scala                            D123   an import is resolved at transpile time and is not re-performed at load time
 tutorial/15-modules-import-a-module.scala                              D123   an import is resolved at transpile time and is not re-performed at load time
 tutorial/15-modules-import-a-type.scala                                D123   an import is resolved at transpile time and is not re-performed at load time
 tutorial/15-modules-import-a-wildcard.scala                            D123   an import is resolved at transpile time and is not re-performed at load time

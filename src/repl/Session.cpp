@@ -708,6 +708,10 @@ const ModuleExports& Session::loadForeign(const std::string& providerSpec,
         throw CompileError("ImportError: provider '" + aliasOfSpec(providerSpec) +
                                "' has no module '" + logicalPath + "'",
                            pos);
+    // From now on a member read with no argument list may be a Smalltalk
+    // message to one of this module's objects (D135, RuntimeLayout).
+    if (aliasOfSpec(providerSpec) == "st")
+        runtime_.layout().smalltalkSeen.store(true, std::memory_order_relaxed);
 
     // P3 D13: publish through the kernel so the module is in the process-global
     // module list under the ruled identity (provider GUID + path + version) and

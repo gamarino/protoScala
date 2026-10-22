@@ -677,6 +677,26 @@ Per DESIGN §7 ("protoCore 3.0.0: one exception type, selected by prototype").
 - [x] **Conformance rule 14**: all four `exception.*` cases pass
       (`catchForeignError`, `escapeLanguageError` in `tests/unit/ConformanceHost.h`).
 
+### Calling protoST, and exceptions between the two runtimes (D135, 2026-10-21)
+
+Per INTEROP §4.1 and §9.1. Tests: `umd/protost-interop`
+(`tests/unit/protost_interop.cpp`, built with `-DPROTOSCALA_PROTOST_INTEROP=ON`)
+and protoST's `tests/unit/test_cross_runtime_send.cpp`.
+
+- [x] **A Scala call on a protoST object sends the Smalltalk message** through
+      protoST's `__st_send__`: unary, binary and keyword selectors
+      (`d.at_put(k, v)` and ``d.`at:put:`(k, v)`` send `at:put:`), class-side
+      methods, and instance creation as ``Counter.`new`()``. Values cross
+      unchanged both ways.
+- [x] **protoST calls a Scala function** with its call form, `f apply(x)`; the
+      call re-enters protoScala's own space.
+- [x] **Exceptions cross both ways**, selected by prototype: a Smalltalk Error is
+      caught in Scala by the imported class and by `Throwable`/`Exception`, not
+      by an unrelated class or `RuntimeException`; a Scala exception is caught in
+      Smalltalk by `on: Exception do:` and not by an unrelated class; the caught
+      value is the same object; `ensure:` and `finally` run during the unwind; a
+      `ScalaThrow` keeps its line across protoST (E3).
+
 ## Not yet implemented
 
 - A `class`, `trait` or `object` nested in a **`class`** or **`trait`**, a local
@@ -700,12 +720,11 @@ Per DESIGN §7 ("protoCore 3.0.0: one exception type, selected by prototype").
   singleton by design, and no `numpy` in protoPython at all. ROADMAP **Track Y**.
 - A **wildcard import of a foreign module** (D92) and **lexical import scoping**
   (D96), which is the same question as scoping extensions (D82).
-- **A cross-runtime CALL.** `import st.<module>` works and its values cross with
-  no copy (R5 below), but *calling* a protoST method from protoScala does not: a
-  protoST method is an object carrying `__bc_ptr__` that protoST's own engine
-  interprets on SEND, not a `proto::ProtoMethod`. A foreign callable has to be a
-  protoCore method. INTEROP §6 lists the other limits of what does work (one
-  thread, one protoST runtime, a namespace snapshot).
+- **What a cross-runtime call to protoST does not cover** (D135, INTEROP §6):
+  a protoST call-form method (`>> incr(by, factor = 1)`), named arguments, a send
+  to a protoST actor, a send from any thread but protoST's owner, and collector
+  safety for a value one runtime creates and only the other holds (protoCore's
+  documented multi-space limitation; no test exercises it).
 - Supervision trees, `ExecutionContext`, actor timeouts and
   `Await.result(f, duration)` — not scheduled. An `await` waits forever; the
   shutdown reports any actor still parked on a future that never completed.
@@ -1176,6 +1195,7 @@ in [DECISIONS-LOG.md](DECISIONS-LOG.md) under "The I/O track".
 |---|---|---|---|
 | D133 | **A type pattern may name a value** — `case e: g.NegativeRadius` with `g` an imported module, or a member-imported `NegativeRadius` — and then tests protoCore's prototype chain (`ProtoObject::isInstanceOf`), the test every language on protoCore selects exceptions by. It is how a module's error type, which is a protoCore object and not a class (D94), is caught by name. scalac rejects a value in type position, so no valid Scala program changes meaning. The same holds for `isInstanceOf[T]` and `asInstanceOf[T]` | unified exceptions (protoCore 3.0.0) | (perm) |
 | D134 | **`Throwable` and `Exception` catch foreign values.** A module's error, another language's exception, or any non-Scala value raised through protoCore is no instance of a Scala class, yet `case e: Throwable` and `case e: Exception` catch it, because on the JVM everything thrown is a `Throwable` and such an error is not fatal. In a `catch`, `Throwable` selects every thrown value and `Exception` every one that is not a Scala `Error`; outside a `catch` both also accept a foreign object. `RuntimeException` and the other specific classes, and `Error` with its subclasses, select their own instances only. `throw e` re-raises a caught foreign value as it is | unified exceptions (protoCore 3.0.0) | (perm) — decided by the maintainer, 2026-10-21 |
+| D135 | **A Scala call on a protoST object is a Smalltalk message, with the selector mapped by rule** (INTEROP §4.1): a name with `:` (in backticks) is the selector; an operator is binary; no argument is unary; n arguments and n `_`-separated parts are a keyword selector (`at_put(k, v)` → `at:put:`); otherwise one argument takes one `:` (`add(x)` → `add:`); anything else is refused. Instance creation is `` Counter.`new`() `` (`new Counter()` stays unavailable, D94). Scala's `Any` members (`eq`, `ne`, `==`, `!=`, `equals`, `hashCode`, `##`, `toString`) keep their Scala meaning. A message without arguments written without `()` (`c.value`) is sent only once the session has met a protoST object (an `st.` import or a send that reached one); before that it reads the attribute. Named arguments are refused; a protoST call-form method (`>> incr(by, factor = 1)`) is not reachable; `getMessage` is not mapped onto `messageText`. Sends run on protoST's owner thread only (protoST D26) | INTEROP §4.1 | (pending review) |
 
 ### Phase 7 — packaging, 2026-09-27
 
@@ -1536,9 +1556,9 @@ exercised for the first time in Phase 6** — see the three entries below it.
   matched across spaces by accident and a 7-byte one missed silently, which is why
   the tests use `Counter`.
 
-  What is still *not* demonstrated: a cross-runtime **call**, imports from more
-  than one thread, more than one protoST runtime, and a namespace that changes
-  after import. INTEROP §6 states each. R5 itself — whether co-residency is
+  What is still *not* demonstrated: imports from more than one thread, more than
+  one protoST runtime, and a namespace that changes after import. A cross-runtime
+  **call** works since D135 (below), within the limits INTEROP §6 lists. INTEROP §6 states each. R5 itself — whether co-residency is
   supported — remains the maintainer's call; this is evidence for it, not a ruling.
   `-DPROTOSCALA_PROTOST_INTEROP=OFF` builds the suite with no reference to the
   protoST tree.

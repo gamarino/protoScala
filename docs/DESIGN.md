@@ -1064,6 +1064,14 @@ Reporting rules:
 
 - A foreign object is an ordinary `ProtoObject`; calls use the standard
   positional + keyword convention with no FFI layer and no copies.
+- **A protoST object is called through one protoCore method** (D135): protoST's
+  methods are its own bytecode, so protoST installs `__st_send__` on its `Object`
+  and a Scala call whose receiver answers it, on a member Scala cannot call (or
+  none), sends the Smalltalk message. The Scala name is mapped to a selector on
+  the Scala side by a fixed rule (`at_put(k, v)` → `at:put:`, backticks for an
+  explicit selector), Scala's `Any` members keep their meaning, and protoST calls
+  Scala back through the native `apply` of a function value, which re-enters
+  protoScala's own space. INTEROP §4.1 and §9.1.
 - Interned symbols are **process-global** since protoCore 2.2.0 (P3): one
   canonical pointer per spelling per process. This rule used to read "interned
   symbols are per space: never cache them in function-local statics", and P3

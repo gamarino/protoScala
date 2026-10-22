@@ -28,6 +28,7 @@ add_executable(protoscala_unit_tests
     test_cpp_tables.cpp
     test_compiled_provider.cpp
     test_field_groups.cpp
+    test_smalltalk_selector.cpp
 )
 
 target_link_libraries(protoscala_unit_tests
@@ -145,6 +146,21 @@ if(PROTOST_RUNTIME_LIBRARY AND PROTOST_FRONTEND_LIBRARY AND PROTOST_INCLUDE_DIR
     # named here. protoScala links the same protoIO target, which brings OpenSSL.
     target_link_libraries(protoscala_protost_interop PRIVATE protoIO::protoio)
     target_compile_options(protoscala_protost_interop PRIVATE ${PROTOSCALA_WARNINGS})
+    # protoST's Smalltalk-source kernel (`new` sending `initialize`, the
+    # exception protocol written in Smalltalk), which an embedder must point
+    # protoST at: it is found next to the protost executable, not next to this
+    # test.
+    target_compile_definitions(protoscala_protost_interop PRIVATE
+        PROTOST_KERNEL_LIB="${CMAKE_SOURCE_DIR}/../protoST/lib")
+    # The tutorial's protoST fixture runs under this host (tests/CMakeLists.txt).
+    add_executable(protoscala_protost_host protost_host.cpp)
+    target_include_directories(protoscala_protost_host PRIVATE
+        "${CMAKE_SOURCE_DIR}/src" "${PROTOST_INCLUDE_DIR}" ${PROTOCORE_INCLUDE_DIRS})
+    target_link_libraries(protoscala_protost_host PRIVATE
+        protoscala_repl protoscala_runtime protoscala_compiler protoscala_frontend
+        protoscala_support
+        "${PROTOST_RUNTIME_LIBRARY}" "${PROTOST_FRONTEND_LIBRARY}" protoIO::protoio)
+    target_compile_options(protoscala_protost_host PRIVATE ${PROTOSCALA_WARNINGS})
     add_test(NAME umd/protost-interop COMMAND protoscala_protost_interop)
     set_tests_properties(umd/protost-interop PROPERTIES TIMEOUT 120)
 elseif(NOT PROTOSCALA_PROTOST_INTEROP)
