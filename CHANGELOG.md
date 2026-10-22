@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-10-22
+
+**Requires protoCore 3.0.0** (SOVERSION 4), the declared minimum for a build from source; the `.deb` depends on `protocore (>= 3.0.0)`. CI pins protoCore tag `v3.0.0` on every job.
+
 ### Added — calling protoST objects, and exceptions between the two runtimes, 2026-10-21
 
 - **A Scala call on a protoST object sends the Smalltalk message** (D135), through

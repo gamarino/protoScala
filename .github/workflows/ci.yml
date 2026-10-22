@@ -57,11 +57,11 @@ env:
   PROTOCORE_REPO: numaes/protoCore
   PROTOST_REPO: gamarino/protoST
   PROTOIO_REPO: gamarino/protoIO
-  # protoCore 3.0.0, SOVERSION 4 (branch feature/args-calling-convention,
-  # cf52f9f): methods receive ProtoArguments / ProtoKeywordArguments.  Bump
+  # protoCore 3.0.0, SOVERSION 4 (tag v3.0.0,
+  # commit ce00a4a2): methods receive ProtoArguments / ProtoKeywordArguments.  Bump
   # deliberately.  It is also the declared minimum, which the floor entry of
   # the `test` job builds.
-  PROTOCORE_REF: ${{ github.event_name == 'schedule' && 'master' || 'cf52f9f5056919bb07326afc7159d5b3d78c03a3' }}
+  PROTOCORE_REF: ${{ github.event_name == 'schedule' && 'master' || 'ce00a4a26b6583ea8a58e776eee2ea91c743469e' }}
   # protoST main (4876884, 2026-10-11: its CI on protoCore 2.14.5; the
   # instance-variable write groups, protoCore 2.11.0 floor), the commit
   # protoScala's interop test was last verified against.
@@ -90,12 +90,12 @@ jobs:
             # Empty: env.PROTOCORE_REF (3.0.0, or master on the schedule).
             protocore_ref: ''
           # THE FLOOR JOB, the only one in this repository. protoCore 3.0.0
-          # (cf52f9f), SOVERSION 4: PROTOCORE_MIN_VERSION in CMakeLists.txt on
+          # (tag v3.0.0, ce00a4a2), SOVERSION 4: PROTOCORE_MIN_VERSION in CMakeLists.txt on
           # every platform (the descriptor calling convention). Built on every
           # event, the schedule included. cross-platform.yml builds 3.0.0 on
           # macOS and Windows.
           - name: Build and test suite (protoCore 3.0.0, the declared minimum)
-            protocore_ref: cf52f9f5056919bb07326afc7159d5b3d78c03a3
+            protocore_ref: ce00a4a26b6583ea8a58e776eee2ea91c743469e
     steps:
       - name: Check out protoScala
         uses: actions/checkout@v4
