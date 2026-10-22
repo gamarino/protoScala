@@ -140,6 +140,13 @@ PRIM(prim_is_instance_of) {
     return v->isInstanceOf(ctx, type) == PROTO_TRUE ? PROTO_TRUE : PROTO_FALSE;
 }
 
+// __isForeignObject(v): whether `v` is an object no Scala class built (D134): what
+// `Throwable` and `Exception` select besides their own instances.
+PRIM(prim_is_foreign_object) {
+    const ProtoObject* v = arg(ctx, args, 0, "__isForeignObject", 1);
+    return isForeignObject(ctx, layoutOf(), v) ? PROTO_TRUE : PROTO_FALSE;
+}
+
 // __fmt(lit0, v0, spec0, lit1, v1, spec1, ..., litN): the compiled form of an
 // f-interpolator (Compiler::compileFormat). Arity is always 3k + 1. The
 // specifiers were already validated at compile time, so a parse failure here is
@@ -1152,6 +1159,7 @@ void installPrimitives(ProtoContext* ctx, const RuntimeLayout& L) {
         {"println", &prim_println}, {"print", &prim_print}, {"__raise", &prim_raise},
         {"__fmt", &prim_fmt}, {"__tryOf", &prim_try_of},
         {"__classNameOf", &prim_class_name_of}, {"__isInstanceOf", &prim_is_instance_of},
+        {"__isForeignObject", &prim_is_foreign_object},
         {"__installExtension", &prim_install_extension}};
     static constexpr MethodEntry any[] = {
         {"toString", &any_toString}, {"equals", &any_equals}, {"==", &any_eqeq},

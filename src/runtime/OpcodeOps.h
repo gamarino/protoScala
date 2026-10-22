@@ -464,10 +464,7 @@ inline void uncons(proto::ProtoContext* ctx, const proto::ProtoObject* listObj,
 [[noreturn]] inline void throwValue(proto::ProtoContext* ctx, const RuntimeLayout& L,
                                     const proto::ProtoObject* v) {
     if (v == PROTO_NONE) throw ScalaError("NullPointerException", "throw null");
-    const bool foreign = isObjectCellFast(v) && !isScalaInstance(ctx, L, v) &&
-                         !compiledModuleOf(ctx, L, v) && !v->isMethod(ctx) &&
-                         v->isInstanceOf(ctx, L.anyProto) != PROTO_TRUE;
-    if (!foreign && v->getAttribute(ctx, L.throwableKey) != PROTO_TRUE)
+    if (!isForeignObject(ctx, L, v) && v->getAttribute(ctx, L.throwableKey) != PROTO_TRUE)
         throw ScalaError("IllegalArgumentException",
                          "throw expects a Throwable, got " + typeName(ctx, L, v));
     throw ScalaThrow(ctx, v);

@@ -22,8 +22,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   class the `std::` exception's type implied.
 - **A module's error type is caught by name** (D133): `case e: g.NegativeRadius`
   after `import example.geometry as g`, or after a member import. The pattern tests
-  protoCore's prototype chain. A module's error is not a Scala `Throwable`, so
-  `case e: Exception` does not catch it; `throw e` re-raises a caught one (D134).
+  protoCore's prototype chain. `case e: Throwable` and `case e: Exception` catch
+  it as well, and any value another language raises, as on the JVM; more specific
+  classes and `Error` do not. `throw e` re-raises a caught one (D134, decided by
+  the maintainer).
 - **Nothing but a `ProtoException` leaves protoScala.** A provider entry, a
   transpiled module's initialiser and a transpiled function entered from another
   runtime materialise protoScala's internal `ScalaError` first; a foreign caller of

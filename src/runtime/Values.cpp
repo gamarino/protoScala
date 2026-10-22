@@ -58,6 +58,12 @@ bool isScalaInstance(proto::ProtoContext* ctx, const RuntimeLayout& L, const pro
     return v->hasAttribute(ctx, L.nameKey) == PROTO_TRUE;  // presence, never a PROTO_NONE compare
 }
 
+bool isForeignObject(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v) {
+    return isObjectCellFast(v) && v != PROTO_NONE && !isScalaInstance(ctx, L, v) &&
+           !compiledModuleOf(ctx, L, v) && !v->isMethod(ctx) &&
+           v->isInstanceOf(ctx, L.anyProto) != PROTO_TRUE;
+}
+
 namespace {
 std::string classNameOf(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v) {
     const proto::ProtoObject* n = v->getAttribute(ctx, L.nameKey);

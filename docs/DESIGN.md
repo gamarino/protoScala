@@ -735,8 +735,12 @@ it throws, and the value's prototype chain its type (protoCore
    path); a type pattern that names a **value**, such as a module's error type
    (`import example.geometry as g` … `case e: g.NegativeRadius`, or a member
    import), tests protoCore's prototype chain through the builtin `__isInstanceOf`
-   (**D133**). A module's error is not below Scala's `Throwable`, so
-   `case e: Exception` does not catch it (**D134**). An exception no case selects
+   (**D133**). The prelude's `Throwable` and `Exception` also select foreign values
+   (**D134**): in a `catch`, `Throwable` matches every thrown value and `Exception`
+   every one that is not a Scala `Error` (a Scala program throws only Throwables,
+   so a thrown value without the Throwable marker is foreign by construction);
+   outside a `catch` both also accept a foreign object (`__isForeignObject`). More
+   specific classes and `Error` keep their own instances only. An exception no case selects
    is rethrown **unchanged** (protoCore rule E3): each frame — `runFrame`, and a
    generated frame — keeps the exceptions its handlers caught
    (`gen::InFlightExceptions`, one `std::exception_ptr` per handler slot, frame state

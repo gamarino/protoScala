@@ -8,7 +8,7 @@ const std::vector<std::string>& builtinGlobalNames() {
     static const std::vector<std::string> names = [] {
         std::vector<std::string> v = {"println", "print", "List", "Nil", "__raise",
                                       "Actor", "Future", "Thread", "System",
-                                      "__fmt", "__tryOf", "__classNameOf", "__isInstanceOf", "__kwprobe",
+                                      "__fmt", "__tryOf", "__classNameOf", "__isInstanceOf", "__isForeignObject", "__kwprobe",
                                       "__installExtension",
                                       "Vector", "Map", "Set",
                                       // Track F: the filesystem natives the

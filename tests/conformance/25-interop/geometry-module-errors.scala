@@ -1,4 +1,4 @@
-// EXPECT: geometry errors: 11 of 11 checks passed
+// EXPECT: geometry errors: 15 of 15 checks passed
 // protoCore's unified exception model, end to end, against protoCore's own
 // example module (protoCore/examples/exceptions/geometry_module), loaded by the
 // plug-in tests/unit/geometry_provider_plugin.cpp and imported through the
@@ -42,9 +42,30 @@ def check(label: String, ok: Boolean): Unit =
       catch
         case e: g.DegenerateTriangle => "wrong handler: DegenerateTriangle"
         case e: ArithmeticException => "wrong handler: ArithmeticException"
-        case e: Exception => "wrong handler: Exception"
+        case e: RuntimeException => "wrong handler: RuntimeException"
+        case e: StackOverflowError => "wrong handler: StackOverflowError"
+        case e: Error => "wrong handler: Error"
     } catch case e: g.NegativeRadius => "passed through " + e.name
   check("unrelated handlers do not catch it", d == "passed through NegativeRadius")
+
+  // D134: on the JVM everything thrown is a Throwable, and a module's error is not
+  // fatal, so Scala's Exception and Throwable both catch it.
+  val ex =
+    try { g.circleArea(-1); "returned" }
+    catch case e: Exception => "Exception caught " + e.name
+  check("case e: Exception catches it", ex == "Exception caught NegativeRadius")
+  val th =
+    try { g.circleArea(-1); "returned" }
+    catch case e: Throwable => "Throwable caught " + e.name
+  check("case e: Throwable catches it", th == "Throwable caught NegativeRadius")
+  val first =
+    try { g.triangleArea(1, 2, 10); "returned" }
+    catch
+      case e: RuntimeException => "RuntimeException"
+      case e: Exception => "Exception"
+  check("RuntimeException does not, Exception does", first == "Exception")
+  check("it is an instance of Exception outside a catch too",
+        (try { g.circleArea(-1); null } catch case e: g.GeometryError => e).isInstanceOf[Exception])
 
   val t =
     try { g.triangleArea(1, 2, 10); "returned" }

@@ -98,6 +98,11 @@ std::string formatDouble(double d);
 // Cells and lazy holders have none.
 bool isScalaInstance(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v);
 
+// A FOREIGN object: an object cell no Scala class built -- not on the chain of
+// Scala's `Any`, not a function, not a method. A module's error value is one.
+// D134: `Throwable` and `Exception` select it; THROW re-raises it.
+bool isForeignObject(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v);
+
 // AnyRef.toString: "<class name>@<identity hash in hex>".
 std::string defaultToString(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v);
 

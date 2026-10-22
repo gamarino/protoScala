@@ -466,9 +466,10 @@ Three kinds of failure arrive here, each as what a Scala programmer would expect
 - a **C++ exception** the module throws, which is a defect of the module and not
   a language value, arrives as a `RuntimeException` carrying its message.
 
-One difference from the JVM: a module's error is **not** a Scala `Throwable`, so
-`case e: Exception` and `case e: Throwable` do not catch it (D134). `case e =>`
-does, and so does `Try`.
+As on the JVM, where everything thrown is a `Throwable`, `case e: Throwable` and
+`case e: Exception` catch a module's error too, and so does `Try`: it is not a
+fatal error. A more specific class — `RuntimeException`, `ArithmeticException` —
+does not, and neither does `Error` or its subclasses (D134).
 
 To run it, the geometry module must be reachable from the import: a provider
 plug-in registers it with protoCore and adds it to the space's resolution chain
@@ -526,8 +527,8 @@ out not to be the one it wanted.
   outer cleanup during a `return`.
 - **D133** — a type pattern may name a **value**, such as a module's error type
   (`case e: g.NegativeRadius`); scalac rejects a value in type position.
-- **D134** — a module's error value is not a Scala `Throwable`, so
-  `case e: Throwable` does not catch it (§11.9).
+- **D134** — `Throwable` and `Exception` catch a module's error, and any value
+  another language raises, although it is no instance of a Scala class (§11.9).
 - There are **no stack traces**, no `NonFatal`, and no `ControlThrowable`. An
   uncaught exception reports `file:line: error: <Class>: <message>` and exits 1.
 

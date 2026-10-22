@@ -457,8 +457,15 @@ TEST(ForeignTypes, ATypePatternOnAValueSelectsByPrototypeChain) {
     EXPECT_EQ(h.eval("try { raising(); 0 } catch { case e: moduleError => 2 }"), "2");
     EXPECT_EQ(h.eval("try { try { raising(); 0 } catch { case e: unrelated => 3 } } "
                      "catch { case e: notFound => 4 }"), "4");
-    // A Scala class is no ancestor of it: `case e: Exception` does not run (D134).
-    EXPECT_EQ(h.eval("try { try { raising(); 0 } catch { case e: Exception => 5 } } "
+    // D134 (the maintainer's decision): Exception and Throwable catch it, a more
+    // specific class and a Scala Error do not.
+    EXPECT_EQ(h.eval("try { raising(); 0 } catch { case e: Exception => 5 }"), "5");
+    EXPECT_EQ(h.eval("try { raising(); 0 } catch { case e: Throwable => 5 }"), "5");
+    EXPECT_EQ(h.eval("try { try { raising(); 0 } catch { case e: RuntimeException => 5 } } "
+                     "catch { case e: moduleError => 6 }"), "6");
+    EXPECT_EQ(h.eval("try { try { raising(); 0 } catch { case e: StackOverflowError => 5 } } "
+                     "catch { case e: moduleError => 6 }"), "6");
+    EXPECT_EQ(h.eval("try { try { raising(); 0 } catch { case e: Error => 5 } } "
                      "catch { case e: moduleError => 6 }"), "6");
     // The caught value is the very object raised, and `throw` re-raises it.
     EXPECT_EQ(h.eval("try { try { raising(); 0 } catch { case e: moduleError => throw e } } "
@@ -561,4 +568,41 @@ TEST(ForeignTypes, APlainForeignProtoExceptionIsNotWrapped) {
         EXPECT_EQ(e.value(), g_traced);
     }
     g_traced = nullptr;
+}
+
+namespace {
+const proto::ProtoObject* g_raw = nullptr;
+const proto::ProtoObject* raiseRaw(proto::ProtoContext* ctx, const proto::ProtoObject*,
+                                   const proto::ParentLink*, const proto::ProtoArguments*,
+                                   const proto::ProtoKeywordArguments*) {
+    ctx->raise(g_raw);
+}
+}  // namespace
+
+// D134: a thrown value that is not an exception at all -- another language may raise
+// an integer or a string -- is caught by Throwable and Exception, and by nothing more
+// specific. A Scala program cannot throw one, so in a `catch` it is foreign by
+// construction; outside a `catch`, a plain Int is not an Exception.
+TEST(ForeignTypes, ANonExceptionValueIsCaughtByThrowableAndException) {
+    EvalHarness h;
+    h.eval("var raiseRaw: Any = null");
+    const RuntimeLayout& L = h.runtime().layout();
+    proto::ProtoContext ctx(&h.space(), h.runtime().rootContext());
+    const GlobalBinding* b = h.globals().binding("raiseRaw");
+    ASSERT_NE(b, nullptr);
+    L.globals->setAttribute(&ctx, proto::ProtoString::createSymbol(&ctx, b->key.c_str()),
+                            ctx.fromMethod(nullptr, &raiseRaw));
+    g_raw = ctx.fromInteger(42);
+    EXPECT_EQ(h.eval("try { raiseRaw(); 0 } catch { case e: Exception => e }"), "42");
+    EXPECT_EQ(h.eval("try { raiseRaw(); 0 } catch { case e: Throwable => e }"), "42");
+    EXPECT_EQ(h.eval("try { try { raiseRaw(); 0 } catch { case e: RuntimeException => 1 } } "
+                     "catch { case e => 2 }"), "2");
+    EXPECT_EQ(h.eval("try { try { raiseRaw(); 0 } catch { case e: StackOverflowError => 1 } } "
+                     "catch { case e => 2 }"), "2");
+    EXPECT_EQ(h.eval("(42: Any).isInstanceOf[Exception]"), "false");
+    // A Scala Error is still not an Exception, thrown or not.
+    EXPECT_EQ(h.eval("try { throw new StackOverflowError(\"x\") } "
+                     "catch { case e: Exception => 1; case e: Throwable => 2 }"), "2");
+    EXPECT_EQ(h.eval("Try(raiseRaw()).isFailure"), "true");
+    g_raw = nullptr;
 }

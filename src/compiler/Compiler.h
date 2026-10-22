@@ -369,6 +369,11 @@ private:
     // with `g` an imported module) rather than a type; nullptr when its head is no
     // value in scope. A type pattern on it tests protoCore's prototype chain.
     NodePtr valueNamedByType(const std::string& dotted, SourcePos pos);
+    // D134: the slot holding the value a `catch` cascade is matching, while its
+    // case patterns compile (-1 otherwise). A type test on THAT slot is a test of a
+    // thrown value, where Scala's `Throwable` and `Exception` also select a foreign
+    // one (a module's error, another language's exception, any non-Scala value).
+    int catchScrutineeSlot_ = -1;
     void compileInstanceOf(const Node& value, const TypeTree& t, bool cast, SourcePos pos);
 };
 

@@ -548,9 +548,10 @@ catch
 ```
 
 A subtype is caught by a handler for its base type; a handler for an unrelated
-type does not run, and the error leaves it with the same value. A module's error is
-not below Scala's `Throwable`, so `case e: Exception` and `case e: Throwable` do not
-catch it (D134); `case e =>` and `Try` do. Its attributes (`e.message`, `e.name` for
+type does not run, and the error leaves it with the same value. As on the JVM,
+`case e: Throwable` and `case e: Exception` catch it too, and any other value a
+foreign runtime raises, while `RuntimeException` and the other specific classes,
+and `Error` and its subclasses, do not (D134); `Try` captures it. Its attributes (`e.message`, `e.name` for
 the geometry module) are read by name, late-bound like every foreign member.
 
 **What else arrives as what.**

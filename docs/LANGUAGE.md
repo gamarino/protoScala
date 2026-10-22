@@ -208,8 +208,11 @@ is one C++ type whose type is the value's prototype chain, so an error raised by
 module (in C++ or in another language) is that module's own object. A handler
 names its type through the import — `case e: g.NegativeRadius` after
 `import example.geometry as g`, or a member-imported name — and the pattern tests
-the chain (D133). Such an error is not below `Throwable`, so `case e: Exception`
-does not catch it (D134); `case e =>` and `Try` do. protoCore's own errors are
+the chain (D133). As on the JVM, where everything thrown is a `Throwable`,
+`case e: Throwable` and `case e: Exception` catch it too — and any other value a
+foreign module or language raises — while more specific classes
+(`RuntimeException`, `ArithmeticException`, ...) and `Error` and its subclasses do
+not (D134). `Try` captures it. protoCore's own errors are
 instances of the classes above: a division by zero or an overflow an
 `ArithmeticException`, a malformed number a `NumberFormatException`, a type
 mismatch a `ClassCastException`, an arity error an `IllegalArgumentException`

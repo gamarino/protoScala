@@ -71,7 +71,10 @@ void Compiler::compileCatchCases(const std::vector<CaseDef>& cases, int slot, So
         checkDistinctVariables(*c.pattern);
         fn_->scopes.emplace_back();
         std::vector<std::size_t> fail;
+        const int outerCatchSlot = catchScrutineeSlot_;
+        catchScrutineeSlot_ = slot;
         compilePattern(*c.pattern, slot, fail);
+        catchScrutineeSlot_ = outerCatchSlot;
         if (c.guard) {
             compileExpr(*c.guard);
             fail.push_back(emitJump(Op::JUMP_IF_FALSE, c.pos, -1));
@@ -456,9 +459,37 @@ bool Compiler::compileTypeTest(const TypeTree& t, int slot, SourcePos pos, bool 
         return true;
     }
     if (const ClassInfo* c = globals_.findType(name)) {
-        // A protoScala class: the per-class marker attribute, the fast path.
+        // D134 (decided by the maintainer, 2026-10-21): on the JVM everything thrown
+        // is a Throwable, so in a `catch` the prelude's `Throwable` selects every
+        // thrown value and `Exception` every one that is not a Scala `Error` -- a
+        // module's error, another language's exception, any non-Scala value. A
+        // Scala program can throw only Throwables, so a thrown value without the
+        // Throwable marker is foreign by construction. Outside a `catch` (a plain
+        // match, isInstanceOf) the two also accept a foreign OBJECT, which no Scala
+        // class built. Every other class keeps its own instances only.
+        const bool throwable = c->key == kThrowableKey;
+        const bool exception = c->key == "@Exception";
+        const bool thrown = slot == catchScrutineeSlot_;
+        if (throwable && thrown && inPattern) return false;   // every thrown value
         emit(Op::PUSH_LOCAL, static_cast<std::uint64_t>(slot), pos, +1);
         emit(Op::TEST_PROTO, fn_->mod->addSymbol(c->key), pos, 0);
+        if (throwable || exception) {
+            // [marker] -> [marker || foreign]
+            emit(Op::DUP, 0, pos, +1);
+            const std::size_t done = emitJump(Op::JUMP_IF_TRUE, pos, -1);
+            emit(Op::POP, 0, pos, -1);
+            if (thrown) {
+                // Any thrown value that is not a Scala Throwable is a foreign one.
+                emit(Op::PUSH_LOCAL, static_cast<std::uint64_t>(slot), pos, +1);
+                emit(Op::TEST_PROTO, fn_->mod->addSymbol(kThrowableKey), pos, 0);
+                emit(Op::NOT, 0, pos, 0);
+            } else {
+                compileIdent(Ident(pos, "__isForeignObject"));
+                emit(Op::PUSH_LOCAL, static_cast<std::uint64_t>(slot), pos, +1);
+                emit(Op::CALL, 1, pos, -1);
+            }
+            fn_->mod->patchJumpTo(done, fn_->mod->pos());
+        }
         return true;
     }
     // D133: a name that is not a type but a VALUE in scope -- a foreign module's
