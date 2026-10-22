@@ -62,10 +62,10 @@ env:
   # deliberately.  It is also the declared minimum, which the floor entry of
   # the `test` job builds.
   PROTOCORE_REF: ${{ github.event_name == 'schedule' && 'master' || 'ce00a4a26b6583ea8a58e776eee2ea91c743469e' }}
-  # protoST main (4876884, 2026-10-11: its CI on protoCore 2.14.5; the
-  # instance-variable write groups, protoCore 2.11.0 floor), the commit
-  # protoScala's interop test was last verified against.
-  PROTOST_REF: ${{ github.event_name == 'schedule' && 'main' || '487688426832933d9a512acd9a1492f60fc8da4f' }}
+  # protoST 0.7.0 (422a73c, 2026-10-22: protoCore 3.0.0, SOVERSION 4, and
+  # `__st_send__`, which protoScala's calls into protoST objects use), the
+  # commit protoScala's interop test was last verified against.
+  PROTOST_REF: ${{ github.event_name == 'schedule' && 'main' || '422a73c9b8899f8db658eb6738ef89d65a761014' }}
   # protoIO 0.2.2 (main, 1611ff9): the I/O layer protoScala and protoST link
   # statically, and protoScala's floor.  Bump deliberately, like protoCore.
   PROTOIO_REF: ${{ github.event_name == 'schedule' && 'main' || '1611ff9cf8d499cdc42a6e108e42ecfc36fd8164' }}
