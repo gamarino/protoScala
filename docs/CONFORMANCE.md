@@ -238,10 +238,9 @@ RETHROW re-raises the same value and it leaves through `leaveProtoScala`, the
 boundary every exit from protoScala takes. `escapeLanguageError` evaluates `throw
 new RuntimeException(...)` through the same boundary.
 
-What this does not prove: the RETHROW raises a NEW `ScalaThrow` carrying the same
-value, so the case's "same value" holds but a foreign runtime's own subclass of
-`ProtoException` would not survive a non-matching protoScala `catch`
-(DECISIONS-LOG, 2026-10-21). And the cases exercise `ExecutionEngine::run` wrapped
+The non-matching cascade rethrows the ORIGINAL exception object (protoCore rule
+E3), so beyond the case's "same value" a foreign runtime's own subclass survives
+too; `ForeignTypes.AForeignExceptionLeavesUnchanged` checks that. The cases exercise `ExecutionEngine::run` wrapped
 by the host in `leaveProtoScala`; protoScala's command-line `Session` reports an
 uncaught exception rather than letting it leave.
 

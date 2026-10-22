@@ -198,9 +198,13 @@ EvalStatus Session::evaluate(const std::string& source, const std::string& sourc
         // protoCore's own -- reported through the VALUE's own toString, so a
         // user-defined class says what its class says. The engine must be active
         // for that, and it is: this is the thread that ran it.
+        // A foreign exception passes through protoScala unchanged (protoCore rule
+        // E3), so it carries no protoScala line: it is reported without one.
         std::fflush(stdout);
-        std::fprintf(stderr, "%s:%d: error: %s\n", sourceName.c_str(), thrownLine(t),
-                     showThrown(&ctx, t.value()).c_str());
+        const std::string where = thrownLine(t) > 0
+                                      ? sourceName + ":" + std::to_string(thrownLine(t))
+                                      : sourceName;
+        std::fprintf(stderr, "%s: error: %s\n", where.c_str(), showThrown(&ctx, t.value()).c_str());
         return EvalStatus::Error;
     } catch (const ScalaError& e) {
         std::fflush(stdout);

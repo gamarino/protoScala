@@ -19,3 +19,14 @@ def greet(who: String): String = "hello, " + who
 
 def reciprocal(n: Int): Int =
   if (n == 0) throw new RuntimeException("division by zero") else 100 / n
+
+// protoCore rule E3: an exception a handler does not select leaves UNCHANGED. `f` is
+// the caller's own method; what it raises must reach the caller as the same C++
+// object, through a cascade that does not match and through a `finally`.
+def passThroughCatch(f: () => Int): Int =
+  try f() catch { case e: ArithmeticException => -1 }
+
+def passThroughFinally(f: () => Int): Int = {
+  var cleaned = 0
+  try f() finally { cleaned = 1 }
+}

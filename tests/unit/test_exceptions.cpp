@@ -467,3 +467,98 @@ TEST(ForeignTypes, ATypePatternOnAValueSelectsByPrototypeChain) {
               "true");
     g_moduleError = nullptr;
 }
+
+namespace {
+// Another runtime's exception: protoCore's one type with something of its own on top.
+struct TracedError : proto::ProtoException {
+    TracedError(proto::ProtoContext* ctx, const proto::ProtoObject* v)
+        : proto::ProtoException(ctx, v) {}
+    int traceDepth = 17;
+};
+const proto::ProtoObject* g_traced = nullptr;
+const proto::ProtoObject* raiseTraced(proto::ProtoContext* ctx, const proto::ProtoObject*,
+                                      const proto::ParentLink*, const proto::ProtoArguments*,
+                                      const proto::ProtoKeywordArguments*) {
+    throw TracedError(ctx, g_traced);
+}
+}  // namespace
+
+// protoCore rule E3: an exception a handler does not select is rethrown UNCHANGED.
+// A foreign subclass passes through a non-matching cascade, a `finally`, and a
+// handler that matches and re-raises with `throw e`, and leaves the interpreter as
+// the same C++ type with its own field and the same value. The transpiled twin is
+// tests/interop (passThroughCatch, passThroughFinally).
+TEST(ForeignTypes, AForeignExceptionLeavesUnchanged) {
+    EvalHarness h;
+    h.eval("var tracedType: Any = null");
+    h.eval("var raiseTraced: Any = null");
+    const RuntimeLayout& L = h.runtime().layout();
+    proto::ProtoContext ctx(&h.space(), h.runtime().rootContext());
+    auto setGlobal = [&](const char* name, const proto::ProtoObject* v) {
+        const GlobalBinding* b = h.globals().binding(name);
+        ASSERT_NE(b, nullptr) << name;
+        L.globals->setAttribute(&ctx, proto::ProtoString::createSymbol(&ctx, b->key.c_str()), v);
+    };
+    const proto::ProtoObject* type = ctx.newObject(false);
+    setGlobal("tracedType", type);
+    setGlobal("raiseTraced", ctx.fromMethod(nullptr, &raiseTraced));
+    const char* programs[] = {
+        "try { raiseTraced(); 0 } catch { case e: ArithmeticException => 1 }",
+        "{ var n = 0; try { raiseTraced(); 0 } finally { n = 1 } }",
+        "try { raiseTraced(); 0 } catch { case e: tracedType => throw e }",
+        "try { try { raiseTraced(); 0 } catch { case e: IllegalStateException => 1 } } "
+        "finally { () }",
+    };
+    for (const char* program : programs) {
+        g_traced = type->newChild(&ctx);
+        ctx.returnValue = g_traced;
+        bool arrived = false;
+        try {
+            (void) h.evalValue(program);
+        } catch (const proto::ProtoException& e) {
+            arrived = true;
+            const auto* traced = dynamic_cast<const TracedError*>(&e);
+            ASSERT_NE(traced, nullptr) << program << ": left as a different C++ object";
+            EXPECT_EQ(traced->traceDepth, 17) << program;
+            EXPECT_EQ(e.value(), g_traced) << program;
+        } catch (...) {
+            ADD_FAILURE() << program << ": left as something that is not a ProtoException";
+            arrived = true;
+        }
+        EXPECT_TRUE(arrived) << program;
+    }
+    g_traced = nullptr;
+}
+
+namespace {
+const proto::ProtoObject* raisePlain(proto::ProtoContext* ctx, const proto::ProtoObject*,
+                                     const proto::ParentLink*, const proto::ProtoArguments*,
+                                     const proto::ProtoKeywordArguments*) {
+    ctx->raise(g_traced);
+}
+}  // namespace
+
+// The other half of E3: a PLAIN proto::ProtoException with a foreign value is not
+// re-raised as a ScalaThrow on its way through a frame (only protoScala's own value,
+// built by the error factory, is, to give it a source line).
+TEST(ForeignTypes, APlainForeignProtoExceptionIsNotWrapped) {
+    EvalHarness h;
+    h.eval("var raisePlain: Any = null");
+    const RuntimeLayout& L = h.runtime().layout();
+    proto::ProtoContext ctx(&h.space(), h.runtime().rootContext());
+    const GlobalBinding* b = h.globals().binding("raisePlain");
+    ASSERT_NE(b, nullptr);
+    L.globals->setAttribute(&ctx, proto::ProtoString::createSymbol(&ctx, b->key.c_str()),
+                            ctx.fromMethod(nullptr, &raisePlain));
+    g_traced = ctx.newObject(false);
+    ctx.returnValue = g_traced;
+    try {
+        (void) h.evalValue("{ def inner(): Int = raisePlain(); inner() }");
+        ADD_FAILURE() << "nothing was raised";
+    } catch (const proto::ProtoException& e) {
+        EXPECT_EQ(dynamic_cast<const ScalaThrow*>(&e), nullptr)
+            << "a foreign ProtoException was re-raised as a ScalaThrow";
+        EXPECT_EQ(e.value(), g_traced);
+    }
+    g_traced = nullptr;
+}

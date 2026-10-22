@@ -34,6 +34,7 @@ class ExecutionEngine;
 // one-line forwards (src/runtime/OpcodeOps.h); declaring it a friend keeps ONE
 // implementation of every opcode without promoting eighteen members to public.
 namespace ops { struct Engine; }
+namespace gen { class InFlightExceptions; }
 
 struct ActiveCallContext {
     ExecutionEngine* engine;
@@ -137,10 +138,14 @@ private:
     // The dispatch loop of one frame. On an exception it writes the word index
     // of the faulting instruction to *faultPc and rethrows; runFrame uses it to
     // search the module's handler table (plan A0-3).
+    // `inflight` holds the exceptions this frame's handlers caught, so RETHROW and
+    // `throw e` re-raise the original C++ object (protoCore rule E3); nullptr for a
+    // frame that has none.
     const proto::ProtoObject* runLoop(proto::ProtoContext& frame, const BytecodeModule& mod,
                                       const proto::ProtoObject** slots,
                                       const proto::ProtoObject** sp, const Instr* ip,
-                                      std::size_t* faultPc);
+                                      std::size_t* faultPc,
+                                      const gen::InFlightExceptions* inflight);
 
     // One frame, with its handler table active. `execute` and `resumeFrames`
     // call this, never runLoop directly (escalation E2): the handler body is

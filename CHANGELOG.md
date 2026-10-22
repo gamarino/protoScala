@@ -31,8 +31,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **An unprefixed import reaches the space's resolution chain** after the `.scala`
   and compiled-module lookups, as INTEROP §3 documented, so a provider an embedder
   or a plug-in adds is importable: `import example.geometry as g`.
-- An uncaught module error is reported as `file:line: error: <name>: <message>`
-  from its attributes.
+- **An exception no handler selects leaves unchanged** (protoCore rule E3): a
+  non-matching `catch`, a `finally` and `throw e` rethrow the original C++
+  exception, interpreted and transpiled, so another runtime's subclass keeps its
+  own state. A foreign `ProtoException` is never wrapped.
+- An uncaught module error is reported as `file: error: <name>: <message>` from
+  its attributes (no line: it passed through protoScala unchanged).
 - Conformance rule 14: `catchForeignError` and `escapeLanguageError` are
   implemented; the four `exception.*` cases pass.
 - Tests: `25-interop/geometry-module-errors.scala` and the tutorial's §11.9 run

@@ -735,12 +735,20 @@ it throws, and the value's prototype chain its type (protoCore
    path); a type pattern that names a **value**, such as a module's error type
    (`import example.geometry as g` … `case e: g.NegativeRadius`, or a member
    import), tests protoCore's prototype chain through the builtin `__isInstanceOf`
-   (**D133**). A value that matches no case is re-raised with the same value
-   (RETHROW). A module's error is not below Scala's `Throwable`, so
-   `case e: Exception` does not catch it (**D134**). A plain `ProtoException`
-   reaching `runLoop` from protoCore or a C++ module is re-raised as a `ScalaThrow`
-   of the same value so it gets a source line; another runtime's subclass passes
-   untouched.
+   (**D133**). A module's error is not below Scala's `Throwable`, so
+   `case e: Exception` does not catch it (**D134**). An exception no case selects
+   is rethrown **unchanged** (protoCore rule E3): each frame — `runFrame`, and a
+   generated frame — keeps the exceptions its handlers caught
+   (`gen::InFlightExceptions`, one `std::exception_ptr` per handler slot, frame state
+   on the C++ stack), and RETHROW (a cascade that matched nothing, the end of a
+   `finally`) or a `throw e` of the same value rethrows the original C++ object, so
+   another runtime's subclass keeps what it carries. Only a value the frame did not
+   catch as a `ProtoException` — a `ScalaError` materialised for the handler, or a
+   frame resumed after a cooperative suspension, whose C++ exception is gone — is
+   raised as a new `ScalaThrow`. A plain `ProtoException` reaching `runLoop` is
+   re-raised as a `ScalaThrow` (to get a source line) only when its value is a
+   protoScala instance, i.e. protoCore's error built by the factory; a foreign one
+   passes as the same object and an uncaught one is reported without a line.
 3. *protoCore's errors.* `Session` installs an error factory
    (`src/runtime/ErrorFactory.cpp`) once the prelude classes exist. It builds the
    instance the way `new C(message)` would, through the engine active on the

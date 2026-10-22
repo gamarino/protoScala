@@ -23,6 +23,23 @@ namespace {
 
 int failures = 0;
 
+// Another runtime's exception: protoCore's one exception type, with something of its
+// own on top (a traceback, say). protoCore rule E3: a handler that does not select it
+// lets it leave as the same C++ object, so the extra survives.
+struct TracedError : proto::ProtoException {
+    TracedError(proto::ProtoContext* ctx, const proto::ProtoObject* v)
+        : proto::ProtoException(ctx, v) {}
+    int traceDepth = 17;
+};
+
+const proto::ProtoObject* g_tracedValue = nullptr;
+
+const proto::ProtoObject* raiseTraced(proto::ProtoContext* ctx, const proto::ProtoObject*,
+                                      const proto::ParentLink*, const proto::ProtoArguments*,
+                                      const proto::ProtoKeywordArguments*) {
+    throw TracedError(ctx, g_tracedValue);
+}
+
 void fail(const std::string& what) {
     std::fprintf(stderr, "FAIL: %s\n", what.c_str());
     ++failures;
@@ -118,6 +135,33 @@ int body(proto::ProtoContext* ctx, const proto::ProtoObject* module, void* ud) {
             fail(std::string("reciprocal(0) left the module as a std:: exception: ") + e.what());
         }
         if (!threw) fail("reciprocal(0) did not raise");
+    }
+
+    // Rule E3, through a non-matching catch and through a finally: the caller's own
+    // exception subclass comes back as the same C++ type, with its extra field and the
+    // very value it was raised with.
+    for (const char* through : {"passThroughCatch", "passThroughFinally"}) {
+        g_tracedValue = ctx->newObject(false);
+        const proto::ProtoObject* raiser = ctx->fromMethod(nullptr, &raiseTraced);
+        const proto::ProtoList* args = ctx->newList()->appendLast(ctx, raiser);
+        bool arrived = false;
+        try {
+            (void)callExport(ctx, module, through, args);
+        } catch (const proto::ProtoException& e) {
+            arrived = true;
+            const auto* traced = dynamic_cast<const TracedError*>(&e);
+            if (!traced)
+                fail(std::string(through) + ": the exception left as a different C++ object");
+            else if (traced->traceDepth != 17)
+                fail(std::string(through) + ": the subclass's own field was lost");
+            if (e.value() != g_tracedValue)
+                fail(std::string(through) + ": the exception left with a different value");
+        } catch (...) {
+            arrived = true;
+            fail(std::string(through) + ": the exception left as something else");
+        }
+        if (!arrived) fail(std::string(through) + ": nothing was raised");
+        g_tracedValue = nullptr;
     }
 
     // A function that is absent must read as absent, not as a wrong cell.

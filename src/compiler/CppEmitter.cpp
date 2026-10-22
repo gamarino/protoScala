@@ -457,6 +457,7 @@ bool CppEmitter::emitBlock(std::size_t index, const GlobalTable&) {
         out_ << "    std::size_t pc = 0;\n"
              << "    std::size_t resumePc = kEntry;\n"
              << "    std::exception_ptr caught;\n"
+             << "    gen::InFlightExceptions inflight;\n"
              << "    for (;;) {\n"
              << "      try {\n"
              << "        switch (resumePc) {\n"
@@ -628,13 +629,20 @@ bool CppEmitter::emitBlock(std::size_t index, const GlobalTable&) {
                 break;
             }
             case Op::THROW:
-                out_ << "gen::throwValue(C, " << st(dep - 1) << ");";
+                // In a frame with handlers, `throw e` of a value a handler caught
+                // rethrows the original exception (protoCore rule E3).
+                if (guarded)
+                    out_ << "gen::throwValueInFrame(C, " << st(dep - 1) << ", inflight);";
+                else
+                    out_ << "gen::throwValue(C, " << st(dep - 1) << ");";
                 break;
             case Op::RETHROW:
                 // A non-matching `catch` cascade, and the end of every `finally`. The
                 // operand is a LOCAL slot -- the one the handler's entry named -- not a
                 // stack offset, so it is `S[n]` and not `st(...)`.
-                out_ << "gen::rethrow(C, " << rec << ", S[" << d.operand << "]);";
+                // The ORIGINAL exception, unchanged, when this frame caught it (E3).
+                out_ << "gen::rethrowInFrame(C, " << rec << ", S[" << d.operand
+                     << "], inflight);";
                 break;
             case Op::MAKE_CLASS: {
                 const BytecodeModule::Const& c = mod.constAt(d.operand);
@@ -710,8 +718,12 @@ bool CppEmitter::emitBlock(std::size_t index, const GlobalTable&) {
         out_ << "      } catch (...) {\n"
              << "        caught = std::current_exception();\n"
              << "      }\n"
-             << "      resumePc = gen::handleCaughtException(C, " << rec
-             << ", pc, S, F.pendingSlot(), caught)->handlerPc;\n"
+             << "      {\n"
+             << "        const gen::HandlerRec* entered = gen::handleCaughtException(C, " << rec
+             << ", pc, S, F.pendingSlot(), caught);\n"
+             << "        inflight.record(entered->slot, S[entered->slot], caught);\n"
+             << "        resumePc = entered->handlerPc;\n"
+             << "      }\n"
              << "      caught = nullptr;\n"
              << "    }\n";
     out_ << "}\n\n";

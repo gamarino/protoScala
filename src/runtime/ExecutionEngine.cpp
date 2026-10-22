@@ -1,4 +1,5 @@
 #include "runtime/ExecutionEngine.h"
+#include <protoScala/GeneratedModule.h>
 #include "runtime/OpcodeOps.h"
 #include "compiler/GlobalTable.h"
 #include "compiler/BytecodeModule.h"
@@ -935,11 +936,15 @@ const proto::ProtoObject* ExecutionEngine::runFrame(proto::ProtoContext& frame,
     // the next dispatch below the frames already left behind: each Scala frame an
     // exception passed through would cost several KiB, and a StackOverflowError
     // raised at depth would overflow the native stack while propagating.
+    // The exceptions this frame's handlers caught, so that a value the frame
+    // re-raises leaves as the SAME C++ exception (protoCore rule E3): a foreign
+    // runtime's subclass keeps what it carries. Frame state, on the C++ stack.
+    gen::InFlightExceptions inflight;
     for (;;) {
         std::size_t faultPc = 0;
         std::exception_ptr passOn;
         try {
-            return runLoop(frame, mod, slots, sp, ip, &faultPc);
+            return runLoop(frame, mod, slots, sp, ip, &faultPc, &inflight);
         } catch (const proto::ProtoException& t) {
             // Every language value arrives here: a Scala throw, an error a module
             // raised, protoCore's own (built by the error factory). protoCore pins
@@ -949,6 +954,8 @@ const proto::ProtoObject* ExecutionEngine::runFrame(proto::ProtoContext& frame,
             // match (CompilePatterns.cpp).
             const BytecodeModule::Handler* h = mod.handlerFor(faultPc);
             if (h) {
+                inflight.record(static_cast<unsigned>(h->slot), t.value(),
+                                std::current_exception());
                 sp = enterHandler(mod, slots, *h, t.value(), &ip);
                 continue;   // leaves the catch block: the handler body then runs with
                             // NO live C++ handler, so it suspends like any other code
@@ -989,7 +996,8 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                                                    const proto::ProtoObject** slots,
                                                    const proto::ProtoObject** sp,
                                                    const Instr* ip,
-                                                   std::size_t* faultPc) {
+                                                   std::size_t* faultPc,
+                                                   const gen::InFlightExceptions* inflight) {
     const Instr* const code = mod.code().data();
     const RuntimeLayout& L = layout_;
     // The operand-stack index where the in-flight call will write its result,
@@ -1328,11 +1336,18 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                     continue;
                 }
                 case Op::THROW:
+                    // `throw e` of a value this frame caught: the original exception (E3).
+                    if (inflight) inflight->rethrowIfCaught(sp[-1]);
                     ops::throwValue(&frame, L, *--sp);
                 case Op::RETHROW:
                     // A Catch cascade that matched nothing, or a Finally body that
                     // has finished: re-raise the value the handler saved in slot
                     // `operand` (plan A0-4).
+                    // The ORIGINAL exception, unchanged, when this frame caught it
+                    // (protoCore rule E3); a new one only for a value it did not
+                    // catch as a ProtoException (a materialised ScalaError, a frame
+                    // resumed after a suspension).
+                    if (inflight) inflight->rethrowIfCaught(slots[operand]);
                     ops::rethrow(&frame, slots[operand], mod.name());
             }
             // Every handled opcode continues the loop or returns; reaching this
@@ -1370,12 +1385,13 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
     } catch (const proto::ProtoException& e) {
         // A language value raised outside protoScala's own throw sites: protoCore's
         // error (built by the error factory as a Scala class), a module's error, or
-        // another runtime's. A plain ProtoException carries nothing but its value,
-        // so it is re-raised as a ScalaThrow of the SAME value to give it this
-        // source line (D14's report shape). A subclass of another runtime may
-        // carry its own state, so it passes through untouched.
+        // another runtime's. Only protoScala's OWN value in a plain ProtoException --
+        // protoCore's error built by the factory, which carries nothing but that
+        // value -- is re-raised as a ScalaThrow, to give it this source line (D14's
+        // report shape). Anything foreign passes through as the same C++ object
+        // (protoCore rule E3), and an uncaught one is reported without a line.
         *faultPc = static_cast<std::size_t>(ip - code) - 1;
-        if (typeid(e) == typeid(proto::ProtoException)) {
+        if (typeid(e) == typeid(proto::ProtoException) && isScalaInstance(&frame, L, e.value())) {
             ScalaThrow t(&frame, e.value());
             t.line = mod.lineAt(*faultPc);
             passOn = std::make_exception_ptr(t);

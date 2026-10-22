@@ -36,6 +36,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <utility>
+#include <vector>
 
 /**
  * Marks the extern "C" entry points of a generated module (`proto_module_init`,
@@ -344,6 +346,52 @@ void uncons(proto::ProtoContext*, const proto::ProtoObject* list, const proto::P
 const proto::ProtoObject* makeTuple(proto::ProtoContext*, const proto::ProtoObject** elems, unsigned n);
 
 [[noreturn]] void throwValue(proto::ProtoContext*, const proto::ProtoObject* v);
+
+/**
+ * The exceptions one frame's handlers caught (protoCore docs/EXCEPTIONS.md, rule E3:
+ * an exception a handler does not select is rethrown UNCHANGED). A handler body runs
+ * outside the C++ catch clause, so the caught exception is kept here, one entry per
+ * handler slot, and RETHROW -- a cascade that matched nothing, the end of a `finally` --
+ * or a `throw e` of the same value rethrows the ORIGINAL C++ object, with whatever a
+ * foreign runtime's subclass of proto::ProtoException carries. It is frame state: the
+ * interpreter's runFrame and a generated frame each own one, on the C++ stack. A value
+ * with no entry (a ScalaError materialised for the handler, a frame resumed after a
+ * cooperative suspension) is raised as a new exception, which is all that is possible.
+ * Header-only, so a module built against an older header is unaffected.
+ */
+class InFlightExceptions {
+public:
+    void record(unsigned slot, const proto::ProtoObject* value, std::exception_ptr caught) {
+        for (Entry& e : entries_)
+            if (e.slot == slot) {
+                e.value = value;
+                e.caught = std::move(caught);
+                return;
+            }
+        entries_.push_back(Entry{slot, value, std::move(caught)});
+    }
+    /** Rethrows the exception a handler of this frame caught with `value`; returns if none. */
+    void rethrowIfCaught(const proto::ProtoObject* value) const {
+        if (!value) return;
+        for (const Entry& e : entries_)
+            if (e.value == value && e.caught) std::rethrow_exception(e.caught);
+    }
+
+private:
+    struct Entry {
+        unsigned slot;
+        const proto::ProtoObject* value;
+        std::exception_ptr caught;
+    };
+    std::vector<Entry> entries_;
+};
+
+/** THROW in a frame with handlers: the original exception when `v` is one it caught (E3). */
+[[noreturn]] inline void throwValueInFrame(proto::ProtoContext* ctx, const proto::ProtoObject* v,
+                                           const InFlightExceptions& inflight) {
+    inflight.rethrowIfCaught(v);
+    throwValue(ctx, v);
+}
 /**
  * RETHROW: re-raise the value the handler saved in a local slot. Takes the block so the
  * "RETHROW with no saved exception in <name>" defect message names it, as the
@@ -351,6 +399,13 @@ const proto::ProtoObject* makeTuple(proto::ProtoContext*, const proto::ProtoObje
  * which one.
  */
 [[noreturn]] void rethrow(proto::ProtoContext*, const BlockRec& blk, const proto::ProtoObject* v);
+/** RETHROW in a frame with handlers: the original exception, unchanged (E3), when there is one. */
+[[noreturn]] inline void rethrowInFrame(proto::ProtoContext* ctx, const BlockRec& blk,
+                                        const proto::ProtoObject* v,
+                                        const InFlightExceptions& inflight) {
+    inflight.rethrowIfCaught(v);
+    rethrow(ctx, blk, v);
+}
 /** The handler entry for `pc`, or nullptr. Same search order as the VM's table. */
 const HandlerRec* handlerFor(const BlockRec&, std::size_t pc);
 /** A ScalaError as a prelude Throwable instance, for the retry loop's catch. */
