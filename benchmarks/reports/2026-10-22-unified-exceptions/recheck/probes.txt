@@ -1,0 +1,16 @@
+startup trans_after 88717970 35 | CHECK 0
+startup trans_before 87041132 26 | CHECK 0
+startup interp_after 91842875 27 | CHECK 0
+startup interp_before 89969717 32 | CHECK 0
+throw_catch trans_after 5600492980 1821 | CHECK 200000
+throw_catch trans_before 5558035375 1970 | CHECK 200000
+throw_catch interp_after 6442717076 2652 | CHECK 200000
+throw_catch interp_before 5756708583 2163 | CHECK 200000
+throw_across5 trans_after 16582056573 6044 | CHECK 100000
+throw_across5 trans_before 14892462042 4927 | CHECK 100000
+throw_across5 interp_after 19730835031 6444 | CHECK 100000
+throw_across5 interp_before 20061095623 6640 | CHECK 100000
+zerodiv trans_after 9176223071 3391 | CHECK 200000
+zerodiv trans_before 8087174606 2669 | CHECK 200000
+zerodiv interp_after 8066072533 2664 | CHECK 200000
+zerodiv interp_before 7653464444 2527 | CHECK 200000

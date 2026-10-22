@@ -1,0 +1,54 @@
+protoScala benchmark harness  --  2026-10-22 10:01
+  host:       AMD Ryzen 5 5500U with Radeon Graphics  (6 cores, 12 logical CPUs)
+  protoscala: /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/after/protoScala/build_release/protoscala  [Release, 1e1cf911]
+  release:    (build_bench not built -- column skipped)
+  scala JVM:  /home/gamarino/Documentos/proyectos/tools/scala3-dl/scala3-3.9.0-x86_64-pc-linux
+  cpython:    /usr/local/bin/python3.14
+  protopy:    (not found -- column skipped)
+  protost:    (not found -- column skipped)
+  protoclj:   (not found -- column skipped)
+  runs:       2 warmup + 5 timed, median, interleaved, every run verified
+
+  load average at start: 5.13 / 5.87 / 6.01
+
+== Compiling the JVM twins with scalac (untimed) ==
+  int_sum_loop        4.0 s  OK
+  fib                 3.7 s  OK
+  str_concat          4.1 s  OK
+  range_iterate       4.3 s  OK
+  tak                 3.8 s  OK
+  fib30               3.8 s  OK
+  sum_loop            4.2 s  OK
+  factorial_100       4.0 s  OK
+  attr_lookup         4.0 s  OK
+  object_tree         4.7 s  OK
+  list_ops            4.9 s  OK
+  map_build           4.6 s  OK
+  case_copy           4.8 s  OK
+
+== Comparable workloads ==
+  int_sum_loop     protoscala=36.2 jvm=214.9 cpython=41.5
+  fib              protoscala=57.6 jvm=211.2 cpython=54.3
+  str_concat       protoscala=31.7 jvm=228.8 cpython=38.9
+  range_iterate    protoscala=36.3 jvm=214.5 cpython=43.3
+  tak              protoscala=37.9 jvm=215.1 cpython=40.8
+  fib30            protoscala=377.8 jvm=218.1 cpython=179.3
+  sum_loop         protoscala=86.0 jvm=224.2 cpython=102.0
+  [load average at midpoint: 6.72 / 6.02 / 6.05]
+  factorial_100    protoscala=29.7 jvm=215.3 cpython=38.9
+  attr_lookup      protoscala=51.9 jvm=212.9 cpython=50.4
+  object_tree      protoscala=320.9 jvm=231.4 cpython=206.7
+  list_ops         protoscala=480.5 jvm=285.4 cpython=1924.7
+  map_build        protoscala=302.3 jvm=389.3 cpython=86.7
+  case_copy        protoscala=769.3 jvm=286.8 cpython=1523.0
+
+== Cold start (benchmarks/cold-start.sh, 21 runs) ==
+  protoScala           script  median 35.89 ms [33.53-39.21] (21/21 verified)
+  protoScala           repl    median 35.24 ms [31.96-45.65] (21/21 verified)
+  protoScala           script: FAIL: median 35.89 ms is not below 25 ms
+  protoScala           repl: FAIL: median 35.24 ms is not below 25 ms
+
+  load average at end: 4.38 / 5.51 / 5.87
+
+Report written: /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out_2/interp_after_r2.md
+rc=0

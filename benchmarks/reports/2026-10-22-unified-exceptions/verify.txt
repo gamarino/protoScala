@@ -1,0 +1,119 @@
+OK interp before attr_lookup last=[600000] expect=[600000]
+OK trans  before attr_lookup last=[600000] expect=[600000]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/before/protoScala/build_release/libprotoScala.so.1 (0x0000754e5b89f000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_before/libprotoCore.so.4 (0x0000754e5b2d9000)
+OK interp after attr_lookup last=[600000] expect=[600000]
+OK trans  after attr_lookup last=[600000] expect=[600000]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/after/protoScala/build_release/libprotoScala.so.1 (0x000078d711f77000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_after/libprotoCore.so.4 (0x000078d7119af000)
+OK interp before case_copy last=[333333 83333166667 248001884] expect=[333333 83333166667 248001884]
+NOSO trans before case_copy /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/after/protoScala/benchmarks/comparable/case_copy.scala:16: error: a named or default argument is not supported by protoscalac yet (D121): keyword binding for a transpiled callee is not implemented
+OK interp after case_copy last=[333333 83333166667 248001884] expect=[333333 83333166667 248001884]
+NOSO trans after case_copy /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/after/protoScala/benchmarks/comparable/case_copy.scala:16: error: a named or default argument is not supported by protoscalac yet (D121): keyword binding for a transpiled callee is not implemented
+OK interp before factorial_100 last=[93326215443944152681699238856266700490715968264381621468592963895217599993229915608941463976156518286253697920827223758251185210916864000000000000000000000000] expect=[93326215443944152681699238856266700490715968264381621468592963895217599993229915608941463976156518286253697920827223758251185210916864000000000000000000000000]
+OK trans  before factorial_100 last=[93326215443944152681699238856266700490715968264381621468592963895217599993229915608941463976156518286253697920827223758251185210916864000000000000000000000000] expect=[93326215443944152681699238856266700490715968264381621468592963895217599993229915608941463976156518286253697920827223758251185210916864000000000000000000000000]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/before/protoScala/build_release/libprotoScala.so.1 (0x0000759bad3bf000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_before/libprotoCore.so.4 (0x0000759bacdf9000)
+OK interp after factorial_100 last=[93326215443944152681699238856266700490715968264381621468592963895217599993229915608941463976156518286253697920827223758251185210916864000000000000000000000000] expect=[93326215443944152681699238856266700490715968264381621468592963895217599993229915608941463976156518286253697920827223758251185210916864000000000000000000000000]
+OK trans  after factorial_100 last=[93326215443944152681699238856266700490715968264381621468592963895217599993229915608941463976156518286253697920827223758251185210916864000000000000000000000000] expect=[93326215443944152681699238856266700490715968264381621468592963895217599993229915608941463976156518286253697920827223758251185210916864000000000000000000000000]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/after/protoScala/build_release/libprotoScala.so.1 (0x0000771136230000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_after/libprotoCore.so.4 (0x0000771135c68000)
+OK interp before fib30 last=[832040] expect=[832040]
+OK trans  before fib30 last=[832040] expect=[832040]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/before/protoScala/build_release/libprotoScala.so.1 (0x0000740d3e4c4000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_before/libprotoCore.so.4 (0x0000740d3defe000)
+OK interp after fib30 last=[832040] expect=[832040]
+OK trans  after fib30 last=[832040] expect=[832040]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/after/protoScala/build_release/libprotoScala.so.1 (0x00007686ef646000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_after/libprotoCore.so.4 (0x00007686ef07e000)
+OK interp before fib last=[75025] expect=[75025]
+OK trans  before fib last=[75025] expect=[75025]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/before/protoScala/build_release/libprotoScala.so.1 (0x00007c33857bb000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_before/libprotoCore.so.4 (0x00007c33851f5000)
+OK interp after fib last=[75025] expect=[75025]
+OK trans  after fib last=[75025] expect=[75025]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/after/protoScala/build_release/libprotoScala.so.1 (0x000071559c1ca000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_after/libprotoCore.so.4 (0x000071559bc02000)
+OK interp before int_sum_loop last=[4999950000] expect=[4999950000]
+OK trans  before int_sum_loop last=[4999950000] expect=[4999950000]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/before/protoScala/build_release/libprotoScala.so.1 (0x00007b78fa18e000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_before/libprotoCore.so.4 (0x00007b78f9bc8000)
+OK interp after int_sum_loop last=[4999950000] expect=[4999950000]
+OK trans  after int_sum_loop last=[4999950000] expect=[4999950000]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/after/protoScala/build_release/libprotoScala.so.1 (0x0000710a899d0000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_after/libprotoCore.so.4 (0x0000710a89408000)
+OK interp before list_ops last=[9999900000 100000 50000] expect=[9999900000 100000 50000]
+OK trans  before list_ops last=[9999900000 100000 50000] expect=[9999900000 100000 50000]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/before/protoScala/build_release/libprotoScala.so.1 (0x00007c8ed70b6000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_before/libprotoCore.so.4 (0x00007c8ed6af0000)
+OK interp after list_ops last=[9999900000 100000 50000] expect=[9999900000 100000 50000]
+OK trans  after list_ops last=[9999900000 100000 50000] expect=[9999900000 100000 50000]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/after/protoScala/build_release/libprotoScala.so.1 (0x000070fa09358000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_after/libprotoCore.so.4 (0x000070fa08d90000)
+OK interp before map_build last=[50000 1249975000 50000] expect=[50000 1249975000 50000]
+OK trans  before map_build last=[50000 1249975000 50000] expect=[50000 1249975000 50000]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/before/protoScala/build_release/libprotoScala.so.1 (0x0000760a89694000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_before/libprotoCore.so.4 (0x0000760a890ce000)
+OK interp after map_build last=[50000 1249975000 50000] expect=[50000 1249975000 50000]
+OK trans  after map_build last=[50000 1249975000 50000] expect=[50000 1249975000 50000]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/after/protoScala/build_release/libprotoScala.so.1 (0x000077faea3b6000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_after/libprotoCore.so.4 (0x000077fae9dee000)
+OK interp before object_tree last=[131071 278364170 725606090] expect=[131071 278364170 725606090]
+OK trans  before object_tree last=[131071 278364170 725606090] expect=[131071 278364170 725606090]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/before/protoScala/build_release/libprotoScala.so.1 (0x000076ba4a201000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_before/libprotoCore.so.4 (0x000076ba49c3b000)
+OK interp after object_tree last=[131071 278364170 725606090] expect=[131071 278364170 725606090]
+OK trans  after object_tree last=[131071 278364170 725606090] expect=[131071 278364170 725606090]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/after/protoScala/build_release/libprotoScala.so.1 (0x0000724154077000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_after/libprotoCore.so.4 (0x0000724153aaf000)
+OK interp before range_iterate last=[100000] expect=[100000]
+OK trans  before range_iterate last=[100000] expect=[100000]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/before/protoScala/build_release/libprotoScala.so.1 (0x000074d3e48b4000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_before/libprotoCore.so.4 (0x000074d3e42ee000)
+OK interp after range_iterate last=[100000] expect=[100000]
+OK trans  after range_iterate last=[100000] expect=[100000]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/after/protoScala/build_release/libprotoScala.so.1 (0x000071cd5fa10000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_after/libprotoCore.so.4 (0x000071cd5f448000)
+OK interp before str_concat last=[2000] expect=[2000]
+OK trans  before str_concat last=[2000] expect=[2000]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/before/protoScala/build_release/libprotoScala.so.1 (0x00007e3ca3792000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_before/libprotoCore.so.4 (0x00007e3ca31cc000)
+OK interp after str_concat last=[2000] expect=[2000]
+OK trans  after str_concat last=[2000] expect=[2000]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/after/protoScala/build_release/libprotoScala.so.1 (0x0000744d4b4f4000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_after/libprotoCore.so.4 (0x0000744d4af2c000)
+OK interp before sum_loop last=[500000500000] expect=[500000500000]
+OK trans  before sum_loop last=[500000500000] expect=[500000500000]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/before/protoScala/build_release/libprotoScala.so.1 (0x0000711061e3c000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_before/libprotoCore.so.4 (0x0000711061876000)
+OK interp after sum_loop last=[500000500000] expect=[500000500000]
+OK trans  after sum_loop last=[500000500000] expect=[500000500000]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/after/protoScala/build_release/libprotoScala.so.1 (0x00007b4e3fb86000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_after/libprotoCore.so.4 (0x00007b4e3f5be000)
+OK interp before tak last=[7] expect=[7]
+OK trans  before tak last=[7] expect=[7]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/before/protoScala/build_release/libprotoScala.so.1 (0x00007b0ec2990000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_before/libprotoCore.so.4 (0x00007b0ec23ca000)
+OK interp after tak last=[7] expect=[7]
+OK trans  after tak last=[7] expect=[7]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/after/protoScala/build_release/libprotoScala.so.1 (0x000075302c5ea000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_after/libprotoCore.so.4 (0x000075302c022000)
+OK interp before empty_loop last=[CHECK 2000000] expect=[CHECK 2000000]
+OK trans  before empty_loop last=[CHECK 2000000] expect=[CHECK 2000000]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/before/protoScala/build_release/libprotoScala.so.1 (0x0000725093d77000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_before/libprotoCore.so.4 (0x00007250937b1000)
+OK interp after empty_loop last=[CHECK 2000000] expect=[CHECK 2000000]
+OK trans  after empty_loop last=[CHECK 2000000] expect=[CHECK 2000000]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/after/protoScala/build_release/libprotoScala.so.1 (0x000073c96009a000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_after/libprotoCore.so.4 (0x000073c95fad2000)
+OK interp before startup last=[CHECK 0] expect=[CHECK 0]
+OK trans  before startup last=[CHECK 0] expect=[CHECK 0]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/before/protoScala/build_release/libprotoScala.so.1 (0x00007629b1eb6000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_before/libprotoCore.so.4 (0x00007629b18f0000)
+OK interp after startup last=[CHECK 0] expect=[CHECK 0]
+OK trans  after startup last=[CHECK 0] expect=[CHECK 0]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/after/protoScala/build_release/libprotoScala.so.1 (0x000073b6a038f000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_after/libprotoCore.so.4 (0x000073b69fdc7000)
+OK interp before throw_across5 last=[CHECK 100000] expect=[CHECK 100000]
+OK trans  before throw_across5 last=[CHECK 100000] expect=[CHECK 100000]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/before/protoScala/build_release/libprotoScala.so.1 (0x000072a3ab695000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_before/libprotoCore.so.4 (0x000072a3ab0cf000)
+OK interp after throw_across5 last=[CHECK 100000] expect=[CHECK 100000]
+OK trans  after throw_across5 last=[CHECK 100000] expect=[CHECK 100000]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/after/protoScala/build_release/libprotoScala.so.1 (0x00007da3f3571000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_after/libprotoCore.so.4 (0x00007da3f2fa9000)
+OK interp before throw_catch last=[CHECK 200000] expect=[CHECK 200000]
+OK trans  before throw_catch last=[CHECK 200000] expect=[CHECK 200000]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/before/protoScala/build_release/libprotoScala.so.1 (0x0000720fbc2b5000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_before/libprotoCore.so.4 (0x0000720fbbcef000)
+OK interp after throw_catch last=[CHECK 200000] expect=[CHECK 200000]
+OK trans  after throw_catch last=[CHECK 200000] expect=[CHECK 200000]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/after/protoScala/build_release/libprotoScala.so.1 (0x00007b3b10cc4000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_after/libprotoCore.so.4 (0x00007b3b106fc000)
+OK interp before try_no_throw last=[CHECK 2000000] expect=[CHECK 2000000]
+OK trans  before try_no_throw last=[CHECK 2000000] expect=[CHECK 2000000]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/before/protoScala/build_release/libprotoScala.so.1 (0x00007b11afaef000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_before/libprotoCore.so.4 (0x00007b11af529000)
+OK interp after try_no_throw last=[CHECK 2000000] expect=[CHECK 2000000]
+OK trans  after try_no_throw last=[CHECK 2000000] expect=[CHECK 2000000]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/after/protoScala/build_release/libprotoScala.so.1 (0x000072ae29ff5000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_after/libprotoCore.so.4 (0x000072ae29a2d000)
+OK interp before zerodiv last=[CHECK 200000] expect=[CHECK 200000]
+OK trans  before zerodiv last=[CHECK 200000] expect=[CHECK 200000]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/before/protoScala/build_release/libprotoScala.so.1 (0x00007319d1824000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_before/libprotoCore.so.4 (0x00007319d125e000)
+OK interp after zerodiv last=[CHECK 200000] expect=[CHECK 200000]
+OK trans  after zerodiv last=[CHECK 200000] expect=[CHECK 200000]
+   module.so ldd:  libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/after/protoScala/build_release/libprotoScala.so.1 (0x000070a2f7c01000); libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_after/libprotoCore.so.4 (0x000070a2f7639000)
+OK jvm    -      empty_loop last=[CHECK 2000000] expect=[CHECK 2000000]
+OK jvm    -      startup last=[CHECK 0] expect=[CHECK 0]
+OK jvm    -      throw_across5 last=[CHECK 100000] expect=[CHECK 100000]
+OK jvm    -      throw_catch last=[CHECK 200000] expect=[CHECK 200000]
+OK jvm    -      try_no_throw last=[CHECK 2000000] expect=[CHECK 2000000]
+OK jvm    -      zerodiv last=[CHECK 200000] expect=[CHECK 200000]
+BAD/NOSO count: 2

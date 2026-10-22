@@ -1,0 +1,20 @@
+== verify_before
+	libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/before/protoScala/build_release/libprotoScala.so.1 (0x0000710fc1a27000)
+	libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_before/libprotoCore.so.4 (0x0000710fc1461000)
+== verify_after
+	libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/after/protoScala/build_release/libprotoScala.so.1 (0x0000786f5e80e000)
+	libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/verify_after/libprotoCore.so.4 (0x0000786f5e752000)
+== interp_after_r1
+/home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/after/protoScala/build_release/protoscala:
+	libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/after/protoScala/build_release/libprotoScala.so.1 (0x00007d826ccf2000)
+	libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/interp_after_r1/libprotoCore.so.4 (0x00007d826cc36000)
+/home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/after/protoScala/build_release/protoscalac:
+	libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/after/protoScala/build_release/libprotoScala.so.1 (0x000077c9157cf000)
+	libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/interp_after_r1/libprotoCore.so.4 (0x000077c915207000)
+== interp_before_r1
+/home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/before/protoScala/build_release/protoscala:
+	libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/before/protoScala/build_release/libprotoScala.so.1 (0x00007ec47202b000)
+	libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/interp_before_r1/libprotoCore.so.4 (0x00007ec471a65000)
+/home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/before/protoScala/build_release/protoscalac:
+	libprotoScala.so.1 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/before/protoScala/build_release/libprotoScala.so.1 (0x00007c9f51431000)
+	libprotoCore.so.4 => /home/gamarino/Documentos/proyectos/.agent_scratch/meas_1022/sc_out/libs/interp_before_r1/libprotoCore.so.4 (0x00007c9f50e6b000)

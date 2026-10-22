@@ -1,0 +1,99 @@
+## Interpreter harness
+rc=0 in all 6 runs: True ; any FAILED cell: False
+| Workload | Scala JVM | CPython | BEFORE | AFTER | A/B | BEFORE rounds | AFTER rounds |
+|---|---:|---:|---:|---:|---:|---|---|
+| `int_sum_loop` | 219.1 | 45.4 | 35.7 | 35.5 | 0.994 | 36/36/34 | 36/36/35 |
+| `fib` | 216.2 | 54.1 | 60.7 | 60.0 | 0.988 | 61/61/59 | 61/58/60 |
+| `str_concat` | 228.4 | 39.9 | 31.9 | 31.6 | 0.991 | 34/32/30 | 31/32/32 |
+| `range_iterate` | 235.8 | 46.9 | 38.0 | 36.3 | 0.955 | 41/38/35 | 35/36/39 |
+| `tak` | 214.8 | 42.7 | 45.3 | 37.9 | 0.837 | 45/51/38 | 41/38/37 |
+| `fib30` | 220.1 | 179.5 | 398.9 | 384.0 | 0.963 | 399/515/385 | 385/378/384 |
+| `sum_loop` | 223.6 | 99.8 | 85.9 | 86.0 | 1.001 | 86/99/85 | 84/86/102 |
+| `factorial_100` | 224.2 | 40.5 | 32.7 | 29.7 | 0.908 | 31/33/33 | 29/30/36 |
+| `attr_lookup` | 222.9 | 53.2 | 50.7 | 51.9 | 1.024 | 51/58/49 | 52/52/54 |
+| `object_tree` | 246.4 | 211.6 | 342.2 | 331.7 | 0.969 | 323/376/342 | 332/321/364 |
+| `list_ops` | 294.4 | 1953.4 | 507.7 | 480.5 | 0.946 | 486/508/508 | 464/480/518 |
+| `map_build` | 393.4 | 88.2 | 312.6 | 303.4 | 0.971 | 297/313/326 | 303/302/421 |
+| `case_copy` | 272.6 | 1488.2 | 748.9 | 769.3 | 1.027 | 749/746/909 | 736/769/838 |
+
+geomean A/B (13): 0.966
+geomean vs JVM: BEFORE 0.44x AFTER 0.43x; vs CPython: BEFORE 0.97x AFTER 0.94x
+cold start script: BEFORE 35.42 ms AFTER 35.89 ms (A/B 1.013)
+cold start repl: BEFORE 36.67 ms AFTER 36.07 ms (A/B 0.984)
+
+## Transpiled vs interpreted (run_transpiled_benchmarks.py)
+failures: none
+no transpiled twin: {'case_copy': 'D121: a named or default argument is not supported by protoscalac yet'} | BEFORE: {'case_copy': 'D121: a named or default argument is not supported by protoscalac yet'}
+| Workload | interp BEFORE | interp AFTER | interp A/B | trans BEFORE | trans AFTER | trans A/B | trans/interp BEFORE | trans/interp AFTER |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `attr_lookup` | 55.0 | 52.7 | 0.958 | 54.8 | 49.5 | 0.903 | 1.00 | 0.94 |
+| `case_copy` | 846.1 | 807.1 | 0.954 | — | — | — | — | — |
+| `factorial_100` | 33.8 | 49.9 | 1.474 | 29.9 | 30.8 | 1.032 | 0.88 | 0.62 |
+| `fib` | 65.9 | 72.2 | 1.096 | 85.5 | 87.3 | 1.021 | 1.30 | 1.21 |
+| `fib30` | 418.5 | 394.9 | 0.944 | 635.8 | 640.7 | 1.008 | 1.52 | 1.62 |
+| `int_sum_loop` | 43.6 | 38.4 | 0.883 | 48.2 | 44.7 | 0.927 | 1.11 | 1.16 |
+| `list_ops` | 636.8 | 625.2 | 0.982 | 666.9 | 673.1 | 1.009 | 1.05 | 1.08 |
+| `map_build` | 344.5 | 343.1 | 0.996 | 353.5 | 341.2 | 0.965 | 1.03 | 0.99 |
+| `object_tree` | 370.1 | 363.7 | 0.983 | 478.0 | 472.8 | 0.989 | 1.29 | 1.30 |
+| `range_iterate` | 50.8 | 43.6 | 0.858 | 38.8 | 38.4 | 0.990 | 0.76 | 0.88 |
+| `str_concat` | 31.8 | 33.2 | 1.042 | 32.2 | 30.7 | 0.953 | 1.01 | 0.92 |
+| `sum_loop` | 96.1 | 95.2 | 0.991 | 114.5 | 104.7 | 0.914 | 1.19 | 1.10 |
+| `tak` | 48.1 | 48.1 | 1.000 | 44.5 | 46.5 | 1.044 | 0.93 | 0.97 |
+| null program | 36.8 | 29.4 | 0.800 | 33.7 | 30.0 | 0.890 | | |
+
+geomean interp A/B (13) 1.003; trans A/B (12) 0.979; trans/interp BEFORE 1.07 AFTER 1.04
+
+## Compile time (compile.txt)
+| Source | BEFORE ms | AFTER ms | A/B | C++ lines B -> A | module.so bytes B -> A | rc |
+|---|---:|---:|---:|---:|---:|---|
+| `fib` | 858 | 849 | 0.990 | 241 -> 241 | 24,888 -> 24,888 | all 0 |
+| `tak` | 917 | 887 | 0.967 | 257 -> 257 | 24,888 -> 24,888 | all 0 |
+| `object_tree` | 1011 | 1129 | 1.117 | 1223 -> 1223 | 66,352 -> 66,352 | all 0 |
+| `list_ops` | 913 | 886 | 0.971 | 455 -> 455 | 32,144 -> 32,144 | all 0 |
+| `case_copy` | 72 | 46 | 0.639 | 0 -> 0 | 0 -> 0 | FAIL |
+| `throw_catch` | 887 | 969 | 1.092 | 308 -> 313 | 26,288 -> 30,776 | all 0 |
+| `throw_across5` | 898 | 960 | 1.068 | 390 -> 395 | 39,656 -> 39,936 | all 0 |
+| `zerodiv` | 867 | 946 | 1.091 | 310 -> 315 | 26,176 -> 30,552 | all 0 |
+geomean compile A/B (7 sources that compiled): 1.041
+
+## Probes
+| Probe | iters | interp_before | interp_after | trans_before | trans_after | jvm | interp_after/interp_before | trans_after/trans_before |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `empty_loop` | 2,000,000 | 197 | 193 | 274 | 253 | <0 (noise) | 0.98x | 0.92x |
+| `try_no_throw` | 2,000,000 | 217 | 206 | 272 | 265 | <0 (noise) | 0.95x | 0.97x |
+| `throw_catch` | 200,000 | 26,980 | 26,314 | 26,461 | 27,587 | 3,024 | 0.98x | 1.04x |
+| `throw_across5` | 100,000 | 204,696 | 196,899 | 147,307 | 163,351 | 4,215 | 0.96x | 1.11x |
+| `zerodiv` | 200,000 | 37,456 | 40,079 | 40,108 | 42,408 | 3,397 | 1.07x | 1.06x |
+startup cycles: interp_before 88,093,120, interp_after 85,593,433, trans_before 85,045,878, trans_after 82,422,293, jvm 1,293,359,771
+
+empty_loop interp_before cycles=481855420.0 task_ms=169.0 check='CHECK 2000000'
+empty_loop interp_after cycles=472583583.0 task_ms=161.0 check='CHECK 2000000'
+empty_loop trans_before cycles=632555382.0 task_ms=213.0 check='CHECK 2000000'
+empty_loop trans_after cycles=587648417.0 task_ms=204.0 check='CHECK 2000000'
+empty_loop jvm cycles=1145878310.0 task_ms=432.0 check='CHECK 2000000'
+try_no_throw interp_before cycles=522695073.0 task_ms=185.0 check='CHECK 2000000'
+try_no_throw interp_after cycles=498388472.0 task_ms=184.0 check='CHECK 2000000'
+try_no_throw trans_before cycles=628763985.0 task_ms=218.0 check='CHECK 2000000'
+try_no_throw trans_after cycles=611775972.0 task_ms=214.0 check='CHECK 2000000'
+try_no_throw jvm cycles=1165949610.0 task_ms=443.0 check='CHECK 2000000'
+throw_catch interp_before cycles=5484190380.0 task_ms=1844.0 check='CHECK 200000'
+throw_catch interp_after cycles=5348338827.0 task_ms=1729.0 check='CHECK 200000'
+throw_catch trans_before cycles=5377228671.0 task_ms=1787.0 check='CHECK 200000'
+throw_catch trans_after cycles=5599777558.0 task_ms=1852.0 check='CHECK 200000'
+throw_catch jvm cycles=1898232995.0 task_ms=668.0 check='CHECK 200000'
+throw_across5 interp_before cycles=20557722038.0 task_ms=7117.0 check='CHECK 100000'
+throw_across5 interp_after cycles=19775443601.0 task_ms=6414.0 check='CHECK 100000'
+throw_across5 trans_before cycles=14815723442.0 task_ms=4800.0 check='CHECK 100000'
+throw_across5 trans_after cycles=16417489366.0 task_ms=5711.0 check='CHECK 100000'
+throw_across5 jvm cycles=1714818950.0 task_ms=601.0 check='CHECK 100000'
+zerodiv interp_before cycles=7579259101.0 task_ms=2446.0 check='CHECK 200000'
+zerodiv interp_after cycles=8101423453.0 task_ms=2648.0 check='CHECK 200000'
+zerodiv trans_before cycles=8106548255.0 task_ms=2621.0 check='CHECK 200000'
+zerodiv trans_after cycles=8563958874.0 task_ms=2807.0 check='CHECK 200000'
+zerodiv jvm cycles=1972682507.0 task_ms=682.0 check='CHECK 200000'
+## compile recheck (5 reps)
+| `fib` | 842 | 878 | 1.043 | 810/833/847/861/842 | 910/882/878/815/861 |
+| `object_tree` | 1047 | 1073 | 1.025 | 1015/1097/980/1047/1068 | 1073/1192/1141/1059/1073 |
+| `throw_catch` | 870 | 919 | 1.056 | 879/917/868/870/868 | 922/916/919/906/1112 |
+| `throw_across5` | 910 | 974 | 1.070 | 869/910/949/871/970 | 974/968/958/1031/974 |
+| `zerodiv` | 890 | 983 | 1.104 | 890/880/875/897/923 | 923/932/998/983/1332 |

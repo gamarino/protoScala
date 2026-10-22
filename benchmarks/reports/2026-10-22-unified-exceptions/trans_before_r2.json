@@ -1,0 +1,265 @@
+{
+  "rounds": 5,
+  "warmup": 1,
+  "load_start_mid_end": [
+    6.19,
+    6.98,
+    6.26
+  ],
+  "failures": [],
+  "no_transpiled_twin": {
+    "case_copy": "D121: a named or default argument is not supported by protoscalac yet"
+  },
+  "actors": {
+    "actors/actor-await": "D113: await is not supported in a transpiled module",
+    "actors/actor-fanout": "D113: await is not supported in a transpiled module",
+    "actors/actor-mpmc": "D113: await is not supported in a transpiled module",
+    "actors/actor-mpsc": "D113: await is not supported in a transpiled module",
+    "actors/actor-pingpong": "D113: await is not supported in a transpiled module",
+    "actors/actor-priority": "D113: await is not supported in a transpiled module",
+    "actors/actor-saturation-32": "D113: await is not supported in a transpiled module",
+    "actors/actor-saturation-8": "D113: await is not supported in a transpiled module",
+    "actors/actor-throughput": "D113: await is not supported in a transpiled module"
+  },
+  "null_program": {
+    "interp": {
+      "median": 0.03678741306066513,
+      "min": 0.030746738077141345,
+      "max": 0.04096661799121648,
+      "n": 5
+    },
+    "trans": {
+      "median": 0.03479869500733912,
+      "min": 0.03004895697813481,
+      "max": 0.049096375005319715,
+      "n": 5
+    }
+  },
+  "workloads": {
+    "attr_lookup": {
+      "interp": {
+        "median": 0.052899906993843615,
+        "min": 0.047036487027071416,
+        "max": 0.05899757600855082,
+        "n": 5
+      },
+      "trans": {
+        "median": 0.05229557503480464,
+        "min": 0.04451607004739344,
+        "max": 0.059223160962574184,
+        "n": 5
+      },
+      "ratio_whole_process": 0.9885759353204666,
+      "ratio_work_only_derived": 1.08592003820317,
+      "work_interp_s": 0.016112493933178484,
+      "work_trans_s": 0.017496880027465522
+    },
+    "case_copy": {
+      "interp": {
+        "median": 0.8461371930316091,
+        "min": 0.8093819569330662,
+        "max": 0.9715823570732027,
+        "n": 5
+      },
+      "trans": null
+    },
+    "factorial_100": {
+      "interp": {
+        "median": 0.03469470306299627,
+        "min": 0.02993323002010584,
+        "max": 0.057644195039756596,
+        "n": 5
+      },
+      "trans": {
+        "median": 0.03274292801506817,
+        "min": 0.027379920007660985,
+        "max": 0.044279171037487686,
+        "n": 5
+      },
+      "ratio_whole_process": 0.9437442930586782,
+      "ratio_work_only_derived": null,
+      "work_interp_s": -0.0020927099976688623,
+      "work_trans_s": -0.0020557669922709465
+    },
+    "fib": {
+      "interp": {
+        "median": 0.06591014005243778,
+        "min": 0.05421214795205742,
+        "max": 0.070034240023233,
+        "n": 5
+      },
+      "trans": {
+        "median": 0.09024011401925236,
+        "min": 0.08081655402202159,
+        "max": 0.09192257304675877,
+        "n": 5
+      },
+      "ratio_whole_process": 1.3691385566387475,
+      "ratio_work_only_derived": 1.903716606881484,
+      "work_interp_s": 0.02912272699177265,
+      "work_trans_s": 0.05544141901191324
+    },
+    "fib30": {
+      "interp": {
+        "median": 0.45544724503997713,
+        "min": 0.4092884080018848,
+        "max": 0.5860892330529168,
+        "n": 5
+      },
+      "trans": {
+        "median": 0.6358427819795907,
+        "min": 0.6200165529735386,
+        "max": 0.6691458090208471,
+        "n": 5
+      },
+      "ratio_whole_process": 1.396084373995454,
+      "ratio_work_only_derived": 1.4356382940552845,
+      "work_interp_s": 0.418659831979312,
+      "work_trans_s": 0.6010440869722515
+    },
+    "int_sum_loop": {
+      "interp": {
+        "median": 0.04355408495757729,
+        "min": 0.03879407898057252,
+        "max": 0.04553120699711144,
+        "n": 5
+      },
+      "trans": {
+        "median": 0.05177232506684959,
+        "min": 0.04004108998924494,
+        "max": 0.071569136925973,
+        "n": 5
+      },
+      "ratio_whole_process": 1.188690455034862,
+      "ratio_work_only_derived": 2.5084162965336128,
+      "work_interp_s": 0.0067666718969121575,
+      "work_trans_s": 0.01697363005951047
+    },
+    "list_ops": {
+      "interp": {
+        "median": 0.6814769629854709,
+        "min": 0.633952607982792,
+        "max": 0.7364754700101912,
+        "n": 5
+      },
+      "trans": {
+        "median": 0.7158034619642422,
+        "min": 0.6801715350011364,
+        "max": 0.750288377981633,
+        "n": 5
+      },
+      "ratio_whole_process": 1.050370740088397,
+      "ratio_work_only_derived": 1.0563297745966767,
+      "work_interp_s": 0.6446895499248058,
+      "work_trans_s": 0.681004766956903
+    },
+    "map_build": {
+      "interp": {
+        "median": 0.34453477000351995,
+        "min": 0.3301455429755151,
+        "max": 0.34825769800227135,
+        "n": 5
+      },
+      "trans": {
+        "median": 0.3534877370111644,
+        "min": 0.34542162192519754,
+        "max": 0.3668434120481834,
+        "n": 5
+      },
+      "ratio_whole_process": 1.0259856704957615,
+      "ratio_work_only_derived": 1.035554115459072,
+      "work_interp_s": 0.3077473569428548,
+      "work_trans_s": 0.3186890420038253
+    },
+    "object_tree": {
+      "interp": {
+        "median": 0.3701144770020619,
+        "min": 0.3526456810068339,
+        "max": 0.3835035879164934,
+        "n": 5
+      },
+      "trans": {
+        "median": 0.47798730595968664,
+        "min": 0.4298452460207045,
+        "max": 0.5122582010226324,
+        "n": 5
+      },
+      "ratio_whole_process": 1.2914580100497495,
+      "ratio_work_only_derived": 1.329590840035317,
+      "work_interp_s": 0.3333270639413968,
+      "work_trans_s": 0.4431886109523475
+    },
+    "range_iterate": {
+      "interp": {
+        "median": 0.054055772023275495,
+        "min": 0.039498634985648096,
+        "max": 0.06754413701128215,
+        "n": 5
+      },
+      "trans": {
+        "median": 0.03768626507371664,
+        "min": 0.03336597699671984,
+        "max": 0.04720585094764829,
+        "n": 5
+      },
+      "ratio_whole_process": 0.6971737459875622,
+      "ratio_work_only_derived": 0.16721739874817973,
+      "work_interp_s": 0.017268358962610364,
+      "work_trans_s": 0.0028875700663775206
+    },
+    "str_concat": {
+      "interp": {
+        "median": 0.030713214073330164,
+        "min": 0.029193265945650637,
+        "max": 0.03398511896375567,
+        "n": 5
+      },
+      "trans": {
+        "median": 0.03219614492263645,
+        "min": 0.03105711005628109,
+        "max": 0.04629309999290854,
+        "n": 5
+      },
+      "ratio_whole_process": 1.0482831541422424,
+      "ratio_work_only_derived": null,
+      "work_interp_s": -0.006074198987334967,
+      "work_trans_s": -0.0026025500847026706
+    },
+    "sum_loop": {
+      "interp": {
+        "median": 0.09608913597185165,
+        "min": 0.08104011102113873,
+        "max": 0.10438239702489227,
+        "n": 5
+      },
+      "trans": {
+        "median": 0.11762429098598659,
+        "min": 0.10551213403232396,
+        "max": 0.13313378300517797,
+        "n": 5
+      },
+      "ratio_whole_process": 1.2241164393490171,
+      "ratio_work_only_derived": 1.3966811065960358,
+      "work_interp_s": 0.059301722911186516,
+      "work_trans_s": 0.08282559597864747
+    },
+    "tak": {
+      "interp": {
+        "median": 0.052584645920433104,
+        "min": 0.034859944018535316,
+        "max": 0.06691640394274145,
+        "n": 5
+      },
+      "trans": {
+        "median": 0.0401059000287205,
+        "min": 0.03732169489376247,
+        "max": 0.04301609704270959,
+        "n": 5
+      },
+      "ratio_whole_process": 0.7626922141760838,
+      "ratio_work_only_derived": 0.3359578901250259,
+      "work_interp_s": 0.015797232859767973,
+      "work_trans_s": 0.005307205021381378
+    }
+  }
+}

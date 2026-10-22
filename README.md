@@ -567,6 +567,44 @@ anticipated, and that count, not the percentage, is the number worth watching.
 
 ## Performance
 
+**protoCore's unified exception model, interpreter and compiler (measured
+2026-10-22).**
+- Branch `feature/protocore-3-calling-convention` at `1e1cf911`, against
+  `3783caa8` (protoCore `cf52f9f5`). Both Release builds, interleaved, three rounds. The machine had 2-4 busy CPUs, so only the ratios count, not the milliseconds.
+
+| | AFTER / BEFORE |
+|---|---:|
+| interpreter, geomean of 13 benchmarks | 0.966 |
+| transpiled modules, geomean of 12 (`case_copy` does not transpile on either side) | 0.979 |
+| compile time, module without `try` | unchanged (identical C++ and `.so`) |
+| compile time, module with `try` | **1.05-1.10**; `module.so` +17 % (+4.5 KB, the E3 rethrow code) |
+
+Exception probes, in cycles per iteration. Where two figures are shown, the
+second is a pass run in the opposite order.
+
+| Probe | interpreted | transpiled | JVM cycles |
+|---|---:|---:|---:|
+| throw and catch, same function | 0.98 / 1.12 (undecided) | 1.04 / 1.01 | 3,024 |
+| throw caught 5 frames up | 0.96 | **1.11 / 1.11** | 4,215 |
+| `1 / 0` caught | **1.07 / 1.05** | **1.06 / 1.14** | 3,397 |
+| `try` that does not throw | 0.95 | 0.97 | below noise |
+
+- **Regressions:**
+  - A caught `1 / 0` is 5-14 % slower. The likely cause, not isolated, is
+    that the `ArithmeticException` is now built by protoCore's error factory.
+  - A transpiled throw across five frames is 11 % slower, about 16k cycles.
+    The likely cause, not isolated, is the per-frame rethrow that keeps the
+    original exception (rule E3).
+- **Against the JVM:** a catch is still 9x the JVM's cost in the same
+  function and 35-50x across five frames.
+- **Transpiled against interpreted:** 1.04 AFTER, 1.07 BEFORE. Transpiled
+  code stays slower than the interpreter on call-heavy work (`fib30` 1.5x,
+  `object_tree` 1.3x). That predates this port and has not been
+  investigated.
+- **Cold-process comparison:** the interpreter runs at 0.43x the JVM's time
+  and 0.94x CPython's.
+- Raw results: [`benchmarks/reports/2026-10-22-unified-exceptions/`](benchmarks/reports/2026-10-22-unified-exceptions/).
+
 **protoCore 2.14.8 and copy by derivation (measured 2026-10-20).** The
 comparable suite (`benchmarks/run_benchmarks.py`), three rounds, each loading a
 fresh copy of protoCore 2.14.8, commit `257b61bf`, RelWithDebInfo; medians of
