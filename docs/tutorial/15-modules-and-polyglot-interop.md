@@ -467,7 +467,9 @@ Four things happen across the boundary, and none of them copies anything:
   Smalltalk class, imported like any member, and `case e: InsufficientFunds`
   selects the error by its class chain. `case e: Exception` would catch it too, as
   it catches any error another language raises (§11.9); `RuntimeException` would
-  not. Its text is the Smalltalk message `messageText`.
+  not. Its text is `e.getMessage`, as for any exception you catch; on a
+  Smalltalk error that is Smalltalk's `messageText`, which you can also send
+  yourself, as the program above does.
 - **It works the other way round.** A Scala exception thrown inside a function
   Smalltalk called is caught in Smalltalk by `on: Exception do:`, and the handler
   receives the very Scala exception; if no Smalltalk handler takes it, it reaches

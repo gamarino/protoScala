@@ -362,8 +362,6 @@ protoST actor is refused too, since an actor's messages are asynchronous.
       stored under their bare name and bind named arguments; `c.incr(2)` maps to
       `incr:` and is not understood. Only unary, binary and keyword methods are
       reachable.
-    - **`getMessage` on a protoST exception** is a Smalltalk message protoST does
-      not understand; its text is `e.messageText()` (§9.1).
     - **A module outlives the runtime that built it.** A loaded module is a
       process-level entity, so a second `STRuntime` in the same process is handed
       the first one's namespace for the same module name, with the first runtime's
@@ -670,8 +668,10 @@ The same model holds between two runtimes, with no module in between, and
   class as a type (D133) — `import st.lib.{Counter, CounterOverflow}`, then
   `case e: CounterOverflow` — and the test is the prototype chain, so a handler
   for an unrelated protoST class and `RuntimeException` do not take it, while
-  `Throwable` and `Exception` do (D134). Its text is the Smalltalk message
-  `e.messageText()`. (`ASmalltalkErrorIsCaughtInScalaByItsClass`)
+  `Throwable` and `Exception` do (D134). Its text is `e.getMessage`, which is
+  Smalltalk's `messageText` (D136, decided by the maintainer; `e.messageText()`
+  sends it directly). On any other foreign exception `getMessage` answers the
+  value's `message` attribute. (`ASmalltalkErrorIsCaughtInScalaByItsClass`)
 - **A Scala exception in Smalltalk.** A Scala function protoST calls
   (`f apply()`) that throws reaches protoST's native-call boundary as a
   `ProtoException`, and protoST signals its value: `on: Exception do:` catches it

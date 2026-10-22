@@ -628,6 +628,9 @@ TEST(ProtoSTInterop, ASmalltalkErrorIsCaughtInScalaByItsClass) {
         "  try c.increment()\n"
         "  catch\n"
         "    case e: Exception => println(\"Exception: \" + e.messageText())\n"
+        "  try c.increment()\n"
+        "  catch\n"
+        "    case e: CounterOverflow => println(\"getMessage: \" + e.getMessage + \" / \" + e.getMessage())\n"
         "  try Counter.boom()\n"
         "  catch\n"
         "    case e: CounterOverflow => println(\"class side: \" + e.messageText())\n"
@@ -643,6 +646,7 @@ TEST(ProtoSTInterop, ASmalltalkErrorIsCaughtInScalaByItsClass) {
               "CounterOverflow: counter overflow\n"
               "Throwable: counter overflow\n"
               "Exception: counter overflow\n"
+              "getMessage: counter overflow / counter overflow\n"
               "class side: boom\n"
               "passed RuntimeException\n")
         << err;

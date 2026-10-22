@@ -114,9 +114,12 @@ const proto::ProtoObject* ExecutionEngine::sendSmalltalk(proto::ProtoContext* ct
     const proto::ProtoObject* universal = layout_.anyProto->getAttribute(ctx, name);
     if (universal && universal != PROTO_NONE && universal->isMethod(ctx))
         return callNative(ctx, universal->asMethod(ctx), base[0], base + 1, argc);
+    // Throwable.getMessage, which a Scala handler writes on any caught
+    // exception, is Smalltalk's `messageText` (D136, decided by the maintainer).
+    std::string scalaName = plainName(name->toStdString(ctx));
+    if (name == layout_.getMessageName && argc == 0) scalaName = "messageText";
     std::string why;
-    const std::optional<std::string> selector =
-        smalltalkSelector(plainName(name->toStdString(ctx)), argc, &why);
+    const std::optional<std::string> selector = smalltalkSelector(scalaName, argc, &why);
     if (!selector) throw ScalaError("IllegalArgumentException", why);
     proto::ProtoContext scope(ctx->space, ctx, nullptr, nullptr, nullptr, nullptr, argc + 1);
     scope.setAutomaticLocal(0, reinterpret_cast<const proto::ProtoObject*>(
@@ -266,6 +269,14 @@ const proto::ProtoObject* ExecutionEngine::dispatch(proto::ProtoContext* ctx,
             // A keyword selector is never an attribute name (D135).
             if (const proto::ProtoObject* st = smalltalkEntryOf(ctx, receiver))
                 return sendSmalltalk(ctx, st, base, name, argc);
+            // Throwable.getMessage on a foreign value that is not a protoST
+            // object -- a module's error, another language's: its `message`
+            // attribute, the convention protoCore's own error values and its
+            // example modules follow (D136).
+            if (name == layout_.getMessageName && argc == 0 &&
+                isForeignObject(ctx, layout_, receiver) &&
+                receiver->hasAttribute(ctx, layout_.messageKey) == PROTO_TRUE)
+                return receiver->getAttribute(ctx, layout_.messageKey);
             throwMissingMember(ctx, receiver, name);
         }
         if (argc == 0 && !applied) return PROTO_NONE;

@@ -175,6 +175,11 @@ struct RuntimeLayout {
     // does not probe its receiver for `stSendKey`, so a program that never
     // touches protoST pays nothing for that probe on its field reads (D135).
     mutable std::atomic<bool> smalltalkSeen{false};
+    // Throwable.getMessage on a foreign exception (D136, decided by the
+    // maintainer): a protoST exception answers its `messageText`, any other
+    // foreign value its `message` attribute.
+    const proto::ProtoString* getMessageName = nullptr;  // "getMessage"
+    const proto::ProtoString* messageKey = nullptr;      // "message"
     // The space this layout belongs to. A native that another runtime may call
     // (Function.apply) compares the caller's space with it.
     proto::ProtoSpace* space = nullptr;

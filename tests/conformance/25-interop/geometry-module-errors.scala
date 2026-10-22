@@ -1,4 +1,4 @@
-// EXPECT: geometry errors: 15 of 15 checks passed
+// EXPECT: geometry errors: 16 of 16 checks passed
 // protoCore's unified exception model, end to end, against protoCore's own
 // example module (protoCore/examples/exceptions/geometry_module), loaded by the
 // plug-in tests/unit/geometry_provider_plugin.cpp and imported through the
@@ -98,6 +98,13 @@ def check(label: String, ok: Boolean): Unit =
     try { g.legacyArea(-1); "returned" }
     catch case e: RuntimeException => e.getMessage
   check("legacyArea(-1) arrives as RuntimeException", l == "legacyArea: negative radius")
+
+  // Throwable.getMessage on a module's error answers its `message` (D136).
+  val gm =
+    try { g.circleArea(-1); ("returned", "") }
+    catch case e: Exception => (e.getMessage, e.message)
+  check("getMessage on a module error is its message",
+        gm._1 == gm._2 && gm._1.startsWith("circleArea: the radius"))
 
   // Try captures a module error like any other thrown value.
   check("Try(g.circleArea(-1)) is a Failure", Try(g.circleArea(-1)).isFailure)

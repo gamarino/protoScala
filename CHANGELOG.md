@@ -29,11 +29,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   seven new cases in `umd/protost-interop`, protoST's `test_cross_runtime_send.cpp`,
   and the tutorial fixture `15-modules-calling-smalltalk.scala`, run under a
   test-only host that links protoST.
+- **`e.getMessage` on a foreign exception** (D136, decided by the maintainer):
+  Smalltalk's `messageText` on a protoST exception, the `message` attribute on
+  any other foreign value (a module's error), where it used to be a
+  `NoSuchMethodError`.
 - **Cost.** A member read without an argument list probes its receiver for
   `__st_send__` only after the session has met a protoST object; measured on 5M
   field reads against `4a295c70`: +1.6 % instructions (`Int` field) and +2.5 %
-  (field holding an object) in a program that never touches protoST. The
-  alternatives are in DECISIONS-LOG, open for the maintainer.
+  (field holding an object) in a program that never touches protoST; the
+  maintainer kept this behaviour and accepted that cost (DECISIONS-LOG).
 
 ### Changed — protoCore 3.0.0: one exception type, selected by prototype, 2026-10-21
 

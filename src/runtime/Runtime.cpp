@@ -101,6 +101,8 @@ Runtime::Runtime(proto::ProtoSpace& space) : space_(space) {
     L.initKey = key(kPrimaryCtorKey);
     L.exportsKey = key("exports");  // Phase 6: getImportModule's wrapper attribute
     L.stSendKey = key("__st_send__");  // protoST's send entry (D135)
+    L.getMessageName = key("getMessage");  // D136
+    L.messageKey = key("message");
     L.space = &space;
     L.toStringName = key("toString");
     L.equalsName = key("equals");
