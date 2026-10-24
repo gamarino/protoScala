@@ -21,8 +21,8 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "usage: %s <file.scala> [args...]\n", argv[0]);
         return 2;
     }
-    protoST::STRuntime st;        // registers provider:st; this thread owns it
     protoScala::Session session;
+    protoST::STRuntime st(session.space());  // a guest in protoScala's space; registers provider:st
     const std::vector<std::string> args(argv + 2, argv + argc);
     return session.runScript(argv[1], args);
 }
