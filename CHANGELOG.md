@@ -11,7 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ProtoSpace per process, protoCore's recommended model). The tests and the
   tutorial host (`tests/unit/protost_interop.cpp`, `protost_host.cpp`) build
   the `Session` first and then `protoST::STRuntime st(session.space())`, a guest
-  in protoScala's space (protoST 5f28163). `AForeignValueIsTheSameObjectOnBothSides`
+  in protoScala's space (protoST a76f11b). `AForeignValueIsTheSameObjectOnBothSides`
   now asserts one space (`ProtoSpace::liveSpaceCount() == 1`, protoCore 3.1.0).
   The two tests that asserted a refusal from another thread
   (`ACrossRuntimeImportFromAnotherThreadIsRefused`,
@@ -20,7 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `ASendFromAnotherThreadOfTheSpaceIsServed`: in one space a protoCore thread
   of the space imports and sends through its own context; the refusal remains
   protoST's rule for a caller in another space (its own tests). CI pins
-  protoCore 3.1.0 (master, 267b9fc9) and protoST 5f28163; the declared minimum
+  protoCore 3.1.0 (master, 267b9fc9) and protoST a76f11b; the declared minimum
   stays protoCore 3.0.0.
 
 ## [0.6.2] - 2026-10-22

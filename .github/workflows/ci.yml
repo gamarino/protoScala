@@ -62,10 +62,10 @@ env:
   # with).  Bump deliberately.  The declared minimum stays 3.0.0, which the
   # floor entry of the `test` job builds.
   PROTOCORE_REF: ${{ github.event_name == 'schedule' && 'master' || '267b9fc93a189fb3552dd7d52c7d519b0d9166b4' }}
-  # protoST 5f28163 (2026-10-24: STRuntime(proto::ProtoSpace&), a guest in the
+  # protoST a76f11b (2026-10-24: STRuntime(proto::ProtoSpace&), a guest in the
   # host's space, which protoScala's interop test hosts protoST as), the commit
   # protoScala's interop test was last verified against.
-  PROTOST_REF: ${{ github.event_name == 'schedule' && 'main' || '5f2816338c4b4cdeea282a04bae3a45dd36d76b8' }}
+  PROTOST_REF: ${{ github.event_name == 'schedule' && 'main' || 'a76f11be41e53fad51072c7e9e07572bfcb5a7a9' }}
   # protoIO 0.2.2 (main, 1611ff9): the I/O layer protoScala and protoST link
   # statically, and protoScala's floor.  Bump deliberately, like protoCore.
   PROTOIO_REF: ${{ github.event_name == 'schedule' && 'main' || '1611ff9cf8d499cdc42a6e108e42ecfc36fd8164' }}
