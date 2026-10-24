@@ -28,6 +28,7 @@
 #include "dap/DapStdio.h"
 #include "dap/DapTransport.h"
 
+#include "frontend/Parser.h"
 #include "repl/Session.h"
 #include "runtime/Debugger.h"
 #include "runtime/StackGuard.h"
@@ -78,6 +79,18 @@ std::string clip(std::string s) {
     return s + "...";
 }
 
+// The parse error of `expr` as a debugger expression, or "" when it parses.
+std::string syntaxError(const std::string& expr) {
+    try {
+        parseSource("(e) => {\n" + expr + "\n}\n");
+    } catch (const ParseError& e) {
+        return e.what();
+    } catch (const std::exception& e) {
+        return e.what();
+    }
+    return std::string();
+}
+
 std::string baseName(const std::string& path) {
     const auto p = path.find_last_of("/\\");
     return p == std::string::npos ? path : path.substr(p + 1);
@@ -103,6 +116,7 @@ struct Work {
 struct StoppedThread {
     int id = 0;
     debug::FrameRecord* top = nullptr;
+    proto::ProtoContext* current = nullptr;  // the thread's innermost live context
     std::vector<FrameView> frames;  // innermost first
     std::deque<std::shared_ptr<Work>> work;
     bool resumeReady = false;
@@ -135,15 +149,16 @@ public:
     }
 
     // --- debug::Controller (on the debuggee's threads) ----------------------
-    void stopped(debug::FrameRecord& top, const char* reason, int threadId,
-                 const debug::ExceptionStop* ex) override {
-        proto::ProtoContext* ctx = top.ctx;
+    void stopped(debug::FrameRecord& top, proto::ProtoContext* current, const char* reason,
+                 int threadId, const debug::ExceptionStop* ex, const std::string* note) override {
+        proto::ProtoContext* ctx = current;
         // A line printed without a newline is still in stdio's buffer.
         std::fflush(stdout);
         std::fflush(stderr);
         auto st = std::make_shared<StoppedThread>();
         st->id = threadId;
         st->top = &top;
+        st->current = current;
         if (ex) st->exception = *ex;
         {
             std::lock_guard<std::mutex> lk(mu_);
@@ -161,6 +176,10 @@ public:
         if (ex) {
             body["description"] = ex->description;
             body["text"] = ex->description;
+        }
+        if (note) {
+            body["description"] = *note;
+            body["text"] = ex ? ex->description + "\n" + *note : *note;
         }
         sendEvent("stopped", body);
 
@@ -209,6 +228,28 @@ public:
                                                      {"line", b.line}}}});
     }
 
+    Evaluation evaluateHere(proto::ProtoContext* current, debug::FrameRecord& frame,
+                            const std::string& expr, const char* boundName,
+                            const proto::ProtoObject* bound, bool asText) override {
+        Evaluation out;
+        if (!session_) {
+            out.text = "no session";
+            return out;
+        }
+        proto::ProtoContext scope(current->space, current);
+        out.ok = evaluateIn(&scope, frame, asText ? "\"\" + (" + expr + ")" : expr, boundName,
+                            bound, &out.text);
+        // `"" + (x)` is a String: its text without the REPL's quotes.
+        if (out.ok && asText && out.text.size() >= 2 && out.text.front() == '"' &&
+            out.text.back() == '"')
+            out.text = out.text.substr(1, out.text.size() - 2);
+        return out;
+    }
+
+    void output(const char* category, const std::string& text) override {
+        sendOutput(category, text);
+    }
+
     void threadStarted(int threadId) override {
         sendEvent("thread", {{"reason", "started"}, {"threadId", threadId}});
     }
@@ -225,19 +266,31 @@ private:
                          {{"supportsConfigurationDoneRequest", true},
                           {"supportsEvaluateForHovers", true},
                           {"supportsExceptionInfoRequest", true},
+                          {"supportsExceptionFilterOptions", true},
+                          {"supportsConditionalBreakpoints", true},
+                          {"supportsHitConditionalBreakpoints", true},
+                          {"supportsLogPoints", true},
                           {"supportsTerminateThreadsRequest", false},
                           {"exceptionBreakpointFilters",
                            json::array({{{"filter", "raised"},
                                          {"label", "All Exceptions"},
                                          {"description",
                                           "Stop wherever an exception is thrown, caught or not"},
-                                         {"default", false}},
+                                         {"default", false},
+                                         {"supportsCondition", true},
+                                         {"conditionDescription",
+                                          "The exception is `e`, e.g. "
+                                          "e.isInstanceOf[IllegalStateException]"}},
                                         {{"filter", "userUnhandled"},
                                          {"label", "Uncaught Exceptions"},
                                          {"description",
                                           "Stop where an exception is thrown that no try/catch "
                                           "of the program will catch"},
-                                         {"default", true}}})}});
+                                         {"default", true},
+                                         {"supportsCondition", true},
+                                         {"conditionDescription",
+                                          "The exception is `e`, e.g. "
+                                          "e.getMessage.contains(\"timeout\")"}}})}});
             sendEvent("initialized", json::object());
         } else if (command == "launch") {
             handleLaunch(req);
@@ -375,16 +428,35 @@ private:
     void handleSetBreakpoints(const json& req) {
         const json args = req.value("arguments", json::object());
         const std::string path = args.value("source", json::object()).value("path", "");
-        std::vector<int> lines;
-        if (args.contains("breakpoints") && args["breakpoints"].is_array())
-            for (const json& b : args["breakpoints"]) lines.push_back(b.value("line", 0));
-        else if (args.contains("lines") && args["lines"].is_array())
-            for (const json& l : args["lines"]) lines.push_back(l.get<int>());
+        std::vector<debug::BreakpointSpec> specs;
+        if (args.contains("breakpoints") && args["breakpoints"].is_array()) {
+            for (const json& b : args["breakpoints"]) {
+                debug::BreakpointSpec sp;
+                sp.line = b.value("line", 0);
+                sp.condition = b.value("condition", "");
+                sp.hitCondition = b.value("hitCondition", "");
+                sp.isLogpoint = b.contains("logMessage") && b["logMessage"].is_string();
+                if (sp.isLogpoint) sp.logMessage = b["logMessage"].get<std::string>();
+                if (!sp.condition.empty()) {
+                    const std::string err = syntaxError(sp.condition);
+                    if (!err.empty())
+                        sendOutput("stderr", "breakpoint condition `" + sp.condition +
+                                                 "` failed: " + err + "\n");
+                }
+                specs.push_back(std::move(sp));
+            }
+        } else if (args.contains("lines") && args["lines"].is_array()) {
+            for (const json& l : args["lines"]) {
+                debug::BreakpointSpec sp;
+                sp.line = l.get<int>();
+                specs.push_back(std::move(sp));
+            }
+        }
         json out = json::array();
         if (!path.empty()) {
-            for (const Breakpoint& b : debug::setBreakpoints(path, lines)) {
+            for (const Breakpoint& b : debug::setBreakpoints(path, specs)) {
                 json e = {{"id", b.id}, {"verified", b.verified}, {"line", b.line}};
-                if (!b.verified) e["message"] = "no code on or after this line (yet)";
+                if (!b.verified) e["message"] = b.message;
                 out.push_back(std::move(e));
             }
         }
@@ -394,22 +466,38 @@ private:
     void handleSetExceptionBreakpoints(const json& req) {
         const json args = req.value("arguments", json::object());
         unsigned mask = 0;
+        std::string conditions[2];
         json answered = json::array();
-        auto take = [&](const std::string& f) {
-            if (f == "raised") mask |= debug::kBreakRaised;
-            else if (f == "userUnhandled" || f == "uncaught") mask |= debug::kBreakUncaught;
-            else {
+        auto take = [&](const std::string& f, const std::string& condition) {
+            int bit = -1;
+            if (f == "raised") bit = 0;
+            else if (f == "userUnhandled" || f == "uncaught") bit = 1;
+            if (bit < 0) {
                 answered.push_back({{"verified", false}, {"message", "unknown filter " + f}});
                 return;
             }
-            answered.push_back({{"verified", true}});
+            mask |= 1u << bit;
+            conditions[bit] = condition;
+            json b = {{"verified", true}};
+            if (!condition.empty()) {
+                const std::string err = syntaxError(condition);
+                if (!err.empty()) {
+                    // Kept: the stop reports the failure where it happens.
+                    const std::string msg =
+                        "exception breakpoint condition `" + condition + "` failed: " + err;
+                    sendOutput("stderr", msg + "\n");
+                    b["message"] = msg;
+                }
+            }
+            answered.push_back(std::move(b));
         };
         if (args.contains("filters") && args["filters"].is_array())
             for (const json& f : args["filters"])
-                if (f.is_string()) take(f.get<std::string>());
+                if (f.is_string()) take(f.get<std::string>(), std::string());
         if (args.contains("filterOptions") && args["filterOptions"].is_array())
-            for (const json& o : args["filterOptions"]) take(o.value("filterId", ""));
-        debug::setExceptionBreaks(mask);
+            for (const json& o : args["filterOptions"])
+                take(o.value("filterId", ""), o.value("condition", ""));
+        debug::setExceptionBreaks(mask, conditions[0], conditions[1]);
         sendResponse(req, {{"breakpoints", answered}});
     }
 
@@ -576,6 +664,37 @@ private:
         return out;
     }
 
+    // Evaluates `expr` over `rec`'s locals and the globals, with `boundName`
+    // bound to `bound` (it shadows a local of that name). On the thread that
+    // owns `rec`, under the caller's Suppress.
+    bool evaluateIn(proto::ProtoContext* scope, const debug::FrameRecord& rec,
+                    const std::string& expr, const char* boundName,
+                    const proto::ProtoObject* bound, std::string* result) {
+        const std::vector<Local> locals = localsOf(rec, scope);
+        if (boundName && expr == boundName) {
+            *result = session_->debugShow(scope, bound);
+            return true;
+        }
+        for (const Local& l : locals)
+            if (l.name == expr && !(boundName && l.name == boundName)) {
+                *result = session_->debugShow(scope, l.value);
+                return true;
+            }
+        std::vector<std::string> names;
+        std::vector<const proto::ProtoObject*> values;
+        for (const Local& l : locals) {
+            if (l.name == "this" || !isIdentifier(l.name)) continue;
+            if (boundName && l.name == boundName) continue;
+            names.push_back(l.name);
+            values.push_back(l.value);
+        }
+        if (boundName) {
+            names.push_back(boundName);
+            values.push_back(bound ? bound : PROTO_NONE);
+        }
+        return session_->debugEvaluate(scope, expr, names, values.data(), result);
+    }
+
     void handleVariables(const json& req) {
         const int ref = req.value("arguments", json::object()).value("variablesReference", 0);
         const int frameId = ref / 2;
@@ -585,7 +704,7 @@ private:
         json vars = json::array();
         if (st) {
             onStoppedThread(st, [&] {
-                proto::ProtoContext scope(st->top->ctx->space, st->top->ctx);
+                proto::ProtoContext scope(st->current->space, st->current);
                 if (globals) {
                     for (const Session::DebugGlobal& g : session_->debugGlobals(&scope))
                         vars.push_back({{"name", g.name},
@@ -623,22 +742,8 @@ private:
         bool ok = false;
         std::string result;
         const bool ran = onStoppedThread(st, [&] {
-            proto::ProtoContext scope(st->top->ctx->space, st->top->ctx);
-            const std::vector<Local> locals = localsOf(*rec, &scope);
-            for (const Local& l : locals)
-                if (l.name == expr) {
-                    result = session_->debugShow(&scope, l.value);
-                    ok = true;
-                    return;
-                }
-            std::vector<std::string> names;
-            std::vector<const proto::ProtoObject*> values;
-            for (const Local& l : locals) {
-                if (l.name == "this" || !isIdentifier(l.name)) continue;
-                names.push_back(l.name);
-                values.push_back(l.value);
-            }
-            ok = session_->debugEvaluate(&scope, expr, names, values.data(), &result);
+            proto::ProtoContext scope(st->current->space, st->current);
+            ok = evaluateIn(&scope, *rec, expr, nullptr, nullptr, &result);
         });
         if (!ran) {
             sendError(req, "the program resumed before the expression could be evaluated");

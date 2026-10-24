@@ -1701,6 +1701,21 @@ void ExecutionEngine::debugRaised(proto::ProtoContext& frame, debug::FrameRecord
     const bool raised = (breaks & debug::kBreakRaised) != 0;
     const bool uncaught = (breaks & debug::kBreakUncaught) != 0 && fate == Fate::Uncaught;
     if (!raised && !uncaught) return;
+    // A filter's condition sees the exception as `e`: a native error is
+    // materialised for it (not the instance a handler will build).
+    if (!held[0] && !held[1] && className != "OutOfMemoryError" &&
+        className != "StackOverflowError") {
+        debug::Suppress quiet;
+        try {
+            held[1] = materialiseError(&scope, ScalaError(className, message));
+        } catch (...) {
+            held[1] = nullptr;
+        }
+    }
+    std::string note;
+    const unsigned stopping = (raised ? debug::kBreakRaised : 0u) | (uncaught ? debug::kBreakUncaught : 0u);
+    if (!debug::exceptionConditionHolds(stopping, &scope, *top, held[0] ? held[0] : held[1], &note))
+        return;
 
     debug::ExceptionStop ex;
     ex.breakMode = uncaught ? "userUnhandled" : "always";
@@ -1733,7 +1748,7 @@ void ExecutionEngine::debugRaised(proto::ProtoContext& frame, debug::FrameRecord
             ex.description += " (raised by the runtime on this line)";
     }
     debug::markReported(&scope, value, value ? nullptr : debug::kNativeError);
-    debug::stopForException(*top, ex);
+    debug::stopForException(*top, &scope, ex, note.empty() ? nullptr : &note);
 }
 
 const proto::ProtoObject* ExecutionEngine::slowBinary(proto::ProtoContext* ctx, Op op,

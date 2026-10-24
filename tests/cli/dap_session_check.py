@@ -31,6 +31,13 @@ Scenarios (all by default):
             several collections; the stopped frame's locals are intact
   uncaughtthreads  "userUnhandled" stops a failing thread body and actor
             handler on their own threads, not a Future's body
+  exccondition  a condition on an exception filter (`e` bound): true, false,
+            one that throws, a syntax error; a breakpoint in a function the
+            condition calls never stops
+  linebp    line breakpoint `condition` and every `hitCondition` form, an
+            invalid one, a condition that fails
+  logpoint  `logMessage` with `{expr}`, `{{literal}}`, an expression error
+  condthreads  a condition hit by two threads is evaluated in each
 
 Paths are passed as VS Code passes them on Windows: absolute, with a
 lower-case drive letter. Every read has a watchdog, so a broken adapter fails
@@ -779,6 +786,195 @@ def scenario_uncaughtthreads(exe, work):
     expect(d.output["stdout"] == "end -1 -2\n", "stdout %r" % d.output["stdout"])
 
 
+
+CONDITIONS = """\
+def check(n: Int): Boolean =
+  n > 1
+def risky(n: Int): Int =
+  if n > 0 then throw new IllegalStateException("bad " + n)
+  n
+var i = 0
+var sum = 0
+while i < 4 do
+  sum += (try risky(i) catch case e: IllegalStateException => 10)
+  i += 1
+println("sum " + sum)
+"""
+
+
+def raised_with(d, prog, condition, breakpoints=None):
+    d.request("initialize", {"adapterID": "protoscala"})
+    d.event("initialized")
+    d.request("launch", {"program": client_path(prog)})
+    for path, lines in (breakpoints or {}).items():
+        d.set_breakpoints(path, lines)
+    r = d.request("setExceptionBreakpoints",
+                  {"filters": [], "filterOptions": [{"filterId": "raised", "condition": condition}]})
+    d.request("configurationDone")
+    return r["body"]["breakpoints"]
+
+
+def scenario_exccondition(exe, work):
+    prog = os.path.join(work, "conditions.scala")
+    write(prog, CONDITIONS)
+    # True only for the second raise. The condition calls `check`, whose line
+    # has a breakpoint: evaluation never stops there.
+    d = Dap(exe, work)
+    caps = d.request("initialize", {"adapterID": "protoscala"})["body"]
+    expect(caps.get("supportsExceptionFilterOptions") and
+           all(f.get("supportsCondition") and "`e`" in f.get("conditionDescription", "")
+               for f in caps["exceptionBreakpointFilters"]), "condition capabilities %r" % caps)
+    d.event("initialized")
+    d.request("launch", {"program": client_path(prog)})
+    d.set_breakpoints(prog, [2])
+    d.request("setExceptionBreakpoints", {"filterOptions": [
+        {"filterId": "raised", "condition": 'check(n) && e.getMessage == "bad 2"'}]})
+    d.request("configurationDone")
+    frames = d.stopped("exception", 4)
+    expect(d.variables(frames[0]["id"], "Locals") == {"n": "2"}, "stopped at n == 2")
+    d.request("continue", {"threadId": d.last_stop["threadId"]})
+    d.finish()
+    expect(d.output["stdout"] == "sum 30\n", "stdout %r" % d.output["stdout"])
+    # Always false: no stop.
+    d = Dap(exe, work)
+    raised_with(d, prog, 'e.getMessage == "nope"')
+    d.finish()
+    expect(d.output["stdout"] == "sum 30\n", "stdout %r" % d.output["stdout"])
+    # A condition that throws stops, and says why.
+    d = Dap(exe, work)
+    raised_with(d, prog, "e.getMessage.length / 0 > 1")
+    frames = d.stopped("exception", 4)
+    desc = d.last_stop.get("description", "")
+    expect("condition" in desc and "failed" in desc and "ArithmeticException" in desc,
+           "condition error in the stop %r" % d.last_stop)
+    expect("exception breakpoint condition" in d.output["stderr"], "stderr %r" % d.output["stderr"])
+    d.request("setExceptionBreakpoints", {"filters": []})
+    d.request("continue", {"threadId": d.last_stop["threadId"]})
+    d.finish()
+    # A syntax error is reported when it is set, and stops where it is used.
+    d = Dap(exe, work)
+    bps = raised_with(d, prog, "e.getMessage ==")
+    expect("failed" in bps[0].get("message", ""), "set-time report %r" % bps)
+    d.wait_output(lambda o: "exception breakpoint condition" in o["stderr"], "set-time output")
+    d.stopped("exception", 4)
+    expect("failed" in d.last_stop.get("description", ""), "syntax error stop %r" % d.last_stop)
+    d.request("setExceptionBreakpoints", {"filters": []})
+    d.request("continue", {"threadId": d.last_stop["threadId"]})
+    d.finish()
+
+
+LOOP = """\
+var total = 0
+var i = 0
+while i < 6 do
+  total += i
+  i += 1
+println("total " + total)
+"""
+
+
+def stops_with(exe, work, bp):
+    """The values of `i` at each stop on line 4 with breakpoint `bp`."""
+    prog = os.path.join(work, "loop.scala")
+    write(prog, LOOP)
+    d = Dap(exe, work)
+    d.request("initialize", {"adapterID": "protoscala"})
+    d.event("initialized")
+    d.request("launch", {"program": client_path(prog)})
+    b = dict(bp)
+    b["line"] = 4
+    answered = d.request("setBreakpoints", {"source": {"path": client_path(prog)},
+                                            "breakpoints": [b]})["body"]["breakpoints"]
+    d.request("configurationDone")
+    seen = []
+    notes = []
+    while True:
+        ev = d.wait_for(lambda m: m.get("event") in ("stopped", "terminated"), "a stop or the end")
+        if ev["event"] == "terminated":
+            break
+        tid = ev["body"]["threadId"]
+        fs = d.frames(tid)
+        seen.append(int(d.variables(fs[0]["id"], "Locals").get("i", d.variables(
+            fs[0]["id"], "Globals").get("i"))))
+        notes.append(ev["body"].get("description", ""))
+        d.request("continue", {"threadId": tid})
+    d.event("exited")
+    d.request("disconnect")
+    d.close()
+    expect(d.output["stdout"].endswith("total 15\n"), "stdout %r" % d.output["stdout"])
+    return seen, notes, answered, d.output
+
+
+def scenario_linebp(exe, work):
+    seen, _, _, _ = stops_with(exe, work, {"condition": "i == 3"})
+    expect(seen == [3], "condition i == 3 stopped at %r" % seen)
+    seen, _, _, _ = stops_with(exe, work, {"condition": "i == 99"})
+    expect(seen == [], "condition false stopped at %r" % seen)
+    for hit, want in (("3", [2]), ("== 3", [2]), (">= 5", [4, 5]), ("> 4", [4, 5]),
+                      ("< 3", [0, 1]), ("<= 1", [0]), ("% 2", [1, 3, 5])):
+        seen, _, _, _ = stops_with(exe, work, {"hitCondition": hit})
+        expect(seen == want, "hitCondition %r stopped at %r, expected %r" % (hit, seen, want))
+    # Only the hits whose condition held count.
+    seen, _, _, _ = stops_with(exe, work, {"condition": "i % 2 == 0", "hitCondition": "2"})
+    expect(seen == [2], "condition + hitCondition stopped at %r" % seen)
+    seen, _, answered, _ = stops_with(exe, work, {"hitCondition": "every other"})
+    expect(not answered[0]["verified"] and "hit condition" in answered[0].get("message", "") and
+           seen == [], "invalid hitCondition %r %r" % (answered, seen))
+    # A condition that fails stops, and says why.
+    seen, notes, _, out = stops_with(exe, work, {"condition": "i / 0 == 1"})
+    expect(len(seen) == 6 and "failed" in notes[0] and "breakpoint condition" in out["stderr"],
+           "failing condition %r %r" % (seen, notes))
+
+
+def scenario_logpoint(exe, work):
+    seen, _, _, out = stops_with(exe, work, {"logMessage": "i={i} total={total} {{literal}} s={\"x\"}"})
+    expect(seen == [], "a logpoint stopped %r" % seen)
+    lines = [l for l in out.get("console", "").splitlines() if l.startswith("i=")]
+    expect(lines == ["i=%d total=%d {literal} s=x" % (k, sum(range(k))) for k in range(6)],
+           "logpoint output %r" % lines)
+    seen, _, _, out = stops_with(exe, work, {"logMessage": "bad {nope + 1}", "hitCondition": "% 3"})
+    lines = [l for l in out.get("console", "").splitlines() if l.startswith("bad")]
+    expect(seen == [] and len(lines) == 2 and all(l.startswith("bad <error: ") for l in lines),
+           "logpoint error %r" % lines)
+
+
+CONDITION_THREADS = """\
+def compute(tag: String, n: Int): Int =
+  var acc = 0
+  var i = 0
+  while i < n do
+    acc += i + 1
+    i += 1
+  acc
+
+val t1 = Thread.start(() => println("a done " + compute("a", 3)))
+val t2 = Thread.start(() => println("b done " + compute("b", 3)))
+t1.join()
+t2.join()
+println("all done")
+"""
+
+
+def scenario_condthreads(exe, work):
+    prog = os.path.join(work, "condthreads.scala")
+    write(prog, CONDITION_THREADS)
+    d = Dap(exe, work)
+    d.request("initialize", {"adapterID": "protoscala"})
+    d.event("initialized")
+    d.request("launch", {"program": client_path(prog)})
+    d.request("setBreakpoints", {"source": {"path": client_path(prog)},
+                                 "breakpoints": [{"line": 5, "condition": 'tag == "b" && i == 1'}]})
+    d.request("configurationDone")
+    frames = d.stopped("breakpoint", 5)
+    loc = d.variables(frames[0]["id"], "Locals")
+    expect(loc.get("tag") == '"b"' and loc.get("i") == "1", "the b thread at i == 1 %r" % loc)
+    d.wait_output(lambda o: "a done 6" in o["stdout"], "a to finish while b is stopped")
+    d.request("continue", {"threadId": d.last_stop["threadId"]})
+    d.finish()
+    expect(d.output["stdout"].endswith("all done\n") and "b done 6" in d.output["stdout"],
+           "stdout %r" % d.output["stdout"])
+
+
 SCENARIOS = {
     "session": scenario_session,
     "entry": scenario_entry,
@@ -794,6 +990,10 @@ SCENARIOS = {
     "pausethread": scenario_pausethread,
     "gc": scenario_gc,
     "uncaughtthreads": scenario_uncaughtthreads,
+    "exccondition": scenario_exccondition,
+    "linebp": scenario_linebp,
+    "logpoint": scenario_logpoint,
+    "condthreads": scenario_condthreads,
 }
 
 

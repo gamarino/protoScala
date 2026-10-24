@@ -85,10 +85,73 @@ void registerThread() {
     if (Controller* c = gController.load(std::memory_order_acquire)) c->threadStarted(info->id);
 }
 
+}  // namespace
+
+// What a line breakpoint does beyond stopping.
+struct LineBreakpoint {
+    enum class Hit { None, Eq, Ge, Gt, Lt, Le, Mod };
+    std::string condition;
+    Hit hit = Hit::None;
+    long long hitN = 0;
+    bool isLog = false;
+    std::string logMessage;
+    std::atomic<long long> hits{0};  // hits whose condition held
+    bool plain() const { return condition.empty() && hit == Hit::None && !isLog; }
+};
+
+namespace {
+
 struct Requested {
     int id;
     int line;
+    std::shared_ptr<LineBreakpoint> bp;  // null: an unconditional breakpoint
+    std::string invalid;                 // why it cannot be armed ("" when it can)
 };
+
+// `3`, `== 3`, `>= 2`, `> 2`, `< 4`, `<= 4`, `% 2`; false when malformed.
+bool parseHitCondition(const std::string& text, LineBreakpoint& bp) {
+    std::size_t i = 0;
+    auto skip = [&] {
+        while (i < text.size() && std::isspace(static_cast<unsigned char>(text[i]))) ++i;
+    };
+    skip();
+    LineBreakpoint::Hit op = LineBreakpoint::Hit::Eq;
+    auto take = [&](const char* tok, LineBreakpoint::Hit h) {
+        const std::size_t n = std::char_traits<char>::length(tok);
+        if (text.compare(i, n, tok) != 0) return false;
+        i += n;
+        op = h;
+        return true;
+    };
+    take("==", LineBreakpoint::Hit::Eq) || take(">=", LineBreakpoint::Hit::Ge) ||
+        take("<=", LineBreakpoint::Hit::Le) || take(">", LineBreakpoint::Hit::Gt) ||
+        take("<", LineBreakpoint::Hit::Lt) || take("%", LineBreakpoint::Hit::Mod) ||
+        take("=", LineBreakpoint::Hit::Eq);
+    skip();
+    const std::size_t start = i;
+    while (i < text.size() && std::isdigit(static_cast<unsigned char>(text[i]))) ++i;
+    if (i == start || i - start > 15) return false;
+    const long long n = std::stoll(text.substr(start, i - start));
+    skip();
+    if (i != text.size()) return false;
+    if (op == LineBreakpoint::Hit::Mod && n <= 0) return false;
+    bp.hit = op;
+    bp.hitN = n;
+    return true;
+}
+
+bool hitPasses(const LineBreakpoint& bp, long long n) {
+    switch (bp.hit) {
+        case LineBreakpoint::Hit::None: return true;
+        case LineBreakpoint::Hit::Eq: return n == bp.hitN;
+        case LineBreakpoint::Hit::Ge: return n >= bp.hitN;
+        case LineBreakpoint::Hit::Gt: return n > bp.hitN;
+        case LineBreakpoint::Hit::Lt: return n < bp.hitN;
+        case LineBreakpoint::Hit::Le: return n <= bp.hitN;
+        case LineBreakpoint::Hit::Mod: return n % bp.hitN == 0;
+    }
+    return true;
+}
 
 struct Registry {
     std::mutex mu;
@@ -114,14 +177,71 @@ int resolveLine(const Source& s, int line) {
 // Arms `s` from the requests for its file. Called with the registry locked.
 std::vector<Controller::Breakpoint> arm(Source& s, const std::vector<Requested>& req) {
     for (std::size_t l = 0; l < s.lineCount; ++l) s.armed[l].store(0, std::memory_order_relaxed);
+    s.special.clear();
     std::vector<Controller::Breakpoint> out;
     for (const Requested& r : req) {
+        if (!r.invalid.empty()) {
+            out.push_back({r.id, r.line, false, r.invalid});
+            continue;
+        }
         const int at = resolveLine(s, r.line);
-        if (at > 0) s.armed[static_cast<std::size_t>(at)].store(1, std::memory_order_relaxed);
-        out.push_back({r.id, at > 0 ? at : r.line, at > 0});
+        if (at > 0) {
+            auto& flag = s.armed[static_cast<std::size_t>(at)];
+            // Two breakpoints resolved to one line: the first one set wins.
+            if (flag.load(std::memory_order_relaxed) == 0 && r.bp) s.special[at] = r.bp;
+            flag.store(1, std::memory_order_relaxed);
+        }
+        out.push_back({r.id, at > 0 ? at : r.line, at > 0,
+                       at > 0 ? std::string() : "no code on or after this line (yet)"});
     }
     return out;
 }
+
+// The breakpoint armed on `line` of `s`, when it is not a plain one.
+std::shared_ptr<LineBreakpoint> specialAt(const Source& s, int line) {
+    Registry& reg = registry();
+    std::lock_guard<std::mutex> lk(reg.mu);
+    auto it = s.special.find(line);
+    return it == s.special.end() ? nullptr : it->second;
+}
+
+// `{expr}` parts evaluated in `r`, `{{` and `}}` literal braces.
+std::string interpolate(Controller* c, proto::ProtoContext* current, FrameRecord& r,
+                        const std::string& msg) {
+    std::string out;
+    for (std::size_t i = 0; i < msg.size(); ++i) {
+        const char ch = msg[i];
+        if ((ch == '{' || ch == '}') && i + 1 < msg.size() && msg[i + 1] == ch) {
+            out += ch;
+            ++i;
+            continue;
+        }
+        if (ch != '{') {
+            out += ch;
+            continue;
+        }
+        // The matching `}`, counting nested braces of the expression.
+        int depth = 1;
+        std::size_t j = i + 1;
+        for (; j < msg.size() && depth > 0; ++j) {
+            if (msg[j] == '{') ++depth;
+            else if (msg[j] == '}') --depth;
+        }
+        if (depth != 0) {  // no closing brace: the rest is text
+            out += msg.substr(i);
+            break;
+        }
+        const std::string expr = msg.substr(i + 1, j - i - 2);
+        const Controller::Evaluation e = c->evaluateHere(current, r, expr, nullptr, nullptr, true);
+        out += e.ok ? e.text : "<error: " + e.text + ">";
+        i = j - 1;
+    }
+    return out;
+}
+
+// Exception filter conditions, by filter bit (guarded by the mutex).
+std::mutex gExceptionConditionsMu;
+std::string gExceptionConditions[2];
 
 // A function's epilogue: its RETURN, or the `()` a Unit body returns. The
 // compiler gives it the line of the definition (the top level's, line 1), so
@@ -236,10 +356,42 @@ void newLine(FrameRecord& r) {
                 reason = "step";
         }
     }
-    if (!reason && r.src->armedAt(r.line)) reason = "breakpoint";
+    std::string note;
+    if (!reason && r.src->armedAt(r.line)) {
+        std::shared_ptr<LineBreakpoint> bp = specialAt(*r.src, r.line);
+        if (!bp) {
+            reason = "breakpoint";
+        } else {
+            // The condition, the hit count and the log message run on this
+            // thread, in this frame, with every stop suppressed.
+            Suppress quiet;
+            bool stop = true;
+            if (!bp->condition.empty()) {
+                const Controller::Evaluation e =
+                    c->evaluateHere(r.ctx, r, bp->condition, nullptr, nullptr, false);
+                if (!e.ok) {
+                    note = "breakpoint condition `" + bp->condition + "` failed: " + e.text;
+                } else if (e.text == "false") {
+                    stop = false;
+                } else if (e.text != "true") {
+                    note = "breakpoint condition `" + bp->condition + "` is not a Boolean: " + e.text;
+                }
+            }
+            if (stop && note.empty()) {
+                const long long n = bp->hits.fetch_add(1) + 1;
+                stop = hitPasses(*bp, n);
+                if (stop && bp->isLog) {
+                    c->output("console", interpolate(c, r.ctx, r, bp->logMessage) + "\n");
+                    stop = false;
+                }
+            }
+            if (!note.empty()) c->output("stderr", note + "\n");
+            if (stop) reason = "breakpoint";
+        }
+    }
     if (!reason) return;
     tSlot.stepMode = StepMode::None;
-    c->stopped(r, reason, self ? self->id : 0, nullptr);
+    c->stopped(r, r.ctx, reason, self ? self->id : 0, nullptr, note.empty() ? nullptr : &note);
 }
 
 void setStep(StepMode mode, const FrameRecord& top) {
@@ -265,7 +417,15 @@ Suppress::~Suppress() { tSuppressed = saved_; }
 
 // --- Exceptions --------------------------------------------------------------
 
-void setExceptionBreaks(unsigned mask) { gExceptionBreaks.store(mask, std::memory_order_release); }
+void setExceptionBreaks(unsigned mask, const std::string& raisedCondition,
+                        const std::string& uncaughtCondition) {
+    {
+        std::lock_guard<std::mutex> lk(gExceptionConditionsMu);
+        gExceptionConditions[0] = raisedCondition;
+        gExceptionConditions[1] = uncaughtCondition;
+    }
+    gExceptionBreaks.store(mask, std::memory_order_release);
+}
 
 bool suppressed() { return tSuppressed; }
 
@@ -285,11 +445,42 @@ void noteMaterialised(proto::ProtoContext* ctx, const void* error, const proto::
     markReported(ctx, value, nullptr);
 }
 
-void stopForException(FrameRecord& top, const ExceptionStop& ex) {
+void stopForException(FrameRecord& top, proto::ProtoContext* current, const ExceptionStop& ex,
+                      const std::string* note) {
     Controller* c = gController.load(std::memory_order_acquire);
     if (!c || tSuppressed) return;
     tSlot.stepMode = StepMode::None;  // the stop ends a step in progress
-    c->stopped(top, "exception", tSlot.info ? tSlot.info->id : 0, &ex);
+    c->stopped(top, current, "exception", tSlot.info ? tSlot.info->id : 0, &ex, note);
+}
+
+bool exceptionConditionHolds(unsigned filters, proto::ProtoContext* current, FrameRecord& top,
+                             const proto::ProtoObject* value, std::string* note) {
+    Controller* c = gController.load(std::memory_order_acquire);
+    if (!c) return false;
+    std::string conditions[2];
+    {
+        std::lock_guard<std::mutex> lk(gExceptionConditionsMu);
+        conditions[0] = gExceptionConditions[0];
+        conditions[1] = gExceptionConditions[1];
+    }
+    for (int bit = 0; bit < 2; ++bit) {
+        if (!(filters & (1u << bit))) continue;
+        const std::string& cond = conditions[bit];
+        if (cond.empty()) return true;
+        Controller::Evaluation e;
+        {
+            Suppress quiet;
+            e = c->evaluateHere(current, top, cond, "e", value, false);
+        }
+        if (e.text == "true" && e.ok) return true;
+        if (!e.ok || e.text != "false") {
+            *note = "exception breakpoint condition `" + cond + "` " +
+                    (e.ok ? "is not a Boolean: " : "failed: ") + e.text;
+            c->output("stderr", *note + "\n");
+            return true;
+        }
+    }
+    return false;
 }
 
 NativeBoundary::NativeBoundary(Boundary kind) {
@@ -404,17 +595,35 @@ void registerModule(const BytecodeModule& mod, const std::string& path) {
 }
 
 std::vector<Controller::Breakpoint> setBreakpoints(const std::string& path,
-                                                   const std::vector<int>& lines) {
+                                                   const std::vector<BreakpointSpec>& specs) {
     Registry& reg = registry();
     std::lock_guard<std::mutex> lk(reg.mu);
     const std::string key = normalisePath(path);
     std::vector<Requested>& req = reg.requested[key];
     req.clear();
-    for (int l : lines) req.push_back({reg.nextId++, l});
+    for (const BreakpointSpec& sp : specs) {
+        Requested r{reg.nextId++, sp.line, nullptr, std::string()};
+        auto bp = std::make_shared<LineBreakpoint>();
+        bp->condition = sp.condition;
+        bp->isLog = sp.isLogpoint;
+        bp->logMessage = sp.logMessage;
+        bool hitOk = true;
+        std::string hit = sp.hitCondition;
+        hit.erase(0, hit.find_first_not_of(" \t"));
+        if (!hit.empty()) hitOk = parseHitCondition(hit, *bp);
+        if (!hitOk)
+            r.invalid = "invalid hit condition `" + sp.hitCondition +
+                        "`: write N, == N, >= N, > N, < N, <= N or % N";
+        else if (!bp->plain())
+            r.bp = std::move(bp);
+        req.push_back(std::move(r));
+    }
     auto it = reg.sources.find(key);
     if (it != reg.sources.end()) return arm(*it->second, req);
     std::vector<Controller::Breakpoint> out;
-    for (const Requested& r : req) out.push_back({r.id, r.line, false});
+    for (const Requested& r : req)
+        out.push_back({r.id, r.line, false,
+                       r.invalid.empty() ? "no code on or after this line (yet)" : r.invalid});
     return out;
 }
 

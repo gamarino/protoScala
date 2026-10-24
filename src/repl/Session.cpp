@@ -806,47 +806,72 @@ bool Session::debugEvaluate(proto::ProtoContext* ctx, const std::string& expr,
     // The expression becomes the body of a function of the frame's locals, so
     // it reads them as parameters, and is compiled as a REPL line against the
     // running unit's table, so it sees the unit's globals.
-    std::string src = "(";
-    for (std::size_t k = 0; k < names.size(); ++k) src += (k ? ", " : "") + names[k];
-    src += ") => {\n" + expr + "\n}\n";
-    GlobalTable table = runningTable_ ? *runningTable_ : globals_;
-    CompiledUnit cu;
-    try {
-        auto unit = parseSource(src);
-        desugar(*unit);
-        Compiler compiler(table);
-        compiler.setModuleLoader(this);
-        cu = compiler.compileUnit(*unit, UnitMode::Repl, 1000000 + debugCounter_++);
-    } catch (const ParseError& e) {
-        *out = e.what();
-        return false;
-    } catch (const CompileError& e) {
-        *out = e.what();
-        return false;
-    } catch (const std::length_error& e) {
-        *out = e.what();
-        return false;
-    } catch (const ScalaError& e) {
-        *out = e.what();
-        return false;
-    } catch (const proto::ProtoException& t) {
-        *out = showThrown(ctx, t.value());
-        return false;
-    }
-    if (cu.resultKey.empty()) {
-        *out = "not an expression";
-        return false;
-    }
     const unsigned n = static_cast<unsigned>(names.size());
     proto::ProtoContext scope(ctx->space, ctx);
     scope.resizeAutomaticLocals(n + 1);
     for (unsigned k = 0; k < n; ++k) scope.setAutomaticLocal(k, values[k]);
-    cu.module->linkSymbols(&scope);
-    const BytecodeModule& mod = *cu.module;
-    modules_.push_back(std::move(cu.module));  // the function value points into it
+    std::string cacheKey = expr + "\n";
+    for (const std::string& nm : names) cacheKey += nm + ",";
+    std::string resultKey;
+    std::unique_lock<std::mutex> lk(debugMu_, std::defer_lock);
+    {
+        // Another thread may hold it while it compiles, and compiling
+        // allocates: wait outside the collector's quorum.
+        proto::ProtoContext::UnmanagedScope unmanaged(&scope);
+        lk.lock();
+    }
+    auto cached = debugCache_.find(cacheKey);
+    if (cached != debugCache_.end()) resultKey = cached->second;
+    if (resultKey.empty()) {
+        std::string src = "(";
+        for (std::size_t k = 0; k < names.size(); ++k) src += (k ? ", " : "") + names[k];
+        src += ") => {\n" + expr + "\n}\n";
+        GlobalTable table = runningTable_ ? *runningTable_ : globals_;
+        CompiledUnit cu;
+        try {
+            auto unit = parseSource(src);
+            desugar(*unit);
+            Compiler compiler(table);
+            compiler.setModuleLoader(this);
+            cu = compiler.compileUnit(*unit, UnitMode::Repl, 1000000 + debugCounter_++);
+        } catch (const ParseError& e) {
+            *out = e.what();
+            return false;
+        } catch (const CompileError& e) {
+            *out = e.what();
+            return false;
+        } catch (const std::length_error& e) {
+            *out = e.what();
+            return false;
+        } catch (const ScalaError& e) {
+            *out = e.what();
+            return false;
+        } catch (const proto::ProtoException& t) {
+            *out = showThrown(ctx, t.value());
+            return false;
+        }
+        if (cu.resultKey.empty()) {
+            *out = "not an expression";
+            return false;
+        }
+        cu.module->linkSymbols(&scope);
+        const BytecodeModule& mod = *cu.module;
+        modules_.push_back(std::move(cu.module));  // the function value points into it
+        try {
+            engine_.run(&scope, mod);  // defines the function: none of the expression runs yet
+        } catch (const proto::ProtoException& t) {
+            *out = showThrown(&scope, t.value());
+            return false;
+        } catch (const ScalaError& e) {
+            *out = e.what();
+            return false;
+        }
+        resultKey = cu.resultKey;
+        debugCache_[cacheKey] = resultKey;
+    }
+    lk.unlock();
     try {
-        engine_.run(&scope, mod);
-        const auto* key = proto::ProtoString::createSymbol(&scope, cu.resultKey.c_str());
+        const auto* key = proto::ProtoString::createSymbol(&scope, resultKey.c_str());
         scope.setAutomaticLocal(n, runtime_.layout().globals->getOwnAttributeDirect(&scope, key));
         const proto::ProtoObject* r =
             engine_.callTopLevel(&scope, scope.getAutomaticLocal(n), scope.getAutomaticLocals(), n);

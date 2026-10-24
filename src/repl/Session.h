@@ -20,6 +20,7 @@
 
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -149,6 +150,12 @@ private:
     // against it.
     const GlobalTable* runningTable_ = nullptr;
     int debugCounter_ = 0;
+    // The debugger's compiled expressions, by expression and the names they
+    // are a function of: a condition hit in a loop is compiled once. Guarded
+    // by debugMu_, which also serialises their compilation (two threads may
+    // evaluate at once: a conditional breakpoint hit by both).
+    std::mutex debugMu_;
+    std::map<std::string, std::string> debugCache_;
 
     // --- Phase 6: modules -------------------------------------------------
     // The table a module is compiled against: the session's, right after the

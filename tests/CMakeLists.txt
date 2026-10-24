@@ -133,8 +133,12 @@ if(Python3_FOUND)
     add_test(NAME cli/dap-threads
         COMMAND ${Python3_EXECUTABLE} "${_dap_check}" "$<TARGET_FILE:protoscala>"
             threads pausethread gc)
+    # Conditions on exception filters; conditional, hit-count and log breakpoints.
+    add_test(NAME cli/dap-conditions
+        COMMAND ${Python3_EXECUTABLE} "${_dap_check}" "$<TARGET_FILE:protoscala>"
+            exccondition linebp logpoint condthreads)
     set_tests_properties(cli/dap-session cli/dap-output cli/dap-exceptions cli/dap-threads
-        PROPERTIES TIMEOUT 300)
+        cli/dap-conditions PROPERTIES TIMEOUT 300)
     unset(_dap_check)
 endif()
 
