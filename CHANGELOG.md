@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Debugging in VS Code** (`docs/debugging.md`). `protoscala --dap` serves the
+  Debug Adapter Protocol on stdin/stdout and runs the script under an
+  interpreter hook (`src/runtime/Debugger.{h,cpp}`, `src/dap/`): line
+  breakpoints in the script and its imported modules, continue / step over /
+  step in / step out / pause, the call stack, Locals and Globals, evaluation in
+  a frame, `stopOnEntry`, the script's stdout and stderr as `output` events.
+  Interpreted code only. The compiler now records each frame slot's source
+  name. `editor-integration/vscode/` is the extension: the `protoscala` debug
+  type and a Scala TextMate grammar and language configuration (`.scala`,
+  `.sc`). Tests: `cli/dap-session`, `cli/dap-output`. The adapter uses
+  nlohmann/json 3.11.3, fetched at configure time (header-only, not installed).
+
 ### Changed
 - **protoST runs in protoScala's ProtoSpace in the interop tests** (one
   ProtoSpace per process, protoCore's recommended model). The tests and the

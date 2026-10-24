@@ -5,6 +5,7 @@ build_asan/
 build-dbg/
 .idea/
 .vscode/
+!examples/.vscode/
 *.swp
 *~
 .DS_Store
@@ -15,3 +16,4 @@ build_tsan/
 build_pmq/
 build_pkg/
 __pycache__/
+*.vsix

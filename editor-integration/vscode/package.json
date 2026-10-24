@@ -1,0 +1,128 @@
+{
+  "name": "protoscala",
+  "displayName": "protoScala",
+  "description": "Scala syntax highlighting and debugging of protoScala scripts through the protoscala --dap Debug Adapter Protocol adapter.",
+  "version": "0.1.0",
+  "publisher": "protoscala-placeholder",
+  "engines": {
+    "vscode": "^1.66.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Debuggers"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onDebug",
+    "onDebugResolve:protoscala",
+    "onDebugDynamicConfigurations:protoscala",
+    "onLanguage:scala"
+  ],
+  "contributes": {
+    "configuration": {
+      "title": "protoScala",
+      "properties": {
+        "protoscala.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the protoscala executable. Empty: the default install location, then 'protoscala' on PATH."
+        }
+      }
+    },
+    "languages": [
+      {
+        "id": "scala",
+        "aliases": [
+          "Scala",
+          "scala"
+        ],
+        "extensions": [
+          ".scala",
+          ".sc"
+        ],
+        "configuration": "./language-configuration.json",
+        "firstLine": "^#!.*\\bprotoscala\\b"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "scala",
+        "scopeName": "source.scala",
+        "path": "./syntaxes/scala.tmLanguage.json"
+      }
+    ],
+    "breakpoints": [
+      {
+        "language": "scala"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "protoscala",
+        "label": "protoScala",
+        "languages": [
+          "scala"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "program"
+            ],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "Path to the Scala script to debug (run by the protoScala interpreter).",
+                "default": "${file}"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Arguments passed to the script's @main method.",
+                "default": []
+              },
+              "cwd": {
+                "type": "string",
+                "description": "Working directory of the script.",
+                "default": "${workspaceFolder}"
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "description": "Stop at the first line of the script.",
+                "default": false
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "protoscala",
+            "request": "launch",
+            "name": "Debug current protoScala script",
+            "program": "${file}",
+            "stopOnEntry": false
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "protoScala: Launch current script",
+            "description": "Debug the active .scala file with the protoScala interpreter.",
+            "body": {
+              "type": "protoscala",
+              "request": "launch",
+              "name": "Debug current protoScala script",
+              "program": "^\"\\${file}\"",
+              "stopOnEntry": false
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gamarino/protoScala"
+  },
+  "license": "MIT"
+}

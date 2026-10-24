@@ -1,0 +1,854 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Scala",
+  "scopeName": "source.scala",
+  "fileTypes": [
+    "scala",
+    "sc"
+  ],
+  "comment": "Scala 3 as protoScala accepts it. Written for protoScala (MIT); not derived from another grammar.",
+  "patterns": [
+    {
+      "include": "#code"
+    }
+  ],
+  "repository": {
+    "code": {
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#char"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#annotation"
+        },
+        {
+          "include": "#imports"
+        },
+        {
+          "include": "#package"
+        },
+        {
+          "include": "#end-marker"
+        },
+        {
+          "include": "#declarations"
+        },
+        {
+          "include": "#keywords"
+        },
+        {
+          "include": "#type-ascription"
+        },
+        {
+          "include": "#type-args"
+        },
+        {
+          "include": "#braces"
+        },
+        {
+          "include": "#operators"
+        },
+        {
+          "include": "#types"
+        },
+        {
+          "include": "#backquoted"
+        },
+        {
+          "include": "#punctuation"
+        }
+      ]
+    },
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.block.documentation.scala",
+          "begin": "/\\*\\*(?!/)",
+          "end": "\\*/",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.scala"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.scala"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#block-comment"
+            },
+            {
+              "name": "keyword.other.documentation.scaladoc.scala",
+              "match": "@[a-zA-Z]+\\b"
+            }
+          ]
+        },
+        {
+          "include": "#block-comment"
+        },
+        {
+          "name": "comment.line.double-slash.scala",
+          "begin": "//",
+          "end": "$",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.scala"
+            }
+          }
+        }
+      ]
+    },
+    "block-comment": {
+      "comment": "Scala block comments nest.",
+      "name": "comment.block.scala",
+      "begin": "/\\*",
+      "end": "\\*/",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.comment.scala"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.comment.scala"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#block-comment"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.triple.interpolated.raw.scala",
+          "begin": "\\b(raw)(\\\"\\\"\\\")",
+          "end": "\\\"\\\"\\\"(?!\\\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.string-interpolator.scala"
+            },
+            "2": {
+              "name": "punctuation.definition.string.begin.scala"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.scala"
+            }
+          },
+          "patterns": [
+            {
+              "name": "constant.character.escape.scala",
+              "match": "\\$\\$"
+            },
+            {
+              "name": "meta.template.expression.scala",
+              "begin": "\\$\\{",
+              "end": "\\}",
+              "beginCaptures": {
+                "0": {
+                  "name": "punctuation.definition.template-expression.begin.scala"
+                }
+              },
+              "endCaptures": {
+                "0": {
+                  "name": "punctuation.definition.template-expression.end.scala"
+                }
+              },
+              "patterns": [
+                {
+                  "include": "#braces"
+                },
+                {
+                  "include": "#code"
+                }
+              ]
+            },
+            {
+              "match": "(\\$)([A-Za-z_][A-Za-z0-9_]*)",
+              "captures": {
+                "1": {
+                  "name": "punctuation.definition.template-expression.scala"
+                },
+                "2": {
+                  "name": "variable.other.interpolated.scala"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.triple.interpolated.scala",
+          "begin": "\\b([A-Za-z_][A-Za-z0-9_]*)(\\\"\\\"\\\")",
+          "end": "\\\"\\\"\\\"(?!\\\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.string-interpolator.scala"
+            },
+            "2": {
+              "name": "punctuation.definition.string.begin.scala"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.scala"
+            }
+          },
+          "patterns": [
+            {
+              "name": "constant.character.escape.scala",
+              "match": "\\$\\$"
+            },
+            {
+              "name": "meta.template.expression.scala",
+              "begin": "\\$\\{",
+              "end": "\\}",
+              "beginCaptures": {
+                "0": {
+                  "name": "punctuation.definition.template-expression.begin.scala"
+                }
+              },
+              "endCaptures": {
+                "0": {
+                  "name": "punctuation.definition.template-expression.end.scala"
+                }
+              },
+              "patterns": [
+                {
+                  "include": "#braces"
+                },
+                {
+                  "include": "#code"
+                }
+              ]
+            },
+            {
+              "match": "(\\$)([A-Za-z_][A-Za-z0-9_]*)",
+              "captures": {
+                "1": {
+                  "name": "punctuation.definition.template-expression.scala"
+                },
+                "2": {
+                  "name": "variable.other.interpolated.scala"
+                }
+              }
+            },
+            {
+              "name": "constant.character.escape.scala",
+              "match": "\\\\(?:[btnfr\\\"'\\\\]|u+[0-9A-Fa-f]{4}|[0-7]{1,3})"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.triple.scala",
+          "begin": "\\\"\\\"\\\"",
+          "end": "\\\"\\\"\\\"(?!\\\")",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.scala"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.scala"
+            }
+          }
+        },
+        {
+          "name": "string.quoted.double.interpolated.raw.scala",
+          "begin": "\\b(raw)(\\\")",
+          "end": "(\\\")|$",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.string-interpolator.scala"
+            },
+            "2": {
+              "name": "punctuation.definition.string.begin.scala"
+            }
+          },
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.string.end.scala"
+            }
+          },
+          "patterns": [
+            {
+              "name": "constant.character.escape.scala",
+              "match": "\\$\\$"
+            },
+            {
+              "name": "meta.template.expression.scala",
+              "begin": "\\$\\{",
+              "end": "\\}",
+              "beginCaptures": {
+                "0": {
+                  "name": "punctuation.definition.template-expression.begin.scala"
+                }
+              },
+              "endCaptures": {
+                "0": {
+                  "name": "punctuation.definition.template-expression.end.scala"
+                }
+              },
+              "patterns": [
+                {
+                  "include": "#braces"
+                },
+                {
+                  "include": "#code"
+                }
+              ]
+            },
+            {
+              "match": "(\\$)([A-Za-z_][A-Za-z0-9_]*)",
+              "captures": {
+                "1": {
+                  "name": "punctuation.definition.template-expression.scala"
+                },
+                "2": {
+                  "name": "variable.other.interpolated.scala"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.double.interpolated.scala",
+          "begin": "\\b([A-Za-z_][A-Za-z0-9_]*)(\\\")",
+          "end": "(\\\")|$",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.string-interpolator.scala"
+            },
+            "2": {
+              "name": "punctuation.definition.string.begin.scala"
+            }
+          },
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.string.end.scala"
+            }
+          },
+          "patterns": [
+            {
+              "name": "constant.character.escape.scala",
+              "match": "\\$\\$"
+            },
+            {
+              "name": "meta.template.expression.scala",
+              "begin": "\\$\\{",
+              "end": "\\}",
+              "beginCaptures": {
+                "0": {
+                  "name": "punctuation.definition.template-expression.begin.scala"
+                }
+              },
+              "endCaptures": {
+                "0": {
+                  "name": "punctuation.definition.template-expression.end.scala"
+                }
+              },
+              "patterns": [
+                {
+                  "include": "#braces"
+                },
+                {
+                  "include": "#code"
+                }
+              ]
+            },
+            {
+              "match": "(\\$)([A-Za-z_][A-Za-z0-9_]*)",
+              "captures": {
+                "1": {
+                  "name": "punctuation.definition.template-expression.scala"
+                },
+                "2": {
+                  "name": "variable.other.interpolated.scala"
+                }
+              }
+            },
+            {
+              "name": "constant.character.escape.scala",
+              "match": "\\\\(?:[btnfr\\\"'\\\\]|u+[0-9A-Fa-f]{4}|[0-7]{1,3})"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.double.scala",
+          "begin": "\\\"",
+          "end": "(\\\")|$",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.scala"
+            }
+          },
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.string.end.scala"
+            }
+          },
+          "patterns": [
+            {
+              "name": "constant.character.escape.scala",
+              "match": "\\\\(?:[btnfr\\\"'\\\\]|u+[0-9A-Fa-f]{4}|[0-7]{1,3})"
+            },
+            {
+              "name": "invalid.illegal.escape.scala",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "char": {
+      "patterns": [
+        {
+          "name": "constant.character.literal.scala",
+          "match": "'(?:\\\\(?:[btnfr\\\"'\\\\]|u+[0-9A-Fa-f]{4}|[0-7]{1,3})|[^'\\\\\\n])'"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.scala",
+          "match": "\\b0[xX][0-9A-Fa-f][0-9A-Fa-f_]*[lL]?\\b"
+        },
+        {
+          "name": "constant.numeric.binary.scala",
+          "match": "\\b0[bB][01][01_]*[lL]?\\b"
+        },
+        {
+          "name": "constant.numeric.float.scala",
+          "match": "(?<![\\w$])(?:\\d[\\d_]*\\.\\d[\\d_]*(?:[eE][+-]?\\d+)?|\\.\\d[\\d_]*(?:[eE][+-]?\\d+)?|\\d[\\d_]*[eE][+-]?\\d+)[fFdD]?\\b"
+        },
+        {
+          "name": "constant.numeric.float.scala",
+          "match": "\\b\\d[\\d_]*[fFdD]\\b"
+        },
+        {
+          "name": "constant.numeric.integer.scala",
+          "match": "\\b\\d[\\d_]*[lL]?\\b"
+        }
+      ]
+    },
+    "annotation": {
+      "patterns": [
+        {
+          "match": "(@)([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*)",
+          "captures": {
+            "0": {
+              "name": "meta.annotation.scala"
+            },
+            "1": {
+              "name": "punctuation.definition.annotation.scala"
+            },
+            "2": {
+              "name": "storage.type.annotation.scala"
+            }
+          }
+        }
+      ]
+    },
+    "imports": {
+      "patterns": [
+        {
+          "name": "meta.import.scala",
+          "begin": "\\b(import|export)\\b",
+          "end": "(?=;)|$",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.import.scala"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "name": "keyword.other.import.given.scala",
+              "match": "\\b(given|as)\\b"
+            },
+            {
+              "name": "keyword.operator.arrow.scala",
+              "match": "=>"
+            },
+            {
+              "name": "variable.language.wildcard.scala",
+              "match": "(?<![\\w$])[_*](?![\\w$])"
+            },
+            {
+              "name": "punctuation.definition.import.scala",
+              "match": "[{},]"
+            },
+            {
+              "name": "punctuation.accessor.scala",
+              "match": "\\."
+            },
+            {
+              "name": "entity.name.type.scala",
+              "match": "\\b[A-Z][A-Za-z0-9_$]*\\b"
+            },
+            {
+              "name": "entity.name.namespace.scala",
+              "match": "(?:[A-Za-z_$][A-Za-z0-9_$]*|`[^`\\n]+`)"
+            }
+          ]
+        }
+      ]
+    },
+    "package": {
+      "patterns": [
+        {
+          "match": "\\b(package)\\s+(?!object\\b)([A-Za-z_][A-Za-z0-9_.]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.other.package.scala"
+            },
+            "2": {
+              "name": "entity.name.namespace.scala"
+            }
+          }
+        },
+        {
+          "name": "keyword.other.package.scala",
+          "match": "\\bpackage\\b"
+        }
+      ]
+    },
+    "end-marker": {
+      "patterns": [
+        {
+          "match": "^\\s*(end)\\s+(if|while|for|match|try|new|this|given|extension|val|(?:[A-Za-z_$][A-Za-z0-9_$]*|`[^`\\n]+`))(?=\\s*(?:$|//|/\\*))",
+          "captures": {
+            "1": {
+              "name": "keyword.control.end.scala"
+            },
+            "2": {
+              "name": "entity.name.label.scala"
+            }
+          }
+        }
+      ]
+    },
+    "declarations": {
+      "patterns": [
+        {
+          "match": "\\b(def)\\s+((?:(?:[A-Za-z_$][A-Za-z0-9_$]*|`[^`\\n]+`)|(?:[!#%&*+\\-/:<=>?@\\\\^|~]+)))",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.function.scala"
+            },
+            "2": {
+              "name": "entity.name.function.scala"
+            }
+          }
+        },
+        {
+          "match": "\\b(val|var)\\s+((?:[A-Za-z_$][A-Za-z0-9_$]*|`[^`\\n]+`))",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.variable.scala"
+            },
+            "2": {
+              "name": "variable.other.declaration.scala"
+            }
+          }
+        },
+        {
+          "match": "\\b(case\\s+)?(class|trait|object|enum)\\s+((?:[A-Za-z_$][A-Za-z0-9_$]*|`[^`\\n]+`))",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.case.scala"
+            },
+            "2": {
+              "name": "keyword.declaration.class.scala"
+            },
+            "3": {
+              "name": "entity.name.class.scala"
+            }
+          }
+        },
+        {
+          "match": "\\b(type)\\s+((?:[A-Za-z_$][A-Za-z0-9_$]*|`[^`\\n]+`))",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.type.scala"
+            },
+            "2": {
+              "name": "entity.name.type.declaration.scala"
+            }
+          }
+        },
+        {
+          "match": "\\b(given)\\s+(?!(?:with|as|using)\\b)([a-z_][A-Za-z0-9_]*)(?=\\s*(?:[:\\[(]|\\busing\\b))",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.given.scala"
+            },
+            "2": {
+              "name": "entity.name.given.scala"
+            }
+          }
+        },
+        {
+          "match": "\\b(case)\\s+([A-Z][A-Za-z0-9_$]*)(?=\\s*(?:,|\\(|\\[|\\bextends\\b|$|//))",
+          "comment": "an enum case (`case Red, Green` / `case Leaf(v: Int)`); a pattern `case Some(x) =>` scopes the same way",
+          "captures": {
+            "1": {
+              "name": "keyword.control.flow.scala"
+            },
+            "2": {
+              "name": "entity.name.type.scala"
+            }
+          }
+        },
+        {
+          "match": "\\b(extension)(?=\\s*[\\[(])",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.extension.scala"
+            }
+          }
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.flow.scala",
+          "match": "\\b(if|then|else|while|do|for|yield|match|case|try|catch|finally|throw|return)\\b"
+        },
+        {
+          "name": "keyword.declaration.scala",
+          "match": "\\b(def|val|var|class|trait|object|enum|type|given|extends|with|new|derives)\\b"
+        },
+        {
+          "name": "storage.modifier.scala",
+          "match": "\\b(abstract|final|sealed|override|private|protected|implicit|lazy)\\b"
+        },
+        {
+          "name": "storage.modifier.soft.scala",
+          "match": "\\b(open|inline|transparent|infix|opaque)\\b(?=\\s+(?:def|val|var|class|trait|object|enum|type|given|extension|case|abstract|final|sealed|override|private|protected|open|inline|transparent|infix|opaque|lazy|implicit)\\b)"
+        },
+        {
+          "match": "(?<=[(,])\\s*(using)\\b",
+          "captures": {
+            "1": {
+              "name": "keyword.other.using.scala"
+            }
+          }
+        },
+        {
+          "name": "constant.language.scala",
+          "match": "\\b(true|false|null)\\b"
+        },
+        {
+          "name": "variable.language.scala",
+          "match": "\\b(this|super)\\b"
+        }
+      ]
+    },
+    "type-ascription": {
+      "patterns": [
+        {
+          "comment": "`x: Int`, `(a: String, b: => T)`, `def f(): List[Int]`; not `::` or `:+`",
+          "match": "(?<![!#%&*+\\-/:<=>?@\\\\^|~])(:)(?![!#%&*+\\-/:<=>?@\\\\^|~])\\s*(=>\\s*)?((?:[A-Za-z_$][A-Za-z0-9_$]*|`[^`\\n]+`)(?:\\.(?:[A-Za-z_$][A-Za-z0-9_$]*|`[^`\\n]+`))*)",
+          "captures": {
+            "1": {
+              "name": "punctuation.separator.type.scala"
+            },
+            "2": {
+              "name": "keyword.operator.arrow.scala"
+            },
+            "3": {
+              "name": "entity.name.type.scala"
+            }
+          }
+        }
+      ]
+    },
+    "type-args": {
+      "comment": "Square brackets always hold types: type parameters and type arguments.",
+      "name": "meta.type-arguments.scala",
+      "begin": "\\[",
+      "end": "\\]",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.type-arguments.begin.scala"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.type-arguments.end.scala"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#type-args"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "name": "keyword.operator.type.scala",
+          "match": "<:|>:|=>|\\?=>|<%"
+        },
+        {
+          "name": "keyword.declaration.scala",
+          "match": "\\b(type|with)\\b"
+        },
+        {
+          "name": "storage.modifier.variance.scala",
+          "match": "(?<=[\\[,\\s])[+-](?=[A-Za-z_])"
+        },
+        {
+          "name": "variable.language.wildcard.scala",
+          "match": "(?<![\\w$])[_?](?![\\w$])"
+        },
+        {
+          "match": "(:)\\s*((?:[A-Za-z_$][A-Za-z0-9_$]*|`[^`\\n]+`))",
+          "captures": {
+            "1": {
+              "name": "punctuation.separator.type.scala"
+            },
+            "2": {
+              "name": "entity.name.type.scala"
+            }
+          }
+        },
+        {
+          "name": "entity.name.type.scala",
+          "match": "(?:[A-Za-z_$][A-Za-z0-9_$]*|`[^`\\n]+`)"
+        },
+        {
+          "include": "#braces"
+        },
+        {
+          "name": "punctuation.separator.comma.scala",
+          "match": ","
+        }
+      ]
+    },
+    "braces": {
+      "patterns": [
+        {
+          "begin": "\\{",
+          "end": "\\}",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.block.begin.scala"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.scala"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#code"
+            }
+          ]
+        },
+        {
+          "begin": "\\(",
+          "end": "\\)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.group.begin.scala"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.group.end.scala"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#code"
+            }
+          ]
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "comment": "`class C:` / `enum E:` / `object O:` opening an indented body",
+          "name": "punctuation.section.block.begin.scala",
+          "match": "(?<![!#%&*+\\-/:<=>?@\\\\^|~]):(?=\\s*(?://.*)?$)"
+        },
+        {
+          "name": "keyword.operator.arrow.scala",
+          "match": "(?<![!#%&*+\\-/:<=>?@\\\\^|~])(?:=>|\\?=>|<-|->|←|→|⇒)(?![!#%&*+\\-/:<=>?@\\\\^|~])"
+        },
+        {
+          "name": "keyword.operator.assignment.scala",
+          "match": "(?<![!#%&*+\\-/:<=>?@\\\\^|~])=(?![!#%&*+\\-/:<=>?@\\\\^|~])"
+        },
+        {
+          "name": "keyword.operator.scala",
+          "match": "[!#%&*+\\-/:<=>?@\\\\^|~]+"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "comment": "A capitalised name is a type, a class or its companion.",
+          "name": "entity.name.type.scala",
+          "match": "\\b[A-Z][A-Za-z0-9_$]*\\b"
+        }
+      ]
+    },
+    "backquoted": {
+      "patterns": [
+        {
+          "name": "variable.other.backquoted.scala",
+          "match": "`[^`\\n]+`"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.accessor.scala",
+          "match": "\\."
+        },
+        {
+          "name": "punctuation.separator.comma.scala",
+          "match": ","
+        },
+        {
+          "name": "punctuation.terminator.scala",
+          "match": ";"
+        },
+        {
+          "name": "punctuation.section.brackets.scala",
+          "match": "[\\]\\})]"
+        }
+      ]
+    }
+  }
+}

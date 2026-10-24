@@ -1348,6 +1348,44 @@ printf 'pump-1 12\npump-2 30\n' | examples/column.scala 2 | examples/sum.scala  
 protoscala
 ```
 
+### Debugging in VS Code
+
+`protoscala --dap` is a [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/)
+server, and [`editor-integration/vscode/`](editor-integration/vscode/) is the
+VS Code extension that uses it. VS Code has no built-in Scala support, so the
+extension also brings Scala syntax highlighting and editing rules for `.scala`
+and `.sc` files.
+
+**Install** (protoScala installed first, see [docs/INSTALLATION.md](docs/INSTALLATION.md);
+`npx` comes with Node.js):
+
+```bash
+cd editor-integration/vscode
+npx @vscode/vsce@3.2.1 package --skip-license
+code --install-extension protoscala-0.1.0.vsix
+```
+
+The extension runs the `protoscala.path` setting if set, else the default
+install location (`%LOCALAPPDATA%\Programs\proto\bin\protoscala.exe` on
+Windows, `~/.local/bin/protoscala` elsewhere), else `protoscala` from `PATH`.
+
+**Debug**: open a `.scala` file, set breakpoints in the gutter, press **F5**
+(no `launch.json` needed; [`examples/.vscode/launch.json`](examples/.vscode/launch.json)
+has examples with `args`, `cwd` and `stopOnEntry`).
+
+**What works**: line breakpoints in the script and in the modules it imports;
+continue, step over, step into, step out and pause; the call stack; Locals (a
+frame's parameters, `val`s, `var`s, captures, `this`) and Globals (the
+script's top-level values); evaluation of any expression over the selected
+frame's locals and the script's globals in Watch, the Debug Console and hovers;
+the script's stdout and stderr in the Debug Console.
+
+**Limitations**: only interpreted code is debugged — modules transpiled by
+`protoscalac` and `--run-module` are not; no conditional, exception or
+function breakpoints; variables do not expand into fields (evaluate `p.x`);
+one thread is presented; standard input reads end of file under the debugger;
+the REPL cannot be debugged. The full guide is [docs/debugging.md](docs/debugging.md).
+
 ### Memory
 
 `protoscala` (and every `Session`: the REPL, `protoscalac`'s loader) runs
@@ -1382,6 +1420,7 @@ started a collection by itself: a program grew its heap with every allocation
 - [docs/ROADMAP.md](docs/ROADMAP.md) — phases with verifiable done-when criteria
 - [docs/tutorial/15-modules-and-polyglot-interop.md](docs/tutorial/15-modules-and-polyglot-interop.md) — modules and polyglot interop, chapter by chapter
 - [docs/tutorial/worked-example.md](docs/tutorial/worked-example.md) — the worked example, where the pieces are shown working together
+- [docs/debugging.md](docs/debugging.md) — debugging scripts in VS Code (`protoscala --dap`)
 - [docs/INTEROP.md](docs/INTEROP.md) — UMD polyglot interop: what routes where, and what is reachable today
 - [docs/PROTOSCALAC_SPECIFICATION.md](docs/PROTOSCALAC_SPECIFICATION.md) — `protoscalac`, the protoScala-to-C++ transpiler: command line, generated code, what it refuses and why
 - [docs/platform/](docs/platform/) — protoCore extensions specified by this project

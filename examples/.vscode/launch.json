@@ -1,0 +1,33 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "protoscala",
+      "request": "launch",
+      "name": "Debug current protoScala script",
+      "program": "${file}",
+      "stopOnEntry": false
+    },
+    {
+      "type": "protoscala",
+      "request": "launch",
+      "name": "Debug current protoScala script (stop on entry)",
+      "program": "${file}",
+      "stopOnEntry": true
+    },
+    {
+      "type": "protoscala",
+      "request": "launch",
+      "name": "Debug fib.scala 10",
+      "program": "${workspaceFolder}/fib.scala",
+      "args": ["10"]
+    },
+    {
+      "type": "protoscala",
+      "request": "launch",
+      "name": "Debug log-report",
+      "program": "${workspaceFolder}/log-report/Main.scala",
+      "cwd": "${workspaceFolder}/log-report"
+    }
+  ]
+}
