@@ -12,8 +12,12 @@ A minimal VS Code extension for protoScala scripts:
   indentation, folding by indentation.
 - **Debugging** of scripts run by the protoScala interpreter — breakpoints,
   stepping, the call stack, Locals and Globals, evaluation in a frame, the
-  script's output in the Debug Console. The debug adapter is the `protoscala`
-  executable itself, started as `protoscala --dap`.
+  script's output in the Debug Console, exception breakpoints (*All
+  Exceptions*, *Uncaught Exceptions*) and threads (`main`, `Thread-N`, the
+  actor workers: only the thread that stops is stopped, the others keep
+  running). The debug adapter is the `protoscala` executable itself, started
+  as `protoscala --dap`; the exception filters come from it, so the BREAKPOINTS
+  view lists them without any setting here.
 
 Plain JavaScript; there is no build step and no bundler.
 
@@ -32,14 +36,14 @@ The extension looks for it in this order:
 ```bash
 cd editor-integration/vscode
 npx @vscode/vsce@3.2.1 package --skip-license
-code --install-extension protoscala-0.1.0.vsix
+code --install-extension protoscala-0.2.0.vsix
 ```
 
 On Linux and macOS a symbolic link works too (edits are picked up after
 **Developer: Reload Window**):
 
 ```bash
-ln -s "$(pwd)/editor-integration/vscode" ~/.vscode/extensions/protoscala-0.1.0
+ln -s "$(pwd)/editor-integration/vscode" ~/.vscode/extensions/protoscala-0.2.0
 ```
 
 If the Scala (Metals) extension is installed it also claims the `scala`

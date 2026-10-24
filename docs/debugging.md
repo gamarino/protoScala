@@ -26,12 +26,12 @@ frames, and a breakpoint in its source never stops.
    ```bash
    cd editor-integration/vscode
    npx @vscode/vsce@3.2.1 package --skip-license
-   code --install-extension protoscala-0.1.0.vsix
+   code --install-extension protoscala-0.2.0.vsix
    ```
 
    Then reload VS Code (**Developer: Reload Window**). On Linux and macOS a
    symbolic link works too, and picks up edits after a reload:
-   `ln -s "$PWD/editor-integration/vscode" ~/.vscode/extensions/protoscala-0.1.0`.
+   `ln -s "$PWD/editor-integration/vscode" ~/.vscode/extensions/protoscala-0.2.0`.
 
 VS Code has no built-in Scala support, so the extension contributes the
 `scala` language (`.scala`, `.sc`, and files whose first line is a
@@ -95,14 +95,79 @@ the debugger detached.
   appears in the Debug Console as it is printed. Standard input is at end of
   file under the debugger (`StdIn.readLine()` answers `null`): the adapter's
   own standard input carries the protocol.
+- **Exception breakpoints** (the BREAKPOINTS view, or `setExceptionBreakpoints`):
+  - **All Exceptions** (filter `raised`, off by default): stop wherever an
+    exception is thrown, caught or not.
+  - **Uncaught Exceptions** (filter `userUnhandled`, on by default): stop
+    where an exception is thrown that no `try`/`catch` of the program will
+    catch.
+
+  The thread stops at the line that threw, before anything unwinds: the call
+  stack, Locals and Evaluate show the state at the `throw`. The stop says the
+  exception's class and message (`IllegalStateException: too big: 6`), and the
+  exception widget shows them with the stack (`exceptionInfo`). An error the
+  runtime raises (`10 / 0`, a `null` dereference, a failed cast) stops at the
+  line whose operation failed, marked "raised by the runtime on this line";
+  one raised inside the prelude (`None.get`, `List().head`) stops at the line
+  of the program that called it, marked "raised in `get`, called from this
+  line". One exception stops once: a `catch` that does not match and
+  re-raises, a `finally` that re-raises after its cleanup, or `throw e` of a
+  caught `e` does not stop again.
+- **Threads.** Every thread that runs interpreted code is listed: `main` (the
+  script), `Thread-1`, `Thread-2`... (`Thread.start` bodies, in start order)
+  and `actor worker 1`, `actor worker 2`... (the actor pool's workers; while a
+  worker runs an actor's handler or a `Future`'s body its name says which:
+  `actor worker 2 (actor#3 at chat.scala:12)`, `(future#4 at main.scala:7)` --
+  the number counts spawns, the place is where `Actor.spawn` or `Future`
+  was called). VS Code gets `thread` events as they start and end.
+
+  When a thread reaches a breakpoint, a step's end, an exception stop or a
+  pause, **only that thread stops**; the others keep running. Several threads
+  can be stopped at once, each with its own call stack, Locals and Evaluate.
+  Continue, Step Over/Into/Out and Pause act on the thread they name (the one
+  selected in the CALL STACK view); a step in one thread never stops another
+  one. Breakpoints apply to every thread. Pause on a thread that is waiting in
+  native code (`t.join()`, an `await` that blocks, I/O) takes effect when it
+  is back in interpreted code.
 
 ## Limitations
 
 - Transpiled modules are not debugged (see the top of this page). Neither is
   the REPL.
-- No conditional breakpoints, hit counts, logpoints, function breakpoints or
-  exception breakpoints. An uncaught exception ends the script and is reported
-  in the Debug Console, as on the command line.
+- No conditional breakpoints, hit counts, logpoints or function breakpoints.
+  After an uncaught-exception stop, Continue lets the exception end the script
+  (or the thread, or fail the actor's message) and be reported in the Debug
+  Console, as on the command line.
+- "Uncaught" is decided at the `throw`, from the handler tables of the
+  thread's interpreted frames and what each `catch` selects: `case e: T`
+  patterns are matched against the exception's class (with `Throwable` and
+  `Exception` selecting foreign values as a `catch` does); a guard, an
+  extractor (`case NonFatal(e)`), or a pattern on a type the compiler cannot
+  name counts as **caught**, because only running it would tell. The search
+  stops at native code that catches:
+  - **counts as caught** (no stop): `Try { ... }`, a `Future`'s body, and the
+    functions given to a future's `map`, `flatMap` and `recover` -- the
+    exception becomes a `Failure` the program may still look at;
+  - **counts as uncaught** (stop): the top of the script, of a `Thread.start`
+    body and of an actor's handler, and a future's `onComplete` callback: each
+    reports the exception and drops it;
+  - native code that only passes exceptions through (`List.map` calling a
+    lambda, a call into another runtime) is transparent. A native that might
+    catch and is not in the lists above makes the filter say "uncaught" where
+    it is caught.
+- Exception stops ignore what the runtime throws for its own control flow:
+  the cooperative suspension of an actor's `await` is not an exception and
+  never stops; an exception the prelude raises and catches itself before any
+  frame of the program sees it never stops either (none does today). An
+  exception thrown while the debugger evaluates (Watch, hover, `toString`)
+  never stops.
+- Recognising "the same exception" is by its value, per thread: a value that
+  is thrown, caught and later thrown **again on purpose** by the same thread,
+  while that thread still runs, stops only the first time. An `await` that
+  re-raises a future's failure on the waiting thread is a new raise there.
+- A failed `await` resumed in an actor (the value injected at the `await`
+  after a suspension) is not seen by the filters; its original throw, on the
+  thread that ran the future, is.
 - Variables are flat: an object shows its `toString` and does not expand into
   fields. Use Evaluate (`p.x`) to look inside.
 - Evaluate runs the expression as code: a `toString`, a call or a `println` in
@@ -113,9 +178,20 @@ the debugger detached.
 - `stopOnEntry` stops at the first line that **runs**. An `import` loads and
   runs its module while the script is compiled, so with imports that first line
   is in the first imported module.
-- One thread is presented. An actor's handler can stop at a breakpoint; while
-  one thread is stopped, another that reaches a breakpoint waits until the first
-  resumes, and steps follow the thread that was stopped.
+- A thread is listed once it has run interpreted code; one that has not yet
+  (a worker that has not taken an actor's message) is not. Only a stopped
+  thread has a call stack to show: a running one, or one blocked in native
+  code (`join`, a blocking `await`, I/O), is listed without frames until it
+  stops.
+- An actor worker is a thread, not an actor: stepping off the end of an
+  actor's handler continues on that worker, in whatever message it runs next
+  (possibly another actor's).
+- Evaluate runs on the stopped thread. An expression that waits for another
+  thread (`f.await` on a future whose actor is stopped, `t.join()` of a
+  stopped thread) blocks that request until the other thread is resumed.
+- Pausing every thread at once is not offered (VS Code's Pause acts on the
+  selected thread); a `pause` with no thread id stops the first thread that
+  reaches a new line.
 - Stop (or closing the session) ends the script: the adapter lets it run to its
   end for half a second, then ends the process.
 - Attached, the interpreter checks every instruction for a new line, which
@@ -130,15 +206,34 @@ the debugger detached.
   checked against the breakpoints (an array of flags per source file) and the
   stepping state (a mode, a thread and a frame depth).
 - The compiler records the source name of every frame slot
-  (`BytecodeModule::slotName`); the session registers each module it compiles
-  from a file under that file's path.
+  (`BytecodeModule::slotName`) and, for each `catch`, what its cases select
+  (`BytecodeModule::CatchFilter`: everything, a list of class markers, or
+  "unknown"); the session registers each module it compiles from a file under
+  that file's path.
+- Stepping state (mode and frame depth), pause requests and the last reported
+  exception are per thread. Each thread is registered with an id and a name
+  the first time it enters an interpreted frame while attached; its exit is
+  reported from the thread's own end.
+- Exceptions: `ExecutionEngine::runLoop` already catches every C++ exception
+  that leaves an instruction (a Scala `throw`, a native's `ScalaError`,
+  protoCore's errors from the error factory, the translated `std::` errors)
+  to attach the source line. Right after that catch clause, while the frame
+  and its callers are still intact, the first frame an exception passes
+  through calls `ExecutionEngine::debugRaised`, which decides from the
+  filters, the frames' handler tables and `debug::NativeBoundary` marks
+  (placed in `Try`, the future callbacks, the `Future` body runner) whether
+  to stop. `FutureYield` (an actor's `await` suspending) has its own clause
+  and is never reported. Detached, or with no exception filter, the cost is
+  one test of a local flag on the exception path only.
 - `src/dap/DapServer.cpp` is the adapter. The protocol loop runs on the main
   thread, which is not a protoCore thread. The script runs on the evaluator
-  thread, in a `Session` created after `configurationDone`. A stopped thread
-  waits in an unmanaged region (a collection never waits for it) and runs the
+  thread, in a `Session` created after `configurationDone`. Each stopped
+  thread waits in an unmanaged region (a collection never waits for it, so
+  the threads that keep running keep allocating and collecting) and runs the
   requests that need the language — rendering values, evaluating — itself, on
-  its own context, so a value is only ever read by the thread whose stopped
-  frames hold it.
+  its own context, from its own queue, so a value is only ever read by the
+  thread whose stopped frames hold it. Frame ids come from one counter for the
+  session, so they are unique across threads.
 - `src/dap/DapStdio.cpp` gives the protocol private copies of the standard
   descriptors, points the script's stdout and stderr at pipes forwarded as
   `output` events (never split inside a UTF-8 sequence), and its stdin at the
@@ -147,4 +242,11 @@ the debugger detached.
 
 The tests are `ctest -R cli/dap` (`tests/cli/dap_session_check.py`, a Python
 DAP client with a watchdog on every wait; on Windows it passes paths with a
-lower-case drive letter, as VS Code does).
+lower-case drive letter, as VS Code does): `cli/dap-session` and
+`cli/dap-output` for the basics, `cli/dap-exceptions` for the filters
+(a throw with its locals, a re-raise that does not stop twice, a runtime
+error, internal control flow, filters off, uncaught on the main thread, in a
+thread body and in an actor's handler but not in a Future's body), and
+`cli/dap-threads` for multi-thread stops (two threads at one breakpoint while
+a third prints, a step in one while the other stays stopped, pause of one
+busy thread, several collections while a thread is stopped).

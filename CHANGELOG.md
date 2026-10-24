@@ -18,6 +18,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   type and a Scala TextMate grammar and language configuration (`.scala`,
   `.sc`). Tests: `cli/dap-session`, `cli/dap-output`. The adapter uses
   nlohmann/json 3.11.3, fetched at configure time (header-only, not installed).
+- **Exception breakpoints and multi-thread debugging** in `protoscala --dap`
+  (`docs/debugging.md`). Filters *All Exceptions* (`raised`) and *Uncaught
+  Exceptions* (`userUnhandled`, on by default), `exceptionInfo`: the thread
+  stops at the throwing line before anything unwinds, once per exception (a
+  re-raising `catch` or `finally` does not stop again); "uncaught" searches
+  the thread's handler tables with a per-`catch` summary the compiler now
+  records (`BytecodeModule::CatchFilter`) and stops at native boundaries
+  (`Try`, a Future body and its callbacks count as caught; thread, actor and
+  script tops and `onComplete` callbacks as uncaught). Threads: every thread
+  that runs interpreted code is listed (`main`, `Thread-N`, `actor worker N`
+  with the actor or future it runs) with `thread` events; only the thread
+  that stops is stopped, several may be stopped at once, and continue, steps,
+  pause and inspection act on the thread named. Tests: `cli/dap-exceptions`,
+  `cli/dap-threads`. The VS Code extension is 0.2.0 (documentation only).
 
 ### Changed
 - **protoST runs in protoScala's ProtoSpace in the interop tests** (one

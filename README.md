@@ -1362,7 +1362,7 @@ and `.sc` files.
 ```bash
 cd editor-integration/vscode
 npx @vscode/vsce@3.2.1 package --skip-license
-code --install-extension protoscala-0.1.0.vsix
+code --install-extension protoscala-0.2.0.vsix
 ```
 
 The extension runs the `protoscala.path` setting if set, else the default
@@ -1378,13 +1378,22 @@ continue, step over, step into, step out and pause; the call stack; Locals (a
 frame's parameters, `val`s, `var`s, captures, `this`) and Globals (the
 script's top-level values); evaluation of any expression over the selected
 frame's locals and the script's globals in Watch, the Debug Console and hovers;
-the script's stdout and stderr in the Debug Console.
+the script's stdout and stderr in the Debug Console; **exception breakpoints**
+-- *All Exceptions* (stop at every `throw` and runtime error) and *Uncaught
+Exceptions* (on by default: stop at a `throw` no `try`/`catch` will catch),
+both before the stack unwinds, with the exception's class and message;
+**threads** -- `main`, `Thread-N` and the actor workers (named after the
+actor or future they are running) are listed, and only the thread that hits a
+breakpoint, a step or an exception stops while the others keep running; each
+stopped thread is inspected, stepped and resumed on its own.
 
 **Limitations**: only interpreted code is debugged — modules transpiled by
-`protoscalac` and `--run-module` are not; no conditional, exception or
-function breakpoints; variables do not expand into fields (evaluate `p.x`);
-one thread is presented; standard input reads end of file under the debugger;
-the REPL cannot be debugged. The full guide is [docs/debugging.md](docs/debugging.md).
+`protoscalac` and `--run-module` are not; no conditional or function
+breakpoints; variables do not expand into fields (evaluate `p.x`); "uncaught"
+treats a `catch` with a guard or an extractor, `Try`, and a `Future`'s body as
+catching; an actor worker is shown as a thread, not per actor; standard input
+reads end of file under the debugger; the REPL cannot be debugged. The full
+guide is [docs/debugging.md](docs/debugging.md).
 
 ### Memory
 
