@@ -3,6 +3,7 @@
 #include "frontend/Desugar.h"
 #include "frontend/Parser.h"
 #include "runtime/ActorScheduler.h"
+#include "runtime/Debugger.h"
 #include "runtime/Errors.h"
 #include "runtime/GeneratedModuleEntry.h"
 #include "runtime/Prelude.h"
@@ -184,6 +185,15 @@ EvalStatus Session::evaluate(const std::string& source, const std::string& sourc
     cu.module->linkSymbols(&ctx);
     const BytecodeModule& mod = *cu.module;
     modules_.push_back(std::move(cu.module));
+    debug::registerModule(mod, sourceName);
+    // The debugger compiles its expressions against the unit's own table while
+    // the unit runs: its globals are committed to globals_ only afterwards.
+    struct RunningTable {
+        const GlobalTable*& slot;
+        const GlobalTable* saved;
+        ~RunningTable() { slot = saved; }
+    } running{runningTable_, runningTable_};
+    runningTable_ = &trial;
     try {
         engine_.run(&ctx, mod);
         if (!cu.mainName.empty() && mainArgs)
@@ -565,6 +575,7 @@ const LoadedModule& Session::loadModuleFile(proto::ProtoContext* ctx, const std:
         cu.module->linkSymbols(ctx);
         const BytecodeModule& mod = *cu.module;
         modules_.push_back(std::move(cu.module));  // the session keeps it alive
+        debug::registerModule(mod, absPath);
         engine_.run(ctx, mod);
 
         LoadedModule m;
@@ -773,6 +784,107 @@ std::string Session::bindForeignMember(const ModuleExports& mod, const std::stri
     runtime_.layout().globals->setAttribute(
         &ctx, proto::ProtoString::createSymbol(&ctx, key.c_str()), v ? v : PROTO_NONE);
     return key;
+}
+
+// ---------------------------------------------------------------------------
+// Debugger support (protoscala --dap, docs/debugging.md)
+// ---------------------------------------------------------------------------
+
+std::string Session::debugShow(proto::ProtoContext* ctx, const proto::ProtoObject* v) {
+    try {
+        return showResult(ctx, v);
+    } catch (const proto::ProtoException& t) {
+        return "<toString threw " + showThrown(ctx, t.value()) + ">";
+    } catch (const ScalaError& e) {
+        return std::string("<toString threw ") + e.what() + ">";
+    }
+}
+
+bool Session::debugEvaluate(proto::ProtoContext* ctx, const std::string& expr,
+                            const std::vector<std::string>& names,
+                            const proto::ProtoObject* const* values, std::string* out) {
+    // The expression becomes the body of a function of the frame's locals, so
+    // it reads them as parameters, and is compiled as a REPL line against the
+    // running unit's table, so it sees the unit's globals.
+    std::string src = "(";
+    for (std::size_t k = 0; k < names.size(); ++k) src += (k ? ", " : "") + names[k];
+    src += ") => {\n" + expr + "\n}\n";
+    GlobalTable table = runningTable_ ? *runningTable_ : globals_;
+    CompiledUnit cu;
+    try {
+        auto unit = parseSource(src);
+        desugar(*unit);
+        Compiler compiler(table);
+        compiler.setModuleLoader(this);
+        cu = compiler.compileUnit(*unit, UnitMode::Repl, 1000000 + debugCounter_++);
+    } catch (const ParseError& e) {
+        *out = e.what();
+        return false;
+    } catch (const CompileError& e) {
+        *out = e.what();
+        return false;
+    } catch (const std::length_error& e) {
+        *out = e.what();
+        return false;
+    } catch (const ScalaError& e) {
+        *out = e.what();
+        return false;
+    } catch (const proto::ProtoException& t) {
+        *out = showThrown(ctx, t.value());
+        return false;
+    }
+    if (cu.resultKey.empty()) {
+        *out = "not an expression";
+        return false;
+    }
+    const unsigned n = static_cast<unsigned>(names.size());
+    proto::ProtoContext scope(ctx->space, ctx);
+    scope.resizeAutomaticLocals(n + 1);
+    for (unsigned k = 0; k < n; ++k) scope.setAutomaticLocal(k, values[k]);
+    cu.module->linkSymbols(&scope);
+    const BytecodeModule& mod = *cu.module;
+    modules_.push_back(std::move(cu.module));  // the function value points into it
+    try {
+        engine_.run(&scope, mod);
+        const auto* key = proto::ProtoString::createSymbol(&scope, cu.resultKey.c_str());
+        scope.setAutomaticLocal(n, runtime_.layout().globals->getOwnAttributeDirect(&scope, key));
+        const proto::ProtoObject* r =
+            engine_.callTopLevel(&scope, scope.getAutomaticLocal(n), scope.getAutomaticLocals(), n);
+        scope.returnValue = r;
+        *out = debugShow(&scope, r);
+        return true;
+    } catch (const proto::ProtoException& t) {
+        *out = showThrown(&scope, t.value());
+    } catch (const ScalaError& e) {
+        *out = e.what();
+    }
+    return false;
+}
+
+std::vector<Session::DebugGlobal> Session::debugGlobals(proto::ProtoContext* ctx) {
+    const GlobalTable& table = runningTable_ ? *runningTable_ : globals_;
+    const RuntimeLayout& L = runtime_.layout();
+    std::vector<std::string> names(table.declaredInUnit().begin(), table.declaredInUnit().end());
+    std::sort(names.begin(), names.end());
+    std::vector<DebugGlobal> out;
+    for (const std::string& name : names) {
+        if (name.find('$') != std::string::npos || name.rfind("__", 0) == 0) continue;
+        const GlobalBinding* b = table.binding(name);
+        if (!b) continue;
+        if (b->kind != BindingKind::Val && b->kind != BindingKind::Var &&
+            b->kind != BindingKind::LazyVal && b->kind != BindingKind::Object)
+            continue;
+        const auto* key = proto::ProtoString::createSymbol(ctx, b->key.c_str());
+        const proto::ProtoObject* v = L.globals->getOwnAttributeDirect(ctx, key);
+        if (!v) continue;  // not assigned yet
+        // A lazy holder is shown only once forced: forcing it would run code.
+        if (v != PROTO_NONE && v->getPrototype(ctx) == L.lazyProto) {
+            if (v->hasOwnAttribute(ctx, L.valueKey) != PROTO_TRUE) continue;
+            v = v->getOwnAttributeDirect(ctx, L.valueKey);
+        }
+        out.push_back({name, v});
+    }
+    return out;
 }
 
 } // namespace protoScala

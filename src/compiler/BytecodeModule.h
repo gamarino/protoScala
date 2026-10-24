@@ -225,6 +225,21 @@ public:
     proto::ProtoMethod nativeEntry() const { return nativeEntry_; }
     void setNativeEntry(proto::ProtoMethod fn) { nativeEntry_ = fn; }
 
+    // --- Debug information (docs/debugging.md) ------------------------------
+    // The source name of each frame slot that holds a named binding (a
+    // parameter, a local, a capture), and whether that slot holds a Cell. Filled
+    // by the compiler; the precompiled prelude image carries none. A slot with an
+    // empty name is a compiler temporary.
+    void setSlotName(int slot, const std::string& name, bool boxed);
+    const std::string& slotName(int slot) const;
+    bool slotBoxed(int slot) const {
+        return slot >= 0 && static_cast<std::size_t>(slot) < slotBoxed_.size() && slotBoxed_[slot];
+    }
+    // The source file a debugger registered this module under (debug::Source),
+    // or nullptr. Set only while a debugger is attached.
+    const void* debugSource() const { return debugSource_; }
+    void setDebugSource(const void* s) const { debugSource_ = s; }
+
     void addCapture(int parentSlot, int localSlot) { captures_.push_back({parentSlot, localSlot}); }
     const std::vector<CaptureSpec>& captureSpecs() const { return captures_; }
     int captureCount() const { return static_cast<int>(captures_.size()); }
@@ -270,6 +285,9 @@ private:
     std::vector<std::size_t> defaultBlocks_;
     bool hasDefaults_ = false;
     int minArity_ = 0;
+    std::vector<std::string> slotNames_;
+    std::vector<bool> slotBoxed_;
+    mutable const void* debugSource_ = nullptr;
 };
 
 } // namespace protoScala

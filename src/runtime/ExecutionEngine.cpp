@@ -3,6 +3,7 @@
 #include "runtime/OpcodeOps.h"
 #include "compiler/GlobalTable.h"
 #include "compiler/BytecodeModule.h"
+#include "runtime/Debugger.h"
 #include "runtime/Errors.h"
 #include "runtime/FutureYield.h"
 #include "runtime/StackGuard.h"
@@ -1109,8 +1110,19 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
     // Set by every clause below, translating ones included, and re-thrown
     // after the catch has completed (runFrame).
     std::exception_ptr passOn;
+    // The debugger's view of this frame (Debugger.h): kept only while one is
+    // attached, so a detached run pays one branch here and none per instruction.
+    debug::FrameRecord dbgFrame;
+    const bool dbgOn = debug::attached();
+    if (dbgOn) debug::enterFrame(dbgFrame, mod, &frame, slots);
+    struct DbgLeave {
+        debug::FrameRecord* r;
+        ~DbgLeave() { if (r) debug::leaveFrame(*r); }
+    } dbgLeave{dbgOn ? &dbgFrame : nullptr};
     try {
         for (;;) {
+            if (dbgOn)
+                debug::atInstruction(dbgFrame, static_cast<std::size_t>(ip - code));
             Instr word = *ip++;
             Op op = static_cast<Op>(word & 0xFF);
             std::uint64_t operand = word >> kOperandShift;

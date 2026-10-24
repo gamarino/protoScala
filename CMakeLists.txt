@@ -492,6 +492,7 @@ add_library(protoscala_runtime OBJECT
     src/runtime/Values.cpp
     src/runtime/Format.cpp
     src/runtime/ExecutionEngine.cpp
+    src/runtime/Debugger.cpp
     src/runtime/Primitives.cpp
     src/runtime/ProductPrimitives.cpp
     src/runtime/CollectionPrimitives.cpp
@@ -565,6 +566,28 @@ endif()
 target_compile_options(protoscala_repl PRIVATE ${PROTOSCALA_WARNINGS})
 set_property(TARGET protoscala_repl PROPERTY POSITION_INDEPENDENT_CODE ON)
 
+# --- The debug adapter (`protoscala --dap`, docs/debugging.md) ------------------
+# nlohmann/json frames the Debug Adapter Protocol's messages. Header-only and used
+# by these sources alone: its own CMake project is not configured (SOURCE_SUBDIR
+# names a directory that does not exist), so nothing of it is built or installed.
+include(FetchContent)
+FetchContent_Declare(
+    nlohmann_json
+    URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+    URL_HASH SHA256=d6c65aca6b1ed68e7a182f4757257b107ae403032760ed6ef121c9d55e81757d
+    SOURCE_SUBDIR no-cmake-project
+)
+FetchContent_MakeAvailable(nlohmann_json)
+add_library(protoscala_dap OBJECT
+    src/dap/DapServer.cpp
+    src/dap/DapStdio.cpp
+    src/dap/DapTransport.cpp
+)
+target_include_directories(protoscala_dap PRIVATE "${nlohmann_json_SOURCE_DIR}/single_include")
+target_link_libraries(protoscala_dap PUBLIC protoscala_repl)
+target_compile_options(protoscala_dap PRIVATE ${PROTOSCALA_WARNINGS})
+set_property(TARGET protoscala_dap PROPERTY POSITION_INDEPENDENT_CODE ON)
+
 # --- libprotoScala.so: the runtime a generated module links against -------------
 # Phase 7 D3. The five libraries above are OBJECT libraries and are combined into
 # ONE shared library, so the internal structure is unchanged and only the final
@@ -579,7 +602,7 @@ add_library(protoScala SHARED
     src/runtime/AbiVersion.cpp
 )
 target_link_libraries(protoScala
-    PRIVATE protoscala_repl protoscala_runtime protoscala_compiler
+    PRIVATE protoscala_dap protoscala_repl protoscala_runtime protoscala_compiler
             protoscala_frontend protoscala_support
     PUBLIC  ${PROTOCORE_LIBRARY} ${PROTOSCALA_THREAD_LIB} ${CMAKE_DL_LIBS})
 target_include_directories(protoScala

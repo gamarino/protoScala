@@ -39,7 +39,7 @@ void Compiler::compileMatch(const Match& m) {
         toEnd.push_back(emitJump(Op::JUMP, c.pos, 0));
         adjust(-1);  // the next case starts without this case's value
         for (std::size_t f : fail) fn_->mod->patchJumpTo(f, fn_->mod->pos());
-        fn_->scopes.pop_back();
+        popScope();
     }
     emit(Op::PUSH_LOCAL, static_cast<std::uint64_t>(scrutinee), m.pos, +1);
     emit(Op::MATCH_ERROR, 0, m.pos, 0);  // throws; the pushed value stands for the result at the join
@@ -83,7 +83,7 @@ void Compiler::compileCatchCases(const std::vector<CaseDef>& cases, int slot, So
         exits.push_back(emitJump(Op::JUMP, c.pos, 0));
         adjust(-1);  // the next case starts without this case's value
         for (std::size_t f : fail) fn_->mod->patchJumpTo(f, fn_->mod->pos());
-        fn_->scopes.pop_back();
+        popScope();
     }
     // Nothing matched: re-raise, which a Finally entry of the same try still
     // covers, so the cleanup runs (plan A0-4).

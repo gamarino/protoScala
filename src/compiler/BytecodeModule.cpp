@@ -258,6 +258,26 @@ void BytecodeModule::setParamNames(std::vector<std::string> names) {
     minArity_ = arity_;
 }
 
+void BytecodeModule::setSlotName(int slot, const std::string& name, bool boxed) {
+    if (slot < 0) return;
+    const auto i = static_cast<std::size_t>(slot);
+    if (slotNames_.size() <= i) {
+        slotNames_.resize(i + 1);
+        slotBoxed_.resize(i + 1, false);
+    }
+    // The first name a slot is given is its declaration's: slots are never
+    // reused within one function body.
+    if (!slotNames_[i].empty()) return;
+    slotNames_[i] = name;
+    slotBoxed_[i] = boxed;
+}
+
+const std::string& BytecodeModule::slotName(int slot) const {
+    static const std::string none;
+    if (slot < 0 || static_cast<std::size_t>(slot) >= slotNames_.size()) return none;
+    return slotNames_[static_cast<std::size_t>(slot)];
+}
+
 void BytecodeModule::setDefaultBlock(std::size_t param, std::size_t blockIndex) {
     if (defaultBlocks_.size() <= param) defaultBlocks_.resize(param + 1, kNoDefault);
     defaultBlocks_[param] = blockIndex;

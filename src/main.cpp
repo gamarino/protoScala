@@ -6,6 +6,7 @@
  * registers it as the space's main thread (as tests/unit/EvalHarness.h does).
  */
 #include "protoScala/Version.h"
+#include "dap/DapServer.h"
 #include "repl/Repl.h"
 #include "runtime/Prelude.h"
 #include "runtime/Errors.h"
@@ -105,6 +106,8 @@ void printHelp() {
         "  --version            Print version and exit.\n"
         "  --help, -h           Print this help and exit.\n"
         "  --disassemble FILE   Print the compiled bytecode of FILE and exit.\n"
+        "  --dap                Serve the Debug Adapter Protocol on stdin/stdout\n"
+        "                       (VS Code; see docs/debugging.md).\n"
         "  --run-module FILE.so [args...]\n"
         "                       Load a compiled module and run it: proto_module_init,\n"
         "                       then proto_module_main when it exports one.\n"
@@ -149,6 +152,7 @@ int main(int argc, char** argv) {
             const std::string a = argv[1];
             if (a == "--version") { printVersion(); return 0; }
             if (a == "--help" || a == "-h") { printHelp(); return 0; }
+            if (a == "--dap") return protoScala::runDapServer();
             ScriptJob job;
             if (a == "--disassemble") {
                 if (argc != 3) {

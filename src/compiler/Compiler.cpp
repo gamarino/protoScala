@@ -1125,7 +1125,7 @@ void Compiler::compileStats(const std::vector<NodePtr>& stats, std::size_t from,
         else emit(Op::POP, 0, s.pos, -1);
     }
     if (!valueOnStack) emit(Op::PUSH_UNIT, 0, pos, +1);
-    fn_->scopes.pop_back();
+    popScope();
 }
 
 // ---------------------------------------------------------------------------

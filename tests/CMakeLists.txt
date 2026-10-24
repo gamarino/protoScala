@@ -109,6 +109,22 @@ if(Python3_FOUND)
         cli/adaptive-heap-bounded-memory PROPERTIES TIMEOUT 300)
     unset(_ah_check)
     unset(_ah_prog)
+
+    # --- The debug adapter (`protoscala --dap`, docs/debugging.md) -------------
+    # A Python DAP client drives a session as VS Code does (paths with a
+    # lower-case drive letter on Windows). Every wait has a watchdog: a broken
+    # adapter fails these instead of hanging them.
+    set(_dap_check "${CMAKE_CURRENT_SOURCE_DIR}/cli/dap_session_check.py")
+    add_test(NAME cli/dap-session
+        COMMAND ${Python3_EXECUTABLE} "${_dap_check}" "$<TARGET_FILE:protoscala>"
+            session entry resolve module)
+    # The script's stdout/stderr as `output` events, stdin at end of file, and a
+    # running loop paused and then ended by `disconnect`.
+    add_test(NAME cli/dap-output
+        COMMAND ${Python3_EXECUTABLE} "${_dap_check}" "$<TARGET_FILE:protoscala>"
+            output pause)
+    set_tests_properties(cli/dap-session cli/dap-output PROPERTIES TIMEOUT 300)
+    unset(_dap_check)
 endif()
 
 add_test(NAME cli/examples

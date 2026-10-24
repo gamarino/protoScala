@@ -116,7 +116,29 @@ private:
             std::vector<std::pair<std::size_t, std::size_t>> holes;
         };
         std::vector<ActiveFinally> finallys;
+
+        FunctionState() = default;
+        FunctionState(const FunctionState&) = delete;
+        FunctionState& operator=(const FunctionState&) = delete;
+        // The names still in scope when the body is done go into the module's
+        // slot table, for the debugger's Locals (popScope records the others).
+        ~FunctionState() {
+            if (mod)
+                for (const auto& scope : scopes) recordSlotNames(*mod, scope);
+        }
+        static void recordSlotNames(BytecodeModule& m,
+                                    const std::unordered_map<std::string, LocalInfo>& scope) {
+            // `this` first: a `self =>` alias shares its slot.
+            auto self = scope.find("this");
+            if (self != scope.end()) m.setSlotName(self->second.slot, "this", false);
+            for (const auto& [name, info] : scope) m.setSlotName(info.slot, name, info.boxed);
+        }
     };
+    // Leaves the innermost scope of the current function, recording its names.
+    void popScope() {
+        FunctionState::recordSlotNames(*fn_->mod, fn_->scopes.back());
+        fn_->scopes.pop_back();
+    }
     // Method: `this` in slot 0 and no enclosing function (Design note 9).
     enum class FnShape { Lambda, Def, Method };
     enum class RefKind { Local, Member, Global };

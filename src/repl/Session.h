@@ -99,6 +99,26 @@ public:
     const LoadedModule& loadModuleFile(proto::ProtoContext* ctx, const std::string& absPath,
                                        const std::string& logicalPath) override;
 
+    // --- Debugger support (protoscala --dap, docs/debugging.md) ------------
+    // Each runs on the session's thread while the debugger holds it stopped.
+    // A value as the debugger shows it: the REPL's rendering (Strings quoted),
+    // and the error that rendering raised instead of the error itself.
+    std::string debugShow(proto::ProtoContext* ctx, const proto::ProtoObject* v);
+    // Evaluates `expr` with `names[i]` bound to `values[i]` (a stopped frame's
+    // locals) and the running unit's globals in scope. Answers false and the
+    // diagnostic in *out when it cannot be compiled or it throws.
+    bool debugEvaluate(proto::ProtoContext* ctx, const std::string& expr,
+                       const std::vector<std::string>& names,
+                       const proto::ProtoObject* const* values, std::string* out);
+    // The top-level vals, vars and objects of the unit being run, with their
+    // current values (a lazy one not forced yet is left out).
+    struct DebugGlobal {
+        std::string name;
+        const proto::ProtoObject* value;
+    };
+    std::vector<DebugGlobal> debugGlobals(proto::ProtoContext* ctx);
+    const RuntimeLayout& layout() const { return runtime_.layout(); }
+
     // The provider plug-ins this session loaded, in load order (--version).
     const std::vector<std::string>& providerPlugins() const { return pluginPaths_; }
     // The space this session owns, for the UMD tests: the provider resolves its
@@ -124,6 +144,11 @@ private:
     GlobalTable globals_;
     std::vector<std::unique_ptr<BytecodeModule>> modules_;
     int resultCounter_ = 0;
+    // The table of the unit evaluate() is running, whose globals are not yet
+    // committed to globals_; nullptr outside a run. The debugger compiles
+    // against it.
+    const GlobalTable* runningTable_ = nullptr;
+    int debugCounter_ = 0;
 
     // --- Phase 6: modules -------------------------------------------------
     // The table a module is compiled against: the session's, right after the
