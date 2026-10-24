@@ -26,12 +26,12 @@ frames, and a breakpoint in its source never stops.
    ```bash
    cd editor-integration/vscode
    npx @vscode/vsce@3.2.1 package --skip-license
-   code --install-extension protoscala-0.2.0.vsix
+   code --install-extension protoscala-0.3.0.vsix
    ```
 
    Then reload VS Code (**Developer: Reload Window**). On Linux and macOS a
    symbolic link works too, and picks up edits after a reload:
-   `ln -s "$PWD/editor-integration/vscode" ~/.vscode/extensions/protoscala-0.2.0`.
+   `ln -s "$PWD/editor-integration/vscode" ~/.vscode/extensions/protoscala-0.3.0`.
 
 VS Code has no built-in Scala support, so the extension contributes the
 `scala` language (`.scala`, `.sc`, and files whose first line is a
@@ -113,6 +113,40 @@ the debugger detached.
   line". One exception stops once: a `catch` that does not match and
   re-raises, a `finally` that re-raises after its cleanup, or `throw e` of a
   caught `e` does not stop again.
+- **Conditional breakpoints, hit counts and logpoints** (right-click a
+  breakpoint → Edit Condition / Hit Count / Log Message):
+  - **Condition**: a Scala expression evaluated in the frame at the
+    breakpoint's line, over its locals and the script's globals, as Evaluate
+    does (`i == 3`, `xs.length > 2 && name.startsWith("a")`). The thread stops
+    when it is `true`. A condition that does not compile, throws, or is not a
+    Boolean **stops** the thread anyway, and the stop (and the Debug Console)
+    says `breakpoint condition `...` failed: <error>`: a broken condition is
+    never skipped silently.
+  - **Hit count**: `N` or `== N` (stop on the Nth hit only), `>= N`, `> N`,
+    `< N`, `<= N`, or `% N` (every Nth hit). Hits are counted per breakpoint,
+    and only the hits whose condition held count. Anything else is answered
+    as an unverified breakpoint with a message. Setting a file's breakpoints
+    again (VS Code does it on every edit) starts the counts again.
+  - **Log message**: printed to the Debug Console instead of stopping, with
+    each `{expr}` replaced by the expression's value as a String (its
+    `toString`, `null` for null) evaluated in the frame; `{{` and `}}` are
+    literal braces. An expression that fails prints `<error: message>`. A
+    logpoint with a condition or a hit count logs only when they pass.
+  - On several threads, each evaluates the condition in its own frame (a
+    condition on `tag` stops only the thread whose `tag` matches).
+- **Conditions on exception filters** (the pencil next to *All Exceptions*
+  / *Uncaught Exceptions*): a Scala expression with the exception bound as
+  **`e`**, e.g. `e.isInstanceOf[IllegalStateException]` or
+  `e.getMessage.contains("timeout")`. It is evaluated in the throwing frame
+  (its locals and the globals are in scope too; `e` hides a local named `e`).
+  The filter stops only when it is `true`; one that fails stops with the
+  failure in the stop's description, as above. A native error the runtime
+  raises (`10 / 0`) is bound as the Scala exception it becomes
+  (`ArithmeticException`).
+- While a condition, a log message, Watch, hover or the Debug Console
+  evaluates, that thread never stops: a breakpoint in a function the
+  condition calls, or an exception the condition throws, does not re-enter
+  the debugger.
 - **Threads.** Every thread that runs interpreted code is listed: `main` (the
   script), `Thread-1`, `Thread-2`... (`Thread.start` bodies, in start order)
   and `actor worker 1`, `actor worker 2`... (the actor pool's workers; while a
@@ -134,8 +168,14 @@ the debugger detached.
 
 - Transpiled modules are not debugged (see the top of this page). Neither is
   the REPL.
-- No conditional breakpoints, hit counts, logpoints or function breakpoints.
-  After an uncaught-exception stop, Continue lets the exception end the script
+- No function or data breakpoints.
+- A condition, a hit condition's count or a log message is evaluated by
+  compiling it as a function of the frame's locals; the compiled function is
+  cached per expression and set of local names, so a condition in a loop is
+  compiled once, but every evaluation is a call (a conditional breakpoint in a
+  hot loop slows it down far more than a plain one). A syntax error is
+  reported when the breakpoint is set and again where it stops.
+- After an uncaught-exception stop, Continue lets the exception end the script
   (or the thread, or fail the actor's message) and be reported in the Debug
   Console, as on the command line.
 - "Uncaught" is decided at the `throw`, from the handler tables of the

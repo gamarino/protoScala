@@ -15,8 +15,10 @@ A minimal VS Code extension for protoScala scripts:
   script's output in the Debug Console, exception breakpoints (*All
   Exceptions*, *Uncaught Exceptions*) and threads (`main`, `Thread-N`, the
   actor workers: only the thread that stops is stopped, the others keep
-  running). The debug adapter is the `protoscala` executable itself, started
-  as `protoscala --dap`; the exception filters come from it, so the BREAKPOINTS
+  running), conditional / hit-count breakpoints and logpoints, and
+  conditions on the exception filters (the exception is `e`). The debug
+  adapter is the `protoscala` executable itself, started as
+  `protoscala --dap`; the exception filters come from it, so the BREAKPOINTS
   view lists them without any setting here.
 
 Plain JavaScript; there is no build step and no bundler.
@@ -36,14 +38,14 @@ The extension looks for it in this order:
 ```bash
 cd editor-integration/vscode
 npx @vscode/vsce@3.2.1 package --skip-license
-code --install-extension protoscala-0.2.0.vsix
+code --install-extension protoscala-0.3.0.vsix
 ```
 
 On Linux and macOS a symbolic link works too (edits are picked up after
 **Developer: Reload Window**):
 
 ```bash
-ln -s "$(pwd)/editor-integration/vscode" ~/.vscode/extensions/protoscala-0.2.0
+ln -s "$(pwd)/editor-integration/vscode" ~/.vscode/extensions/protoscala-0.3.0
 ```
 
 If the Scala (Metals) extension is installed it also claims the `scala`

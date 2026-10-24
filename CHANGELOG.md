@@ -31,7 +31,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   with the actor or future it runs) with `thread` events; only the thread
   that stops is stopped, several may be stopped at once, and continue, steps,
   pause and inspection act on the thread named. Tests: `cli/dap-exceptions`,
-  `cli/dap-threads`. The VS Code extension is 0.2.0 (documentation only).
+  `cli/dap-threads`. The VS Code extension is 0.2.0 (documentation only; 0.3.0 with the next entry).
+- **Conditional breakpoints, hit counts, logpoints and exception filter
+  conditions** in `protoscala --dap` (`docs/debugging.md`): `condition`
+  (evaluated in the frame), `hitCondition` (`N`, `== N`, `>= N`, `> N`, `< N`,
+  `<= N`, `% N`; counted per breakpoint over the hits whose condition held;
+  an invalid one is unverified), `logMessage` (`{expr}` interpolation, `{{`
+  `}}` literal), and `filterOptions` conditions with the exception bound as
+  `e`. A condition that fails stops and reports the failure (stop description
+  and stderr; a syntax error also when it is set). Evaluation runs on the
+  hitting thread with stops suppressed. The debugger's compiled expressions are
+  cached per expression and frame names (`Session::debugEvaluate`), and their
+  compilation is serialised for concurrent threads. Test: `cli/dap-conditions`.
+
+### Fixed
+- `protoscala --dap`: what a stopped thread evaluates is now a child of its
+  innermost live context (an exception stop raised inside the prelude used the
+  context of the frame it showed, which could leave the frames below it out of
+  the root scan while other threads collected).
 
 ### Changed
 - **protoST runs in protoScala's ProtoSpace in the interop tests** (one

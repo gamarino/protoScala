@@ -1362,7 +1362,7 @@ and `.sc` files.
 ```bash
 cd editor-integration/vscode
 npx @vscode/vsce@3.2.1 package --skip-license
-code --install-extension protoscala-0.2.0.vsix
+code --install-extension protoscala-0.3.0.vsix
 ```
 
 The extension runs the `protoscala.path` setting if set, else the default
@@ -1385,11 +1385,14 @@ both before the stack unwinds, with the exception's class and message;
 **threads** -- `main`, `Thread-N` and the actor workers (named after the
 actor or future they are running) are listed, and only the thread that hits a
 breakpoint, a step or an exception stops while the others keep running; each
-stopped thread is inspected, stepped and resumed on its own.
+stopped thread is inspected, stepped and resumed on its own;
+**conditional breakpoints, hit counts** (`3`, `>= 2`, `% 2`, ...) **and
+logpoints** (`i={i}`), and conditions on the exception filters with the
+exception bound as `e` (`e.isInstanceOf[IllegalStateException]`); a condition
+that fails stops and says why.
 
 **Limitations**: only interpreted code is debugged — modules transpiled by
-`protoscalac` and `--run-module` are not; no conditional or function
-breakpoints; variables do not expand into fields (evaluate `p.x`); "uncaught"
+`protoscalac` and `--run-module` are not; no function breakpoints; variables do not expand into fields (evaluate `p.x`); "uncaught"
 treats a `catch` with a guard or an extractor, `Try`, and a `Future`'s body as
 catching; an actor worker is shown as a thread, not per actor; standard input
 reads end of file under the debugger; the REPL cannot be debugged. The full

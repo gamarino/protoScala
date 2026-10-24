@@ -2,7 +2,7 @@
   "name": "protoscala",
   "displayName": "protoScala",
   "description": "Scala syntax highlighting and debugging of protoScala scripts through the protoscala --dap Debug Adapter Protocol adapter.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "protoscala-placeholder",
   "engines": {
     "vscode": "^1.66.0"
