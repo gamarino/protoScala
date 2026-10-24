@@ -19,6 +19,12 @@ std::atomic<Controller*> gController{nullptr};
 
 // A stop the first thread to reach a new line takes ("entry"), or nullptr.
 std::atomic<const char*> gStopRequest{nullptr};
+std::atomic<bool> gJustMyCode{false};
+
+// A step may stop in `s`.
+bool stepsInto(const Source* s) {
+    return s && !(s->library && gJustMyCode.load(std::memory_order_relaxed));
+}
 
 // One OS thread that ran interpreted code while attached.
 struct ThreadInfo {
@@ -156,6 +162,9 @@ bool hitPasses(const LineBreakpoint& bp, long long n) {
 struct Registry {
     std::mutex mu;
     std::map<std::string, std::unique_ptr<Source>> sources;      // by key
+    std::vector<const Source*> order;                            // registration order
+    std::map<int, const Source*> byRef;
+    int nextRef = 1;
     std::map<std::string, std::vector<Requested>> requested;     // by key
     int nextId = 1;
 };
@@ -332,7 +341,7 @@ void leaveFrame(FrameRecord& r) {
     const StepMode mode = tSlot.stepMode;
     if ((mode == StepMode::Over || mode == StepMode::Out) && r.depth <= tSlot.stepDepth) {
         for (FrameRecord* p = r.parent; p; p = p->parent)
-            if (p->src) {
+            if (stepsInto(p->src)) {
                 p->line = -1;
                 break;
             }
@@ -346,10 +355,13 @@ void newLine(FrameRecord& r) {
     const char* reason = nullptr;
     ThreadInfo* self = tSlot.info.get();
     if (self && self->pause.load(std::memory_order_relaxed)) reason = self->pause.exchange(nullptr);
-    if (!reason && gStopRequest.load(std::memory_order_relaxed)) reason = gStopRequest.exchange(nullptr);
+    // "entry" (and a pause for no thread in particular) is the program's first
+    // line, never the prelude's initialisation.
+    if (!reason && !r.src->library && gStopRequest.load(std::memory_order_relaxed))
+        reason = gStopRequest.exchange(nullptr);
     if (!reason) {
         const StepMode mode = tSlot.stepMode;
-        if (mode != StepMode::None) {
+        if (mode != StepMode::None && stepsInto(r.src)) {
             const unsigned depth = tSlot.stepDepth;
             if (mode == StepMode::In || (mode == StepMode::Over && r.depth <= depth) ||
                 (mode == StepMode::Out && r.depth < depth))
@@ -532,7 +544,7 @@ void Activity::set(const std::string& text) {
 
 std::string currentLocation() {
     for (const FrameRecord* r = tTop; r; r = r->parent) {
-        if (!r->src) continue;
+        if (!r->src || r->src->library) continue;
         const std::string& path = r->src->path;
         const auto slash = path.find_last_of("/\\");
         return (slash == std::string::npos ? path : path.substr(slash + 1)) + ":" +
@@ -555,23 +567,30 @@ std::vector<ThreadView> threads() {
 
 // --- Sources and breakpoints -----------------------------------------------------
 
-void registerModule(const BytecodeModule& mod, const std::string& path) {
-    if (!attached() || path.empty() || path.front() == '<') return;
+namespace {
+
+void registerSource(const BytecodeModule& mod, const std::string& key, const std::string& path,
+                    const std::string& name, const char* content, const std::string& origin) {
     std::vector<std::uint8_t> lines;
     markLines(mod, lines);
     std::vector<Controller::Breakpoint> resolved;
+    const Source* fresh = nullptr;
     {
         Registry& reg = registry();
         std::lock_guard<std::mutex> lk(reg.mu);
-        const std::string key = normalisePath(path);
         auto& slot = reg.sources[key];
         if (!slot) {
             slot = std::make_unique<Source>();
-            // Absolute, with the platform's separators: what a client opens.
-            std::error_code ec;
-            const std::filesystem::path abs = std::filesystem::absolute(std::filesystem::path(path), ec);
-            slot->path = ec ? path : abs.lexically_normal().make_preferred().string();
+            slot->path = path;
             slot->key = key;
+            slot->name = name;
+            slot->content = content;
+            slot->origin = origin;
+            slot->library = content != nullptr;
+            slot->ref = reg.nextRef++;
+            reg.byRef[slot->ref] = slot.get();
+            reg.order.push_back(slot.get());
+            fresh = slot.get();
         }
         Source& s = *slot;
         // A file compiled twice (a module re-imported): the union of its lines.
@@ -591,14 +610,53 @@ void registerModule(const BytecodeModule& mod, const std::string& path) {
         if (req != reg.requested.end()) resolved = arm(s, req->second);
     }
     Controller* c = gController.load(std::memory_order_acquire);
+    if (c && fresh) c->sourceLoaded(*fresh);
     if (c && !resolved.empty()) c->breakpointsResolved(resolved);
 }
 
-std::vector<Controller::Breakpoint> setBreakpoints(const std::string& path,
-                                                   const std::vector<BreakpointSpec>& specs) {
+}  // namespace
+
+void registerModule(const BytecodeModule& mod, const std::string& path) {
+    if (!attached() || path.empty() || path.front() == '<') return;
+    // Absolute, with the platform's separators: what a client opens.
+    std::error_code ec;
+    const std::filesystem::path abs = std::filesystem::absolute(std::filesystem::path(path), ec);
+    const std::string full = ec ? path : abs.lexically_normal().make_preferred().string();
+    const auto slash = full.find_last_of("/\\");
+    registerSource(mod, normalisePath(path), full,
+                   slash == std::string::npos ? full : full.substr(slash + 1), nullptr, std::string());
+}
+
+void registerEmbeddedModule(const BytecodeModule& mod, const std::string& name,
+                            const char* content, const std::string& origin) {
+    if (!attached()) return;
+    registerSource(mod, "embedded:" + name, std::string(), name, content, origin);
+}
+
+std::vector<const Source*> loadedSources() {
     Registry& reg = registry();
     std::lock_guard<std::mutex> lk(reg.mu);
-    const std::string key = normalisePath(path);
+    return reg.order;
+}
+
+const Source* sourceByRef(int ref) {
+    Registry& reg = registry();
+    std::lock_guard<std::mutex> lk(reg.mu);
+    auto it = reg.byRef.find(ref);
+    return it == reg.byRef.end() ? nullptr : it->second;
+}
+
+void setJustMyCode(bool on) { gJustMyCode.store(on, std::memory_order_release); }
+
+std::vector<Controller::Breakpoint> setBreakpoints(const std::string& path,
+                                                   const std::vector<BreakpointSpec>& specs) {
+    return setBreakpointsForKey(normalisePath(path), specs);
+}
+
+std::vector<Controller::Breakpoint> setBreakpointsForKey(const std::string& key,
+                                                         const std::vector<BreakpointSpec>& specs) {
+    Registry& reg = registry();
+    std::lock_guard<std::mutex> lk(reg.mu);
     std::vector<Requested>& req = reg.requested[key];
     req.clear();
     for (const BreakpointSpec& sp : specs) {

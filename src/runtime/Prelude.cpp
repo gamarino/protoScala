@@ -2,6 +2,7 @@
 #include "compiler/Compiler.h"
 #include "frontend/Desugar.h"
 #include "frontend/Parser.h"
+#include "runtime/Debugger.h"
 #include "runtime/Errors.h"
 #include "runtime/ExecutionEngine.h"
 #include "support/PreludeImage.h"
@@ -32,6 +33,14 @@ void reportTiming() {
                      "run=%.0fus total=%.0fus image=%d\n",
                      g_timing.parseUs, g_timing.desugarUs, g_timing.compileUs, g_timing.linkUs,
                      g_timing.runUs, g_timing.totalUs, g_timing.fromImage ? 1 : 0);
+}
+
+// The prelude's frames show its source and take breakpoints under a debugger:
+// the image carries the line table, and the text ships in the binary.
+void registerPreludeForDebugger(const protoScala::BytecodeModule& mod) {
+    protoScala::debug::registerEmbeddedModule(
+        mod, "prelude.scala", protoScala::preludeSource(),
+        "protoScala prelude (embedded in the executable)");
 }
 
 }  // namespace
@@ -82,6 +91,7 @@ void loadPrelude(proto::ProtoContext* parent, ExecutionEngine& engine, GlobalTab
             const_cast<BytecodeModule&>(mod).linkSymbols(parent);
             g_timing.linkUs = usSince(t0);
 
+            registerPreludeForDebugger(mod);
             t0 = Clock::now();
             engine.run(parent, mod);
             g_timing.runUs = usSince(t0);
@@ -119,6 +129,7 @@ void loadPrelude(proto::ProtoContext* parent, ExecutionEngine& engine, GlobalTab
 
         const BytecodeModule& mod = *cu.module;
         modules.push_back(std::move(cu.module));
+        registerPreludeForDebugger(mod);
 
         t0 = Clock::now();
         engine.run(parent, mod);

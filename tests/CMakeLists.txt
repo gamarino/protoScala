@@ -137,8 +137,13 @@ if(Python3_FOUND)
     add_test(NAME cli/dap-conditions
         COMMAND ${Python3_EXECUTABLE} "${_dap_check}" "$<TARGET_FILE:protoscala>"
             exccondition linebp logpoint condthreads)
+    # Sources without a client-side file (the embedded prelude, a module outside
+    # pathMappings) and pathMappings.
+    add_test(NAME cli/dap-sources
+        COMMAND ${Python3_EXECUTABLE} "${_dap_check}" "$<TARGET_FILE:protoscala>"
+            embedded pathmap)
     set_tests_properties(cli/dap-session cli/dap-output cli/dap-exceptions cli/dap-threads
-        cli/dap-conditions PROPERTIES TIMEOUT 300)
+        cli/dap-conditions cli/dap-sources PROPERTIES TIMEOUT 300)
     unset(_dap_check)
 endif()
 

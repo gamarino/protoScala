@@ -6,7 +6,9 @@
 // and lets F5 on an open .scala file debug it without a launch.json.
 //
 // protoscala is taken from the `protoscala.path` setting if set, else from the
-// default install location (when present), else from PATH.
+// default install location (when present), else from PATH. A launch with
+// `remote.command` runs `<command...> <remote.path or protoscala> --dap`
+// instead (ssh, wsl, docker exec ...); pathMappings go to the adapter.
 const vscode = require("vscode");
 const fs = require("fs");
 const path = require("path");
@@ -44,13 +46,39 @@ const configurationProvider = {
         .showInformationMessage("protoScala: open a .scala file or set 'program' in launch.json.")
         .then(() => undefined);
     }
+    if (config.remote) {
+      const cmd = config.remote.command;
+      if (!Array.isArray(cmd) || cmd.length === 0 || !cmd.every((a) => typeof a === "string")) {
+        return vscode.window
+          .showErrorMessage("protoScala: 'remote.command' must be a non-empty list of strings, " +
+                            'e.g. ["ssh", "-T", "-o", "BatchMode=yes", "user@host"].')
+          .then(() => undefined);
+      }
+      if (!Array.isArray(config.pathMappings) || config.pathMappings.length === 0) {
+        return vscode.window
+          .showErrorMessage("protoScala: a 'remote' launch needs 'pathMappings': " +
+                            '[{"localRoot": "${workspaceFolder}", "remoteRoot": "<the same ' +
+                            'folder on the remote machine>"}], so that breakpoints and frames ' +
+                            "can be translated between the two machines.")
+          .then(() => undefined);
+      }
+    }
     return config;
   },
 };
 
 function activate(context) {
   const factory = {
-    createDebugAdapterDescriptor(/* session */) {
+    createDebugAdapterDescriptor(session) {
+      // `remote`: the adapter runs on another machine (ssh), in WSL or in a
+      // container, behind any command that relays stdin/stdout. Paths are
+      // translated by the adapter itself (pathMappings), not here.
+      const remote = session.configuration.remote;
+      if (remote && Array.isArray(remote.command) && remote.command.length > 0) {
+        const exe = remote.path || "protoscala";
+        return new vscode.DebugAdapterExecutable(remote.command[0],
+                                                 [...remote.command.slice(1), exe, "--dap"]);
+      }
       return new vscode.DebugAdapterExecutable(protoscalaCommand(), ["--dap"]);
     },
   };

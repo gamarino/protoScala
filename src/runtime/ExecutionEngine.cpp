@@ -1626,15 +1626,15 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
 // only reports it (a future continuation) as uncaught, like the thread's top.
 // A native that lets an exception pass unchanged is transparent.
 //
-// Exceptions the prelude raises and catches itself, before any frame with a
-// source line sees them, are internal: they never stop.
+// Exceptions the prelude raises and catches itself, before any frame of the
+// program sees them, are internal: they never stop.
 void ExecutionEngine::debugRaised(proto::ProtoContext& frame, debug::FrameRecord& rec,
                                   const proto::ProtoObject* value, const std::string& className,
                                   const std::string& message) {
     if (value && debug::alreadyReported(value, nullptr)) return;
     debug::FrameRecord* top = &rec;
-    while (top && !top->src) top = top->parent;
-    if (!top) return;  // no frame with a source line on this thread
+    while (top && (!top->src || top->src->library)) top = top->parent;
+    if (!top) return;  // no frame of the program on this thread
     const unsigned breaks = debug::exceptionBreaks();
     const RuntimeLayout& L = layout_;
     proto::ProtoContext scope(frame.space, &frame);

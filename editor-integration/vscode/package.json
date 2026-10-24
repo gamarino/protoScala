@@ -2,7 +2,7 @@
   "name": "protoscala",
   "displayName": "protoScala",
   "description": "Scala syntax highlighting and debugging of protoScala scripts through the protoscala --dap Debug Adapter Protocol adapter.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "protoscala-placeholder",
   "engines": {
     "vscode": "^1.66.0"
@@ -91,6 +91,59 @@
                 "type": "boolean",
                 "description": "Stop at the first line of the script.",
                 "default": false
+              },
+              "justMyCode": {
+                "type": "boolean",
+                "default": false,
+                "description": "Steps never stop in the prelude (protoScala's library). Breakpoints set in it still stop."
+              },
+              "pathMappings": {
+                "type": "array",
+                "default": [
+                  {
+                    "localRoot": "${workspaceFolder}",
+                    "remoteRoot": "/home/user/project"
+                  }
+                ],
+                "description": "Translate paths between this machine (localRoot) and the machine where protoscala runs (remoteRoot), longest root first. Files under no mapping are shown read-only from the adapter.",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "localRoot",
+                    "remoteRoot"
+                  ],
+                  "properties": {
+                    "localRoot": {
+                      "type": "string",
+                      "description": "A directory on this machine."
+                    },
+                    "remoteRoot": {
+                      "type": "string",
+                      "description": "The same directory where protoscala runs."
+                    }
+                  }
+                }
+              },
+              "remote": {
+                "type": "object",
+                "description": "Run the adapter elsewhere: '<command...> <path> --dap'. Needs pathMappings. The remote shell must print nothing on a non-interactive start.",
+                "required": [
+                  "command"
+                ],
+                "properties": {
+                  "command": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "The argv prefix that reaches the other machine, e.g. [\"ssh\", \"-T\", \"-o\", \"BatchMode=yes\", \"user@host\"] or [\"wsl\", \"-d\", \"Ubuntu-24.04\", \"--\"]."
+                  },
+                  "path": {
+                    "type": "string",
+                    "default": "protoscala",
+                    "description": "The protoscala executable on the other machine."
+                  }
+                }
               }
             }
           }
@@ -115,6 +168,57 @@
               "program": "^\"\\${file}\"",
               "stopOnEntry": false
             }
+          },
+          {
+            "label": "protoScala: Launch over SSH",
+            "description": "Run protoscala --dap on another machine through ssh; paths are mapped by the adapter.",
+            "body": {
+              "type": "protoscala",
+              "request": "launch",
+              "name": "Debug over SSH",
+              "program": "^\"\\${file}\"",
+              "remote": {
+                "command": [
+                  "ssh",
+                  "-T",
+                  "-o",
+                  "BatchMode=yes",
+                  "user@host"
+                ],
+                "path": "/home/user/.local/bin/protoscala"
+              },
+              "pathMappings": [
+                {
+                  "localRoot": "^\"\\${workspaceFolder}\"",
+                  "remoteRoot": "/home/user/project"
+                }
+              ]
+            }
+          },
+          {
+            "label": "protoScala: Launch in WSL",
+            "description": "Run the Linux protoscala inside WSL; the Windows workspace is mapped to its /mnt path or a Linux clone.",
+            "body": {
+              "type": "protoscala",
+              "request": "launch",
+              "name": "Debug in WSL",
+              "program": "^\"\\${file}\"",
+              "remote": {
+                "command": [
+                  "wsl",
+                  "-d",
+                  "Ubuntu-24.04",
+                  "--"
+                ],
+                "path": "/home/user/.local/bin/protoscala"
+              },
+              "pathMappings": [
+                {
+                  "localRoot": "^\"\\${workspaceFolder}\"",
+                  "remoteRoot": "/home/user/project"
+                }
+              ]
+            }
           }
         ]
       }
@@ -124,5 +228,8 @@
     "type": "git",
     "url": "https://github.com/gamarino/protoScala"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "extensionKind": [
+    "workspace"
+  ]
 }

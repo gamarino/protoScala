@@ -44,8 +44,16 @@ struct LineBreakpoint;  // Debugger.cpp: a breakpoint's condition, hit count, lo
 
 // One source file the session compiled while a debugger was attached.
 struct Source {
-    std::string path;                  // as the session named it
+    std::string path;                  // the file, absolute; "" for embedded source
     std::string key;                   // normalised, for matching client paths
+    std::string name;                  // what a client shows: the file's base name
+    int ref = 0;                       // its DAP sourceReference (> 0, stable)
+    // Embedded source (the prelude, compiled into the binary): its text, and
+    // where it comes from. A library: steps may skip it (justMyCode), and
+    // exception stops show the program's frame that called into it.
+    const char* content = nullptr;
+    std::string origin;
+    bool library = false;
     std::vector<std::uint8_t> hasCode; // per line: some instruction maps to it
     std::unique_ptr<std::atomic<std::uint8_t>[]> armed;  // per line: a breakpoint
     std::size_t lineCount = 0;         // size of both arrays
@@ -128,6 +136,9 @@ public:
     // thread, in order).
     virtual void threadStarted(int threadId) = 0;
     virtual void threadExited(int threadId) = 0;
+    // A source was registered (a script, a module, the prelude): the client's
+    // Loaded Scripts. Called on the registering thread.
+    virtual void sourceLoaded(const Source& s) = 0;
 };
 
 // --- Attaching (any thread, before the debuggee starts) -------------------
@@ -238,6 +249,16 @@ std::vector<ThreadView> threads();
 // Registers `mod` and its blocks as compiled from `path` and arms the
 // breakpoints the client set on that file. No-op while detached.
 void registerModule(const BytecodeModule& mod, const std::string& path);
+// Registers `mod` as compiled from embedded text `content` (which outlives the
+// session), shown as `name` with `origin`, and marked as library code.
+void registerEmbeddedModule(const BytecodeModule& mod, const std::string& name,
+                            const char* content, const std::string& origin);
+// The registered sources, in registration order; by reference; by key. The
+// pointers stay valid for the process.
+std::vector<const Source*> loadedSources();
+const Source* sourceByRef(int ref);
+// justMyCode: steps never stop in library code (breakpoints and pause still do).
+void setJustMyCode(bool on);
 
 // --- The controller's side -------------------------------------------------
 // Replaces the breakpoints of `path` (a client path). Answers one entry per
@@ -257,6 +278,10 @@ struct BreakpointSpec {
 };
 std::vector<Controller::Breakpoint> setBreakpoints(const std::string& path,
                                                    const std::vector<BreakpointSpec>& specs);
+// The same, for the source registered under `key` (Source::key) -- a source the
+// client names by sourceReference.
+std::vector<Controller::Breakpoint> setBreakpointsForKey(const std::string& key,
+                                                         const std::vector<BreakpointSpec>& specs);
 // The stepping request for the CALLING thread (the stopped one), relative to
 // the frame `top` it is stopped in. Other threads are not affected.
 void setStep(StepMode mode, const FrameRecord& top);

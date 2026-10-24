@@ -38,6 +38,12 @@ Scenarios (all by default):
             invalid one, a condition that fails
   logpoint  `logMessage` with `{expr}`, `{{literal}}`, an expression error
   condthreads  a condition hit by two threads is evaluated in each
+  embedded  a step into the prelude shows its embedded source by
+            sourceReference; `source` serves it; a breakpoint on it stops;
+            justMyCode keeps steps out of it; loadedSources
+  pathmap   pathMappings with a fake client root: breakpoints and frames in
+            client paths, a module outside the mapping by sourceReference
+            (content, breakpoint), `source` by client path, a bad mapping
 
 Paths are passed as VS Code passes them on Windows: absolute, with a
 lower-case drive letter. Every read has a watchdog, so a broken adapter fails
@@ -975,6 +981,148 @@ def scenario_condthreads(exe, work):
            "stdout %r" % d.output["stdout"])
 
 
+
+PRELUDE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "lib", "prelude.scala")
+
+EMBEDDED = """\
+def check(n: Int): Int =
+  require(n > 0, "positive")
+  n + 1
+println(check(1))
+println(check(2))
+"""
+
+
+def scenario_embedded(exe, work):
+    prog = os.path.join(work, "embedded.scala")
+    write(prog, EMBEDDED)
+    d = Dap(exe, work)
+    caps = d.request("initialize", {"adapterID": "protoscala"})["body"]
+    expect(caps.get("supportsLoadedSourcesRequest"), "loadedSources not advertised")
+    d.event("initialized")
+    d.request("launch", {"program": client_path(prog)})
+    d.set_breakpoints(prog, [2])
+    d.request("configurationDone")
+    d.stopped("breakpoint", 2)
+    tid = d.last_stop["threadId"]
+    # Into the prelude's `require`: a frame whose source is the embedded text.
+    d.request("stepIn", {"threadId": tid})
+    frames = d.stopped("step")
+    src = frames[0]["source"]
+    expect(frames[0]["name"] == "require" and src.get("sourceReference", 0) > 0 and
+           "path" not in src and src.get("presentationHint") == "deemphasize" and
+           src.get("name") == "prelude.scala", "a prelude frame %r" % frames[0])
+    expect(frames[1]["name"] == "check" and frames[1]["line"] == 2, "its caller %r" % frames[1])
+    ref = src["sourceReference"]
+    body = d.request("source", {"sourceReference": ref, "source": src})["body"]
+    with open(PRELUDE, encoding="utf-8") as f:
+        expect(body["content"] == f.read(), "the prelude's text")
+    line = frames[0]["line"]
+    expect("def require" in body["content"].splitlines()[line - 2], "the line shown %d" % line)
+    # A breakpoint in the prelude, by sourceReference.
+    d.set_breakpoints(prog, [])
+    r = d.request("setBreakpoints", {"source": {"name": "prelude.scala", "sourceReference": ref},
+                                     "breakpoints": [{"line": line}]})["body"]["breakpoints"]
+    expect(r[0]["verified"] and r[0]["source"]["sourceReference"] == ref, "prelude breakpoint %r" % r)
+    d.request("continue", {"threadId": tid})
+    frames = d.stopped("breakpoint", line)
+    expect(frames[0]["source"].get("sourceReference") == ref and
+           d.variables(frames[1]["id"], "Locals") == {"n": "2"}, "stopped in require for check(2)")
+    names = [s["name"] for s in d.request("loadedSources")["body"]["sources"]]
+    expect("prelude.scala" in names and "embedded.scala" in names, "loaded sources %r" % names)
+    d.request("setBreakpoints", {"source": {"sourceReference": ref}, "breakpoints": []})
+    d.request("continue", {"threadId": tid})
+    d.finish()
+    expect(d.output["stdout"] == "2\n3\n", "stdout %r" % d.output["stdout"])
+    # justMyCode: a step into the prelude stays in the program.
+    d = Dap(exe, work)
+    d.start(prog, {prog: [2]}, justMyCode=True)
+    d.stopped("breakpoint", 2)
+    d.request("stepIn", {"threadId": d.last_stop["threadId"]})
+    frames = d.stopped("step", 3)
+    expect(frames[0]["name"] == "check", "justMyCode step %r" % frames[0])
+    d.set_breakpoints(prog, [])
+    d.request("continue", {"threadId": d.last_stop["threadId"]})
+    d.finish()
+
+
+def scenario_pathmap(exe, work):
+    proj = os.path.join(work, "proj")
+    lib = os.path.join(work, "lib")
+    main = os.path.join(proj, "main.scala")
+    mod = os.path.join(lib, "util", "Strings.scala")
+    write(main, """\
+import util.Strings
+def twice(x: Int): Int =
+  val y = x * 2
+  y
+println(twice(4))
+println(Strings.shout("hi"))
+""")
+    write(mod, """\
+def shout(s: String): String =
+  val up = s.toUpperCase
+  up + "!"
+""")
+    if os.name == "nt":
+        fake = "c:\\Fake\\Proj"
+        fake_main = "C:/fake/proj/main.scala"     # another spelling of the same path
+        shown_main = "c:\\Fake\\Proj\\main.scala"
+    else:
+        fake = "/fake/proj"
+        fake_main = "/fake/proj/main.scala"
+        shown_main = fake_main
+    # Relative: PROTOSCALA_PATH is split on ":" on every platform.
+    env = {"PROTOSCALA_PATH": os.path.join("..", "lib")}
+    # An entry without both roots is refused.
+    d = Dap(exe, work, env=env)
+    d.request("initialize", {"adapterID": "protoscala"})
+    d.event("initialized")
+    r = d.request("launch", {"program": fake_main, "pathMappings": [{"localRoot": fake}]}, ok=False)
+    expect(not r["success"] and "remoteRoot" in r.get("message", ""), "bad mapping %r" % r)
+    d.request("disconnect")
+    d.close()
+
+    d = Dap(exe, work, env=env)
+    d.request("initialize", {"adapterID": "protoscala"})
+    d.event("initialized")
+    d.request("launch", {"program": fake_main, "cwd": fake,
+                         "pathMappings": [{"localRoot": fake, "remoteRoot": proj}]})
+    bps = d.request("setBreakpoints", {"source": {"path": fake_main},
+                                       "breakpoints": [{"line": 3}]})["body"]["breakpoints"]
+    expect(len(bps) == 1, "breakpoints %r" % bps)
+    d.request("configurationDone")
+    frames = d.stopped("breakpoint", 3)
+    tid = d.last_stop["threadId"]
+    expect(frames[0]["source"].get("path") == shown_main and
+           frames[1]["source"].get("path") == shown_main, "client paths %r" % frames)
+    loaded = {s["name"]: s for s in d.request("loadedSources")["body"]["sources"]}
+    expect(loaded.get("main.scala", {}).get("path") == shown_main, "main in loaded %r" % loaded)
+    strings = loaded.get("Strings.scala", {})
+    expect(strings.get("sourceReference", 0) > 0 and "path" not in strings and
+           os.path.normcase(os.path.abspath(mod)) in os.path.normcase(strings.get("origin", "")),
+           "a module outside the mapping %r" % strings)
+    content = d.request("source", {"sourceReference": strings["sourceReference"]})["body"]["content"]
+    with open(mod, encoding="utf-8") as f:
+        expect(content == f.read(), "its text")
+    # A breakpoint on it by reference.
+    r = d.request("setBreakpoints", {"source": {"name": "Strings.scala",
+                                                "sourceReference": strings["sourceReference"]},
+                                     "breakpoints": [{"line": 3}]})["body"]["breakpoints"]
+    expect(r[0]["verified"], "breakpoint by reference %r" % r)
+    d.request("continue", {"threadId": tid})
+    frames = d.stopped("breakpoint", 3)
+    expect(frames[0]["name"] == "shout" and
+           frames[0]["source"].get("sourceReference") == strings["sourceReference"] and
+           frames[1]["source"].get("path") == shown_main, "stopped in the module %r" % frames)
+    # `source` by a client path reads through the mapping.
+    content = d.request("source", {"source": {"path": fake_main}, "sourceReference": 0})["body"]["content"]
+    expect(content.startswith("import util.Strings"), "source by path %r" % content[:40])
+    d.request("continue", {"threadId": tid})
+    d.finish()
+    expect(d.output["stdout"] == "8\nHI!\n", "stdout %r" % d.output["stdout"])
+
+
 SCENARIOS = {
     "session": scenario_session,
     "entry": scenario_entry,
@@ -994,6 +1142,8 @@ SCENARIOS = {
     "linebp": scenario_linebp,
     "logpoint": scenario_logpoint,
     "condthreads": scenario_condthreads,
+    "embedded": scenario_embedded,
+    "pathmap": scenario_pathmap,
 }
 
 
