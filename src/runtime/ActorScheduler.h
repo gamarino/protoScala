@@ -20,6 +20,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
 
 namespace protoScala {
@@ -49,6 +50,9 @@ struct ActorState {
     const proto::ProtoObject* actor = nullptr;
     std::atomic<unsigned> sched{0};
     unsigned pendingIdx[kBands] = {0, 0, 0};  // read cursor into __pend<n>__
+    // What the debugger shows a worker running this actor as ("actor#3 at
+    // x.scala:7", "future#4 at x.scala:9"); set only while one is attached.
+    std::string debugName;
 };
 
 class ActorScheduler {
@@ -63,8 +67,11 @@ public:
     // Joins every worker. Safe to call when nothing was started, and twice.
     void shutdown(proto::ProtoContext* ctx);
 
+    // `kind` names the actor for the debugger: "actor", or "future" for the
+    // one-shot actor a Future body runs on.
     const proto::ProtoObject* spawn(proto::ProtoContext* ctx, const proto::ProtoObject* handler,
-                                    const proto::ProtoObject* initialState);
+                                    const proto::ProtoObject* initialState,
+                                    const char* kind = "actor");
     // Queues `envelope` (a message object) and schedules the actor if needed.
     void send(proto::ProtoContext* ctx, const proto::ProtoObject* actor, Band band,
               const proto::ProtoObject* envelope);

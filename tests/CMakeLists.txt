@@ -123,7 +123,18 @@ if(Python3_FOUND)
     add_test(NAME cli/dap-output
         COMMAND ${Python3_EXECUTABLE} "${_dap_check}" "$<TARGET_FILE:protoscala>"
             output pause)
-    set_tests_properties(cli/dap-session cli/dap-output PROPERTIES TIMEOUT 300)
+    # Exception breakpoints: the raised and uncaught filters, a re-raise that
+    # does not stop twice, internal control flow, uncaught in threads and actors.
+    add_test(NAME cli/dap-exceptions
+        COMMAND ${Python3_EXECUTABLE} "${_dap_check}" "$<TARGET_FILE:protoscala>"
+            raised internal nofilter uncaught uncaughtthreads)
+    # Multi-thread debugging: one-thread stops, per-thread step and pause, and
+    # collections while a thread is stopped.
+    add_test(NAME cli/dap-threads
+        COMMAND ${Python3_EXECUTABLE} "${_dap_check}" "$<TARGET_FILE:protoscala>"
+            threads pausethread gc)
+    set_tests_properties(cli/dap-session cli/dap-output cli/dap-exceptions cli/dap-threads
+        PROPERTIES TIMEOUT 300)
     unset(_dap_check)
 endif()
 

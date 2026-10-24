@@ -9,17 +9,20 @@
  *    (StackGuard.h), which waits for `configurationDone`, then creates the
  *    Session -- and with it the ProtoSpace -- and runs the script exactly as
  *    `protoscala file.scala` does.
- *  - A thread that reaches a breakpoint or a step target calls stopped() from
- *    inside the interpreter. It parks in an unmanaged region on its own
- *    context, so a collection never waits for it, and serves the requests that
- *    need the language -- rendering locals, evaluating an expression -- itself,
- *    on its own context, in managed mode. The protocol thread hands those to it
+ *  - A thread that reaches a breakpoint, a step target or an exception stop
+ *    calls stopped() from inside the interpreter. Only that thread stops: it
+ *    parks in an unmanaged region on its own context, so a collection never
+ *    waits for it, and serves the requests that need the language -- rendering
+ *    locals, evaluating an expression -- itself, on its own context, in managed
+ *    mode. The protocol thread hands those to it (one queue per stopped thread)
  *    and waits. Values are therefore read only by the thread whose frames root
- *    them, and only while those frames are stopped.
+ *    them, and only while those frames are stopped. Other threads -- actor
+ *    workers, Thread.start bodies -- keep running, and several can be stopped
+ *    at once; each is resumed, stepped and inspected by its own thread id.
  *  - DapStdio forwards the script's stdout and stderr as `output` events.
  *
- * One stop at a time: a second thread reaching a breakpoint (an actor) waits,
- * unmanaged, until the first resumes. The client sees one thread.
+ * Frame ids come from one counter for the whole session, so they are unique
+ * across threads; a variablesReference is 2 * frameId (+1 for the globals).
  */
 #include "dap/DapServer.h"
 #include "dap/DapStdio.h"
@@ -80,18 +83,32 @@ std::string baseName(const std::string& path) {
     return p == std::string::npos ? path : path.substr(p + 1);
 }
 
-// A frame of the stopped thread, as the client is shown it.
+// A frame of a stopped thread, as the client is shown it.
 struct FrameView {
+    int id;  // the DAP frame id, unique in the session
     debug::FrameRecord* rec;
     std::string name;
     std::string path;
     int line;
 };
 
-// A request the stopped thread runs for the protocol thread.
+// A request a stopped thread runs for the protocol thread.
 struct Work {
     std::function<void()> fn;
     bool done = false;
+};
+
+// One stopped thread. Shared between the thread (which owns the frames) and
+// the protocol thread; guarded by DapServer::mu_.
+struct StoppedThread {
+    int id = 0;
+    debug::FrameRecord* top = nullptr;
+    std::vector<FrameView> frames;  // innermost first
+    std::deque<std::shared_ptr<Work>> work;
+    bool resumeReady = false;
+    debug::StepMode resumeMode = debug::StepMode::None;
+    bool gone = false;  // resumed: its frames are no longer valid
+    std::optional<debug::ExceptionStop> exception;
 };
 
 class DapServer : public debug::Controller {
@@ -118,30 +135,34 @@ public:
     }
 
     // --- debug::Controller (on the debuggee's threads) ----------------------
-    void stopped(debug::FrameRecord& top, const char* reason) override {
+    void stopped(debug::FrameRecord& top, const char* reason, int threadId,
+                 const debug::ExceptionStop* ex) override {
         proto::ProtoContext* ctx = top.ctx;
         // A line printed without a newline is still in stdio's buffer.
         std::fflush(stdout);
         std::fflush(stderr);
-        std::vector<FrameView> frames;
-        for (debug::FrameRecord* r = &top; r; r = r->parent) {
-            if (!r->src) continue;  // the prelude: no source to show
-            frames.push_back({r, r->mod->name(), r->src->path, r->line});
-        }
-        std::unique_lock<std::mutex> stopLk(stopMu_, std::defer_lock);
-        {
-            proto::ProtoContext::UnmanagedScope unmanaged(ctx);
-            stopLk.lock();
-        }
+        auto st = std::make_shared<StoppedThread>();
+        st->id = threadId;
+        st->top = &top;
+        if (ex) st->exception = *ex;
         {
             std::lock_guard<std::mutex> lk(mu_);
             if (shuttingDown_) return;
-            stopped_ = true;
-            resumeReady_ = false;
-            frames_ = std::move(frames);
-            stoppedTop_ = &top;
+            for (debug::FrameRecord* r = &top; r; r = r->parent) {
+                if (!r->src) continue;  // the prelude: no source to show
+                const int id = nextFrameId_++;
+                st->frames.push_back({id, r, r->mod->name(), r->src->path, r->line});
+                frameOwner_[id] = threadId;
+            }
+            stopped_[threadId] = st;
+            lastStopped_ = threadId;
         }
-        sendEvent("stopped", {{"reason", reason}, {"threadId", 1}, {"allThreadsStopped", true}});
+        json body = {{"reason", reason}, {"threadId", threadId}, {"allThreadsStopped", false}};
+        if (ex) {
+            body["description"] = ex->description;
+            body["text"] = ex->description;
+        }
+        sendEvent("stopped", body);
 
         debug::StepMode mode = debug::StepMode::None;
         for (;;) {
@@ -149,16 +170,16 @@ public:
             {
                 proto::ProtoContext::UnmanagedScope unmanaged(ctx);
                 std::unique_lock<std::mutex> lk(mu_);
-                cv_.wait(lk, [&] { return resumeReady_ || !work_.empty(); });
-                if (!work_.empty()) {
-                    work = work_.front();
-                    work_.pop_front();
+                cv_.wait(lk, [&] { return st->resumeReady || !st->work.empty(); });
+                if (!st->work.empty()) {
+                    work = st->work.front();
+                    st->work.pop_front();
                 } else {
-                    mode = resumeMode_;
-                    resumeReady_ = false;
-                    stopped_ = false;
-                    stoppedTop_ = nullptr;
-                    frames_.clear();
+                    mode = st->resumeMode;
+                    st->gone = true;
+                    for (const FrameView& f : st->frames) frameOwner_.erase(f.id);
+                    auto it = stopped_.find(threadId);
+                    if (it != stopped_.end() && it->second == st) stopped_.erase(it);
                 }
             }
             if (!work) break;
@@ -175,6 +196,7 @@ public:
             }
             cv_.notify_all();
         }
+        cv_.notify_all();
         // Output the requests printed (an evaluated println) goes out now.
         std::fflush(stdout);
         if (mode != debug::StepMode::None) debug::setStep(mode, top);
@@ -187,20 +209,44 @@ public:
                                                      {"line", b.line}}}});
     }
 
+    void threadStarted(int threadId) override {
+        sendEvent("thread", {{"reason", "started"}, {"threadId", threadId}});
+    }
+    void threadExited(int threadId) override {
+        sendEvent("thread", {{"reason", "exited"}, {"threadId", threadId}});
+    }
+
 private:
     // Answers true when the loop should end.
     bool handle(const json& req) {
         const std::string command = req.value("command", "");
         if (command == "initialize") {
-            sendResponse(req, {{"supportsConfigurationDoneRequest", true},
-                               {"supportsEvaluateForHovers", true}});
+            sendResponse(req,
+                         {{"supportsConfigurationDoneRequest", true},
+                          {"supportsEvaluateForHovers", true},
+                          {"supportsExceptionInfoRequest", true},
+                          {"supportsTerminateThreadsRequest", false},
+                          {"exceptionBreakpointFilters",
+                           json::array({{{"filter", "raised"},
+                                         {"label", "All Exceptions"},
+                                         {"description",
+                                          "Stop wherever an exception is thrown, caught or not"},
+                                         {"default", false}},
+                                        {{"filter", "userUnhandled"},
+                                         {"label", "Uncaught Exceptions"},
+                                         {"description",
+                                          "Stop where an exception is thrown that no try/catch "
+                                          "of the program will catch"},
+                                         {"default", true}}})}});
             sendEvent("initialized", json::object());
         } else if (command == "launch") {
             handleLaunch(req);
         } else if (command == "setBreakpoints") {
             handleSetBreakpoints(req);
         } else if (command == "setExceptionBreakpoints") {
-            sendResponse(req, {{"breakpoints", json::array()}});
+            handleSetExceptionBreakpoints(req);
+        } else if (command == "exceptionInfo") {
+            handleExceptionInfo(req);
         } else if (command == "configurationDone") {
             sendResponse(req, json::object());
             {
@@ -209,12 +255,15 @@ private:
             }
             cv_.notify_all();
         } else if (command == "threads") {
-            sendResponse(req, {{"threads", json::array({{{"id", 1}, {"name", "main"}}})}});
+            handleThreads(req);
         } else if (command == "continue" || command == "next" || command == "stepIn" ||
                    command == "stepOut") {
             handleResume(req, command);
         } else if (command == "pause") {
-            debug::requestStop("pause");
+            const int threadId = req.value("arguments", json::object()).value("threadId", 0);
+            // A thread in native code or blocked stops when it is back in the
+            // interpreter; the response does not wait for it.
+            if (threadId == 0 || !debug::requestPause(threadId)) debug::requestStop("pause");
             sendResponse(req, json::object());
         } else if (command == "stackTrace") {
             handleStackTrace(req);
@@ -301,6 +350,7 @@ private:
             cv_.wait(lk, [&] { return configDone_ || shuttingDown_; });
             if (shuttingDown_) return 0;
         }
+        debug::nameThread("main");
         Session session;
         {
             std::lock_guard<std::mutex> lk(mu_);
@@ -341,72 +391,152 @@ private:
         sendResponse(req, {{"breakpoints", out}});
     }
 
+    void handleSetExceptionBreakpoints(const json& req) {
+        const json args = req.value("arguments", json::object());
+        unsigned mask = 0;
+        json answered = json::array();
+        auto take = [&](const std::string& f) {
+            if (f == "raised") mask |= debug::kBreakRaised;
+            else if (f == "userUnhandled" || f == "uncaught") mask |= debug::kBreakUncaught;
+            else {
+                answered.push_back({{"verified", false}, {"message", "unknown filter " + f}});
+                return;
+            }
+            answered.push_back({{"verified", true}});
+        };
+        if (args.contains("filters") && args["filters"].is_array())
+            for (const json& f : args["filters"])
+                if (f.is_string()) take(f.get<std::string>());
+        if (args.contains("filterOptions") && args["filterOptions"].is_array())
+            for (const json& o : args["filterOptions"]) take(o.value("filterId", ""));
+        debug::setExceptionBreaks(mask);
+        sendResponse(req, {{"breakpoints", answered}});
+    }
+
+    // --- threads ------------------------------------------------------------
+    void handleThreads(const json& req) {
+        json threads = json::array();
+        for (const debug::ThreadView& t : debug::threads())
+            threads.push_back({{"id", t.id}, {"name", t.name}});
+        // Before the script runs (or after the main thread ended) VS Code still
+        // needs a thread to show.
+        if (threads.empty()) threads.push_back({{"id", 1}, {"name", "main"}});
+        sendResponse(req, {{"threads", threads}});
+    }
+
     // --- resuming -----------------------------------------------------------
     void handleResume(const json& req, const std::string& command) {
         debug::StepMode mode = debug::StepMode::None;
         if (command == "next") mode = debug::StepMode::Over;
         else if (command == "stepIn") mode = debug::StepMode::In;
         else if (command == "stepOut") mode = debug::StepMode::Out;
+        const json args = req.value("arguments", json::object());
+        const int threadId = args.value("threadId", 0);
         {
             std::lock_guard<std::mutex> lk(mu_);
-            if (stopped_) {
-                resumeMode_ = mode;
-                resumeReady_ = true;
+            for (auto& [id, st] : stopped_) {
+                // No thread named: continue all (a client that knows one thread).
+                if (threadId != 0 && id != threadId) continue;
+                st->resumeMode = mode;
+                st->resumeReady = true;
             }
         }
         cv_.notify_all();
-        sendResponse(req, command == "continue" ? json{{"allThreadsContinued", true}}
+        sendResponse(req, command == "continue" ? json{{"allThreadsContinued", threadId == 0}}
                                                 : json::object());
     }
 
     // --- inspection ---------------------------------------------------------
-    // Runs `fn` on the stopped thread and waits for it; false when no thread is
-    // stopped (or it resumed first).
-    bool onStoppedThread(std::function<void()> fn) {
+    // The stopped thread a frame id belongs to, or nullptr.
+    std::shared_ptr<StoppedThread> ownerOf(int frameId, debug::FrameRecord** rec) {
+        std::lock_guard<std::mutex> lk(mu_);
+        auto it = frameOwner_.find(frameId);
+        if (it == frameOwner_.end()) return nullptr;
+        auto st = stopped_.find(it->second);
+        if (st == stopped_.end()) return nullptr;
+        for (const FrameView& f : st->second->frames)
+            if (f.id == frameId) {
+                if (rec) *rec = f.rec;
+                return st->second;
+            }
+        return nullptr;
+    }
+
+    // Runs `fn` on the stopped thread `st` and waits for it; false when the
+    // thread resumed first (or there is no session).
+    bool onStoppedThread(const std::shared_ptr<StoppedThread>& st, std::function<void()> fn) {
         auto work = std::make_shared<Work>();
         work->fn = std::move(fn);
         std::unique_lock<std::mutex> lk(mu_);
-        if (!stopped_ || !session_) return false;
-        work_.push_back(work);
+        if (st->gone || !session_) return false;
+        st->work.push_back(work);
         cv_.notify_all();
-        cv_.wait(lk, [&] { return work->done || !stopped_; });
+        cv_.wait(lk, [&] { return work->done || st->gone; });
         return work->done;
     }
 
     void handleStackTrace(const json& req) {
         const json args = req.value("arguments", json::object());
+        const int threadId = args.value("threadId", 0);
         const int start = args.value("startFrame", 0);
         const int levels = args.value("levels", 0);
         json frames = json::array();
         int total = 0;
         {
             std::lock_guard<std::mutex> lk(mu_);
-            total = static_cast<int>(frames_.size());
-            for (int i = start; i < total; ++i) {
-                if (levels > 0 && static_cast<int>(frames.size()) >= levels) break;
-                const FrameView& f = frames_[static_cast<std::size_t>(i)];
-                frames.push_back({{"id", i + 1},
-                                  {"name", f.name},
-                                  {"line", f.line},
-                                  {"column", 1},
-                                  {"source", {{"name", baseName(f.path)}, {"path", f.path}}}});
+            auto it = stopped_.find(threadId);
+            if (it != stopped_.end()) {
+                const std::vector<FrameView>& fs = it->second->frames;
+                total = static_cast<int>(fs.size());
+                for (int i = start; i < total; ++i) {
+                    if (levels > 0 && static_cast<int>(frames.size()) >= levels) break;
+                    const FrameView& f = fs[static_cast<std::size_t>(i)];
+                    frames.push_back({{"id", f.id},
+                                      {"name", f.name},
+                                      {"line", f.line},
+                                      {"column", 1},
+                                      {"source", {{"name", baseName(f.path)}, {"path", f.path}}}});
+                }
             }
         }
         sendResponse(req, {{"stackFrames", frames}, {"totalFrames", total}});
+    }
+
+    void handleExceptionInfo(const json& req) {
+        const int threadId = req.value("arguments", json::object()).value("threadId", 0);
+        std::optional<debug::ExceptionStop> ex;
+        std::string trace;
+        {
+            std::lock_guard<std::mutex> lk(mu_);
+            auto it = stopped_.find(threadId);
+            if (it != stopped_.end() && it->second->exception) {
+                ex = it->second->exception;
+                for (const FrameView& f : it->second->frames)
+                    trace += "  at " + f.name + " (" + f.path + ":" + std::to_string(f.line) + ")\n";
+            }
+        }
+        if (!ex) {
+            sendError(req, "the thread is not stopped on an exception");
+            return;
+        }
+        sendResponse(req, {{"exceptionId", ex->typeName},
+                           {"description", ex->message.empty() ? ex->description : ex->message},
+                           {"breakMode", ex->breakMode},
+                           {"details",
+                            {{"typeName", ex->typeName},
+                             {"message", ex->message},
+                             {"stackTrace", trace}}}});
     }
 
     // variablesReference: 2 * frameId + 0 the frame's locals, + 1 the globals.
     void handleScopes(const json& req) {
         const int frameId = req.value("arguments", json::object()).value("frameId", 0);
         json scopes = json::array();
-        {
-            std::lock_guard<std::mutex> lk(mu_);
-            if (frameId >= 1 && frameId <= static_cast<int>(frames_.size())) {
-                scopes.push_back({{"name", "Locals"}, {"presentationHint", "locals"},
-                                  {"variablesReference", 2 * frameId}, {"expensive", false}});
-                scopes.push_back({{"name", "Globals"}, {"variablesReference", 2 * frameId + 1},
-                                  {"expensive", false}});
-            }
+        if (ownerOf(frameId, nullptr)) {
+            scopes.push_back({{"name", "Locals"}, {"presentationHint", "locals"},
+                              {"variablesReference", 2 * frameId}, {"expensive", false}});
+            scopes.push_back({{"name", "Globals"}, {"variablesReference", 2 * frameId + 1},
+                              {"expensive", false}});
         }
         sendResponse(req, {{"scopes", scopes}});
     }
@@ -446,21 +576,16 @@ private:
         return out;
     }
 
-    debug::FrameRecord* frameRecord(int frameId) {
-        std::lock_guard<std::mutex> lk(mu_);
-        if (frameId < 1 || frameId > static_cast<int>(frames_.size())) return nullptr;
-        return frames_[static_cast<std::size_t>(frameId - 1)].rec;
-    }
-
     void handleVariables(const json& req) {
         const int ref = req.value("arguments", json::object()).value("variablesReference", 0);
         const int frameId = ref / 2;
         const bool globals = (ref % 2) == 1;
-        debug::FrameRecord* rec = frameRecord(frameId);
+        debug::FrameRecord* rec = nullptr;
+        std::shared_ptr<StoppedThread> st = ownerOf(frameId, &rec);
         json vars = json::array();
-        if (rec) {
-            onStoppedThread([&] {
-                proto::ProtoContext scope(stoppedTop_->ctx->space, stoppedTop_->ctx);
+        if (st) {
+            onStoppedThread(st, [&] {
+                proto::ProtoContext scope(st->top->ctx->space, st->top->ctx);
                 if (globals) {
                     for (const Session::DebugGlobal& g : session_->debugGlobals(&scope))
                         vars.push_back({{"name", g.name},
@@ -481,16 +606,24 @@ private:
         const json args = req.value("arguments", json::object());
         const std::string expr = args.value("expression", "");
         int frameId = args.value("frameId", 0);
-        if (frameId == 0) frameId = 1;
-        debug::FrameRecord* rec = frameRecord(frameId);
-        if (!rec) {
+        if (frameId == 0) {
+            // No frame selected: the innermost frame of the thread stopped last.
+            std::lock_guard<std::mutex> lk(mu_);
+            auto it = stopped_.find(lastStopped_);
+            if (it == stopped_.end()) it = stopped_.begin();
+            if (it != stopped_.end() && !it->second->frames.empty())
+                frameId = it->second->frames.front().id;
+        }
+        debug::FrameRecord* rec = nullptr;
+        std::shared_ptr<StoppedThread> st = ownerOf(frameId, &rec);
+        if (!st) {
             sendError(req, "expressions are evaluated while the program is stopped");
             return;
         }
         bool ok = false;
         std::string result;
-        const bool ran = onStoppedThread([&] {
-            proto::ProtoContext scope(stoppedTop_->ctx->space, stoppedTop_->ctx);
+        const bool ran = onStoppedThread(st, [&] {
+            proto::ProtoContext scope(st->top->ctx->space, st->top->ctx);
             const std::vector<Local> locals = localsOf(*rec, &scope);
             for (const Local& l : locals)
                 if (l.name == expr) {
@@ -525,8 +658,10 @@ private:
             std::lock_guard<std::mutex> lk(mu_);
             shuttingDown_ = true;
             configDone_ = true;
-            resumeMode_ = debug::StepMode::None;
-            resumeReady_ = true;
+            for (auto& [id, st] : stopped_) {
+                st->resumeMode = debug::StepMode::None;
+                st->resumeReady = true;
+            }
         }
         cv_.notify_all();
         if (!launcher_.joinable()) return 0;
@@ -579,17 +714,14 @@ private:
     // Shared between the protocol thread and the debuggee's threads.
     std::mutex mu_;
     std::condition_variable cv_;
-    std::mutex stopMu_;  // one stop at a time
     bool configDone_ = false;
     bool shuttingDown_ = false;
     bool finished_ = false;
-    bool stopped_ = false;
-    bool resumeReady_ = false;
-    debug::StepMode resumeMode_ = debug::StepMode::None;
     Session* session_ = nullptr;
-    debug::FrameRecord* stoppedTop_ = nullptr;
-    std::vector<FrameView> frames_;
-    std::deque<std::shared_ptr<Work>> work_;
+    std::map<int, std::shared_ptr<StoppedThread>> stopped_;  // by thread id
+    std::map<int, int> frameOwner_;                          // frame id -> thread id
+    int nextFrameId_ = 1;
+    int lastStopped_ = 0;
 };
 
 }  // namespace

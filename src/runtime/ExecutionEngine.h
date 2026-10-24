@@ -24,6 +24,10 @@ class ProtoObject;
 class ProtoString;
 }
 
+namespace protoScala::debug {
+struct FrameRecord;
+}
+
 namespace protoScala {
 
 class BytecodeModule;
@@ -205,6 +209,16 @@ private:
     // called only once a handler is known to exist: the uncaught path must not
     // allocate, because it may be dying of OutOfMemoryError.
     const proto::ProtoObject* materialiseError(proto::ProtoContext* ctx, const ScalaError& e);
+
+    // The debugger's exception filters (Debugger.h, docs/debugging.md): runLoop
+    // calls it for the first VM frame an exception passes through, while a
+    // debugger with exception breakpoints is attached. `value` is the language
+    // value in flight, or nullptr for a native error not materialised yet, which
+    // `className`/`message` describe. It may stop the thread.
+    PROTOSCALA_NOINLINE void debugRaised(proto::ProtoContext& frame, debug::FrameRecord& rec,
+                                         const proto::ProtoObject* value,
+                                         const std::string& className,
+                                         const std::string& message);
 
     // base[0] is the receiver, base[1..argc] the arguments; all rooted.
     // `applied`: the call site wrote an argument list (SEND_APPLY), so a member

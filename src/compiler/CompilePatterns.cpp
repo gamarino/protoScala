@@ -13,6 +13,7 @@
 #include "compiler/Compiler.h"
 #include "runtime/StackGuard.h"
 
+#include <functional>
 #include <unordered_map>
 
 namespace protoScala {
@@ -92,6 +93,67 @@ void Compiler::compileCatchCases(const std::vector<CaseDef>& cases, int slot, So
     for (std::size_t e : exits) fn_->mod->patchJumpTo(e, fn_->mod->pos());
 }
 
+// The debugger's summary of a catch cascade. It mirrors compileTypeTest's
+// choices for a thrown value (D134: Throwable selects everything, Exception
+// also every foreign value); anything it cannot decide without running code is
+// `unknown`, which the debugger treats as "caught".
+BytecodeModule::CatchFilter Compiler::catchFilterOf(const std::vector<CaseDef>& cases) {
+    using Filter = BytecodeModule::CatchFilter;
+    enum class Verdict { All, Unknown, Keys };
+    std::function<Verdict(const Pattern&, std::vector<Filter::Key>&)> classify =
+        [&](const Pattern& p, std::vector<Filter::Key>& keys) -> Verdict {
+        using K = Pattern::Kind;
+        switch (p.kind) {
+            case K::Wildcard:
+            case K::Var:
+                return Verdict::All;
+            case K::Bind:
+                return classify(*p.args[0], keys);
+            case K::Alt: {
+                Verdict v = Verdict::Keys;
+                for (const PatternPtr& a : p.args) {
+                    const Verdict one = classify(*a, keys);
+                    if (one == Verdict::All) return Verdict::All;
+                    if (one == Verdict::Unknown) v = Verdict::Unknown;
+                }
+                return v;
+            }
+            case K::Typed: {
+                const Pattern& sub = *p.args[0];
+                if (sub.kind != K::Wildcard && sub.kind != K::Var) return Verdict::Unknown;
+                const TypeTree& t = *p.type;
+                if (t.kind != TypeTree::Kind::Name && t.kind != TypeTree::Kind::Applied)
+                    return Verdict::Unknown;
+                std::string name = globals_.followTypeAlias(t.name);
+                for (const char* prefix : {"scala.", "java.lang.", "Predef."})
+                    if (name.rfind(prefix, 0) == 0)
+                        name = name.substr(std::char_traits<char>::length(prefix));
+                name = globals_.followTypeAlias(name);
+                if (name == "Any") return Verdict::All;
+                const ClassInfo* c = globals_.findType(name);
+                if (!c) return Verdict::Unknown;  // a builtin type, a foreign module's type
+                if (c->key == kThrowableKey) return Verdict::All;
+                keys.push_back({c->key, c->key == "@Exception"});
+                return Verdict::Keys;
+            }
+            default:
+                return Verdict::Unknown;
+        }
+    };
+    Filter f;
+    for (const CaseDef& c : cases) {
+        std::vector<Filter::Key> keys;
+        const Verdict v = c.guard ? Verdict::Unknown : classify(*c.pattern, keys);
+        if (v == Verdict::All) {
+            f.all = true;
+            break;
+        }
+        if (v == Verdict::Unknown) f.unknown = true;
+        for (Filter::Key& k : keys) f.keys.push_back(std::move(k));
+    }
+    return f;
+}
+
 std::vector<std::size_t> Compiler::addHandlerRanges(
     std::size_t start, std::size_t end, int entryDepth, int slot,
     BytecodeModule::HandlerKind kind,
@@ -160,10 +222,12 @@ void Compiler::compileTry(const Try& n) {
     // table order stays innermost-first (plan A0-4).
     std::vector<std::pair<std::size_t, std::size_t>> holes;
     if (n.finallyBody) holes = fn_->finallys.back().holes;
-    if (!n.cases.empty())
+    if (!n.cases.empty()) {
         for (std::size_t i : addHandlerRanges(tryStart, tryEnd, entryDepth, slot,
                                               BytecodeModule::HandlerKind::Catch, holes))
             fn_->mod->patchHandlerBody(i, catchBody);
+        fn_->mod->setCatchFilter(catchBody, catchFilterOf(n.cases));
+    }
     if (!n.finallyBody) return;
 
     const std::size_t skipCleanup = fn_->mod->emitJump(Op::JUMP, line(n.pos));

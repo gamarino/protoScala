@@ -287,6 +287,8 @@ private:
     // the handler does not match rather than replacing it. `slot` holds the
     // caught value, which the handler entry has already written there.
     void compileCatchCases(const std::vector<CaseDef>& cases, int slot, SourcePos pos);
+    // What the cascade selects, for the debugger (BytecodeModule::CatchFilter).
+    BytecodeModule::CatchFilter catchFilterOf(const std::vector<CaseDef>& cases);
     // Emits every enclosing finally body, innermost first, recording each span
     // so the owning try can exclude it from its handler range. Called by
     // compileReturn AFTER the returned value has been evaluated.

@@ -1,6 +1,7 @@
 #include "runtime/Primitives.h"
 #include "runtime/Format.h"
 #include "support/FormatSpec.h"
+#include "runtime/Debugger.h"
 #include "runtime/Errors.h"
 #include "runtime/ExecutionEngine.h"
 #include "runtime/Hashing.h"
@@ -186,7 +187,10 @@ PRIM(prim_try_of) {
     scope.resizeAutomaticLocals(2);
     const ProtoObject** slot = scope.getAutomaticLocals();
     try {
-        slot[0] = engine->invoke(&scope, f, nullptr, 0);
+        {
+            debug::NativeBoundary boundary(debug::Boundary::Captures);  // becomes a Failure
+            slot[0] = engine->invoke(&scope, f, nullptr, 0);
+        }
         slot[1] = engine->invoke(&scope, L.hooks.success, &slot[0], 1);
     } catch (const proto::ProtoException& t) {
         // A Scala `throw` from the block, a module's error or protoCore's: the

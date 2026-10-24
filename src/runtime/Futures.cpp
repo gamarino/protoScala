@@ -1,5 +1,6 @@
 #include "runtime/Futures.h"
 #include "runtime/ActorScheduler.h"
+#include "runtime/Debugger.h"
 #include "runtime/Errors.h"
 #include "runtime/ErrorFactory.h"
 #include "runtime/ExecutionEngine.h"
@@ -214,6 +215,7 @@ void runContinuations(proto::ProtoContext* ctx, const RuntimeLayout& L,
         const proto::ProtoObject* arg = tryOf(&scope, L, f);
         scope.returnValue = arg;
         try {
+            debug::NativeBoundary boundary(debug::Boundary::Reports);  // reported below
             callHook(&scope, list->getAt(&scope, static_cast<int>(i)), &arg, 1);
         } catch (const proto::ProtoException& e) {
             reportContinuationFailure(&scope, e);
@@ -236,6 +238,7 @@ void onComplete(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::P
             scope.returnValue = arg;
             ActorTurnPause pause;
             try {
+                debug::NativeBoundary boundary(debug::Boundary::Reports);  // reported below
                 callHook(&scope, fn, &arg, 1);
             } catch (const proto::ProtoException& e) {
                 reportContinuationFailure(&scope, e);

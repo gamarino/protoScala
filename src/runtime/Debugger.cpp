@@ -1,5 +1,7 @@
 #include "runtime/Debugger.h"
 
+#include "protoCore.h"
+
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -9,21 +11,79 @@
 namespace protoScala::debug {
 
 std::atomic<bool> gAttached{false};
+std::atomic<unsigned> gExceptionBreaks{0};
 
 namespace {
 
 std::atomic<Controller*> gController{nullptr};
 
-// Stepping: one request at a time, for the thread that was stopped.
-std::atomic<int> gStepMode{0};
-std::atomic<const void*> gStepThread{nullptr};
-std::atomic<unsigned> gStepDepth{0};
-// A stop any thread takes at its next new line ("entry", "pause"), or nullptr.
+// A stop the first thread to reach a new line takes ("entry"), or nullptr.
 std::atomic<const char*> gStopRequest{nullptr};
+
+// One OS thread that ran interpreted code while attached.
+struct ThreadInfo {
+    int id = 0;
+    std::string name;
+    std::atomic<const char*> pause{nullptr};  // a stop requested for this thread
+    std::string activity;                     // guarded by Threads::mu
+};
+
+struct Threads {
+    std::mutex mu;
+    std::map<int, std::shared_ptr<ThreadInfo>> live;
+    int nextId = 1;
+};
+
+Threads& threadTable() {
+    static Threads t;
+    return t;
+}
+
+// The calling thread's debugging state. Its destructor runs when the OS thread
+// ends and reports the thread's exit.
+struct ThreadSlot {
+    std::shared_ptr<ThreadInfo> info;
+    std::string pendingName;   // nameThread before registration
+    StepMode stepMode = StepMode::None;
+    unsigned stepDepth = 0;
+    // The exception reported last (alreadyReported). A ProtoException copy
+    // shares the original's pin, so the value stays alive while remembered.
+    std::unique_ptr<proto::ProtoException> reported;
+    const void* reportedError = nullptr;
+    // The innermost NativeBoundary on this thread.
+    bool boundaryOn = false;
+    Boundary boundaryKind = Boundary::None;
+    const FrameRecord* boundaryParent = nullptr;
+
+    ~ThreadSlot() {
+        // The space may be gone by now (the evaluator thread outlives its
+        // Session): never release a pin here. leaveFrame released it already
+        // unless the thread ended inside interpreted code.
+        (void)reported.release();
+        if (!info) return;
+        Threads& t = threadTable();
+        std::lock_guard<std::mutex> lk(t.mu);
+        t.live.erase(info->id);
+        if (Controller* c = gController.load(std::memory_order_acquire)) c->threadExited(info->id);
+    }
+};
 
 thread_local FrameRecord* tTop = nullptr;
 thread_local bool tSuppressed = false;
-thread_local char tToken;  // its address identifies the thread
+thread_local ThreadSlot tSlot;
+
+void registerThread() {
+    auto info = std::make_shared<ThreadInfo>();
+    Threads& t = threadTable();
+    std::lock_guard<std::mutex> lk(t.mu);
+    info->id = t.nextId++;
+    info->name = !tSlot.pendingName.empty() ? tSlot.pendingName
+                 : info->id == 1             ? std::string("main")
+                                             : "thread " + std::to_string(info->id);
+    t.live[info->id] = info;
+    tSlot.info = info;
+    if (Controller* c = gController.load(std::memory_order_acquire)) c->threadStarted(info->id);
+}
 
 struct Requested {
     int id;
@@ -111,13 +171,19 @@ void attach(Controller* c) {
 
 void detach() {
     gAttached.store(false, std::memory_order_release);
-    gController.store(nullptr, std::memory_order_release);
-    gStepMode.store(0);
+    gExceptionBreaks.store(0);
     gStopRequest.store(nullptr);
+    // Taken so that no thread is inside a threadStarted/threadExited call on
+    // the controller once this returns.
+    Threads& t = threadTable();
+    std::lock_guard<std::mutex> lk(t.mu);
+    gController.store(nullptr, std::memory_order_release);
+    for (auto& [id, info] : t.live) info->pause.store(nullptr);
 }
 
 void enterFrame(FrameRecord& r, const BytecodeModule& mod, proto::ProtoContext* ctx,
                 const proto::ProtoObject** slots) {
+    if (!tSlot.info) registerThread();
     r.parent = tTop;
     r.depth = tTop ? tTop->depth + 1 : 1;
     r.mod = &mod;
@@ -126,20 +192,25 @@ void enterFrame(FrameRecord& r, const BytecodeModule& mod, proto::ProtoContext* 
     r.slots = slots;
     r.pc = 0;
     r.line = -1;
+    r.boundary = tSlot.boundaryOn && tSlot.boundaryParent == tTop ? tSlot.boundaryKind
+                                                                   : Boundary::None;
     tTop = &r;
 }
 
 void leaveFrame(FrameRecord& r) {
     tTop = r.parent;
+    if (!tTop) {
+        // The thread left interpreted code: whatever it reported is settled.
+        tSlot.reported.reset();
+        tSlot.reportedError = nullptr;
+    }
     // The frame a step over or a step out started in returns: the step ends in
     // its caller, at the call site, rather than at the caller's next line --
     // which for `n * fact(n - 1)` would be after the multiplication and the
     // caller's own return. A prelude frame in between (List.map running a
     // lambda) has no line to show, so the mark goes to the nearest one that has.
-    const auto mode = static_cast<StepMode>(gStepMode.load(std::memory_order_relaxed));
-    if ((mode == StepMode::Over || mode == StepMode::Out) &&
-        gStepThread.load(std::memory_order_relaxed) == &tToken &&
-        r.depth <= gStepDepth.load(std::memory_order_relaxed)) {
+    const StepMode mode = tSlot.stepMode;
+    if ((mode == StepMode::Over || mode == StepMode::Out) && r.depth <= tSlot.stepDepth) {
         for (FrameRecord* p = r.parent; p; p = p->parent)
             if (p->src) {
                 p->line = -1;
@@ -153,11 +224,13 @@ void newLine(FrameRecord& r) {
     Controller* c = gController.load(std::memory_order_acquire);
     if (!c) return;
     const char* reason = nullptr;
-    if (gStopRequest.load(std::memory_order_relaxed)) reason = gStopRequest.exchange(nullptr);
+    ThreadInfo* self = tSlot.info.get();
+    if (self && self->pause.load(std::memory_order_relaxed)) reason = self->pause.exchange(nullptr);
+    if (!reason && gStopRequest.load(std::memory_order_relaxed)) reason = gStopRequest.exchange(nullptr);
     if (!reason) {
-        const auto mode = static_cast<StepMode>(gStepMode.load(std::memory_order_relaxed));
-        if (mode != StepMode::None && gStepThread.load(std::memory_order_relaxed) == &tToken) {
-            const unsigned depth = gStepDepth.load(std::memory_order_relaxed);
+        const StepMode mode = tSlot.stepMode;
+        if (mode != StepMode::None) {
+            const unsigned depth = tSlot.stepDepth;
             if (mode == StepMode::In || (mode == StepMode::Over && r.depth <= depth) ||
                 (mode == StepMode::Out && r.depth < depth))
                 reason = "step";
@@ -165,22 +238,131 @@ void newLine(FrameRecord& r) {
     }
     if (!reason && r.src->armedAt(r.line)) reason = "breakpoint";
     if (!reason) return;
-    gStepMode.store(0, std::memory_order_relaxed);
-    c->stopped(r, reason);
+    tSlot.stepMode = StepMode::None;
+    c->stopped(r, reason, self ? self->id : 0, nullptr);
 }
 
 void setStep(StepMode mode, const FrameRecord& top) {
-    gStepThread.store(&tToken, std::memory_order_relaxed);
-    gStepDepth.store(top.depth, std::memory_order_relaxed);
-    gStepMode.store(static_cast<int>(mode), std::memory_order_release);
+    tSlot.stepDepth = top.depth;
+    tSlot.stepMode = mode;
 }
 
 void requestStop(const char* reason) { gStopRequest.store(reason, std::memory_order_release); }
+
+bool requestPause(int threadId) {
+    Threads& t = threadTable();
+    std::lock_guard<std::mutex> lk(t.mu);
+    auto it = t.live.find(threadId);
+    if (it == t.live.end()) return false;
+    it->second->pause.store("pause", std::memory_order_release);
+    return true;
+}
 
 FrameRecord* currentFrame() { return tTop; }
 
 Suppress::Suppress() : saved_(tSuppressed) { tSuppressed = true; }
 Suppress::~Suppress() { tSuppressed = saved_; }
+
+// --- Exceptions --------------------------------------------------------------
+
+void setExceptionBreaks(unsigned mask) { gExceptionBreaks.store(mask, std::memory_order_release); }
+
+bool suppressed() { return tSuppressed; }
+
+bool alreadyReported(const proto::ProtoObject* value, const void* error) {
+    if (error && error == tSlot.reportedError) return true;
+    return value && tSlot.reported && tSlot.reported->value() == value;
+}
+
+void markReported(proto::ProtoContext* ctx, const proto::ProtoObject* value, const void* error) {
+    tSlot.reportedError = error;
+    tSlot.reported.reset();
+    if (value) tSlot.reported = std::make_unique<proto::ProtoException>(ctx, value);
+}
+
+void noteMaterialised(proto::ProtoContext* ctx, const void* error, const proto::ProtoObject* value) {
+    if (!error || error != tSlot.reportedError) return;
+    markReported(ctx, value, nullptr);
+}
+
+void stopForException(FrameRecord& top, const ExceptionStop& ex) {
+    Controller* c = gController.load(std::memory_order_acquire);
+    if (!c || tSuppressed) return;
+    tSlot.stepMode = StepMode::None;  // the stop ends a step in progress
+    c->stopped(top, "exception", tSlot.info ? tSlot.info->id : 0, &ex);
+}
+
+NativeBoundary::NativeBoundary(Boundary kind) {
+    if (!attached()) return;
+    active_ = true;
+    savedOn_ = tSlot.boundaryOn;
+    savedKind_ = tSlot.boundaryKind;
+    savedParent_ = tSlot.boundaryParent;
+    tSlot.boundaryOn = true;
+    tSlot.boundaryKind = kind;
+    tSlot.boundaryParent = tTop;
+}
+
+NativeBoundary::~NativeBoundary() {
+    if (!active_) return;
+    tSlot.boundaryOn = savedOn_;
+    tSlot.boundaryKind = savedKind_;
+    tSlot.boundaryParent = savedParent_;
+}
+
+// --- Threads -------------------------------------------------------------------
+
+void nameThread(const std::string& name) {
+    if (!attached()) return;
+    if (!tSlot.info) {
+        tSlot.pendingName = name;
+        return;
+    }
+    Threads& t = threadTable();
+    std::lock_guard<std::mutex> lk(t.mu);
+    tSlot.info->name = name;
+}
+
+Activity::~Activity() {
+    if (!set_ || !tSlot.info) return;
+    Threads& t = threadTable();
+    std::lock_guard<std::mutex> lk(t.mu);
+    tSlot.info->activity.clear();
+}
+
+void Activity::set(const std::string& text) {
+    if (!attached()) return;
+    if (!tSlot.info) registerThread();
+    set_ = true;
+    Threads& t = threadTable();
+    std::lock_guard<std::mutex> lk(t.mu);
+    tSlot.info->activity = text;
+}
+
+std::string currentLocation() {
+    for (const FrameRecord* r = tTop; r; r = r->parent) {
+        if (!r->src) continue;
+        const std::string& path = r->src->path;
+        const auto slash = path.find_last_of("/\\");
+        return (slash == std::string::npos ? path : path.substr(slash + 1)) + ":" +
+               std::to_string(r->line);
+    }
+    return std::string();
+}
+
+int currentThreadId() { return tSlot.info ? tSlot.info->id : 0; }
+
+std::vector<ThreadView> threads() {
+    std::vector<ThreadView> out;
+    Threads& t = threadTable();
+    std::lock_guard<std::mutex> lk(t.mu);
+    for (const auto& [id, info] : t.live)
+        out.push_back({id, info->activity.empty() ? info->name
+                                                  : info->name + " (" + info->activity + ")"});
+    return out;
+}
+
+// --- Sources and breakpoints -----------------------------------------------------
 
 void registerModule(const BytecodeModule& mod, const std::string& path) {
     if (!attached() || path.empty() || path.front() == '<') return;

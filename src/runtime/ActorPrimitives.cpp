@@ -5,6 +5,7 @@
  */
 #include "compiler/GlobalTable.h"
 #include "runtime/ActorScheduler.h"
+#include "runtime/Debugger.h"
 #include "runtime/Errors.h"
 #include "runtime/ErrorFactory.h"
 #include "runtime/FutureYield.h"
@@ -234,6 +235,7 @@ PRIM(cont_map) {
         futures::complete(ctx, L, derived, futures::errorOf(ctx, L, source), true);
     else
         try {
+            debug::NativeBoundary boundary(debug::Boundary::Captures);  // into `derived`
             const ProtoObject* v = futures::valueOf(ctx, L, source);
             const ProtoObject* r = activeCallContext()->engine->invoke(ctx, body, &v, 1);
             futures::complete(ctx, L, derived, r, false);
@@ -269,6 +271,7 @@ PRIM(cont_flatMap) {
         return L.unit;
     }
     try {
+        debug::NativeBoundary boundary(debug::Boundary::Captures);  // into `derived`
         const ProtoObject* v = futures::valueOf(ctx, L, source);
         const ProtoObject* inner = activeCallContext()->engine->invoke(ctx, body, &v, 1);
         proto::ProtoContext scope(ctx->space, ctx);
@@ -299,6 +302,7 @@ PRIM(cont_recover) {
         return L.unit;
     }
     try {
+        debug::NativeBoundary boundary(debug::Boundary::Captures);  // into `derived`
         const ProtoObject* e = futures::errorOf(ctx, L, source);
         const ProtoObject* r = activeCallContext()->engine->invoke(ctx, body, &e, 1);
         futures::complete(ctx, L, derived, r, false);
@@ -348,7 +352,12 @@ PRIM(future_onComplete) {
 PRIM(futureBody_handler) {
     const RuntimeLayout& L = layoutOf();
     const ProtoObject* state = args && args->getSize(ctx) > 0 ? args->getAt(ctx, 0) : L.unit;
-    const ProtoObject* r = activeCallContext()->engine->invoke(ctx, self, nullptr, 0);
+    const ProtoObject* r;
+    {
+        // The body's exception fails the future: the program may still handle it.
+        debug::NativeBoundary boundary(debug::Boundary::Captures);
+        r = activeCallContext()->engine->invoke(ctx, self, nullptr, 0);
+    }
     proto::ProtoContext scope(ctx->space, ctx);
     scope.returnValue = r;
     const ProtoObject* pair = makeTuple2(&scope, L, state, r);
@@ -368,7 +377,7 @@ PRIM(futureObject_apply) {
     proto::ProtoContext scope(ctx->space, ctx);
     const ProtoObject* handler = scope.fromMethod(const_cast<ProtoObject*>(body), &futureBody_handler);
     scope.returnValue = handler;
-    const ProtoObject* actor = s.spawn(&scope, handler, L.unit);
+    const ProtoObject* actor = s.spawn(&scope, handler, L.unit, "future");
     scope.returnValue = actor;
     return sendEnvelope(&scope, L, actor, L.unit, Band::Medium, /*wantsReply=*/true);
 }
@@ -418,6 +427,10 @@ const ProtoObject* threadEntry(ProtoContext* ctx, const ProtoObject*, const prot
     if (!engine || !layout) return PROTO_NONE;
     ExecutionEngine::ActiveCallGuard guard(engine, layout);
     const RuntimeLayout& L = *layout;
+    if (debug::attached()) {
+        static std::atomic<unsigned> started{0};
+        debug::nameThread("Thread-" + std::to_string(++started));
+    }
     try {
         const ProtoObject* body = handle->getOwnAttributeDirect(ctx, L.bodyKey);
         engine->invoke(ctx, body, nullptr, 0);

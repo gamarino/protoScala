@@ -4,6 +4,7 @@
 #include "runtime/ExecutionEngine.h"
 #include "runtime/FutureYield.h"
 #include "runtime/Futures.h"
+#include "runtime/Debugger.h"
 #include "runtime/Mailbox.h"
 #include "runtime/Values.h"
 #include "protoCore.h"
@@ -140,7 +141,8 @@ ActorState* ActorScheduler::stateOf(proto::ProtoContext* ctx, const proto::Proto
 
 const proto::ProtoObject* ActorScheduler::spawn(proto::ProtoContext* ctx,
                                                 const proto::ProtoObject* handler,
-                                                const proto::ProtoObject* initialState) {
+                                                const proto::ProtoObject* initialState,
+                                                const char* kind) {
     const RuntimeLayout& L = *layout_;
     proto::ProtoContext scope(ctx->space, ctx);
     auto* actor = const_cast<proto::ProtoObject*>(L.actorProto->newChild(&scope, /*isMutable=*/true));
@@ -158,6 +160,12 @@ const proto::ProtoObject* ActorScheduler::spawn(proto::ProtoContext* ctx,
         st = owners_.back().get();
     }
     st->actor = actor;
+    if (debug::attached()) {
+        static std::atomic<unsigned> spawned{0};
+        st->debugName = std::string(kind) + "#" + std::to_string(++spawned);
+        const std::string at = debug::currentLocation();
+        if (!at.empty()) st->debugName += " at " + at;
+    }
     actor->setAttribute(&scope, L.stateRefKey,
                         scope.fromInteger(static_cast<long long>(reinterpret_cast<std::intptr_t>(st))));
     // Anchor before returning: from here the GC reaches the actor, its
@@ -325,6 +333,8 @@ void ActorScheduler::deliver(proto::ProtoContext* ctx, ActorState* a,
     const proto::ProtoObject* fut = envelope->getOwnAttributeDirect(&call, L.futureKey);
     slot[3] = fut ? fut : PROTO_NONE;
     setCurrentActor(actor);
+    debug::Activity activity;
+    if (debug::attached()) activity.set(a->debugName);
     try {
         const proto::ProtoObject* r = engine_->invoke(&call, slot[0], slot + 1, 2);
         call.returnValue = r;
@@ -406,6 +416,8 @@ void ActorScheduler::resumeSuspendedTurn(proto::ProtoContext* ctx, ActorState* a
         injected = futures::valueOf(&turn, L, slot[1]);
     }
     setCurrentActor(actor);
+    debug::Activity activity;
+    if (debug::attached()) activity.set(a->debugName);
     bool yielded = false;
     try {
         const proto::ProtoObject* r = engine_->resumeFrames(&turn, slot[0]->asList(&turn), 0,
@@ -563,6 +575,10 @@ bool ActorScheduler::drainOne(proto::ProtoContext* ctx) {
 void ActorScheduler::workerLoop(proto::ProtoContext* ctx) {
     ExecutionEngine::ActiveCallGuard active(engine_, layout_);
     tl_workerOf = this;
+    if (debug::attached()) {
+        static std::atomic<unsigned> workers{0};
+        debug::nameThread("actor worker " + std::to_string(++workers));
+    }
     for (;;) {
         while (drainOne(ctx)) {}
         if (shuttingDown_.load(std::memory_order_acquire)) {

@@ -4,8 +4,16 @@
  * Off unless `protoscala --dap` attached a Controller: then every interpreted
  * frame (ExecutionEngine::runLoop) keeps a FrameRecord on a per-thread chain
  * and reports each instruction; the first instruction of a new source line is
- * checked against the breakpoints and the stepping state, and a match hands the
- * thread to the controller, which parks it until the client resumes.
+ * checked against the breakpoints and the thread's stepping state, and a match
+ * hands the thread to the controller, which parks THAT thread until the client
+ * resumes it. Other threads keep running.
+ *
+ * Every OS thread that runs interpreted code while attached is registered with
+ * a stable id and a name (the evaluator thread is "main", a Thread.start body
+ * "Thread-N", an actor worker "actor worker N"; what an actor worker runs right
+ * now is its activity). A raised language exception is reported through
+ * exceptionRaised (ExecutionEngine), which stops when the exception filters ask
+ * for it.
  *
  * Cost when detached: one well-predicted branch per frame entry. The per-
  * instruction check is only compiled into frames that started while attached.
@@ -44,6 +52,15 @@ struct Source {
     }
 };
 
+// What the native code that called a frame does with an exception that leaves
+// it (NativeBoundary below).
+enum class Boundary : std::uint8_t {
+    None,      // called by the interpreter, or by a native that lets it pass
+    Captures,  // Try, a Future body, a map/flatMap/recover callback: the value
+               // becomes a Failure the program may still handle
+    Reports,   // a top level that reports and drops it (a future continuation)
+};
+
 // One running interpreted frame. Lives on runLoop's C++ stack.
 struct FrameRecord {
     FrameRecord* parent = nullptr;     // the caller's record on this thread
@@ -54,17 +71,28 @@ struct FrameRecord {
     const proto::ProtoObject** slots = nullptr;  // parameters, locals, captures
     std::size_t pc = 0;                // the instruction being executed
     int line = -1;                     // its source line
+    Boundary boundary = Boundary::None;  // how native code called this frame
 };
 
 enum class StepMode : int { None = 0, In = 1, Over = 2, Out = 3 };
+
+// An exception stop, as the client is told about it (DAP exceptionInfo).
+struct ExceptionStop {
+    std::string typeName;     // the exception's class, `ArithmeticException`
+    std::string message;      // its message (may be empty)
+    std::string description;  // what the stop says, `ArithmeticException: / by zero`
+    const char* breakMode;    // "always" (the raised filter) or "userUnhandled"
+};
 
 // The receiver of stops: the DAP server.
 class Controller {
 public:
     virtual ~Controller() = default;
     // Called on the stopped thread, inside the interpreter; returns when the
-    // thread may continue. `reason` is a DAP stop reason.
-    virtual void stopped(FrameRecord& top, const char* reason) = 0;
+    // thread may continue. `reason` is a DAP stop reason; `ex` is set for
+    // "exception". `threadId` is the calling thread's id.
+    virtual void stopped(FrameRecord& top, const char* reason, int threadId,
+                         const ExceptionStop* ex) = 0;
     // A source was registered and the breakpoints asked for it were resolved
     // (called on the thread that compiled it).
     struct Breakpoint {
@@ -73,6 +101,10 @@ public:
         bool verified;   // false: no code on or after the requested line
     };
     virtual void breakpointsResolved(const std::vector<Breakpoint>& bps) = 0;
+    // A thread ran interpreted code for the first time / ended (called on that
+    // thread, in order).
+    virtual void threadStarted(int threadId) = 0;
+    virtual void threadExited(int threadId) = 0;
 };
 
 // --- Attaching (any thread, before the debuggee starts) -------------------
@@ -96,6 +128,78 @@ inline void atInstruction(FrameRecord& r, std::size_t pc) {
     newLine(r);
 }
 
+// --- Exceptions ------------------------------------------------------------
+// The exception filters the client enabled (setExceptionBreakpoints).
+enum : unsigned { kBreakRaised = 1u, kBreakUncaught = 2u };
+void setExceptionBreaks(unsigned mask);
+extern std::atomic<unsigned> gExceptionBreaks;
+inline unsigned exceptionBreaks() { return gExceptionBreaks.load(std::memory_order_relaxed); }
+// True inside Suppress: the debugger's own evaluations never stop.
+bool suppressed();
+// One exception is reported once, however many frames it passes through and
+// however often a handler re-raises it. `value` identifies a language value
+// (pinned while it is remembered, so its address cannot be reused), `error` a
+// native ScalaError not materialised yet. Both are per thread, and forgotten
+// when the thread leaves its outermost frame or reports another exception.
+// The `error` a native ScalaError is reported under: between its report and
+// the handler that materialises it, nothing else runs on the thread.
+inline constexpr char kNativeErrorTag = 0;
+inline constexpr const void* kNativeError = &kNativeErrorTag;
+bool alreadyReported(const proto::ProtoObject* value, const void* error);
+void markReported(proto::ProtoContext* ctx, const proto::ProtoObject* value, const void* error);
+// A handler materialised the native error `error` into `value`: if `error`
+// was reported, so is `value` (its RETHROW is the same exception).
+void noteMaterialised(proto::ProtoContext* ctx, const void* error, const proto::ProtoObject* value);
+// Hands the calling thread to the controller for an exception stop at `top`.
+void stopForException(FrameRecord& top, const ExceptionStop& ex);
+
+// While alive on a native's C++ stack, the frames the native calls are marked
+// with `kind` (FrameRecord::boundary): the uncaught-exception filter stops its
+// search for a handler there. No-op while detached.
+class NativeBoundary {
+public:
+    explicit NativeBoundary(Boundary kind);
+    ~NativeBoundary();
+    NativeBoundary(const NativeBoundary&) = delete;
+    NativeBoundary& operator=(const NativeBoundary&) = delete;
+
+private:
+    bool active_ = false;
+    Boundary savedKind_ = Boundary::None;
+    const FrameRecord* savedParent_ = nullptr;
+    bool savedOn_ = false;
+};
+
+// --- Threads ---------------------------------------------------------------
+// The name the calling thread is registered under when it first runs
+// interpreted code ("main", "Thread-3"). Only before that point; no-op while
+// detached.
+void nameThread(const std::string& name);
+// While alive, what the calling thread is running, shown after its name
+// ("actor#2 at x.scala:7"). Set only while attached.
+class Activity {
+public:
+    Activity() = default;
+    ~Activity();
+    void set(const std::string& text);
+    Activity(const Activity&) = delete;
+    Activity& operator=(const Activity&) = delete;
+
+private:
+    bool set_ = false;
+};
+// `x.scala:7`: the innermost source line the calling thread is running, or
+// "" when it runs none (detached, or only the prelude).
+std::string currentLocation();
+// The calling thread's id, 0 when it has not run interpreted code yet.
+int currentThreadId();
+struct ThreadView {
+    int id;
+    std::string name;
+};
+// The registered threads that are still alive, by id.
+std::vector<ThreadView> threads();
+
 // --- The session's side ----------------------------------------------------
 // Registers `mod` and its blocks as compiled from `path` and arms the
 // breakpoints the client set on that file. No-op while detached.
@@ -108,11 +212,13 @@ void registerModule(const BytecodeModule& mod, const std::string& path);
 std::vector<Controller::Breakpoint> setBreakpoints(const std::string& path,
                                                    const std::vector<int>& lines);
 // The stepping request for the CALLING thread (the stopped one), relative to
-// the frame `top` it is stopped in.
+// the frame `top` it is stopped in. Other threads are not affected.
 void setStep(StepMode mode, const FrameRecord& top);
-// Stops the first thread that reaches a new line ("entry" for stopOnEntry,
-// "pause" for a pause request).
+// Stops the first thread that reaches a new line ("entry" for stopOnEntry).
 void requestStop(const char* reason);
+// Stops thread `threadId` at its next new line ("pause"). False when no such
+// thread is alive.
+bool requestPause(int threadId);
 // The innermost record of the calling thread.
 FrameRecord* currentFrame();
 // While alive, the calling thread runs without stopping (the debugger's own

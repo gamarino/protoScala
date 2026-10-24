@@ -239,6 +239,30 @@ public:
     // or nullptr. Set only while a debugger is attached.
     const void* debugSource() const { return debugSource_; }
     void setDebugSource(const void* s) const { debugSource_ = s; }
+    // What a `catch` cascade selects, as the debugger's "uncaught exception"
+    // filter needs it without running the cascade: every value (`case e:
+    // Throwable`, `case _`), the classes named by `case e: C` patterns (by
+    // marker key; `orForeign`: `Exception`, which also selects any thrown value
+    // that is not a Scala Throwable), or `unknown` (a guard, an extractor such
+    // as NonFatal(e), a literal: only running the code would tell). Keyed by
+    // the cascade's first pc (Handler::handlerPc). A module with no entry for a
+    // Catch handler (the prelude image) is `unknown`.
+    struct CatchFilter {
+        struct Key {
+            std::string key;
+            bool orForeign = false;
+        };
+        bool all = false;
+        bool unknown = false;
+        std::vector<Key> keys;
+    };
+    void setCatchFilter(std::size_t handlerPc, CatchFilter f) {
+        catchFilters_[handlerPc] = std::move(f);
+    }
+    const CatchFilter* catchFilter(std::size_t handlerPc) const {
+        auto it = catchFilters_.find(handlerPc);
+        return it == catchFilters_.end() ? nullptr : &it->second;
+    }
 
     void addCapture(int parentSlot, int localSlot) { captures_.push_back({parentSlot, localSlot}); }
     const std::vector<CaptureSpec>& captureSpecs() const { return captures_; }
@@ -288,6 +312,7 @@ private:
     std::vector<std::string> slotNames_;
     std::vector<bool> slotBoxed_;
     mutable const void* debugSource_ = nullptr;
+    std::unordered_map<std::size_t, CatchFilter> catchFilters_;
 };
 
 } // namespace protoScala

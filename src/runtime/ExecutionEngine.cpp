@@ -4,6 +4,7 @@
 #include "compiler/GlobalTable.h"
 #include "compiler/BytecodeModule.h"
 #include "runtime/Debugger.h"
+#include "runtime/ErrorFactory.h"
 #include "runtime/Errors.h"
 #include "runtime/FutureYield.h"
 #include "runtime/StackGuard.h"
@@ -1068,6 +1069,7 @@ const proto::ProtoObject* ExecutionEngine::runFrame(proto::ProtoContext& frame,
             if (h) {
                 const proto::ProtoObject* v = materialiseError(&frame, e);
                 frame.returnValue = v;   // rooted until enterHandler stores it in a slot
+                if (debug::attached()) debug::noteMaterialised(&frame, debug::kNativeError, v);
                 sp = enterHandler(mod, slots, *h, v, &ip);
                 continue;
             }
@@ -1119,6 +1121,11 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
         debug::FrameRecord* r;
         ~DbgLeave() { if (r) debug::leaveFrame(*r); }
     } dbgLeave{dbgOn ? &dbgFrame : nullptr};
+    // What the debugger's exception filters are told (debugRaised): set by the
+    // clauses below for the first VM frame a C++ exception passes through.
+    bool dbgFresh = false;
+    const proto::ProtoObject* dbgValue = nullptr;
+    std::string dbgClass, dbgMessage;
     try {
         for (;;) {
             if (dbgOn)
@@ -1493,6 +1500,10 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
     } catch (ScalaThrow& t) {
         // A Scala exception value: runFrame searches this module's handler table.
         *faultPc = static_cast<std::size_t>(ip - code) - 1;
+        if (dbgOn && t.line == 0) {
+            dbgFresh = true;
+            dbgValue = t.value();
+        }
         if (t.line == 0) t.line = mod.lineAt(*faultPc);
         passOn = std::current_exception();
     } catch (const proto::ProtoException& e) {
@@ -1504,6 +1515,12 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
         // report shape). Anything foreign passes through as the same C++ object
         // (protoCore rule E3), and an uncaught one is reported without a line.
         *faultPc = static_cast<std::size_t>(ip - code) - 1;
+        if (dbgOn) {
+            // A foreign one passes through every frame unchanged: the debugger
+            // tells it from the next by its value (debug::alreadyReported).
+            dbgFresh = true;
+            dbgValue = e.value();
+        }
         if (typeid(e) == typeid(proto::ProtoException) && isScalaInstance(&frame, L, e.value())) {
             ScalaThrow t(&frame, e.value());
             t.line = mod.lineAt(*faultPc);
@@ -1513,6 +1530,11 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
         }
     } catch (ScalaError& e) {
         *faultPc = static_cast<std::size_t>(ip - code) - 1;
+        if (dbgOn && e.line == 0) {
+            dbgFresh = true;
+            dbgClass = e.className();
+            dbgMessage = e.message();
+        }
         if (e.line == 0) e.line = mod.lineAt(*faultPc);
         passOn = std::current_exception();
     } catch (const std::invalid_argument& e) {
@@ -1527,24 +1549,44 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
         *faultPc = static_cast<std::size_t>(ip - code) - 1;
         ScalaError se("IllegalArgumentException", e.what());
         se.line = mod.lineAt(*faultPc);
+        if (dbgOn) {
+            dbgFresh = true;
+            dbgClass = se.className();
+            dbgMessage = se.message();
+        }
         passOn = std::make_exception_ptr(se);
     } catch (const std::out_of_range& e) {
         // Also a std::logic_error subclass: caught by its exact type, as above.
         *faultPc = static_cast<std::size_t>(ip - code) - 1;
         ScalaError se("IndexOutOfBoundsException", e.what());
         se.line = mod.lineAt(*faultPc);
+        if (dbgOn) {
+            dbgFresh = true;
+            dbgClass = se.className();
+            dbgMessage = se.message();
+        }
         passOn = std::make_exception_ptr(se);
     } catch (const std::overflow_error& e) {
         // Derives from std::runtime_error, so it must precede that clause.
         *faultPc = static_cast<std::size_t>(ip - code) - 1;
         ScalaError se("ArithmeticException", e.what());
         se.line = mod.lineAt(*faultPc);
+        if (dbgOn) {
+            dbgFresh = true;
+            dbgClass = se.className();
+            dbgMessage = se.message();
+        }
         passOn = std::make_exception_ptr(se);
     } catch (const std::bad_alloc& e) {
         // An Error, not an Exception: `case e: Exception` must not catch it.
         *faultPc = static_cast<std::size_t>(ip - code) - 1;
         ScalaError se("OutOfMemoryError", e.what());
         se.line = mod.lineAt(*faultPc);
+        if (dbgOn) {
+            dbgFresh = true;
+            dbgClass = se.className();
+            dbgMessage = se.message();
+        }
         passOn = std::make_exception_ptr(se);
     } catch (const std::runtime_error& e) {
         // A C++ runtime error from a native or a module (e.g. the geometry
@@ -1553,9 +1595,145 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
         *faultPc = static_cast<std::size_t>(ip - code) - 1;
         ScalaError se("RuntimeException", e.what());
         se.line = mod.lineAt(*faultPc);
+        if (dbgOn) {
+            dbgFresh = true;
+            dbgClass = se.className();
+            dbgMessage = se.message();
+        }
         passOn = std::make_exception_ptr(se);
     }
+    // After the catch clause, while this frame and its callers are intact: a
+    // stop here shows the faulting line with its locals.
+    if (dbgFresh && debug::exceptionBreaks() != 0 && !debug::suppressed())
+        debugRaised(frame, dbgFrame, dbgValue, dbgClass, dbgMessage);
     std::rethrow_exception(passOn);
+}
+
+// --- The debugger's exception filters (Debugger.h, docs/debugging.md) --------
+//
+// Called after runLoop's catch clause, for the first VM frame a C++ exception
+// passes through, so the faulting frame and every caller are intact: a stop
+// here shows the faulting line, its locals and evaluate. It is reached once per
+// exception: later frames see a ScalaThrow/ScalaError whose line is set, and a
+// value already reported (a RETHROW, `throw e` of a caught e, a foreign
+// exception passing through unchanged) is recognised by debug::alreadyReported.
+//
+// The "uncaught" filter searches the handler tables of this thread's frames,
+// innermost first, with each frame's current pc and the catch cascade's summary
+// (BytecodeModule::CatchFilter). The search ends at a native boundary
+// (debug::NativeBoundary): one that captures the exception (Try, a Future body)
+// counts as caught -- the program may still look at the Failure -- and one that
+// only reports it (a future continuation) as uncaught, like the thread's top.
+// A native that lets an exception pass unchanged is transparent.
+//
+// Exceptions the prelude raises and catches itself, before any frame with a
+// source line sees them, are internal: they never stop.
+void ExecutionEngine::debugRaised(proto::ProtoContext& frame, debug::FrameRecord& rec,
+                                  const proto::ProtoObject* value, const std::string& className,
+                                  const std::string& message) {
+    if (value && debug::alreadyReported(value, nullptr)) return;
+    debug::FrameRecord* top = &rec;
+    while (top && !top->src) top = top->parent;
+    if (!top) return;  // no frame with a source line on this thread
+    const unsigned breaks = debug::exceptionBreaks();
+    const RuntimeLayout& L = layout_;
+    proto::ProtoContext scope(frame.space, &frame);
+    scope.resizeAutomaticLocals(2);
+    const proto::ProtoObject** held = scope.getAutomaticLocals();
+    held[0] = value;  // the value in flight (pinned by its exception already)
+
+    enum class Fate { Caught, MaybeCaught, Uncaught };
+    Fate fate = Fate::Uncaught;
+    bool internal = false;
+    if ((breaks & debug::kBreakUncaught) || top != &rec) {
+        debug::Suppress quiet;  // what the search runs never stops
+        // The value the type tests look at: a native error is materialised for
+        // them (it is not the instance a handler will build). An error raised
+        // because memory or the stack ran out is not: that could fail again.
+        bool triedValue = false;
+        auto testValue = [&]() -> const proto::ProtoObject* {
+            if (held[0] || triedValue) return held[0] ? held[0] : held[1];
+            triedValue = true;
+            if (className == "OutOfMemoryError" || className == "StackOverflowError") return nullptr;
+            try {
+                held[1] = materialiseError(&scope, ScalaError(className, message));
+            } catch (...) {
+                held[1] = nullptr;
+            }
+            return held[1];
+        };
+        auto catches = [&](const debug::FrameRecord& r) -> bool {
+            for (const BytecodeModule::Handler& h : r.mod->handlers()) {
+                if (r.pc < h.startPc || r.pc >= h.endPc) continue;
+                if (h.kind != BytecodeModule::HandlerKind::Catch) continue;  // a finally re-raises
+                const BytecodeModule::CatchFilter* f = r.mod->catchFilter(h.handlerPc);
+                if (!f || f->all || f->unknown) return true;
+                const proto::ProtoObject* v = testValue();
+                if (!v) return true;  // cannot tell: assume it is caught
+                const auto* throwable = proto::ProtoString::createSymbol(&scope, kThrowableKey);
+                for (const BytecodeModule::CatchFilter::Key& k : f->keys) {
+                    const auto* key = proto::ProtoString::createSymbol(&scope, k.key.c_str());
+                    if (ops::testProtoKey(&scope, key, v)) return true;
+                    if (k.orForeign && !ops::testProtoKey(&scope, throwable, v)) return true;
+                }
+            }
+            return false;
+        };
+        try {
+            for (debug::FrameRecord* r = &rec; r; r = r->parent) {
+                if (catches(*r)) {
+                    fate = Fate::Caught;
+                    internal = r->depth > top->depth;
+                    break;
+                }
+                if (r->boundary == debug::Boundary::Captures) {
+                    fate = Fate::MaybeCaught;
+                    internal = r->depth > top->depth;
+                    break;
+                }
+                if (r->boundary == debug::Boundary::Reports) break;
+            }
+        } catch (...) {
+            fate = Fate::MaybeCaught;  // the search itself failed: do not claim "uncaught"
+        }
+    }
+    if (internal) return;
+    const bool raised = (breaks & debug::kBreakRaised) != 0;
+    const bool uncaught = (breaks & debug::kBreakUncaught) != 0 && fate == Fate::Uncaught;
+    if (!raised && !uncaught) return;
+
+    debug::ExceptionStop ex;
+    ex.breakMode = uncaught ? "userUnhandled" : "always";
+    if (value) {
+        debug::Suppress quiet;
+        const std::string text = describeThrown(&scope, value);
+        std::string type;
+        if (isScalaInstance(&scope, L, value)) {
+            const proto::ProtoObject* n = value->getAttribute(&scope, L.nameKey);
+            if (proto::ProtoObject::isStringTagFast(n))
+                type = reinterpret_cast<const proto::ProtoString*>(n)->toStdString(&scope);
+        }
+        if (type.empty()) type = text.substr(0, text.find(": "));
+        ex.typeName = type;
+        ex.message = text.rfind(type + ": ", 0) == 0 ? text.substr(type.size() + 2)
+                     : text == type                   ? std::string()
+                                                      : text;
+        ex.description = text;
+    } else {
+        ex.typeName = className;
+        ex.message = message;
+        ex.description = message.empty() ? className : className + ": " + message;
+    }
+    // Where it came from, when that is not a `throw` on the line shown.
+    if (top != &rec) {
+        ex.description += " (raised in " + rec.mod->name() + ", called from this line)";
+    } else {
+        const Op op = static_cast<Op>(rec.mod->code()[rec.pc] & 0xFF);
+        if (op != Op::THROW && op != Op::RETHROW)
+            ex.description += " (raised by the runtime on this line)";
+    }
+    debug::markReported(&scope, value, value ? nullptr : debug::kNativeError);
+    debug::stopForException(*top, ex);
 }
 
 const proto::ProtoObject* ExecutionEngine::slowBinary(proto::ProtoContext* ctx, Op op,
