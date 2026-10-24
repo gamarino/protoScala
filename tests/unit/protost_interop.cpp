@@ -129,8 +129,8 @@ TEST(ProtoSTInterop, BothProvidersAreReachableInOneProcess) {
               "Counter >> value ^ value.\n");
     ::setenv("STPATH", ".", 1);
 
-    protoST::STRuntime st;        // registers provider:st in the process registry
-    protoScala::Session session;  // registers provider:scala in the same registry
+    protoScala::Session session;          // registers provider:scala in the process registry
+    protoST::STRuntime st(session.space());  // a guest in protoScala's space; registers provider:st
 
     auto& reg = proto::ProviderRegistry::instance();
     EXPECT_NE(reg.getProviderForSpec("provider:st"), nullptr)
@@ -159,8 +159,8 @@ TEST(ProtoSTInterop, TheProviderAnswersCallersInEitherProtoSpace) {
               "Counter >> value ^ value.\n");
     ::setenv("STPATH", ".", 1);
 
-    protoST::STRuntime st;
     protoScala::Session session;
+    protoST::STRuntime st(session.space());
 
     proto::ModuleProvider* stProvider =
         proto::ProviderRegistry::instance().getProviderForSpec("provider:st");
@@ -227,8 +227,8 @@ TEST(ProtoSTInterop, AForeignValueIsTheSameObjectOnBothSides) {
               "Counter >> value ^ value.\n");
     ::setenv("STPATH", ".", 1);
 
-    protoST::STRuntime st;
     protoScala::Session session;
+    protoST::STRuntime st(session.space());
 
     proto::ModuleProvider* stProvider =
         proto::ProviderRegistry::instance().getProviderForSpec("provider:st");
@@ -263,8 +263,12 @@ TEST(ProtoSTInterop, AForeignValueIsTheSameObjectOnBothSides) {
                 (const void*)fromST, static_cast<unsigned long long>(fromST->getHash(&stCtx)));
     std::fflush(stdout);
 
-    // Two distinct object spaces...
-    EXPECT_NE((const void*)&session.space(), (const void*)st.space());
+    // One object space for both runtimes (protoST is a guest in protoScala's)...
+    EXPECT_EQ((const void*)&session.space(), (const void*)st.space());
+#if defined(PROTOCORE_HAS_LIVE_SPACE_COUNT)
+    EXPECT_EQ(proto::ProtoSpace::liveSpaceCount(), 1u)
+        << "the process holds more than one ProtoSpace";
+#endif
     // ...one object.
     EXPECT_EQ(fromScala, fromST)
         << "the class protoScala sees is not the cell protoST holds: something "
@@ -294,8 +298,8 @@ TEST(ProtoSTInterop, AForeignObjectsStateIsReadThroughTheCallersContext) {
               "Counter >> value ^ value.\n");
     ::setenv("STPATH", ".", 1);
 
-    protoST::STRuntime st;
     protoScala::Session session;
+    protoST::STRuntime st(session.space());
 
     proto::ModuleProvider* stProvider =
         proto::ProviderRegistry::instance().getProviderForSpec("provider:st");
@@ -348,8 +352,8 @@ TEST(ProtoSTInterop, AForeignValueSurvivesACollectionOnBothSides) {
               "Counter >> value ^ value.\n");
     ::setenv("STPATH", ".", 1);
 
-    protoST::STRuntime st;
     protoScala::Session session;
+    protoST::STRuntime st(session.space());
 
     proto::ModuleProvider* stProvider =
         proto::ProviderRegistry::instance().getProviderForSpec("provider:st");
@@ -411,37 +415,74 @@ TEST(ProtoSTInterop, AForeignValueSurvivesACollectionOnBothSides) {
     EXPECT_EQ(name->asString(&stCtx)->toStdString(&stCtx), "Counter");
 }
 
-// A cross-runtime import must not be silently served from a thread that may not
-// allocate on protoST's root context (D26). It is refused, with a message.
-TEST(ProtoSTInterop, ACrossRuntimeImportFromAnotherThreadIsRefused) {
+// One space: protoST is a guest in protoScala's space, so a protoCore thread of
+// that space imports a protoST module through its own context, as protoST's own
+// threads do. (In a process with two spaces such an import from another thread
+// is refused, because it would have to allocate on protoST's root context; that
+// case is protoST's own test, test_cross_runtime_provider.cpp.)
+namespace {
+struct ThreadImport {
+    proto::ModuleProvider* provider = nullptr;
+    const proto::ProtoObject* counter = nullptr;  // the send test's receiver
+    bool served = false;
+    std::string message;
+};
+ThreadImport* g_threadImport = nullptr;
+
+const proto::ProtoObject* importOnThread(proto::ProtoContext* ctx, const proto::ProtoObject*,
+                                         const proto::ParentLink*, const proto::ProtoArguments*,
+                                         const proto::ProtoKeywordArguments*) {
+    try {
+        const proto::ProtoObject* m = g_threadImport->provider->tryLoad("counter_lib", ctx);
+        g_threadImport->served = m && m != PROTO_NONE &&
+            m->getAttribute(ctx, proto::ProtoString::createSymbol(ctx, "Counter")) != PROTO_NONE;
+    } catch (const std::exception& e) {
+        g_threadImport->message = e.what();
+    }
+    return PROTO_NONE;
+}
+
+const proto::ProtoObject* sendOnThread(proto::ProtoContext* ctx, const proto::ProtoObject*,
+                                       const proto::ParentLink*, const proto::ProtoArguments*,
+                                       const proto::ProtoKeywordArguments*) {
+    try {
+        const proto::ProtoObject* counter = g_threadImport->counter;
+        const proto::ProtoObject* args[] = {reinterpret_cast<const proto::ProtoObject*>(
+            proto::ProtoString::createSymbol(ctx, "new"))};
+        const proto::ProtoObject* r = counter->call(
+            ctx, nullptr, proto::ProtoString::createSymbol(ctx, "__st_send__"), counter, args, 1);
+        g_threadImport->served = r && r != PROTO_NONE && r != counter;
+    } catch (const std::exception& e) {
+        g_threadImport->message = e.what();
+    }
+    return PROTO_NONE;
+}
+
+void runOnSpaceThread(proto::ProtoSpace& space, proto::ProtoContext* ctx, proto::ProtoMethod body) {
+    const proto::ProtoThread* t = space.newThread(
+        ctx, proto::ProtoString::createSymbol(ctx, "interop-thread"), body, ctx->newList(), nullptr);
+    ASSERT_NE(t, nullptr);
+    const_cast<proto::ProtoThread*>(t)->join(ctx);
+}
+}  // namespace
+
+TEST(ProtoSTInterop, AnImportFromAnotherThreadOfTheSpaceIsServed) {
     writeFile("counter_lib.st",
               "\"-- counter_lib.st --\"\n"
               "Object subclass: #Counter instanceVariableNames: 'value'.\n"
               "Counter >> value ^ value.\n");
     ::setenv("STPATH", ".", 1);
 
-    protoST::STRuntime st;
     protoScala::Session session;
-    proto::ModuleProvider* stProvider =
-        proto::ProviderRegistry::instance().getProviderForSpec("provider:st");
-    ASSERT_NE(stProvider, nullptr);
-
-    std::string message;
-    bool threw = false;
-    std::thread other([&] {
-        proto::ProtoContext ctx(&session.space(), nullptr);
-        try {
-            stProvider->tryLoad("counter_lib", &ctx);
-        } catch (const std::exception& e) {
-            threw = true;
-            message = e.what();
-        }
-    });
-    other.join();
-    EXPECT_TRUE(threw) << "a cross-runtime import from a foreign thread was served";
-    EXPECT_NE(message.find("thread that constructed the protoST runtime"),
-              std::string::npos)
-        << "unexpected message: " << message;
+    protoST::STRuntime st(session.space());
+    ThreadImport state;
+    state.provider = proto::ProviderRegistry::instance().getProviderForSpec("provider:st");
+    ASSERT_NE(state.provider, nullptr);
+    g_threadImport = &state;
+    proto::ProtoContext scalaCtx(&session.space(), nullptr);
+    runOnSpaceThread(session.space(), &scalaCtx, &importOnThread);
+    g_threadImport = nullptr;
+    EXPECT_TRUE(state.served) << "the import from another thread was not served: " << state.message;
 }
 
 // The end-to-end claim: a protoScala PROGRAM imports a protoST module. Phase 6
@@ -459,8 +500,8 @@ TEST(ProtoSTInterop, AProtoScalaProgramImportsAProtoSTModule) {
               "import st.counter_lib as lib\n"
               "@main def run(): Unit = println(lib)\n");
 
-    protoST::STRuntime st;
     protoScala::Session session;
+    protoST::STRuntime st(session.space());
     EXPECT_EQ(session.runScript("twin.scala", {}), 0);
 }
 
@@ -488,8 +529,8 @@ TEST(ProtoSTInterop, AProtoScalaProgramBindsAMemberOfAProtoSTModule) {
               "import st.counter_lib.NotAClassThisModuleDefines\n"
               "@main def run(): Unit = println(1)\n");
 
-    protoST::STRuntime st;
     protoScala::Session session;
+    protoST::STRuntime st(session.space());
     EXPECT_EQ(session.runScript("member.scala", {}), 0)
         << "a member of the protoST module did not bind in protoScala";
     EXPECT_NE(session.runScript("absent.scala", {}), 0)
@@ -559,8 +600,8 @@ int runWithSendLib(const std::string& file, const std::string& script, std::stri
          at = body.find("st.send_lib", at + 3 + lib.size()))
         body.replace(at, 11, "st." + lib);
     writeFile(file, body);
-    protoST::STRuntime st;
     protoScala::Session session;
+    protoST::STRuntime st(session.space());
     std::fflush(stdout);
     std::fflush(stderr);
     testing::internal::CaptureStdout();
@@ -769,37 +810,25 @@ TEST(ProtoSTInterop, AScalaThrowKeepsItsLineAcrossSmalltalk) {
     EXPECT_NE(err.find("IllegalStateException: thrown on line 4"), std::string::npos) << err;
 }
 
-// The one-thread restriction applies to a send as it does to an import (D26):
-// a call into protoST from a thread other than the one that constructed it is
-// refused with a message, never run on protoST's root context.
-TEST(ProtoSTInterop, ASendFromAnotherThreadIsRefused) {
-    writeFile("thread_lib.st", "Object subclass: #Counter instanceVariableNames: 'value'.\n");
+// One space: a send into protoST from another protoCore thread of the space runs
+// on that thread's own context, as an import does (see above).
+TEST(ProtoSTInterop, ASendFromAnotherThreadOfTheSpaceIsServed) {
+    writeFile("counter_lib.st", "Object subclass: #Counter instanceVariableNames: 'value'.\n");
     ::setenv("STPATH", ".", 1);
-    protoST::STRuntime st;
     protoScala::Session session;
+    protoST::STRuntime st(session.space());
     proto::ModuleProvider* stProvider =
         proto::ProviderRegistry::instance().getProviderForSpec("provider:st");
     ASSERT_NE(stProvider, nullptr);
     proto::ProtoContext scalaCtx(&session.space(), nullptr);
-    const proto::ProtoObject* module = stProvider->tryLoad("thread_lib", &scalaCtx);
+    const proto::ProtoObject* module = stProvider->tryLoad("counter_lib", &scalaCtx);
     ASSERT_NE(module, PROTO_NONE);
-    const proto::ProtoObject* counter = module->getAttribute(
+    ThreadImport state;
+    state.counter = module->getAttribute(
         &scalaCtx, proto::ProtoString::createSymbol(&scalaCtx, "Counter"));
-    ASSERT_NE(counter, PROTO_NONE);
-
-    std::string message;
-    std::thread other([&] {
-        proto::ProtoContext ctx(&session.space(), nullptr);
-        const proto::ProtoObject* args[] = {reinterpret_cast<const proto::ProtoObject*>(
-            proto::ProtoString::createSymbol(&ctx, "new"))};
-        try {
-            counter->call(&ctx, nullptr, proto::ProtoString::createSymbol(&ctx, "__st_send__"),
-                          counter, args, 1);
-        } catch (const std::exception& e) {
-            message = e.what();
-        }
-    });
-    other.join();
-    EXPECT_NE(message.find("thread that constructed the protoST runtime"), std::string::npos)
-        << "unexpected message: " << message;
+    ASSERT_NE(state.counter, PROTO_NONE);
+    g_threadImport = &state;
+    runOnSpaceThread(session.space(), &scalaCtx, &sendOnThread);
+    g_threadImport = nullptr;
+    EXPECT_TRUE(state.served) << "the send from another thread was not served: " << state.message;
 }

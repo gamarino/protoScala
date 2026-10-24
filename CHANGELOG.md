@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **protoST runs in protoScala's ProtoSpace in the interop tests** (one
+  ProtoSpace per process, protoCore's recommended model). The tests and the
+  tutorial host (`tests/unit/protost_interop.cpp`, `protost_host.cpp`) build
+  the `Session` first and then `protoST::STRuntime st(session.space())`, a guest
+  in protoScala's space (protoST a76f11b). `AForeignValueIsTheSameObjectOnBothSides`
+  now asserts one space (`ProtoSpace::liveSpaceCount() == 1`, protoCore 3.1.0).
+  The two tests that asserted a refusal from another thread
+  (`ACrossRuntimeImportFromAnotherThreadIsRefused`,
+  `ASendFromAnotherThreadIsRefused`) became
+  `AnImportFromAnotherThreadOfTheSpaceIsServed` and
+  `ASendFromAnotherThreadOfTheSpaceIsServed`: in one space a protoCore thread
+  of the space imports and sends through its own context; the refusal remains
+  protoST's rule for a caller in another space (its own tests). CI pins
+  protoCore 3.1.0 (master, 267b9fc9) and protoST a76f11b; the declared minimum
+  stays protoCore 3.0.0.
+
 ## [0.6.2] - 2026-10-22
 
 **Requires protoCore 3.0.0** (SOVERSION 4), the declared minimum for a build from source; the `.deb` depends on `protocore (>= 3.0.0)`. CI pins protoCore tag `v3.0.0` on every job, and builds protoST 0.7.0

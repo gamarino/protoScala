@@ -57,15 +57,15 @@ env:
   PROTOCORE_REPO: numaes/protoCore
   PROTOST_REPO: gamarino/protoST
   PROTOIO_REPO: gamarino/protoIO
-  # protoCore 3.0.0, SOVERSION 4 (tag v3.0.0,
-  # commit ce00a4a2): methods receive ProtoArguments / ProtoKeywordArguments.  Bump
-  # deliberately.  It is also the declared minimum, which the floor entry of
-  # the `test` job builds.
-  PROTOCORE_REF: ${{ github.event_name == 'schedule' && 'master' || 'ce00a4a26b6583ea8a58e776eee2ea91c743469e' }}
-  # protoST 0.7.0 (422a73c, 2026-10-22: protoCore 3.0.0, SOVERSION 4, and
-  # `__st_send__`, which protoScala's calls into protoST objects use), the
-  # commit protoScala's interop test was last verified against.
-  PROTOST_REF: ${{ github.event_name == 'schedule' && 'main' || '422a73c9b8899f8db658eb6738ef89d65a761014' }}
+  # protoCore 3.1.0, SOVERSION 4 (untagged master, commit 267b9fc9: one space
+  # per process, ProtoSpace::liveSpaceCount, which the interop test asserts
+  # with).  Bump deliberately.  The declared minimum stays 3.0.0, which the
+  # floor entry of the `test` job builds.
+  PROTOCORE_REF: ${{ github.event_name == 'schedule' && 'master' || '267b9fc93a189fb3552dd7d52c7d519b0d9166b4' }}
+  # protoST a76f11b (2026-10-24: STRuntime(proto::ProtoSpace&), a guest in the
+  # host's space, which protoScala's interop test hosts protoST as), the commit
+  # protoScala's interop test was last verified against.
+  PROTOST_REF: ${{ github.event_name == 'schedule' && 'main' || 'a76f11be41e53fad51072c7e9e07572bfcb5a7a9' }}
   # protoIO 0.2.2 (main, 1611ff9): the I/O layer protoScala and protoST link
   # statically, and protoScala's floor.  Bump deliberately, like protoCore.
   PROTOIO_REF: ${{ github.event_name == 'schedule' && 'main' || '1611ff9cf8d499cdc42a6e108e42ecfc36fd8164' }}
@@ -87,7 +87,7 @@ jobs:
       matrix:
         include:
           - name: Build and test suite
-            # Empty: env.PROTOCORE_REF (3.0.0, or master on the schedule).
+            # Empty: env.PROTOCORE_REF (3.1.0, or master on the schedule).
             protocore_ref: ''
           # THE FLOOR JOB, the only one in this repository. protoCore 3.0.0
           # (tag v3.0.0, ce00a4a2), SOVERSION 4: PROTOCORE_MIN_VERSION in CMakeLists.txt on
