@@ -1809,6 +1809,13 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
                 if (mode == UnitMode::Repl) out.definitions.push_back({"def " + d.name, key});
             } else if (s->kind == NodeKind::ValDef) {
                 const auto& v = as<ValDef>(*s);
+                // The temporary of `val (a, b) = e` is a slot of this frame, not a
+                // global: Scala has no such binding, so nothing may list it (the
+                // debugger's globals) or keep its value alive for the session.
+                if (v.synthetic) {
+                    declareLocal(v.name, kindOf(v), /*boxed=*/false);
+                    continue;
+                }
                 const std::string& key = globals_.declare(v.name, kindOf(v));
                 if (mode == UnitMode::Repl && v.name.rfind('<', 0) != 0)
                     out.definitions.push_back(
@@ -1977,7 +1984,8 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
                 const auto& v = as<ValDef>(s);
                 if (v.isLazy) continue;  // hoisted (step 2)
                 compileExpr(rhsOf(v));
-                emit(Op::STORE_GLOBAL, top.mod->addSymbol(globalKey(v.name)), v.pos, -1);
+                if (v.synthetic) storeLocal(*findInFunction(fn_, v.name), v.pos);
+                else emit(Op::STORE_GLOBAL, top.mod->addSymbol(globalKey(v.name)), v.pos, -1);
                 continue;
             }
             compileExpr(s);

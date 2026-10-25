@@ -697,6 +697,15 @@ and protoST's `tests/unit/test_cross_runtime_send.cpp`.
       value is the same object; `ensure:` and `finally` run during the unwind; a
       `ScalaThrow` keeps its line across protoST (E3).
 
+### Top-level pattern definitions (2026-10-25)
+
+- [x] **Top-level `val (a, b) = e` creates no hidden global.** The temporary
+      that holds the matched values is a slot of the top-level frame; it was a
+      global `<t0>` that the debugger listed under Globals and that kept the
+      value alive for the session. Fixture:
+      `03-definitions/top-level-pattern-val.scala`; a unit test in
+      `tests/unit/test_compiler.cpp`.
+
 ## Not yet implemented
 
 - A `class`, `trait` or `object` nested in a **`class`** or **`trait`**, a local

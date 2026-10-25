@@ -113,6 +113,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `cli/dap-sources`; a manual end-to-end session from Windows into WSL.
 
 ### Fixed
+- **Top-level `val (a, b) = e` no longer declares a hidden global `<t0>`.**
+  The temporary holding the matched values is now a slot of the top-level
+  frame; as a global it appeared in the debugger's Globals list and kept the
+  value alive for the whole session. Test:
+  `03-definitions/top-level-pattern-val.scala`, a unit test; VM.md example 09
+  regenerated.
 - **`PROTOSCALA_PATH` on Windows**: the module search path was split on `:` on
   every platform, so an absolute `C:\...` entry broke. It is now separated as
   `PATH` is (`;` on Windows, `:` elsewhere), like `PROTOSCALA_MODULE_PATH`,

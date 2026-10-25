@@ -633,3 +633,14 @@ TEST(Bytecode, AReturnPunchesAHoleInItsOwnFinallyRange) {
     while ((at = asm_.find("finally", at)) != std::string::npos) { ++entries; ++at; }
     EXPECT_GE(entries, 2u) << asm_;
 }
+
+// --- Top-level pattern definitions (2026-10-25) --------------------------------
+
+TEST(Compiler, TopLevelPatternValDeclaresNoHiddenGlobal) {
+    GlobalTable g = sessionGlobals();
+    auto cu = compile("val (a, b) = (1, 2)", g, UnitMode::Repl);
+    EXPECT_FALSE(g.find("<t0>").has_value());
+    EXPECT_TRUE(g.find("a").has_value());
+    EXPECT_TRUE(g.find("b").has_value());
+    EXPECT_FALSE(has(cu.module->disassemble(), "<t0>"));
+}

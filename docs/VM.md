@@ -1123,7 +1123,7 @@ println(describe(Point(a, b)))
 ```
 
 ```text
-function <top> arity=0 locals=5 stack=5 captures=0
+function <top> arity=0 locals=6 stack=5 captures=0
   0000  L1  PUSH_GLOBAL 0 ; @Product
   0001  L1  PUSH_GLOBAL 1 ; @AnyRef
   0002  L1  PUSH_GLOBAL 2 ; @Any
@@ -1145,37 +1145,37 @@ function <top> arity=0 locals=5 stack=5 captures=0
   0018  L7  PUSH_CONST 9 ; 1
   0019  L7  PUSH_CONST 10 ; 2
   0020  L7  MAKE_TUPLE 2
-  0021  L7  STORE_LOCAL 0
-  0022  L7  PUSH_LOCAL 0
+  0021  L7  STORE_LOCAL 1
+  0022  L7  PUSH_LOCAL 1
   0023  L7  TEST_PROTO 11 ; @Tuple2
   0024  L7  JUMP_IF_FALSE 12 ; -> 37
-  0025  L7  PUSH_LOCAL 0
+  0025  L7  PUSH_LOCAL 1
   0026  L7  UNAPPLY_FIELDS 12 ; [_1,_2]
-  0027  L7  STORE_LOCAL 1
-  0028  L7  STORE_LOCAL 2
-  0029  L7  PUSH_LOCAL 2
-  0030  L7  STORE_LOCAL 3
-  0031  L7  PUSH_LOCAL 1
-  0032  L7  STORE_LOCAL 4
-  0033  L7  PUSH_LOCAL 3
-  0034  L7  PUSH_LOCAL 4
+  0027  L7  STORE_LOCAL 2
+  0028  L7  STORE_LOCAL 3
+  0029  L7  PUSH_LOCAL 3
+  0030  L7  STORE_LOCAL 4
+  0031  L7  PUSH_LOCAL 2
+  0032  L7  STORE_LOCAL 5
+  0033  L7  PUSH_LOCAL 4
+  0034  L7  PUSH_LOCAL 5
   0035  L7  MAKE_TUPLE 2
   0036  L7  JUMP 2 ; -> 39
-  0037  L7  PUSH_LOCAL 0
+  0037  L7  PUSH_LOCAL 1
   0038  L7  MATCH_ERROR 0
-  0039  L7  STORE_GLOBAL 13 ; <t0>
-  0040  L7  PUSH_GLOBAL 13 ; <t0>
-  0041  L7  SEND 14 ; _1/0
-  0042  L7  STORE_GLOBAL 15 ; a
-  0043  L7  PUSH_GLOBAL 13 ; <t0>
-  0044  L7  SEND 16 ; _2/0
-  0045  L7  STORE_GLOBAL 17 ; b
-  0046  L8  PUSH_GLOBAL 18 ; println
+  0039  L7  STORE_LOCAL 0
+  0040  L7  PUSH_LOCAL 0
+  0041  L7  SEND 13 ; _1/0
+  0042  L7  STORE_GLOBAL 14 ; a
+  0043  L7  PUSH_LOCAL 0
+  0044  L7  SEND 15 ; _2/0
+  0045  L7  STORE_GLOBAL 16 ; b
+  0046  L8  PUSH_GLOBAL 17 ; println
   0047  L8  PUSH_GLOBAL 8 ; describe
   0048  L8  PUSH_GLOBAL 4 ; @Point
-  0049  L8  PUSH_GLOBAL 15 ; a
-  0050  L8  PUSH_GLOBAL 17 ; b
-  0051  L8  NEW 19 ; <init>/2
+  0049  L8  PUSH_GLOBAL 14 ; a
+  0050  L8  PUSH_GLOBAL 16 ; b
+  0051  L8  NEW 18 ; <init>/2
   0052  L8  CALL 1
   0053  L8  CALL 1
   0054  L8  POP 0
@@ -1267,8 +1267,10 @@ function <top> arity=0 locals=5 stack=5 captures=0
   test and binds the fields; the body is a `CONCAT`.
 - `val (a, b) = (1, 2)` at the top level (0018-0045) is a `match` on the
   tuple (`MAKE_TUPLE 2`, `TEST_PROTO @Tuple2`, `UNAPPLY_FIELDS [_1,_2]`)
-  whose result is a new tuple of the bound values, stored in a hidden global
-  `<t0>`; `a` and `b` are then `<t0>._1` and `<t0>._2` (section 6).
+  whose result is a new tuple of the bound values, stored in slot 0 of the
+  top-level frame (0039); `a` and `b` are then that tuple's `_1` and `_2`
+  (0040-0045). The temporary is a slot, not a global, so no hidden name is
+  declared and the tuple dies with the frame (section 6).
 - `Point(a, b)` compiles straight to `NEW <init>/2` on `@Point` (0048-0051):
   the synthesised `apply` is bypassed.
 
@@ -2386,8 +2388,8 @@ given, never create a context, and root what you hold (step 4).
 
 Found while writing this document, verified against `main` at `3ac106e8`.
 The ones fixed since (the context rule, `NOP`, the STATUS.md opcode table, the
-stale comments and the unused context in `NEW`) were removed from this list on
-2026-10-25.
+stale comments, the unused context in `NEW` and the hidden global `<t0>` of a
+top-level destructuring) were removed from this list on 2026-10-25.
 
 - **`@tailrec` is accepted and ignored** (verified). A self-recursive call in
   tail position is an ordinary `CALL` (example 06), so
@@ -2399,11 +2401,12 @@ stale comments and the unused context in `NEW`) were removed from this list on
 - **`EXTEND` (1) is reachable only for operands above 16,777,215**, which
   needs more than 2^24 constants, blocks, slots or arguments in one function;
   it is covered by `tests/unit/test_bytecode.cpp`, not by any program.
-- **Top-level tuple destructuring rebuilds the tuple.** `val (a, b) = (1, 2)`
-  at the top level matches the tuple, builds a second tuple of the bound
-  values, stores it in a hidden global `<t0>` and reads `a` and `b` back with
-  `_1` / `_2` sends (example 09). The result is correct; the hidden global
-  stays alive for the session.
+- **A pattern definition rebuilds the tuple.** `val (a, b) = (1, 2)`
+  matches the tuple, builds a second tuple of the bound values in a temporary
+  (a slot: a local of the block, or of the top-level frame at the top level)
+  and reads `a` and `b` back with `_1` / `_2` sends (example 09). The result
+  is correct; binding the variables straight from the pattern would save the
+  second tuple.
 - **No poll at frame entry.** Unlike protoClojure, the VM polls
   `safepoint()` only at `JUMP_BACK` (1.6).
 - **The disassembler does not list the constant pool, slot names or default

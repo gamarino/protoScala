@@ -206,6 +206,11 @@ struct ValDef : Node {
     TypePtr type;                   // may be null
     NodePtr rhs;                    // null: an abstract member (templates only)
     PatternPtr pattern;             // `val (a, b) = e` (Task 2); null for a simple name
+    // The temporary `<tN>` Desugar writes for a pattern definition with several
+    // variables (`val (a, b) = e`). No source can name it; at the top level of a
+    // unit the compiler keeps it in a slot of the top-level frame rather than
+    // declaring a global.
+    bool synthetic = false;
 };
 struct DefDef : Node {
     DefDef(SourcePos p) : Node(NodeKind::DefDef, p) {}
