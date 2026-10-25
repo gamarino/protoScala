@@ -110,6 +110,12 @@ if(Python3_FOUND)
     unset(_ah_check)
     unset(_ah_prog)
 
+    # PROTOSCALA_PATH is a PATH-style list: absolute entries with drive letters
+    # on Windows (';'-separated there).
+    add_test(NAME cli/module-path-list
+        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/cli/module_path_check.py"
+            "$<TARGET_FILE:protoscala>")
+
     # --- The debug adapter (`protoscala --dap`, docs/debugging.md) -------------
     # A Python DAP client drives a session as VS Code does (paths with a
     # lower-case drive letter on Windows). Every wait has a watchdog: a broken

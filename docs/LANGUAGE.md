@@ -300,7 +300,7 @@ An import is **resolved when the file is compiled**, which is why an imported
 class is usable as a type. `import a.b.C` tries the longest dotted prefix first —
 module `a.b.C`, then module `a.b` with member `C` — and a miss names every path
 it tried. Modules are searched in the importing file's directory, then each
-colon-separated entry of `PROTOSCALA_PATH`, then the working directory.
+entry of `PROTOSCALA_PATH` (`:`-separated; `;` on Windows, as `PATH`), then the working directory.
 
 An import is **hoisted to its compilation unit** (**D96**): a top-level import is
 visible for the whole unit, and one written inside a block or a template body

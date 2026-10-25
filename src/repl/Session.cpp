@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include "support/DynamicLibrary.h"
+#include "support/Platform.h"
 
 #include <cstdio>
 #include <filesystem>
@@ -450,7 +451,8 @@ int Session::disassemble(const std::string& path) {
 // ---------------------------------------------------------------------------
 
 // a.b.C -> a/b/C.scala, searched in the importing file's directory, then each
-// colon-separated entry of PROTOSCALA_PATH, then the working directory (A0-5).
+// entry of PROTOSCALA_PATH (separated as PATH is: ';' on Windows, where a drive
+// letter contains ':', and ':' elsewhere), then the working directory (A0-5).
 std::vector<std::string> Session::candidatePathsOf(const std::string& logicalPath,
                                                    const std::string& importerDir) const {
     std::string rel = logicalPath;
@@ -461,7 +463,7 @@ std::vector<std::string> Session::candidatePathsOf(const std::string& logicalPat
     if (const char* p = std::getenv("PROTOSCALA_PATH")) {
         std::stringstream ss(p);
         std::string dir;
-        while (std::getline(ss, dir, ':'))
+        while (std::getline(ss, dir, kPathListSeparator))
             if (!dir.empty()) out.push_back(dir + "/" + rel);
     }
     out.push_back(rel);

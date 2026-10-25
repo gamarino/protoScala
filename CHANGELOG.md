@@ -56,6 +56,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `cli/dap-sources`; a manual end-to-end session from Windows into WSL.
 
 ### Fixed
+- **`PROTOSCALA_PATH` on Windows**: the module search path was split on `:` on
+  every platform, so an absolute `C:\...` entry broke. It is now separated as
+  `PATH` is (`;` on Windows, `:` elsewhere), like `PROTOSCALA_MODULE_PATH`,
+  `PROTOSCALA_PROVIDERS` and `PROTOSCALAC_INCLUDE_DIRS` already were. Test:
+  `cli/module-path-list` (two absolute entries, the module in the first).
 - `protoscala --dap`: what a stopped thread evaluates is now a child of its
   innermost live context (an exception stop raised inside the prelude used the
   context of the frame it showed, which could leave the frames below it out of

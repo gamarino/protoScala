@@ -1072,8 +1072,7 @@ def shout(s: String): String =
         fake = "/fake/proj"
         fake_main = "/fake/proj/main.scala"
         shown_main = fake_main
-    # Relative: PROTOSCALA_PATH is split on ":" on every platform.
-    env = {"PROTOSCALA_PATH": os.path.join("..", "lib")}
+    env = {"PROTOSCALA_PATH": lib}
     # An entry without both roots is refused.
     d = Dap(exe, work, env=env)
     d.request("initialize", {"adapterID": "protoscala"})

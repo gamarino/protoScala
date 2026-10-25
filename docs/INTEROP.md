@@ -34,7 +34,8 @@ route by prefix.
 
 - `ScalaModuleProvider`, alias `scala`, registered once per process.
 - Resolves `a.b.C` to `a/b/C.scala` relative to the importing file, then to
-  the directories in `PROTOSCALA_PATH`.
+  the directories in `PROTOSCALA_PATH` (a list separated as `PATH` is: `:`,
+  or `;` on Windows).
 - A module object exposes the file's top-level definitions as attributes.
 - The provider finds its runtime through a registry keyed by `ProtoSpace`
   (protoST pattern), so imports work from any thread.

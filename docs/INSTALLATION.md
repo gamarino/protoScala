@@ -274,7 +274,7 @@ How Windows differs, by design:
 - **UTF-8 throughout.** `protoscala.exe` carries a manifest that makes UTF-8
   the process code page (Windows 10 1903 or later), so arguments, environment
   variables and file names with non-ASCII characters work as on Linux.
-- **Path lists use `;`** (`PROTOSCALA_MODULE_PATH`, `PROTOSCALA_PROVIDERS`,
+- **Path lists use `;`** (`PROTOSCALA_PATH`, `PROTOSCALA_MODULE_PATH`, `PROTOSCALA_PROVIDERS`,
   `PROTOSCALAC_INCLUDE_DIRS`, `PROTOSCALAC_LIBRARY_DIRS`), as `PATH` does,
   since drive letters contain `:`. Provider plug-ins and compiled modules are
   `.dll` files (the suffix is matched without regard to case). A plug-in exports
