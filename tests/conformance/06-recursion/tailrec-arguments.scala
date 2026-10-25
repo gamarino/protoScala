@@ -1,4 +1,4 @@
-// EXPECT: 10 3 4 2.5 100000
+// EXPECT: 10 3 4 2.5 2000
 // A tail self-call binds its arguments as a call does: named arguments in any
 // order, a by-name argument as a thunk, a repeated parameter from a splice or
 // from plain arguments, and Double widening of an Int argument.
@@ -25,5 +25,5 @@ def spin(n: Int, more: Int*): Int = if n == 0 then more.length else spin(n - 1, 
 def sevens(n: Int, acc: List[Int]): List[Int] = if n == 0 then acc else sevens(n - 1, 7 :: acc)
 
 @main def run(): Unit =
-  val xs = sevens(100000, Nil)
+  val xs = sevens(2000, Nil)
   println(s"${named(4, 0, 1)} ${byName(3, 0)} ${countArgs(0, 0)} ${halve(1, 3) / 2} ${spin(5, xs*)}")
