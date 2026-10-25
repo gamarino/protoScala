@@ -427,10 +427,10 @@ const ProtoObject* threadEntry(ProtoContext* ctx, const ProtoObject*, const prot
     if (!engine || !layout) return PROTO_NONE;
     ExecutionEngine::ActiveCallGuard guard(engine, layout);
     const RuntimeLayout& L = *layout;
-    if (debug::attached()) {
-        static std::atomic<unsigned> started{0};
-        debug::nameThread("Thread-" + std::to_string(++started));
-    }
+    // The debugger's name for it: numbered by Thread.start, in call order (a
+    // number taken here would follow whichever thread the OS ran first).
+    if (debug::attached() && args->getSize(ctx) > 3)
+        debug::nameThread("Thread-" + std::to_string(proto::asSmallInt(args->getAt(ctx, 3))));
     try {
         const ProtoObject* body = handle->getOwnAttributeDirect(ctx, L.bodyKey);
         engine->invoke(ctx, body, nullptr, 0);
@@ -497,6 +497,9 @@ PRIM(threadObject_start) {
     targs = targs->appendLast(&scope, engineRef);
     scope.setAutomaticLocal(0, targs->asObject(&scope));
     targs = targs->appendLast(&scope, layoutRef);
+    scope.setAutomaticLocal(0, targs->asObject(&scope));
+    static std::atomic<long long> started{0};  // Thread-N for the debugger (threadEntry)
+    targs = targs->appendLast(&scope, proto::makeSmallInt(++started));
     scope.setAutomaticLocal(0, targs->asObject(&scope));
     const proto::ProtoThread* t = scope.space->newThread(&scope, name, &threadEntry, targs, nullptr);
     handle->setAttribute(&scope, L.threadRefKey,
