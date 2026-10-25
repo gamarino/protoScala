@@ -422,7 +422,7 @@ statement made by a tool rather than asserted by a document.
 A protoCore-**pure** emission mode is **not offered**, and `--report-purity` is
 built instead. A unit is protoCore-pure iff
 
-1. its emitted opcode set is a subset of `{NOP, EXTEND, PUSH_CONST, PUSH_UNIT,
+1. its emitted opcode set is a subset of `{EXTEND, PUSH_CONST, PUSH_UNIT,
    PUSH_NULL, PUSH_TRUE, PUSH_FALSE, POP, DUP, PUSH_LOCAL, STORE_LOCAL, JUMP,
    JUMP_IF_FALSE, JUMP_IF_TRUE, JUMP_BACK, RETURN}`,
 2. it references no `PUSH_GLOBAL` / `STORE_GLOBAL` key,

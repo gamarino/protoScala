@@ -743,7 +743,7 @@ their reserved ranges.
 
 | # | Name | Stack effect | Notes |
 |---|---|---|---|
-| 0 | `NOP` | `[] -> []` | |
+| 0 | not an opcode | | a zeroed code word is a defect: the VM raises `unknown opcode 0`. `NOP` was never emitted and was removed |
 | 1 | `EXTEND` | — | operand: high 24 bits of the next instruction's operand |
 | 2 | `PUSH_CONST` | `[] -> [consts[operand]]` | |
 | 3 | `PUSH_UNIT` | `[] -> [()]` | |
@@ -789,7 +789,6 @@ their reserved ranges.
 | 66 | `INVOKE_INIT` | `[cls this a1..an] -> [this']` | operand: SendSite (constructor key, n); returns the rebuilt instance (D28) |
 | 67 | `STORE_FIELD` | `[v] -> []` | `slot[0] = slot[0].setAttribute(key, v)`; operand: Symbol |
 | 68 | `SET_FIELD` | `[obj v] -> []` | the receiver must be mutable; operand: Symbol |
-| 82 | `STORE_FIELDS_IF_NEW` | `[v1..vn] -> []` | a constructor's parameter fields as one write group: `STORE_FIELD_IF_NEW` for each key in order, published as one version of `slot[0]` (`ProtoObject::setAttributes`); operand: a Names constant (the n keys) |
 | 69 | `SEND_SUPER` | `[this a1..an] -> [r]` | operand: a SuperSite constant (DESIGN §4.4) |
 | 70 | `TEST_TYPE` | `[v] -> [Boolean]` | operand: TypeCode (the built-in types, D29) |
 | 71 | `TEST_PROTO` | `[v] -> [Boolean]` | operand: Symbol (the class's marker key, DESIGN §5.3) |
@@ -801,8 +800,10 @@ their reserved ranges.
 | 77 | `SEND_KW` | `[recv a1..an v1..vm] -> [r]` | operand: a KwSendSite constant (named arguments to native methods, Q9) |
 | 78 | `NEW_SPREAD` | `[cls a1..an list] -> [obj]` | operand: SendSite (constructor key, n); list elements follow a1..an |
 | 79 | `SEND_APPLY` | `[recv a1..an] -> [r]` | operand: SendSite (name, n); `recv.m(args)` written with an argument list: calls the member when it is a method, else applies its value (D10) |
-| 80 | `CALL_KW` | `[f a1..an v1..vm] -> [r]` | operand: a KwSendSite constant (positional count, keyword names); `f(x = 1)` on a function value, a global `def` or a local one, which `SEND_KW` cannot express because it has no receiver. The keyword `ProtoSparseList` is keyed by the ADDRESS of the interned parameter-name symbol — protoCore's own convention (DESIGN §5.2) |
-| 81..95 | reserved | | object model |
+| 80 | `CALL_KW` | `[f a1..an v1..vm] -> [r]` | operand: a KwSendSite constant (positional count, keyword names); `f(x = 1)` on a function value, a global `def` or a local one, which `SEND_KW` cannot express because it has no receiver. The named arguments reach the callee as a `ProtoKeywordArguments` of (interned parameter name, value) pairs over the operand stack, protoCore's calling convention (DESIGN §5.2) |
+| 81 | `STORE_FIELD_IF_NEW` | `[v] -> []` | a constructor parameter field: `slot[0] = slot[0].setAttribute(key, v)` unless `slot[0]` already has `key` (a more-derived constructor's `override val` parameter, which ran first, wins); operand: Symbol |
+| 82 | `STORE_FIELDS_IF_NEW` | `[v1..vn] -> []` | a constructor's parameter fields as one write group: `STORE_FIELD_IF_NEW` for each key in order, published as one version of `slot[0]` (`ProtoObject::setAttributes`); operand: a Names constant (the n keys) |
+| 83..95 | reserved | | object model |
 | 96 | `THROW` | `[v] -> throws` | `v` must answer the `@Throwable` marker; `null` raises `NullPointerException` |
 | 97 | `RETHROW` | `[] -> throws` | operand: the local slot a `Finally` handler saved the in-flight value in. Also what a `catch` cascade emits when no case matches, so the exception continues outward rather than being replaced |
 | 98..127 | reserved | | exceptions |

@@ -17,7 +17,7 @@ constexpr int kTerminal = -1000000;   // the instruction does not fall through
 // (§D5). The reason each group is out is in `refusalFor`.
 bool isSupported(Op op) {
     switch (op) {
-        case Op::NOP: case Op::EXTEND:
+        case Op::EXTEND:
         case Op::PUSH_CONST: case Op::PUSH_UNIT: case Op::PUSH_NULL:
         case Op::PUSH_TRUE: case Op::PUSH_FALSE:
         case Op::POP: case Op::DUP:
@@ -67,7 +67,7 @@ std::string refusalFor(Op op) {
 // raises ClassCastException on a non-Boolean, and JUMP_BACK takes a GC safepoint.
 bool canThrow(Op op) {
     switch (op) {
-        case Op::NOP: case Op::EXTEND:
+        case Op::EXTEND:
         case Op::PUSH_UNIT: case Op::PUSH_NULL: case Op::PUSH_TRUE: case Op::PUSH_FALSE:
         case Op::POP: case Op::DUP:
         case Op::PUSH_LOCAL: case Op::STORE_LOCAL:
@@ -109,7 +109,7 @@ std::vector<CppEmitter::Decoded> CppEmitter::decode(const BytecodeModule& mod) {
 int CppEmitter::effect(const BytecodeModule& mod, const Decoded& d) {
     const auto n = static_cast<int>(d.operand);
     switch (d.op) {
-        case Op::NOP: case Op::EXTEND: return 0;
+        case Op::EXTEND: return 0;
         case Op::PUSH_CONST: case Op::PUSH_UNIT: case Op::PUSH_NULL: case Op::PUSH_TRUE:
         case Op::PUSH_FALSE: case Op::PUSH_LOCAL: case Op::PUSH_CELL: case Op::PUSH_GLOBAL:
         case Op::DUP:
@@ -485,7 +485,7 @@ bool CppEmitter::emitBlock(std::size_t index, const GlobalTable&) {
         if (guarded && canThrow(d.op)) out_ << "    pc = " << d.pc << ";\n";
         out_ << "    ";
         switch (d.op) {
-            case Op::NOP: case Op::EXTEND:
+            case Op::EXTEND:
                 out_ << ";";
                 break;
             case Op::PUSH_CONST:

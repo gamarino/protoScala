@@ -3,8 +3,9 @@
 // Two invariants of the image are SILENT if broken: the constant-pool indices
 // and the block indices are baked into the emitted code words, so an image that
 // assigns pool slots instead of replaying the add* calls produces a prelude that
-// runs and is wrong. disassemble() prints the opcodes, the operands, the
-// constant pool and the handler table, so an equal listing means equal indices.
+// runs and is wrong. disassemble() prints the opcodes, the operands (block and
+// pool indices among them), each instruction's constant as a comment and the
+// handler table, so an equal listing means equal indices.
 #include "compiler/BytecodeModule.h"
 #include "compiler/Compiler.h"
 #include "frontend/Desugar.h"

@@ -12,7 +12,7 @@
  * review artefact — an opcode in none of the three, or in two, is a bug):
  *
  *  V — vanishes in generated code, so there is no body to share. No entry here.
- *      NOP, EXTEND, PUSH_UNIT, PUSH_NULL, PUSH_TRUE, PUSH_FALSE, POP, DUP,
+ *      EXTEND, PUSH_UNIT, PUSH_NULL, PUSH_TRUE, PUSH_FALSE, POP, DUP,
  *      PUSH_LOCAL, STORE_LOCAL, JUMP, JUMP_IF_FALSE's and JUMP_IF_TRUE's jump
  *      halves, JUMP_BACK's jump half, RETURN.
  *
@@ -25,7 +25,7 @@
  *      MAKE_FN, SEND/SEND_APPLY's dispatch, MAKE_LAZY, FORCE_THUNK,
  *      JUMP_IF_FALSE/TRUE's Boolean check, JUMP_BACK's safepoint, ADD..NE, NEG,
  *      NOT, CONCAT, MAKE_CLASS, NEW's instantiate, NEW_SPREAD, INVOKE_INIT,
- *      STORE_FIELD, STORE_FIELD_IF_NEW, SET_FIELD, SEND_SUPER, TEST_TYPE,
+ *      STORE_FIELD, STORE_FIELD_IF_NEW, STORE_FIELDS_IF_NEW, SET_FIELD, SEND_SUPER, TEST_TYPE,
  *      TEST_PROTO, UNAPPLY_FIELDS, UNCONS, MATCH_ERROR, CAST_FAIL, MAKE_TUPLE,
  *      SEND_KW, CALL_KW, THROW, RETHROW.
  *

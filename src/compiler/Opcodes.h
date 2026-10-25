@@ -14,7 +14,9 @@
 namespace protoScala {
 
 enum class Op : uint8_t {
-    NOP          = 0,
+    // 0 is not an opcode: a zeroed code word is a compiler defect or a corrupted
+    // module, and the VM raises "unknown opcode 0" for it (NOP was never
+    // emitted and was removed).
     EXTEND       = 1,   // operand: high 24 bits of the next instruction's operand
     // Constants and stack
     PUSH_CONST   = 2,   // [] -> [consts[operand]]
@@ -83,8 +85,9 @@ enum class Op : uint8_t {
                           // `recv.m(args)` written with an argument list: calls the
                           // member when it is a method, else applies its value.
     // Phase 4: a keyword-argument call of a function value (plan A0-11, A0-12).
-    // The keyword ProtoSparseList is keyed by the address of the interned
-    // parameter-name symbol, protoCore's own convention (A0-12).
+    // The named arguments reach the callee as a ProtoKeywordArguments of
+    // (interned parameter name, value) pairs over the operand stack, protoCore's
+    // calling convention (docs/CALLING_CONVENTION.md); nothing is allocated.
     CALL_KW        = 80,  // [f a1..an v1..vm] -> [r]     operand: KwSendSite constant
     // A constructor parameter field. Scala assigns these before the superclass
     // initialiser runs, and a subclass's `override val` param must win, so the

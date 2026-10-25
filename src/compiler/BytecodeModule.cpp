@@ -11,7 +11,6 @@ namespace protoScala {
 
 const char* opName(Op op) {
     switch (op) {
-        case Op::NOP:           return "NOP";
         case Op::EXTEND:        return "EXTEND";
         case Op::PUSH_CONST:    return "PUSH_CONST";
         case Op::PUSH_UNIT:     return "PUSH_UNIT";

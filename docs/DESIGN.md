@@ -429,6 +429,13 @@ is the same convention every proto* runtime understands.
 Named arguments are passed in the keyword `ProtoSparseList` keyed by interned
 parameter names. Default values are compiled into the callee's prologue.
 
+**Amended 2026-10-25.** Since protoCore 3.0.0 the keyword arguments are a
+`ProtoKeywordArguments` of (interned parameter name, value) pairs over the
+caller's operand stack (protoCore docs/CALLING_CONVENTION.md), not a
+`ProtoSparseList`; the call allocates nothing. The interning rule below still
+holds: a name that is not interned matches no parameter. The rest of this
+section is kept as the Phase 4 record.
+
 **Amended 2026-09-24 (Phase 4), with the rationale the section did not state.**
 
 *The key convention.* The `keywordParameters` key is the **address of the interned
