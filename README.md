@@ -1362,7 +1362,7 @@ and `.sc` files.
 ```bash
 cd editor-integration/vscode
 npx @vscode/vsce@3.2.1 package --skip-license
-code --install-extension protoscala-0.4.0.vsix
+code --install-extension protoscala-0.4.1.vsix
 ```
 
 The extension runs the `protoscala.path` setting if set, else the default

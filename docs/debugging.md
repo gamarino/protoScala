@@ -26,12 +26,12 @@ frames, and a breakpoint in its source never stops.
    ```bash
    cd editor-integration/vscode
    npx @vscode/vsce@3.2.1 package --skip-license
-   code --install-extension protoscala-0.4.0.vsix
+   code --install-extension protoscala-0.4.1.vsix
    ```
 
    Then reload VS Code (**Developer: Reload Window**). On Linux and macOS a
    symbolic link works too, and picks up edits after a reload:
-   `ln -s "$PWD/editor-integration/vscode" ~/.vscode/extensions/protoscala-0.4.0`.
+   `ln -s "$PWD/editor-integration/vscode" ~/.vscode/extensions/protoscala-0.4.1`.
 
 VS Code has no built-in Scala support, so the extension contributes the
 `scala` language (`.scala`, `.sc`, and files whose first line is a

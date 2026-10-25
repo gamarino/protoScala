@@ -22,8 +22,31 @@ function defaultInstallPath() {
   return path.join(os.homedir(), ".local", "bin", "protoscala");
 }
 
+function configuredPath() {
+  return vscode.workspace.getConfiguration("protoscala").get("path");
+}
+
+// What is wrong with the `protoscala.path` setting, or null: it names a file
+// (not a bare command looked up in PATH) that does not exist. Checked before
+// the launch, so the user reads which setting is wrong instead of a spawn
+// error.
+function configuredPathProblem() {
+  const configured = configuredPath();
+  if (!configured || !/[\\/]/.test(configured) || fs.existsSync(configured)) return null;
+  return `protoScala: the protoscala.path setting is "${configured}", which does not exist. ` +
+    "Fix it, or clear it to use the default install location or protoscala from PATH.";
+}
+
+// Shows a message and aborts the launch, without waiting for the user to
+// close the message: a launch that waited would stay pending for as long as
+// the notification is not dismissed.
+function refuse(kind, message) {
+  vscode.window[kind](message);
+  return undefined;
+}
+
 function protoscalaCommand() {
-  const configured = vscode.workspace.getConfiguration("protoscala").get("path");
+  const configured = configuredPath();
   if (configured) return configured;
   const installed = defaultInstallPath();
   return fs.existsSync(installed) ? installed : "protoscala";
@@ -42,26 +65,25 @@ const configurationProvider = {
       }
     }
     if (!config.program) {
-      return vscode.window
-        .showInformationMessage("protoScala: open a .scala file or set 'program' in launch.json.")
-        .then(() => undefined);
+      return refuse("showInformationMessage", "protoScala: open a .scala file or set 'program' in launch.json.");
     }
     if (config.remote) {
       const cmd = config.remote.command;
       if (!Array.isArray(cmd) || cmd.length === 0 || !cmd.every((a) => typeof a === "string")) {
-        return vscode.window
-          .showErrorMessage("protoScala: 'remote.command' must be a non-empty list of strings, " +
-                            'e.g. ["ssh", "-T", "-o", "BatchMode=yes", "user@host"].')
-          .then(() => undefined);
+        return refuse("showErrorMessage",
+                      "protoScala: 'remote.command' must be a non-empty list of strings, " +
+                      'e.g. ["ssh", "-T", "-o", "BatchMode=yes", "user@host"].');
       }
       if (!Array.isArray(config.pathMappings) || config.pathMappings.length === 0) {
-        return vscode.window
-          .showErrorMessage("protoScala: a 'remote' launch needs 'pathMappings': " +
-                            '[{"localRoot": "${workspaceFolder}", "remoteRoot": "<the same ' +
-                            'folder on the remote machine>"}], so that breakpoints and frames ' +
-                            "can be translated between the two machines.")
-          .then(() => undefined);
+        return refuse("showErrorMessage",
+                      "protoScala: a 'remote' launch needs 'pathMappings': " +
+                      '[{"localRoot": "${workspaceFolder}", "remoteRoot": "<the same ' +
+                      'folder on the remote machine>"}], so that breakpoints and frames ' +
+                      "can be translated between the two machines.");
       }
+    } else {
+      const problem = configuredPathProblem();
+      if (problem) return refuse("showErrorMessage", problem);
     }
     return config;
   },

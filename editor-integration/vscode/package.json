@@ -2,7 +2,7 @@
   "name": "protoscala",
   "displayName": "protoScala",
   "description": "Scala syntax highlighting and debugging of protoScala scripts through the protoscala --dap Debug Adapter Protocol adapter.",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "publisher": "protoscala-placeholder",
   "engines": {
     "vscode": "^1.66.0"
@@ -231,5 +231,12 @@
   "license": "MIT",
   "extensionKind": [
     "workspace"
-  ]
+  ],
+  "scripts": {
+    "test": "node ./test/runTest.js"
+  },
+  "devDependencies": {
+    "@vscode/test-electron": "2.5.2",
+    "mocha": "10.8.2"
+  }
 }
