@@ -8,7 +8,6 @@ namespace protoScala {
 
 namespace {
 thread_local PrimitiveWindow* t_window = nullptr;
-thread_local FrameSpare t_spare{};
 
 // A young list cell of `ctx` referencing `v`: live until `ctx`'s chain is
 // submitted.
@@ -20,18 +19,18 @@ void anchorIn(proto::ProtoContext* ctx, const proto::ProtoObject* v) {
 
 PrimitiveWindow*& currentPrimitiveWindow() { return t_window; }
 void anchorInContext(proto::ProtoContext* ctx, const proto::ProtoObject* v) { anchorIn(ctx, v); }
-FrameSpare& currentFrameSpare() { return t_spare; }
 
-NativeCallScope::NativeCallScope(proto::ProtoContext* ctx) : saved_(t_window) {
+NativeCallScope::NativeCallScope(proto::ProtoContext* ctx, const FrameSpare& spare)
+    : saved_(t_window) {
     if (saved_ && saved_->frame == ctx) {
         nested_ = true;
         ++saved_->depth;
         return;
     }
-    if (t_spare.frame == ctx && t_spare.slots) {
+    if (spare.frame == ctx && spare.slots) {
         own_.frame = ctx;
-        own_.next = t_spare.slots;
-        own_.end = t_spare.slots + kPrimitiveSlots;
+        own_.next = spare.slots;
+        own_.end = spare.slots + kPrimitiveSlots;
         own_.depth = 1;
         t_window = &own_;
         return;

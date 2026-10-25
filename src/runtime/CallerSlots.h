@@ -89,27 +89,16 @@ struct PrimitiveWindow {
 // The window of the native call in progress on this thread, or nullptr.
 PrimitiveWindow*& currentPrimitiveWindow();
 
-// The spare slots of the innermost VM frame running on this thread.
+// The spare slots of the innermost VM frame running on this thread. The
+// thread-local itself lives in ExecutionEngine.cpp, next to `execute`, which
+// publishes and restores it on every activation: one translation unit, so the
+// access is a direct thread-local access rather than a call (measured: an
+// out-of-line accessor cost fib(30) 12 %).
 struct FrameSpare {
     proto::ProtoContext*       frame = nullptr;
     const proto::ProtoObject** slots = nullptr;  // kPrimitiveSlots slots
 };
 FrameSpare& currentFrameSpare();
-
-// Published by a VM frame for as long as it runs; restores the enclosing
-// frame's spare slots on every exit path.
-class FrameSpareScope {
-public:
-    FrameSpareScope(proto::ProtoContext* frame, const proto::ProtoObject** spare)
-        : saved_(currentFrameSpare()) {
-        currentFrameSpare() = FrameSpare{frame, spare};
-    }
-    ~FrameSpareScope() { currentFrameSpare() = saved_; }
-    FrameSpareScope(const FrameSpareScope&) = delete;
-    FrameSpareScope& operator=(const FrameSpareScope&) = delete;
-private:
-    FrameSpare saved_;
-};
 
 // Installed by ExecutionEngine::callNative around every native call made in
 // `ctx`:
@@ -122,7 +111,8 @@ private:
 // Restores the previous window on every exit path.
 class NativeCallScope {
 public:
-    explicit NativeCallScope(proto::ProtoContext* ctx);
+    // `spare` is the innermost VM frame's (currentFrameSpare()).
+    NativeCallScope(proto::ProtoContext* ctx, const FrameSpare& spare);
     ~NativeCallScope();
     NativeCallScope(const NativeCallScope&) = delete;
     NativeCallScope& operator=(const NativeCallScope&) = delete;

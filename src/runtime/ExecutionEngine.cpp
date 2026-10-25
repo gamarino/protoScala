@@ -33,6 +33,26 @@ thread_local bool tl_activeSet = false;
 // (D43): 1 while a native method runs, more when a native re-entered the VM.
 thread_local unsigned tl_nativeDepth = 0;
 
+// The innermost VM frame's spare slots (CallerSlots.h). Defined here so that
+// execute's publication of it is a direct thread-local access.
+thread_local FrameSpare tl_frameSpare{};
+
+// Published by a VM frame for as long as it runs; restores the enclosing
+// frame's spare slots on every exit path.
+class FrameSpareScope {
+public:
+    FrameSpareScope(proto::ProtoContext* frame, const proto::ProtoObject** spare)
+        : saved_(tl_frameSpare) {
+        tl_frameSpare = FrameSpare{frame, spare};
+    }
+    ~FrameSpareScope() { tl_frameSpare = saved_; }
+    FrameSpareScope(const FrameSpareScope&) = delete;
+    FrameSpareScope& operator=(const FrameSpareScope&) = delete;
+
+private:
+    FrameSpare saved_;
+};
+
 // The interned method name of a binary operator, read from the layout rather
 // than interned per execution (Phase 3, Task 1 Step 3). `?` cannot occur: the
 // dispatch loop only reaches slowBinary for these seven opcodes.
@@ -57,6 +77,7 @@ std::string plainName(std::string n) {
 } // namespace
 
 const ActiveCallContext* activeCallContext() { return tl_activeSet ? &tl_active : nullptr; }
+FrameSpare& currentFrameSpare() { return tl_frameSpare; }
 
 ExecutionEngine::ActiveCallGuard::ActiveCallGuard(ExecutionEngine* engine, const RuntimeLayout* layout)
     : saved_(tl_active), wasSet_(tl_activeSet) {
@@ -166,7 +187,7 @@ const proto::ProtoObject* ExecutionEngine::callNative(proto::ProtoContext* ctx, 
     // frame's slots or in storage it traces. The window gives the native the
     // calling frame's spare slots (CallerSlots.h).
     const proto::ProtoArguments list(args, argc);
-    NativeCallScope window(ctx);
+    NativeCallScope window(ctx, tl_frameSpare);
     // A native that re-enters the VM raises the depth for everything it calls,
     // and the destructor lowers it on unwinding too, so a FutureYield passing
     // through does not leave it raised (D43, A0-2).
