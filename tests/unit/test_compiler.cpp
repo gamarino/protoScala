@@ -634,7 +634,37 @@ TEST(Bytecode, AReturnPunchesAHoleInItsOwnFinallyRange) {
     EXPECT_GE(entries, 2u) << asm_;
 }
 
-// --- Top-level pattern definitions (2026-10-25) --------------------------------
+// --- @tailrec and top-level pattern definitions (2026-10-25) ------------------
+
+TEST(Compiler, TailrecSelfCallIsAJumpBack) {
+    GlobalTable g = sessionGlobals();
+    auto cu = compile("@annotation.tailrec\ndef count(n: Int, acc: Int): Int =\n"
+                      "  if n == 0 then acc else count(n - 1, acc + 1)", g);
+    const auto l = cu.module->block(0).disassemble();
+    EXPECT_TRUE(has(l, "JUMP_BACK"));
+    EXPECT_FALSE(has(l, "CALL"));
+    EXPECT_FALSE(has(l, "PUSH_GLOBAL"));
+}
+
+TEST(Compiler, WithoutTailrecTheSelfCallStaysACall) {
+    GlobalTable g = sessionGlobals();
+    auto cu = compile("def count(n: Int, acc: Int): Int =\n"
+                      "  if n == 0 then acc else count(n - 1, acc + 1)", g);
+    const auto l = cu.module->block(0).disassemble();
+    EXPECT_TRUE(has(l, "CALL 2"));
+    EXPECT_FALSE(has(l, "JUMP_BACK"));
+}
+
+TEST(Compiler, TailrecErrorsUseScalacWording) {
+    EXPECT_TRUE(has(compileError("@annotation.tailrec def f(n: Int): Int = "
+                                 "if n == 0 then 0 else 1 + f(n - 1)"),
+                    "Cannot rewrite recursive call: it is not in tail position"));
+    EXPECT_TRUE(has(compileError("@annotation.tailrec def f(n: Int): Int = n"),
+                    "TailRec optimisation not applicable, method f contains no recursive calls"));
+    EXPECT_TRUE(has(compileError("class C:\n  @annotation.tailrec def f(n: Int): Int = "
+                                 "if n == 0 then 0 else f(n - 1)"),
+                    "method f is neither private nor final so can be overridden"));
+}
 
 TEST(Compiler, TopLevelPatternValDeclaresNoHiddenGlobal) {
     GlobalTable g = sessionGlobals();

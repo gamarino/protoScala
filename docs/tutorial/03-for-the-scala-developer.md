@@ -874,7 +874,11 @@ the order of how often it asked: `sys` (`sys.exit`, `sys.error`), `identity`,
 `scala.util.control.Breaks`, `Int.MaxValue` and the other numeric limits,
 `scala.util.Random`, and `Function22`+. There is also no `scala.*` namespace to
 import any of them from (D90/D91), so `import scala.annotation.tailrec` does not
-compile.
+compile. The annotation itself works without the import: write
+`@annotation.tailrec` or `@scala.annotation.tailrec` (annotation names are not
+resolved, so a bare `@tailrec` is accepted too). A self-call in tail position is
+then a loop, and a method that is not tail-recursive is rejected with scalac's
+message (fixtures `tests/conformance/06-recursion/tailrec-*.scala`).
 
 Still missing in the concurrency area, and not scheduled: supervision trees,
 `ExecutionContext`, actor timeouts and `Await.result(f, duration)`. Still

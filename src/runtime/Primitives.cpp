@@ -130,6 +130,12 @@ PRIM(prim_class_name_of) {
     return str(ctx, typeName(ctx, layoutOf(), v));
 }
 
+// __varargs(a1, ..., an): the List of its arguments, which is exactly what a
+// call's prologue binds to a repeated parameter (ExecutionEngine::execute). A
+// @tailrec self-call rebinds a repeated parameter with it (CompileTailRec.cpp),
+// so a splice reaches it through CALL_SPREAD with CALL_SPREAD's own checks.
+PRIM(prim_varargs) { return ctx->newList(args->count(), args->values())->asObject(ctx); }
+
 // __isInstanceOf(v, type): a type pattern whose type is a VALUE (D133), such as
 // a foreign module's error prototype in `case e: g.NegativeRadius`. The test is
 // protoCore's prototype chain, the one every language on protoCore selects
@@ -1197,6 +1203,7 @@ void installPrimitives(ProtoContext* ctx, const RuntimeLayout& L) {
         {"println", &prim_println}, {"print", &prim_print}, {"__raise", &prim_raise},
         {"__fmt", &prim_fmt}, {"__tryOf", &prim_try_of},
         {"__classNameOf", &prim_class_name_of}, {"__isInstanceOf", &prim_is_instance_of},
+        {"__varargs", &prim_varargs},
         {"__isForeignObject", &prim_is_foreign_object},
         {"__installExtension", &prim_install_extension}};
     static constexpr MethodEntry any[] = {

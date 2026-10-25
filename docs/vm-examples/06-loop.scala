@@ -11,4 +11,4 @@ def count(n: Int, acc: Int): Int =
   if n == 0 then acc else count(n - 1, acc + 1)
 
 println(sumTo(100))
-println(count(1000, 0))
+println(count(1000000, 0))

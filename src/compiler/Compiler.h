@@ -94,6 +94,7 @@ private:
         // A local `def`: one by-name mask per parameter list (D47).
         std::vector<std::uint32_t> byNameMasks;
     };
+    struct TailRecState;
     struct FunctionState {
         BytecodeModule* mod = nullptr;
         FunctionState* parent = nullptr;
@@ -116,6 +117,10 @@ private:
             std::vector<std::pair<std::size_t, std::size_t>> holes;
         };
         std::vector<ActiveFinally> finallys;
+        // The @tailrec method whose self-calls this function compiles: its own
+        // body (the loop), or a function literal nested in it, where a self-call
+        // can only be reported. Null everywhere else (CompileTailRec.cpp).
+        TailRecState* tailrec = nullptr;
 
         FunctionState() = default;
         FunctionState(const FunctionState&) = delete;
@@ -158,6 +163,44 @@ private:
         const ClassInfo* companion;  // its companion (private access, D5), or nullptr
         std::string selfName;        // `self =>` alias of `this`, or empty
     };
+
+    // --- @tailrec (CompileTailRec.cpp) -------------------------------------
+    // The method a @tailrec annotation names, as its own call sites resolve it.
+    struct TailRecTarget {
+        enum class Kind { Global, Member, Local, Extension };
+        const DefDef* def = nullptr;
+        Kind kind = Kind::Global;
+        std::string key;            // Global: the alternative's key; Member: the member key
+        std::string receiverAlias;  // Extension: the receiver's name (`x` in `extension (x: T)`)
+    };
+    // One compilation of a @tailrec method's body. `owner` runs the loop: the
+    // method itself, or the innermost function literal of a curried method,
+    // whose frame holds every parameter list (the outer ones as captures).
+    struct TailRecState {
+        const TailRecTarget* target = nullptr;
+        FunctionState* owner = nullptr;
+        std::vector<const std::vector<Param>*> lists;  // outermost first
+        std::unordered_set<const Node*> sites;          // applications in tail position
+        std::size_t calls = 0;                          // self-calls compiled
+        // A call of the method's name on a receiver the compiler cannot type
+        // (`other.f(x)`): possibly recursive, so "contains no recursive calls"
+        // is not reported.
+        bool otherReceiver = false;
+    };
+    // Set while a curried @tailrec method's chain of lambdas is compiled; the
+    // innermost one (the method's real body) takes it.
+    const TailRecTarget* curriedTailRec_ = nullptr;
+    // Fills `state` for `target` before the body `body` of `owner` is compiled.
+    void beginTailRec(TailRecState& state, const TailRecTarget& target, FunctionState& owner,
+                      const Node& body);
+    // `a` calls the @tailrec method being compiled with every parameter list:
+    // fills `argLists` (outermost first) and returns true.
+    bool matchSelfCall(const Apply& a, std::vector<const std::vector<NodePtr>*>& argLists);
+    // Rebinds the parameters to the new arguments and jumps back to the start.
+    void compileTailCall(const Apply& a, const std::vector<const std::vector<NodePtr>*>& argLists);
+    LocalInfo outerParamSlot(FunctionState& owner, const std::string& name, SourcePos pos);
+    // Rejects a @tailrec member a subclass could override (scalac's rule).
+    static void checkTailRecOverridable(const DefDef& d, bool finalOwner);
 
     GlobalTable& globals_;
     ModuleLoader* loader_ = nullptr;
@@ -269,7 +312,8 @@ private:
     void compileFunction(const std::string& name, const std::vector<Param>& params,
                          const Node& body, FnShape shape, SourcePos pos,
                          bool paramless = false, bool allowByName = false,
-                         const std::string& selfAlias = {});
+                         const std::string& selfAlias = {},
+                         const TailRecTarget* tailrec = nullptr);
     // Bit k set: argument k of the application whose callee expression is `fn`
     // is by-name (D47). Zero unless the compiler resolves `fn` to a declaration
     // that says so; an unresolved callee evaluates its arguments (D53).

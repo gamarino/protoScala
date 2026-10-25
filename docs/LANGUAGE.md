@@ -57,6 +57,7 @@
 | `import` (selectors, renames `as` and `=>`, wildcard `*` and `_`, `given` selectors parsed and ignored), and the family prefixes `py.`/`js.`/`st.`/`clj.` | 6 ✅ (§3.2; D90–D96) |
 | `import Obj.*` / `.{a, b}` / `.a as b` on an object, companion or `enum` in scope — plain Scala's **member** import | Track X ✅ (§3.2; D105). Phase 6 had replaced it with the module-loading form |
 | top-level definitions (no wrapping `object` needed), `@main` methods | 1 |
+| `@tailrec` (`@tailrec`, `@annotation.tailrec`, `@scala.annotation.tailrec`): tail self-calls compile to a loop; a method that is not tail-recursive, has no recursive call or can be overridden is rejected with scalac's messages | ✅ 2026-10-25 (D137) |
 | `object Main extends App` as the program's entry point | Track X ✅ (§4.4; D104) |
 | `package` clauses (one namespace per file) | — **not implemented and not scheduled**: a module is a file reached by its path, not a package (D91). `package p` is refused with "not implemented yet" |
 
@@ -765,6 +766,7 @@ and `Priority` was three integers on an object. Their ids are not reused.
 | D130 | **java.net's socket names with simplified streams**: read/write methods on the socket, `read(n)` waits for n, `tryAccept(ms): Option`, `send`/`receive` without `DatagramPacket`, `startTls(serverName)` | no Java interop (D8) and no overloading (D31) |
 | D131 | **requests-scala's client, reduced**: its named arguments, but its own positional order, one `readTimeout`, no auth/cookies/proxy/sessions; `HttpResponse`, not `Response`; also bound as `requests` | the common shapes, one native call per exchange |
 | D132 | **A small HTTP server of protoScala's own**: one request per connection, 16 connection actors round robin, `127.0.0.1` by default | Scala has no standard server; the design fixed this shape |
+| D137 | `@tailrec` rewrites self-calls written bare or on `this` (or an extension's receiver). A tail call of the same method on another receiver (`other.f(x)`), which scalac rewrites for a final or private method, stays an ordinary send because the receiver's type is unknown, and so does an extension method called on another receiver (`(n - 1).m(...)`); it is never reported as an error. A parameterless `@tailrec def` is not checked or rewritten | types are erased (D4); agent, pending review |
 
 **D57, D60, D64 and D78 do not exist**, and are not reused. They were reserved for
 a `Char`-key divergence, a `Range == List` divergence, a `Try.apply` divergence

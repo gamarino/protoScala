@@ -697,14 +697,37 @@ and protoST's `tests/unit/test_cross_runtime_send.cpp`.
       value is the same object; `ensure:` and `finally` run during the unwind; a
       `ScalaThrow` keeps its line across protoST (E3).
 
-### Top-level pattern definitions (2026-10-25)
+### `@tailrec`, and top-level pattern definitions (2026-10-25)
 
+Verified against **scalac 3.9.0** (outputs and error texts compared fixture by
+fixture).
+
+- [x] **`@tailrec` methods loop** (`src/compiler/CompileTailRec.cpp`). A
+      self-call in tail position stores the new arguments into the parameter
+      slots and jumps back to word 0 with `JUMP_BACK`, which polls the GC
+      safepoint as a `while` loop does; no opcode was added. Tail positions are
+      scalac's: `if` branches, a block's last expression, `match` case bodies,
+      the right operand of `&&` / `||`, a `return`'s value and the `catch` cases
+      of a `try` without `finally`; never a `try` body. Covered: top-level,
+      local, object, private, final and extension methods (`x.m(...)` on their own
+      receiver; an annotation on an extension member may now be qualified), `this.m(...)`, several parameter lists, overloads, named and
+      default arguments, by-name and repeated parameters (a new internal native,
+      `__varargs`, builds the repeated parameter's List as a call's prologue
+      would), Double widening, and closures created in an earlier iteration,
+      which keep that iteration's values.
+- [x] **`@tailrec` is checked as scalac checks it**, with scalac's messages:
+      `Cannot rewrite recursive call: it is not in tail position` (including a
+      self-call inside a function literal), `TailRec optimisation not
+      applicable, method f contains no recursive calls`, and `... method f is
+      neither private nor final so can be overridden` for an overridable member
+      of a class or trait. Residue: D137 (agent, pending review).
 - [x] **Top-level `val (a, b) = e` creates no hidden global.** The temporary
       that holds the matched values is a slot of the top-level frame; it was a
       global `<t0>` that the debugger listed under Globals and that kept the
-      value alive for the session. Fixture:
-      `03-definitions/top-level-pattern-val.scala`; a unit test in
-      `tests/unit/test_compiler.cpp`.
+      value alive for the session.
+- [x] Fixtures: `tests/conformance/06-recursion/tailrec-*.scala` (11 running, 5
+      compile errors; `tailrec-defaults.scala` is not transpiled, D121), `03-definitions/top-level-pattern-val.scala`; unit tests
+      in `tests/unit/test_compiler.cpp`.
 
 ## Not yet implemented
 
@@ -1207,6 +1230,12 @@ in [DECISIONS-LOG.md](DECISIONS-LOG.md) under "The I/O track".
 | D134 | **`Throwable` and `Exception` catch foreign values.** A module's error, another language's exception, or any non-Scala value raised through protoCore is no instance of a Scala class, yet `case e: Throwable` and `case e: Exception` catch it, because on the JVM everything thrown is a `Throwable` and such an error is not fatal. In a `catch`, `Throwable` selects every thrown value and `Exception` every one that is not a Scala `Error`; outside a `catch` both also accept a foreign object. `RuntimeException` and the other specific classes, and `Error` with its subclasses, select their own instances only. `throw e` re-raises a caught foreign value as it is | unified exceptions (protoCore 3.0.0) | (perm) — decided by the maintainer, 2026-10-21 |
 | D135 | **A Scala call on a protoST object is a Smalltalk message, with the selector mapped by rule** (INTEROP §4.1): a name with `:` (in backticks) is the selector; an operator is binary; no argument is unary; n arguments and n `_`-separated parts are a keyword selector (`at_put(k, v)` → `at:put:`); otherwise one argument takes one `:` (`add(x)` → `add:`); anything else is refused. Instance creation is `` Counter.`new`() `` (`new Counter()` stays unavailable, D94). Scala's `Any` members (`eq`, `ne`, `==`, `!=`, `equals`, `hashCode`, `##`, `toString`) keep their Scala meaning. A message without arguments written without `()` (`c.value`) is sent only once the session has met a protoST object (an `st.` import or a send that reached one); before that it reads the attribute. Named arguments are refused; a protoST call-form method (`>> incr(by, factor = 1)`) is not reachable. The no-`()` rule was confirmed by the maintainer (2026-10-21). Sends run on protoST's owner thread only (protoST D26) | INTEROP §4.1 | (pending review) |
 | D136 | **`getMessage` on a foreign exception.** On a protoST exception it is Smalltalk's `messageText`; on any other foreign value it is the value's `message` attribute. A Scala `Throwable` keeps its own. Other `Throwable` members (`getClass`, `printStackTrace`, ...) are not mapped | INTEROP §9.1 | (perm) — decided by the maintainer, 2026-10-21 |
+
+### `@tailrec` deviations — recorded 2026-10-25, agent, pending review
+
+| id | Deviation | Plan | Revisit |
+|---|---|---|---|
+| D137 | **`@tailrec` where protoScala cannot see a type.** scalac also rewrites a tail call of a final or private method on *another* receiver of the same class (`other.f(x)`); protoScala has no static type for `other` (D4) and cannot know that `other.f` is the same method, so the call stays an ordinary send and does not loop. The same holds for an extension method called on a receiver other than its own (`(n - 1).countDown(acc)`), which scalac rewrites because an extension is a static method: here the call dispatches on the receiver's run-time prototype (D6), so rewriting it could run the extension where the receiver has a member of its own. Such a call is not reported as a non-tail call either, and its presence suppresses the "contains no recursive calls" error, so no program scalac accepts is rejected. A **parameterless** `@tailrec def f: T` is compiled without the check or the rewrite. A call of the method's own name through its object (`O.f(x)` inside `object O`) is treated like any other receiver. Decided by the agent that implemented `@tailrec`; pending the maintainer's review | `@tailrec` (2026-10-25) | (pending review) |
 
 ### Phase 7 — packaging, 2026-09-27
 
