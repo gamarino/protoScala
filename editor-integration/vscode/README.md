@@ -16,7 +16,8 @@ A minimal VS Code extension for protoScala scripts:
   Exceptions*, *Uncaught Exceptions*) and threads (`main`, `Thread-N`, the
   actor workers: only the thread that stops is stopped, the others keep
   running), conditional / hit-count breakpoints and logpoints, and
-  conditions on the exception filters (the exception is `e`). The debug
+  conditions on the exception filters (the exception is `e`), the prelude's
+  embedded source, and remote debugging (`remote` + `pathMappings`). The debug
   adapter is the `protoscala` executable itself, started as
   `protoscala --dap`; the exception filters come from it, so the BREAKPOINTS
   view lists them without any setting here.
@@ -38,14 +39,14 @@ The extension looks for it in this order:
 ```bash
 cd editor-integration/vscode
 npx @vscode/vsce@3.2.1 package --skip-license
-code --install-extension protoscala-0.3.0.vsix
+code --install-extension protoscala-0.4.0.vsix
 ```
 
 On Linux and macOS a symbolic link works too (edits are picked up after
 **Developer: Reload Window**):
 
 ```bash
-ln -s "$(pwd)/editor-integration/vscode" ~/.vscode/extensions/protoscala-0.3.0
+ln -s "$(pwd)/editor-integration/vscode" ~/.vscode/extensions/protoscala-0.4.0
 ```
 
 If the Scala (Metals) extension is installed it also claims the `scala`
@@ -75,6 +76,16 @@ language; the debugger works the same with either grammar.
 | `args`        | string[] | Arguments for the script's `@main`. |
 | `cwd`         | string   | Working directory of the script. |
 | `stopOnEntry` | boolean  | Stop at the first line that runs. |
+| `justMyCode`  | boolean  | Steps never stop in the prelude. |
+| `pathMappings`| object[] | `[{localRoot, remoteRoot}]`: this machine's path and the adapter's. |
+| `remote`      | object   | `{command: ["ssh", "-T", "-o", "BatchMode=yes", "u@h"], path: "/remote/protoscala"}`: run the adapter behind that command. Needs `pathMappings`. |
+
+**Remote**: with VS Code's Remote - SSH / WSL / Dev Containers, install this
+`.vsix` and protoScala on the remote side (the extension runs where the
+workspace is). Or keep VS Code local and use the "protoScala: Launch over SSH"
+/ "Launch in WSL" snippets (`remote` + `pathMappings`); the remote shell must
+print nothing on a non-interactive start. Details: [docs/debugging.md](../../docs/debugging.md),
+"Remote debugging"; JetBrains IDEs: the same page.
 
 Only interpreted code is debugged; modules transpiled by `protoscalac` are
 not. See [docs/debugging.md](../../docs/debugging.md) for what works and the

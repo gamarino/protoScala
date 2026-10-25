@@ -44,6 +44,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   cached per expression and frame names (`Session::debugEvaluate`), and their
   compilation is serialised for concurrent threads. Test: `cli/dap-conditions`.
 
+- **Sources without a file, pathMappings, remote debugging** in
+  `protoscala --dap` (`docs/debugging.md`): the prelude's frames show its
+  embedded source (by `sourceReference`, served by the `source` request),
+  take breakpoints and can be stepped into (`justMyCode` keeps steps out);
+  `loadedSources` and `loadedSource` events; `pathMappings` translated by the
+  adapter in both directions, with files outside every mapping served by
+  reference. The VS Code extension (0.4.0) gains `remote: {command, path}`
+  (ssh / wsl / docker exec), "Launch over SSH" / "Launch in WSL" snippets and
+  `extensionKind: workspace`. JetBrains (LSP4IJ) instructions. Test:
+  `cli/dap-sources`; a manual end-to-end session from Windows into WSL.
+
 ### Fixed
 - `protoscala --dap`: what a stopped thread evaluates is now a child of its
   innermost live context (an exception stop raised inside the prelude used the

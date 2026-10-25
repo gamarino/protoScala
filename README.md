@@ -1362,7 +1362,7 @@ and `.sc` files.
 ```bash
 cd editor-integration/vscode
 npx @vscode/vsce@3.2.1 package --skip-license
-code --install-extension protoscala-0.3.0.vsix
+code --install-extension protoscala-0.4.0.vsix
 ```
 
 The extension runs the `protoscala.path` setting if set, else the default
@@ -1389,7 +1389,12 @@ stopped thread is inspected, stepped and resumed on its own;
 **conditional breakpoints, hit counts** (`3`, `>= 2`, `% 2`, ...) **and
 logpoints** (`i={i}`), and conditions on the exception filters with the
 exception bound as `e` (`e.isInstanceOf[IllegalStateException]`); a condition
-that fails stops and says why.
+that fails stops and says why; the prelude's frames with its embedded source
+(step into it, set breakpoints in it) and Loaded Scripts; **remote
+debugging**, through VS Code's Remote - SSH / WSL / Dev Containers or with the
+adapter behind `ssh`/`wsl`/`docker exec` (`remote` + `pathMappings`, which the
+adapter itself translates, so any DAP client can use them); JetBrains IDEs
+through the LSP4IJ plugin (see the guide).
 
 **Limitations**: only interpreted code is debugged — modules transpiled by
 `protoscalac` and `--run-module` are not; no function breakpoints; variables do not expand into fields (evaluate `p.x`); "uncaught"

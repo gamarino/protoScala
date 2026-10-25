@@ -26,12 +26,12 @@ frames, and a breakpoint in its source never stops.
    ```bash
    cd editor-integration/vscode
    npx @vscode/vsce@3.2.1 package --skip-license
-   code --install-extension protoscala-0.3.0.vsix
+   code --install-extension protoscala-0.4.0.vsix
    ```
 
    Then reload VS Code (**Developer: Reload Window**). On Linux and macOS a
    symbolic link works too, and picks up edits after a reload:
-   `ln -s "$PWD/editor-integration/vscode" ~/.vscode/extensions/protoscala-0.3.0`.
+   `ln -s "$PWD/editor-integration/vscode" ~/.vscode/extensions/protoscala-0.4.0`.
 
 VS Code has no built-in Scala support, so the extension contributes the
 `scala` language (`.scala`, `.sc`, and files whose first line is a
@@ -65,6 +65,9 @@ work, and VS Code uses one of the two grammars.
 | `args`        | Arguments for the script's `@main` method. |
 | `cwd`         | Working directory of the script (imports are found relative to the importing file, as always). |
 | `stopOnEntry` | Stop at the first line that runs. |
+| `justMyCode`  | Steps never stop in the prelude (breakpoints there still do). Default `false`. |
+| `pathMappings`| `[{localRoot, remoteRoot}]`: translate paths between the client's machine and the adapter's ("Remote debugging"). |
+| `remote`      | Extension only: `{command: [...], path}` runs the adapter behind that command ("Remote debugging"). |
 
 **Ctrl+F5** (Run Without Debugging) runs the script through the adapter with
 the debugger detached.
@@ -81,8 +84,8 @@ the debugger detached.
   call site (for `n * fact(n - 1)`, back on that line before the
   multiplication). A loop whose body is on one line stops once per iteration.
 - **Call stack** with function names (`fact`, `<lambda>`, `Point.<init>`, the
-  script's `<top>`), files and lines. Frames of the prelude (`List.map` running
-  a lambda) are not shown.
+  script's `<top>`), files and lines, prelude frames included (shown dimmed,
+  with the prelude's embedded source: see "Sources without a file").
 - **Variables**: a frame's **Locals** — parameters, `val`s and `var`s in
   scope, captured variables, `this` in a method — and **Globals**: the
   top-level `val`s, `var`s and objects of the script being run (a `lazy val` not
@@ -163,6 +166,103 @@ the debugger detached.
   one. Breakpoints apply to every thread. Pause on a thread that is waiting in
   native code (`t.join()`, an `await` that blocks, I/O) takes effect when it
   is back in interpreted code.
+
+## Sources without a file: the prelude, Loaded Scripts
+
+The prelude (`lib/prelude.scala`: `Option`, `List`'s Scala-written methods,
+`require`, `Try`, the I/O classes...) is installed only inside the executable,
+as a precompiled image plus its source text. Under the debugger its frames
+show that text: VS Code opens it read-only as `prelude.scala` (the adapter
+serves it through the DAP `source` request, by `sourceReference`), dimmed as
+library code. Step Into enters prelude methods, breakpoints set in that
+read-only editor stop, and its frames are in the call stack. Its frames have
+no Locals names beyond the parameters (the image carries no slot names).
+
+- `"justMyCode": true` keeps steps out of the prelude (Step Into on
+  `require(...)` goes to the next line of the program). Breakpoints in the
+  prelude still stop.
+- Exception stops always show the program's frame that called into the
+  prelude ("raised in `require`, called from this line"), and stopOnEntry
+  stops at the script's first line, not in the prelude's initialisation.
+- **Loaded Scripts** (the Run and Debug view's LOADED SCRIPTS section, DAP
+  `loadedSources` and `loadedSource` events) lists the prelude, the script
+  and every module it imported, as they load.
+- Code compiled for Watch, the Debug Console and conditions is never shown:
+  nothing stops inside it.
+
+## Remote debugging
+
+The script runs where `protoscala --dap` runs. Two ways to put it on another
+machine (a Linux server, WSL, a container):
+
+1. **VS Code's own remoting (Remote - SSH, WSL, Dev Containers).** Install
+   protoScala and the extension's `.vsix` on the remote side and open the
+   folder there. The extension is a workspace extension
+   (`"extensionKind": ["workspace"]`), so it runs where the files are, and
+   nothing else is needed: paths are the remote machine's on both ends.
+2. **The adapter behind a command** (`remote` + `pathMappings`): VS Code and
+   your files stay local; the extension starts
+   `<remote.command...> <remote.path> --dap`, and the adapter translates every
+   path itself, so this works with any command that relays stdin/stdout:
+
+   ```json
+   {
+     "type": "protoscala", "request": "launch", "name": "Debug over SSH",
+     "program": "${file}",
+     "remote": { "command": ["ssh", "-T", "-o", "BatchMode=yes", "me@build-host"],
+                 "path": "/home/me/.local/bin/protoscala" },
+     "pathMappings": [ { "localRoot": "${workspaceFolder}",
+                         "remoteRoot": "/home/me/src/project" } ]
+   }
+   ```
+
+   In WSL: `"command": ["wsl", "-d", "Ubuntu-24.04", "--"]` and a
+   `remoteRoot` that is a Linux clone (or `/mnt/c/...` for the Windows folder
+   itself). In a container: `["docker", "exec", "-i", "my-container"]`.
+   **The remote shell must print nothing** when it starts non-interactively:
+   a `motd`, an `echo` in `.bashrc`, or a password prompt would land in the
+   protocol stream and VS Code would drop the session. `ssh -T -o
+   BatchMode=yes` (no terminal, no prompts; use a key) avoids the last two.
+   The same files must exist on both sides (a clone, a synced folder).
+
+`pathMappings` (also usable without `remote`, by any DAP client) is a list of
+`{localRoot, remoteRoot}`: local is the client's machine, remote the
+adapter's. The script's `program` and `cwd`, breakpoint paths and `source`
+requests are translated local -> remote; frames, Loaded Scripts and the
+exception stack local <- remote. The longest matching root wins; `\` and `/`
+are converted; a root that looks like a Windows path (`c:\...`) matches
+regardless of case. A file under no mapping (a module found through
+`PROTOSCALA_PATH` elsewhere on the remote machine) is shown read-only by
+`sourceReference`, with its remote path as the origin, and takes breakpoints
+like the prelude. An entry without both roots fails the launch.
+
+## JetBrains IDEs (IntelliJ IDEA, PyCharm, CLion, ...)
+
+*This section was written from the LSP4IJ plugin's documentation and the
+adapter's protocol behaviour; it has not been clicked through in a JetBrains
+IDE, and menu names may differ between versions.*
+
+JetBrains IDEs speak DAP through the [LSP4IJ](https://github.com/redhat-developer/lsp4ij)
+plugin (Settings -> Plugins -> Marketplace -> "LSP4IJ"):
+
+1. **Run -> Edit Configurations... -> + -> Debug Adapter Protocol.**
+2. **Server** tab: the command `protoscala --dap` (the full path to the
+   executable if it is not on `PATH`; for a remote machine, the same command
+   line as `remote` above: `ssh -T -o BatchMode=yes me@host /home/me/.local/bin/protoscala --dap`).
+3. **Mappings** tab: map the `*.scala` files (or the Scala language) to this
+   server, so the IDE lets you set breakpoints in them and sends them.
+4. **Configuration** tab: the working directory and file, and the launch
+   JSON, with the same attributes as VS Code's `launch.json`:
+   `{"type": "protoscala", "request": "launch", "program": "${file}",
+   "cwd": "${workspaceFolder}", "pathMappings": [...]}` (`stopOnEntry`,
+   `args`, `justMyCode` too). Everything about paths and sources is in the
+   adapter, so pathMappings, the prelude's source, exception filters,
+   conditions and threads behave as in VS Code.
+
+Syntax: an IDE with a Scala plugin already highlights `.scala`. Without one,
+import the extension's TextMate grammar: **Settings -> Editor -> TextMate
+Bundles -> +**, and choose the `editor-integration/vscode` folder of this
+repository (it reads `package.json`'s grammar contribution).
 
 ## Limitations
 
