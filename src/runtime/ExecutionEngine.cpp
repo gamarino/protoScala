@@ -34,8 +34,18 @@ thread_local bool tl_activeSet = false;
 thread_local unsigned tl_nativeDepth = 0;
 
 // The innermost VM frame's spare slots (CallerSlots.h). Defined here so that
-// execute's publication of it is a direct thread-local access.
-thread_local FrameSpare tl_frameSpare{};
+// execute's publication of it is a direct thread-local access, and in the
+// initial-exec TLS model where the toolchain has one: every activation saves
+// and restores it, and the general-dynamic model's __tls_get_addr calls cost
+// fib(30) about 6 % (measured interleaved, 15 rounds, 2026-10-25). The cost of
+// the model is a static TLS slot of 16 bytes, which a dlopen of libprotoScala
+// takes from glibc's static TLS surplus.
+#if defined(__GNUC__) && defined(__ELF__)
+#define PROTOSCALA_TLS_INITIAL_EXEC __attribute__((tls_model("initial-exec")))
+#else
+#define PROTOSCALA_TLS_INITIAL_EXEC
+#endif
+thread_local FrameSpare tl_frameSpare PROTOSCALA_TLS_INITIAL_EXEC = {};
 
 // Published by a VM frame for as long as it runs; restores the enclosing
 // frame's spare slots on every exit path.
