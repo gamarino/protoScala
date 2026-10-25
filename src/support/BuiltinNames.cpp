@@ -9,7 +9,7 @@ const std::vector<std::string>& builtinGlobalNames() {
         std::vector<std::string> v = {"println", "print", "List", "Nil", "__raise",
                                       "Actor", "Future", "Thread", "System",
                                       "__fmt", "__tryOf", "__classNameOf", "__isInstanceOf", "__isForeignObject", "__kwprobe",
-                                      "__installExtension",
+                                      "__installExtension", "__varargs",
                                       "Vector", "Map", "Set",
                                       // Track F: the filesystem natives the
                                       // prelude's Source and FileIO call.

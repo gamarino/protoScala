@@ -1661,7 +1661,15 @@ NodePtr Parser::parseExtension() {
         std::vector<std::string> annotations;
         while (at(TokenKind::At)) {
             advance();
-            annotations.push_back(expect(TokenKind::Identifier, "an annotation name").text);
+            // A qualified name (`@annotation.tailrec`), as parseDefinition reads it.
+            std::string name = expect(TokenKind::Identifier, "an annotation name").text;
+            while (at(TokenKind::Dot) && peek(1).kind == TokenKind::Identifier) {
+                advance();
+                name += '.';
+                name += advance().text;
+            }
+            annotations.push_back(std::move(name));
+            while (at(TokenKind::Newline)) advance();  // an annotation on its own line
         }
         bool isLazy = false;
         const Modifiers mods = parseModifiers(&isLazy);

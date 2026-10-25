@@ -519,7 +519,9 @@ private:
     static NodePtr widenToDouble(NodePtr e) {
         const SourcePos pos = e->pos;
         auto sel = std::make_unique<Select>(pos, std::move(e), "toDouble");
-        return std::make_unique<Apply>(pos, std::move(sel));
+        auto widened = std::make_unique<Apply>(pos, std::move(sel));
+        widened->doubleWidening = true;
+        return widened;
     }
 
     // `Unit` / `scala.Unit` as written (types are not resolved in Phase 1).
@@ -557,6 +559,7 @@ private:
         if (!e || yieldsUnit(*e)) return e;
         const SourcePos pos = e->pos;
         auto block = std::make_unique<Block>(pos);
+        block->valueDiscard = true;
         block->stats.push_back(std::move(e));
         block->stats.push_back(std::make_unique<UnitLit>(pos));
         return block;

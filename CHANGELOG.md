@@ -7,6 +7,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **`@tailrec` is honoured** (`src/compiler/CompileTailRec.cpp`). A
+  self-call in tail position of a method annotated `@tailrec` (any
+  qualification) rebinds the parameters and jumps back to the start of the
+  body with `JUMP_BACK`, so `count(1000000, 0)` no longer raises
+  `StackOverflowError`. Works for top-level, local, object, private, final and
+  extension methods, `this.f(...)`, several parameter lists, overloads, named
+  and default arguments, by-name and repeated parameters; closures created in
+  an earlier iteration keep that iteration's values. No opcode was added; the
+  internal native `__varargs` rebuilds a repeated parameter. A method that is
+  not tail-recursive, has no recursive call, or can be overridden is rejected
+  with scalac 3.9's messages. Deviation D137 (a tail call on another receiver
+  stays a send). An extension member's annotation may now be qualified
+  (`@annotation.tailrec`), as on any other definition. Tests: `06-recursion/tailrec-*.scala` (16 fixtures), unit
+  tests in `test_compiler.cpp`; VM.md example 06 regenerated.
 - **`docs/VM.md`: the bytecode VM for contributors.** A reading order through
   the source (parser, desugarer, compiler, `BytecodeModule`, VM, primitives),
   the instruction encoding, the frame layout (one `ProtoContext` per

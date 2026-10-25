@@ -104,6 +104,10 @@ struct Apply : Node {
     NodePtr fn;
     std::vector<NodePtr> args;
     bool blockArg = false;  // f { ... }
+    // `e.toDouble()` written by Desugar to widen a value to a declared Double
+    // (widenToDouble), not by the user. The widening is idempotent, so a
+    // tail-recursive call inside it is still in tail position (CompileTailRec.cpp).
+    bool doubleWidening = false;
 };
 struct TypeApply : Node {
     TypeApply(SourcePos p, NodePtr f) : Node(NodeKind::TypeApply, p), fn(std::move(f)) {}
@@ -138,6 +142,10 @@ struct Block : Node {
     Block(SourcePos p) : Node(NodeKind::Block, p) {}
     std::vector<NodePtr> stats;  // statements, in order; the block's value is the last
                                  // one when it is an expression, else ()
+    // `{ e; () }` written by Desugar to discard a value where Unit is declared
+    // (discardValue), not by the user. Discarding is idempotent, so a
+    // tail-recursive call in `e` is still in tail position (CompileTailRec.cpp).
+    bool valueDiscard = false;
 };
 // Modifiers of a definition or class parameter. Only `private` changes the
 // meaning of a program (D5: class-qualified member keys); the others are
@@ -227,10 +235,13 @@ struct DefDef : Node {
     // "this" is an auxiliary constructor (templates only).
     // `@main` under any qualification (`@scala.main`): the last dot-segment
     // of the annotation name decides (annotations are not resolved in Phase 1).
-    bool isMain() const {
+    bool isMain() const { return hasAnnotation("main"); }
+    // `@tailrec`, `@annotation.tailrec`, `@scala.annotation.tailrec`.
+    bool isTailrec() const { return hasAnnotation("tailrec"); }
+    bool hasAnnotation(const char* simpleName) const {
         for (const auto& a : annotations) {
             const auto dot = a.rfind('.');
-            if ((dot == std::string::npos ? a : a.substr(dot + 1)) == "main") return true;
+            if ((dot == std::string::npos ? a : a.substr(dot + 1)) == simpleName) return true;
         }
         return false;
     }

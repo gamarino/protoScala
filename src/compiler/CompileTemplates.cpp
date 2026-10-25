@@ -486,8 +486,14 @@ void Compiler::compileTemplate(const TemplateDef& t, const ClassInfo& info) {
         const auto& d = as<DefDef>(*s);
         if (d.name == "this" || !d.body) continue;
         keys.push_back(info.members.at(d.name).key);
+        const bool tailrec = d.isTailrec() && !d.paramLists.empty();
+        if (tailrec)
+            checkTailRecOverridable(d, info.kind == ClassKind::Object || t.mods.isFinal);
+        const TailRecTarget target{&d, TailRecTarget::Kind::Member, info.members.at(d.name).key,
+                                   {}};
         compileFunction(d.name, paramsOfDef(d), *d.body, FnShape::Method, d.pos,
-                        /*paramless=*/d.paramLists.empty(), /*allowByName=*/true);
+                        /*paramless=*/d.paramLists.empty(), /*allowByName=*/true, {},
+                        tailrec ? &target : nullptr);
     }
     auto setterFor = [&](const std::string& name, SourcePos pos) {
         keys.push_back(info.members.at(setterName(name)).key);

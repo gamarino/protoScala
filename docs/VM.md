@@ -842,7 +842,7 @@ def count(n: Int, acc: Int): Int =
   if n == 0 then acc else count(n - 1, acc + 1)
 
 println(sumTo(100))
-println(count(1000, 0))
+println(count(1000000, 0))
 ```
 
 ```text
@@ -859,7 +859,7 @@ function <top> arity=0 locals=0 stack=4 captures=0
   0009  L13  POP 0
   0010  L14  PUSH_GLOBAL 2 ; println
   0011  L14  PUSH_GLOBAL 1 ; count
-  0012  L14  PUSH_CONST 4 ; 1000
+  0012  L14  PUSH_CONST 4 ; 1000000
   0013  L14  PUSH_CONST 5 ; 0
   0014  L14  CALL 2
   0015  L14  CALL 1
@@ -894,22 +894,23 @@ function <top> arity=0 locals=0 stack=4 captures=0
     0023  L7  PUSH_LOCAL 2
     0024  L1  RETURN 0
 
-  function count arity=2 locals=0 stack=4 captures=0
+  function count arity=2 locals=0 stack=3 captures=0
     0000  L11  PUSH_LOCAL 0
     0001  L11  PUSH_CONST 0 ; 0
     0002  L11  EQ 0
     0003  L11  JUMP_IF_FALSE 2 ; -> 6
     0004  L11  PUSH_LOCAL 1
-    0005  L11  JUMP 8 ; -> 14
-    0006  L11  PUSH_GLOBAL 1 ; count
-    0007  L11  PUSH_LOCAL 0
-    0008  L11  PUSH_CONST 2 ; 1
-    0009  L11  SUB 0
-    0010  L11  PUSH_LOCAL 1
-    0011  L11  PUSH_CONST 2 ; 1
-    0012  L11  ADD 0
-    0013  L11  CALL 2
-    0014  L10  RETURN 0
+    0005  L11  JUMP 9 ; -> 15
+    0006  L11  PUSH_LOCAL 0
+    0007  L11  PUSH_CONST 1 ; 1
+    0008  L11  SUB 0
+    0009  L11  PUSH_LOCAL 1
+    0010  L11  PUSH_CONST 1 ; 1
+    0011  L11  ADD 0
+    0012  L11  STORE_LOCAL 1
+    0013  L11  STORE_LOCAL 0
+    0014  L11  JUMP_BACK 15 ; -> 0
+    0015  L10  RETURN 0
 ```
 
 - `sumTo`: the loop condition is at 0004; `JUMP_IF_FALSE 13` exits to 0021.
@@ -917,10 +918,15 @@ function <top> arity=0 locals=0 stack=4 captures=0
   polling the GC safepoint (1.6). The `while` itself yields Unit (0021),
   dropped at 0022 because it is a statement.
 - An assignment yields Unit (0012, 0018), which the enclosing block drops.
-- `count` is annotated `@annotation.tailrec`, but the annotation is ignored:
-  the recursive call is an ordinary `CALL` (0013) and nests on the native
-  stack. `count(1000000, 0)` raises `StackOverflowError` (section 6). Write
-  deep iteration as a `while` loop.
+- `count` is annotated `@annotation.tailrec`, so its self-call in tail
+  position is a loop (`src/compiler/CompileTailRec.cpp`): the new arguments
+  are evaluated onto the stack (0006-0011), stored into the parameter slots in
+  reverse (0012-0013), and `JUMP_BACK 15` returns to word 0, polling the GC
+  safepoint as the `while` loop does. No `CALL` and no `PUSH_GLOBAL count`
+  remain, the frame and its context are reused, and `count(1000000, 0)` needs
+  no native stack. Word 0 is the loop head on purpose: it is where the
+  prologue widens a `Double` parameter, so a rebound one is widened again.
+  The `RETURN` at 0015 is reached only from the `then` branch.
 
 ### Example 07: closures capturing a `val` and a `var`
 
@@ -2360,16 +2366,9 @@ the `ctx` you are given or in a scope you open, and root what you hold
 ## 6. Known oddities
 
 Found while writing this document, verified against `main` at `3ac106e8`.
-One found then is fixed since: top-level destructuring stored its temporary
-in a hidden global `<t0>`.
+Two found then are fixed since: `@tailrec` was ignored, and top-level
+destructuring stored its temporary in a hidden global `<t0>`.
 
-- **`@tailrec` is accepted and ignored** (verified). A self-recursive call in
-  tail position is an ordinary `CALL` (example 06), so
-  `@annotation.tailrec def count(n: Int, acc: Int): Int = if n == 0 then acc
-  else count(n - 1, acc + 1)` raises `StackOverflowError: calls nested too
-  deeply for the 32 MiB thread stack` for `count(1000000, 0)`, where scalac
-  compiles a loop. Neither `docs/STATUS.md` nor `docs/LANGUAGE.md` lists this
-  as a deviation.
 - **`NOP` (0) is never emitted** by the compiler, the transpiler or the
   prelude image builder. The VM and the emitter accept it. It is dead.
 - **`EXTEND` (1) is reachable only for operands above 16,777,215**, which

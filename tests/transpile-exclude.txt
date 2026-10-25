@@ -22,7 +22,7 @@
 #
 # Counts by code:
 #   D113    40
-#   D121    35
+#   D121    36
 #   D123    89
 #
 #   D113  await: cooperative suspension snapshots a bytecode frame, and a transpiled
@@ -33,6 +33,7 @@
 #   D123  imports: resolved at transpile time by loading (D90) and not re-performed
 #         at load time, so the imported globals would be unbound.
 #
+06-recursion/tailrec-defaults.scala                                    D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
 08-case-classes/case-class-basics-braces.scala                         D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
 08-case-classes/case-class-basics-indent.scala                         D121   keyword and default binding is done by the callee prologue a transpiled frame does not run
 08-case-classes/copy-derived-is-a-new-instance.scala                   D121   keyword and default binding is done by the callee prologue a transpiled frame does not run

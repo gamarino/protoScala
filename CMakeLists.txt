@@ -445,6 +445,7 @@ add_library(protoscala_compiler OBJECT
     src/compiler/ClassInfo.cpp
     src/compiler/Compiler.cpp
     src/compiler/CompilePatterns.cpp
+    src/compiler/CompileTailRec.cpp
     src/compiler/CompileTemplates.cpp
     src/compiler/CppTables.cpp
 )

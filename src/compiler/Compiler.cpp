@@ -620,9 +620,13 @@ void Compiler::compileExpr(const Node& n) {
             // A curried def's lambda owns its body's `return`s (Desugar), and
             // carries a real parameter list, so it may declare by-name
             // parameters (D47).
+            // The innermost lambda of a curried @tailrec method is its body.
+            const TailRecTarget* tailrec =
+                l.ownsReturn && l.fromCurriedDef ? curriedTailRec_ : nullptr;
+            if (tailrec) curriedTailRec_ = nullptr;
             compileFunction("<lambda>", l.params, *l.body,
                             l.ownsReturn ? FnShape::Def : FnShape::Lambda, n.pos,
-                            /*paramless=*/false, /*allowByName=*/l.fromCurriedDef);
+                            /*paramless=*/false, /*allowByName=*/l.fromCurriedDef, {}, tailrec);
             return;
         }
         case NodeKind::ValDef:
@@ -764,6 +768,13 @@ std::uint32_t Compiler::byNameMaskOfCallee(const Node& fnNode) {
 }
 
 void Compiler::compileApply(const Apply& a) {
+    if (fn_->tailrec) {
+        std::vector<const std::vector<NodePtr>*> argLists;
+        if (matchSelfCall(a, argLists)) {
+            compileTailCall(a, argLists);
+            return;
+        }
+    }
     // Type arguments are erased: recv.m[T](args) is a send like recv.m(args).
     const Node* fn = a.fn.get();
     while (fn->kind == NodeKind::TypeApply) fn = as<TypeApply>(*fn).fn.get();
@@ -1085,8 +1096,10 @@ void Compiler::compileStats(const std::vector<NodePtr>& stats, std::size_t from,
         const NodePtr& s = stats[k];
         if (s->kind == NodeKind::DefDef) {
             const auto& d = as<DefDef>(*s);
+            const TailRecTarget target{&d, TailRecTarget::Kind::Local, {}, {}};
             compileFunction(d.name, paramsOf(d), bodyOf(d), FnShape::Def, d.pos,
-                            /*paramless=*/false, /*allowByName=*/true);
+                            /*paramless=*/false, /*allowByName=*/true, {},
+                            d.isTailrec() && !d.paramLists.empty() ? &target : nullptr);
             storeLocal(*findInFunction(fn_, d.name), d.pos);
         } else if (s->kind == NodeKind::ValDef && as<ValDef>(*s).isLazy) {
             const auto& v = as<ValDef>(*s);
@@ -1315,7 +1328,8 @@ void Compiler::widenDoubleParams(const std::vector<Param>& params, bool method) 
 void Compiler::compileFunction(const std::string& name, const std::vector<Param>& params,
                                const Node& body, FnShape shape, SourcePos pos,
                                bool paramless, bool allowByName,
-                               const std::string& selfAlias) {
+                               const std::string& selfAlias,
+                               const TailRecTarget* tailrec) {
     for (const Param& p : params)
         if (p.defaultValue && !params.empty() && params.back().repeated)
             throw CompileError("a default parameter value is not supported on a method with a "
@@ -1355,8 +1369,36 @@ void Compiler::compileFunction(const std::string& name, const std::vector<Param>
     mod->setArity(arity);
     mod->setVariadic(!params.empty() && params.back().repeated);
     analyseCaptures(params, body);
+    // @tailrec: this body is the loop, unless it is a curried method's chain of
+    // lambdas, whose innermost lambda is. A function literal nested in a loop
+    // body inherits the state so a self-call in it can be reported; a nested
+    // `def` does not (scalac leaves those calls alone).
+    TailRecState tailState;
+    const TailRecTarget* savedCurried = curriedTailRec_;
+    if (tailrec) {
+        if (body.kind == NodeKind::Lambda && as<Lambda>(body).fromCurriedDef) {
+            curriedTailRec_ = tailrec;
+        } else {
+            beginTailRec(tailState, *tailrec, fs, body);
+            fs.tailrec = &tailState;
+        }
+    } else if (shape == FnShape::Lambda && saved && saved->tailrec) {
+        fs.tailrec = saved->tailrec;
+    }
+    // The loop starts here, at word 0: a tail call re-runs the Double widening
+    // of the parameters it has just rebound.
     widenDoubleParams(params, method);
-    compileExpr(body);
+    try {
+        compileExpr(body);
+    } catch (...) {
+        curriedTailRec_ = savedCurried;
+        throw;
+    }
+    curriedTailRec_ = savedCurried;
+    if (fs.tailrec == &tailState && tailState.calls == 0 && !tailState.otherReceiver)
+        throw CompileError("TailRec optimisation not applicable, method " + tailrec->def->name +
+                               " contains no recursive calls",
+                           tailrec->def->pos);
     emit(Op::RETURN, 0, pos, -1);
     // After the body: the capture list is final, so a default block can mirror it.
     recordParamsAndDefaults(*mod, params, method, name, fs.scopes.front());
@@ -1947,8 +1989,10 @@ CompiledUnit Compiler::compileUnit(const CompilationUnit& unit, UnitMode mode,
         for (const auto& s : unit.stats) {
             if (s->kind == NodeKind::DefDef) {
                 const auto& d = as<DefDef>(*s);
+                const TailRecTarget target{&d, TailRecTarget::Kind::Global, defKeys.at(&d), {}};
                 compileFunction(d.name, paramsOf(d), bodyOf(d), FnShape::Def, d.pos,
-                                /*paramless=*/false, /*allowByName=*/true);
+                                /*paramless=*/false, /*allowByName=*/true, {},
+                                d.isTailrec() && !d.paramLists.empty() ? &target : nullptr);
                 emit(Op::STORE_GLOBAL, top.mod->addSymbol(defKeys.at(&d)), d.pos, -1);
             } else if (s->kind == NodeKind::ValDef && as<ValDef>(*s).isLazy) {
                 const auto& v = as<ValDef>(*s);
@@ -2065,9 +2109,13 @@ void Compiler::compileExtension(const ExtensionDef& n) {
         emit(Op::PUSH_GLOBAL, fn_->mod->addSymbol(globalKey("__installExtension")), d.pos, +1);
         emit(Op::PUSH_CONST, fn_->mod->addString(target), d.pos, +1);
         emit(Op::PUSH_CONST, fn_->mod->addString(d.name), d.pos, +1);
+        // An extension method cannot be overridden, so @tailrec applies as it
+        // does to a top-level method; its self-calls are `x.m(...)` on the receiver.
+        const TailRecTarget target{&d, TailRecTarget::Kind::Extension, {}, n.receiverName};
         compileFunction(d.name, paramsOf(d), bodyOf(d), FnShape::Method, d.pos,
                         /*paramless=*/d.paramLists.empty(), /*allowByName=*/false,
-                        n.receiverName);
+                        n.receiverName,
+                        d.isTailrec() && !d.paramLists.empty() ? &target : nullptr);
         emit(Op::CALL, 3, d.pos, -3);
         emit(Op::POP, 0, d.pos, -1);
     }
