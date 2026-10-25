@@ -12,12 +12,18 @@
 # inside a foldLeft callback, flatMap through Option, case-class copy with a
 # named argument, an operator on a user class (a C++-initiated send), a Map
 # built and folded, Try around a throwing block, String.map and exists. It
-# runs under a 1,000,000-cell hard ceiling with
+# runs under a 300,000-cell hard ceiling with
 # PROTOCORE_GC_CONTEXT_THRESHOLD=200, so contexts submit their young chains
 # at nearly every safepoint and collection cycles run while the natives hold
 # their values: a value the collector reclaimed shows up as a wrong result or
 # a crash. The expected line was produced by Scala 3.9.0 on the JVM (the same
 # program, with `import scala.util.Try`).
+#
+# Sensitivity, measured 2026-10-25: with CallerSlots sabotaged to keep its
+# slots in an untraced C++ array (while still allowing the submissions), this
+# run crashed with SIGSEGV in 3 of 4 runs at 300,000 and 150,000 cells; at
+# 1,000,000 cells it passed, which is why the ceiling is this low. The
+# unsabotaged build passes at both (31 and 23 collection cycles).
 #
 # Usage: native-callbacks-survive-gc.sh <path-to-protoscala>
 set -u
@@ -49,11 +55,11 @@ def labels(n: Int): List[String] = (0 until n).map(i => "label-" + i).toList
   println(s"$a $b $c $d $e $f $g $h $k $m $t $s $w")
 SCALA
 expected="168890 181440 108894 1500 label-0 44000 9000 46890 38890 1090 3333 18890 true"
-export PROTOCORE_HEAP_TRACE=1 PROTOCORE_ADAPTIVE_HEAP=0 PROTOCORE_HEAP_LIMIT_CELLS=1000000
+export PROTOCORE_HEAP_TRACE=1 PROTOCORE_ADAPTIVE_HEAP=0 PROTOCORE_HEAP_LIMIT_CELLS=300000
 export PROTOCORE_GC_CONTEXT_THRESHOLD=200
 out=$(timeout 300s "$P" "$work/natives.scala" 2>&1); rc=$?
 if [[ $rc -ne 0 ]]; then
-    echo "FAIL: protoscala exited $rc under PROTOCORE_HEAP_LIMIT_CELLS=1000000"
+    echo "FAIL: protoscala exited $rc under PROTOCORE_HEAP_LIMIT_CELLS=300000"
     printf '%s\n' "$out" | grep -v '^protoCore heap:' | tail -5
     exit 1
 fi
