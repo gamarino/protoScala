@@ -1,0 +1,70 @@
+function <top> arity=0 locals=0 stack=5 captures=0
+  0000  L3  PUSH_GLOBAL 0 ; @Product
+  0001  L3  PUSH_GLOBAL 1 ; @AnyRef
+  0002  L3  PUSH_GLOBAL 2 ; @Any
+  0003  L3  MAKE_FN 0 ; -> block 0
+  0004  L3  MAKE_CLASS 3 ; class Bag @Bag parents=3 members=[<init>] fields=[items]
+  0005  L3  STORE_GLOBAL 4 ; @Bag
+  0006  L3  PUSH_GLOBAL 1 ; @AnyRef
+  0007  L3  PUSH_GLOBAL 2 ; @Any
+  0008  L3  MAKE_FN 1 ; -> block 1
+  0009  L3  MAKE_FN 2 ; -> block 2
+  0010  L3  MAKE_FN 3 ; -> block 3
+  0011  L3  MAKE_CLASS 5 ; class Bag @Bag.type parents=2 members=[apply,unapply,<init>]
+  0012  L3  STORE_GLOBAL 6 ; @Bag.type
+  0013  L3  MAKE_FN 4 ; -> block 4
+  0014  L3  MAKE_LAZY 0
+  0015  L3  STORE_GLOBAL 7 ; Bag
+  0016  L1  MAKE_FN 5 ; -> block 5
+  0017  L1  STORE_GLOBAL 8 ; total
+  0018  L5  PUSH_GLOBAL 9 ; List
+  0019  L5  PUSH_CONST 10 ; 1
+  0020  L5  PUSH_CONST 11 ; 2
+  0021  L5  PUSH_CONST 12 ; 3
+  0022  L5  CALL 3
+  0023  L5  STORE_GLOBAL 13 ; nums
+  0024  L6  PUSH_GLOBAL 14 ; println
+  0025  L6  PUSH_GLOBAL 8 ; total
+  0026  L6  PUSH_GLOBAL 13 ; nums
+  0027  L6  CALL_SPREAD 0
+  0028  L6  CALL 1
+  0029  L6  POP 0
+  0030  L7  PUSH_GLOBAL 14 ; println
+  0031  L7  PUSH_GLOBAL 4 ; @Bag
+  0032  L7  PUSH_GLOBAL 13 ; nums
+  0033  L7  NEW_SPREAD 15 ; <init>/0
+  0034  L7  SEND 16 ; items/0
+  0035  L7  CALL 1
+  0036  L7  POP 0
+  0037  L1  PUSH_UNIT 0
+  0038  L1  RETURN 0
+
+  function Bag.<init> arity=2 variadic method locals=0 stack=1 captures=0
+    0000  L3  PUSH_LOCAL 1
+    0001  L3  STORE_FIELD_IF_NEW 0 ; items
+    0002  L3  PUSH_LOCAL 0
+    0003  L3  RETURN 0
+
+  function apply arity=2 variadic method locals=0 stack=2 captures=0
+    0000  L3  PUSH_GLOBAL 0 ; @Bag
+    0001  L3  PUSH_LOCAL 1
+    0002  L3  NEW_SPREAD 1 ; <init>/0
+    0003  L3  RETURN 0
+
+  function unapply arity=2 method locals=0 stack=1 captures=0
+    0000  L3  PUSH_LOCAL 1
+    0001  L3  RETURN 0
+
+  function Bag.<init> arity=1 method locals=0 stack=1 captures=0
+    0000  L3  PUSH_LOCAL 0
+    0001  L3  RETURN 0
+
+  function <object Bag> arity=0 locals=0 stack=1 captures=0
+    0000  L3  PUSH_GLOBAL 0 ; @Bag.type
+    0001  L3  NEW 1 ; <init>/0
+    0002  L3  RETURN 0
+
+  function total arity=1 variadic locals=0 stack=1 captures=0
+    0000  L1  PUSH_LOCAL 0
+    0001  L1  SEND 0 ; sum/0
+    0002  L1  RETURN 0

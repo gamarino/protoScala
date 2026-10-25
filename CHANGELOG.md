@@ -7,6 +7,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **`docs/VM.md`: the bytecode VM for contributors.** A reading order through
+  the source (parser, desugarer, compiler, `BytecodeModule`, VM, primitives),
+  the instruction encoding, the frame layout (one `ProtoContext` per
+  activation), function values and classes, the calling conventions,
+  safepoints, exceptions and the transpiler as the second consumer; all 61
+  opcodes with operand, stack effect, semantics, errors and the construct
+  that emits them; 20 worked examples; how to add an opcode and a primitive
+  (and where the VM creates a context for something that is not a method
+  activation today); the oddities found on the way. Every listing is real
+  `protoscala --disassemble` output: the sources and golden listings live in
+  `docs/vm-examples/`, and the ctest `docs/vm-examples` runs each example and
+  fails when a listing, or VM.md's copy of it, drifts. `--disassemble` now
+  prints where each capture comes from (`captures: slot 1 <- parent slot 0`)
+  and decodes `CALL_KW`'s site. README links VM.md.
 - **VS Code extension 0.4.1: integration tests, and two launch fixes they
   found.** `editor-integration/vscode/test/` runs the extension in a real VS
   Code Extension Development Host (`npm install && npm test`; the extension

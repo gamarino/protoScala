@@ -1,0 +1,17 @@
+function <top> arity=0 locals=0 stack=3 captures=0
+  0000  L1  MAKE_FN 0 ; -> block 0
+  0001  L1  STORE_GLOBAL 0 ; square
+  0002  L3  PUSH_GLOBAL 1 ; println
+  0003  L3  PUSH_GLOBAL 0 ; square
+  0004  L3  PUSH_CONST 2 ; 7
+  0005  L3  CALL 1
+  0006  L3  CALL 1
+  0007  L3  POP 0
+  0008  L1  PUSH_UNIT 0
+  0009  L1  RETURN 0
+
+  function square arity=1 locals=0 stack=2 captures=0
+    0000  L1  PUSH_LOCAL 0
+    0001  L1  PUSH_LOCAL 0
+    0002  L1  MUL 0
+    0003  L1  RETURN 0

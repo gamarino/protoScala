@@ -1434,6 +1434,7 @@ started a collection by itself: a program grew its heap with every allocation
 - [docs/LANGUAGE.md](docs/LANGUAGE.md) — supported language and departures from Scala
 - [docs/STATUS.md](docs/STATUS.md) — living implementation tracker
 - [docs/DESIGN.md](docs/DESIGN.md) — the approved design specification
+- [docs/VM.md](docs/VM.md) — the bytecode VM for contributors: where to start reading, every opcode, worked `--disassemble` examples, how to add an opcode or a primitive
 - [docs/ROADMAP.md](docs/ROADMAP.md) — phases with verifiable done-when criteria
 - [docs/tutorial/15-modules-and-polyglot-interop.md](docs/tutorial/15-modules-and-polyglot-interop.md) — modules and polyglot interop, chapter by chapter
 - [docs/tutorial/worked-example.md](docs/tutorial/worked-example.md) — the worked example, where the pieces are shown working together

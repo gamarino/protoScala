@@ -1,0 +1,87 @@
+function <top> arity=0 locals=2 stack=4 captures=0
+  0000  L1  PUSH_GLOBAL 0 ; @AnyRef
+  0001  L1  PUSH_GLOBAL 1 ; @Any
+  0002  L2  MAKE_FN 0 ; -> block 0
+  0003  L1  MAKE_FN 1 ; -> block 1
+  0004  L1  MAKE_CLASS 2 ; class Greeter @Greeter parents=2 members=[greet,<init>]
+  0005  L1  STORE_GLOBAL 3 ; @Greeter
+  0006  L4  MAKE_FN 2 ; -> block 2
+  0007  L4  STORE_GLOBAL 4 ; check
+  0008  L6  PUSH_GLOBAL 3 ; @Greeter
+  0009  L6  NEW 5 ; <init>/0
+  0010  L6  STORE_GLOBAL 6 ; g
+  0011  L7  PUSH_GLOBAL 7 ; println
+  0012  L7  PUSH_GLOBAL 6 ; g
+  0013  L7  PUSH_CONST 8 ; "Bo"
+  0014  L7  PUSH_CONST 9 ; "?"
+  0015  L7  SEND_KW 10 ; greet/1(punct=)
+  0016  L7  CALL 1
+  0017  L7  POP 0
+  0018  L8  PUSH_GLOBAL 7 ; println
+  0019  L8  PUSH_GLOBAL 4 ; check
+  0020  L8  PUSH_CONST 11 ; 1
+  0021  L8  PUSH_NULL 0
+  0022  L8  CALL 2
+  0023  L8  CALL 1
+  0024  L8  POP 0
+  0025  L9  PUSH_GLOBAL 12 ; @RuntimeException
+  0026  L9  PUSH_CONST 13 ; "boom"
+  0027  L9  NEW 14 ; <init>/1
+  0028  L9  THROW 0
+  0029  L9  PUSH_UNIT 0
+  0030  L9  JUMP 17 ; -> 48
+  0031  L10  PUSH_LOCAL 0
+  0032  L10  TEST_PROTO 15 ; @Exception
+  0033  L10  DUP 0
+  0034  L10  JUMP_IF_TRUE 4 ; -> 39
+  0035  L10  POP 0
+  0036  L10  PUSH_LOCAL 0
+  0037  L10  TEST_PROTO 16 ; @Throwable
+  0038  L10  NOT 0
+  0039  L10  JUMP_IF_FALSE 7 ; -> 47
+  0040  L10  PUSH_LOCAL 0
+  0041  L10  STORE_LOCAL 1
+  0042  L10  PUSH_GLOBAL 7 ; println
+  0043  L10  PUSH_LOCAL 1
+  0044  L10  SEND 17 ; getMessage/0
+  0045  L10  CALL 1
+  0046  L10  JUMP 1 ; -> 48
+  0047  L9  RETHROW 0
+  0048  L9  POP 0
+  0049  L1  PUSH_UNIT 0
+  0050  L1  RETURN 0
+  handler [25, 30) -> 31  depth=0 slot=0 catch
+
+  function greet arity=3 method locals=0 stack=2 captures=0
+    0000  L2  PUSH_CONST 0 ; "Hi "
+    0001  L2  PUSH_LOCAL 1
+    0002  L2  ADD 0
+    0003  L2  PUSH_LOCAL 2
+    0004  L2  ADD 0
+    0005  L2  RETURN 0
+
+    function greet$default$1 arity=3 method locals=0 stack=1 captures=0
+      0000  L2  PUSH_CONST 0 ; "!"
+      0001  L2  RETURN 0
+
+  function Greeter.<init> arity=1 method locals=0 stack=1 captures=0
+    0000  L1  PUSH_LOCAL 0
+    0001  L1  RETURN 0
+
+  function check arity=2 locals=0 stack=2 captures=0
+    0000  L4  PUSH_LOCAL 0
+    0001  L4  PUSH_CONST 0 ; 0
+    0002  L4  GE 0
+    0003  L4  JUMP_IF_FALSE 4 ; -> 8
+    0004  L4  PUSH_LOCAL 1
+    0005  L4  PUSH_NULL 0
+    0006  L4  NE 0
+    0007  L4  JUMP 1 ; -> 9
+    0008  L4  PUSH_FALSE 0
+    0009  L4  JUMP_IF_TRUE 4 ; -> 14
+    0010  L4  PUSH_LOCAL 0
+    0011  L4  PUSH_CONST 1 ; -1
+    0012  L4  EQ 0
+    0013  L4  JUMP 1 ; -> 15
+    0014  L4  PUSH_TRUE 0
+    0015  L4  RETURN 0

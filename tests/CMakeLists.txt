@@ -116,6 +116,15 @@ if(Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/cli/module_path_check.py"
             "$<TARGET_FILE:protoscala>")
 
+    # The bytecode listings of docs/VM.md are real `protoscala --disassemble`
+    # output: each docs/vm-examples/*.scala runs, is disassembled and compared
+    # with its golden .txt file and with VM.md's copy
+    # (docs/vm-examples/disasm_examples.py; --update regenerates them).
+    add_test(NAME docs/vm-examples
+        COMMAND ${Python3_EXECUTABLE} -I "${PROJECT_SOURCE_DIR}/docs/vm-examples/disasm_examples.py"
+            "$<TARGET_FILE:protoscala>" --check)
+    set_tests_properties(docs/vm-examples PROPERTIES TIMEOUT 300)
+
     # --- The debug adapter (`protoscala --dap`, docs/debugging.md) -------------
     # A Python DAP client drives a session as VS Code does (paths with a
     # lower-case drive letter on Windows). Every wait has a watchdog: a broken

@@ -1,0 +1,46 @@
+function <top> arity=0 locals=0 stack=3 captures=0
+  0000  L1  MAKE_FN 0 ; -> block 0
+  0001  L1  MAKE_LAZY 0
+  0002  L1  STORE_GLOBAL 0 ; expensive
+  0003  L5  MAKE_FN 1 ; -> block 1
+  0004  L5  STORE_GLOBAL 1 ; twice
+  0005  L7  PUSH_GLOBAL 2 ; println
+  0006  L7  PUSH_GLOBAL 0 ; expensive
+  0007  L7  FORCE 0
+  0008  L7  PUSH_GLOBAL 0 ; expensive
+  0009  L7  FORCE 0
+  0010  L7  ADD 0
+  0011  L7  CALL 1
+  0012  L7  POP 0
+  0013  L8  PUSH_GLOBAL 2 ; println
+  0014  L8  PUSH_GLOBAL 1 ; twice
+  0015  L8  MAKE_FN 2 ; -> block 2
+  0016  L8  CALL 1
+  0017  L8  CALL 1
+  0018  L8  POP 0
+  0019  L1  PUSH_UNIT 0
+  0020  L1  RETURN 0
+
+  function <lazy> arity=0 locals=0 stack=2 captures=0
+    0000  L2  PUSH_GLOBAL 0 ; println
+    0001  L2  PUSH_CONST 1 ; "computing"
+    0002  L2  CALL 1
+    0003  L2  POP 0
+    0004  L3  PUSH_CONST 2 ; 42
+    0005  L1  RETURN 0
+
+  function twice arity=1 locals=0 stack=2 captures=0
+    0000  L5  PUSH_LOCAL 0
+    0001  L5  FORCE_THUNK 0
+    0002  L5  PUSH_LOCAL 0
+    0003  L5  FORCE_THUNK 0
+    0004  L5  ADD 0
+    0005  L5  RETURN 0
+
+  function <by-name> arity=0 locals=0 stack=2 captures=0
+    0000  L8  PUSH_GLOBAL 0 ; println
+    0001  L8  PUSH_CONST 1 ; "evaluated"
+    0002  L8  CALL 1
+    0003  L8  POP 0
+    0004  L8  PUSH_CONST 2 ; 1
+    0005  L8  RETURN 0

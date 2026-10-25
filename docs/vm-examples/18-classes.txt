@@ -1,0 +1,106 @@
+function <top> arity=0 locals=0 stack=6 captures=0
+  0000  L1  PUSH_GLOBAL 0 ; @AnyRef
+  0001  L1  PUSH_GLOBAL 1 ; @Any
+  0002  L3  MAKE_FN 0 ; -> block 0
+  0003  L1  MAKE_CLASS 2 ; class Shape @Shape parents=2 members=[describe]
+  0004  L1  STORE_GLOBAL 3 ; @Shape
+  0005  L5  PUSH_GLOBAL 3 ; @Shape
+  0006  L5  PUSH_GLOBAL 0 ; @AnyRef
+  0007  L5  PUSH_GLOBAL 1 ; @Any
+  0008  L6  MAKE_FN 1 ; -> block 1
+  0009  L5  MAKE_FN 2 ; -> block 2
+  0010  L5  MAKE_CLASS 4 ; class Rect @Rect parents=3 members=[area,<init>]
+  0011  L5  STORE_GLOBAL 5 ; @Rect
+  0012  L8  PUSH_GLOBAL 5 ; @Rect
+  0013  L8  PUSH_GLOBAL 3 ; @Shape
+  0014  L8  PUSH_GLOBAL 0 ; @AnyRef
+  0015  L8  PUSH_GLOBAL 1 ; @Any
+  0016  L9  MAKE_FN 3 ; -> block 3
+  0017  L8  MAKE_FN 4 ; -> block 4
+  0018  L8  MAKE_CLASS 6 ; class Square @Square parents=4 members=[describe,<init>]
+  0019  L8  STORE_GLOBAL 7 ; @Square
+  0020  L11  PUSH_GLOBAL 0 ; @AnyRef
+  0021  L11  PUSH_GLOBAL 1 ; @Any
+  0022  L11  MAKE_FN 5 ; -> block 5
+  0023  L11  MAKE_CLASS 8 ; class Unit1 @Unit1.type parents=2 members=[<init>]
+  0024  L11  STORE_GLOBAL 9 ; @Unit1.type
+  0025  L11  MAKE_FN 6 ; -> block 6
+  0026  L11  MAKE_LAZY 0
+  0027  L11  STORE_GLOBAL 10 ; Unit1
+  0028  L14  PUSH_GLOBAL 11 ; println
+  0029  L14  PUSH_GLOBAL 7 ; @Square
+  0030  L14  PUSH_CONST 12 ; 2
+  0031  L14  NEW 13 ; <init>/1
+  0032  L14  SEND 14 ; describe/0
+  0033  L14  CALL 1
+  0034  L14  POP 0
+  0035  L15  PUSH_GLOBAL 11 ; println
+  0036  L15  PUSH_GLOBAL 10 ; Unit1
+  0037  L15  FORCE 0
+  0038  L15  SEND 15 ; one/0
+  0039  L15  CALL 1
+  0040  L15  POP 0
+  0041  L1  PUSH_UNIT 0
+  0042  L1  RETURN 0
+
+  function describe arity=1 method locals=0 stack=2 captures=0
+    0000  L3  PUSH_CONST 0 ; "shape with area "
+    0001  L3  PUSH_LOCAL 0
+    0002  L3  SEND 1 ; area/0
+    0003  L3  CONCAT 2
+    0004  L3  RETURN 0
+
+  function area arity=1 method locals=0 stack=2 captures=0
+    0000  L6  PUSH_LOCAL 0
+    0001  L6  SEND 0 ; w/0
+    0002  L6  PUSH_LOCAL 0
+    0003  L6  SEND 1 ; h/0
+    0004  L6  MUL 0
+    0005  L6  SEND_APPLY 2 ; toDouble/0
+    0006  L6  RETURN 0
+
+  function Rect.<init> arity=3 method locals=0 stack=2 captures=0
+    0000  L5  PUSH_LOCAL 1
+    0001  L5  SEND 0 ; toDouble/0
+    0002  L5  STORE_LOCAL 1
+    0003  L5  PUSH_LOCAL 2
+    0004  L5  SEND 0 ; toDouble/0
+    0005  L5  STORE_LOCAL 2
+    0006  L5  PUSH_LOCAL 1
+    0007  L5  PUSH_LOCAL 2
+    0008  L5  STORE_FIELDS_IF_NEW 1 ; [w,h]
+    0009  L5  PUSH_LOCAL 0
+    0010  L5  RETURN 0
+
+  function describe arity=1 method locals=0 stack=2 captures=0
+    0000  L9  PUSH_CONST 0 ; "square, "
+    0001  L9  PUSH_LOCAL 0
+    0002  L9  SEND_SUPER 1 ; super.describe/0 in @Square
+    0003  L9  ADD 0
+    0004  L9  RETURN 0
+
+  function Square.<init> arity=2 method locals=0 stack=4 captures=0
+    0000  L8  PUSH_LOCAL 1
+    0001  L8  SEND 0 ; toDouble/0
+    0002  L8  STORE_LOCAL 1
+    0003  L8  PUSH_LOCAL 1
+    0004  L8  STORE_FIELD_IF_NEW 1 ; Square::side
+    0005  L8  PUSH_GLOBAL 2 ; @Rect
+    0006  L8  PUSH_LOCAL 0
+    0007  L8  PUSH_LOCAL 1
+    0008  L8  PUSH_LOCAL 1
+    0009  L8  INVOKE_INIT 3 ; <init>/2
+    0010  L8  STORE_LOCAL 0
+    0011  L8  PUSH_LOCAL 0
+    0012  L8  RETURN 0
+
+  function Unit1.<init> arity=1 method locals=0 stack=1 captures=0
+    0000  L12  PUSH_CONST 0 ; 1
+    0001  L12  STORE_FIELD 1 ; one
+    0002  L11  PUSH_LOCAL 0
+    0003  L11  RETURN 0
+
+  function <object Unit1> arity=0 locals=0 stack=1 captures=0
+    0000  L11  PUSH_GLOBAL 0 ; @Unit1.type
+    0001  L11  NEW 1 ; <init>/0
+    0002  L11  RETURN 0

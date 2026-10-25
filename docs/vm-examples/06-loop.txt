@@ -1,0 +1,64 @@
+function <top> arity=0 locals=0 stack=4 captures=0
+  0000  L1  MAKE_FN 0 ; -> block 0
+  0001  L1  STORE_GLOBAL 0 ; sumTo
+  0002  L10  MAKE_FN 1 ; -> block 1
+  0003  L10  STORE_GLOBAL 1 ; count
+  0004  L13  PUSH_GLOBAL 2 ; println
+  0005  L13  PUSH_GLOBAL 0 ; sumTo
+  0006  L13  PUSH_CONST 3 ; 100
+  0007  L13  CALL 1
+  0008  L13  CALL 1
+  0009  L13  POP 0
+  0010  L14  PUSH_GLOBAL 2 ; println
+  0011  L14  PUSH_GLOBAL 1 ; count
+  0012  L14  PUSH_CONST 4 ; 1000
+  0013  L14  PUSH_CONST 5 ; 0
+  0014  L14  CALL 2
+  0015  L14  CALL 1
+  0016  L14  POP 0
+  0017  L1  PUSH_UNIT 0
+  0018  L1  RETURN 0
+
+  function sumTo arity=1 locals=2 stack=2 captures=0
+    0000  L2  PUSH_CONST 0 ; 0
+    0001  L2  STORE_LOCAL 1
+    0002  L3  PUSH_CONST 0 ; 0
+    0003  L3  STORE_LOCAL 2
+    0004  L4  PUSH_LOCAL 1
+    0005  L4  PUSH_LOCAL 0
+    0006  L4  LE 0
+    0007  L4  JUMP_IF_FALSE 13 ; -> 21
+    0008  L5  PUSH_LOCAL 2
+    0009  L5  PUSH_LOCAL 1
+    0010  L5  ADD 0
+    0011  L5  STORE_LOCAL 2
+    0012  L5  PUSH_UNIT 0
+    0013  L5  POP 0
+    0014  L6  PUSH_LOCAL 1
+    0015  L6  PUSH_CONST 1 ; 1
+    0016  L6  ADD 0
+    0017  L6  STORE_LOCAL 1
+    0018  L6  PUSH_UNIT 0
+    0019  L4  POP 0
+    0020  L4  JUMP_BACK 17 ; -> 4
+    0021  L4  PUSH_UNIT 0
+    0022  L4  POP 0
+    0023  L7  PUSH_LOCAL 2
+    0024  L1  RETURN 0
+
+  function count arity=2 locals=0 stack=4 captures=0
+    0000  L11  PUSH_LOCAL 0
+    0001  L11  PUSH_CONST 0 ; 0
+    0002  L11  EQ 0
+    0003  L11  JUMP_IF_FALSE 2 ; -> 6
+    0004  L11  PUSH_LOCAL 1
+    0005  L11  JUMP 8 ; -> 14
+    0006  L11  PUSH_GLOBAL 1 ; count
+    0007  L11  PUSH_LOCAL 0
+    0008  L11  PUSH_CONST 2 ; 1
+    0009  L11  SUB 0
+    0010  L11  PUSH_LOCAL 1
+    0011  L11  PUSH_CONST 2 ; 1
+    0012  L11  ADD 0
+    0013  L11  CALL 2
+    0014  L10  RETURN 0

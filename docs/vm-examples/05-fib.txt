@@ -1,0 +1,31 @@
+function <top> arity=0 locals=0 stack=3 captures=0
+  0000  L1  MAKE_FN 0 ; -> block 0
+  0001  L1  STORE_GLOBAL 0 ; fib
+  0002  L4  PUSH_GLOBAL 1 ; println
+  0003  L4  PUSH_GLOBAL 0 ; fib
+  0004  L4  PUSH_CONST 2 ; 20
+  0005  L4  CALL 1
+  0006  L4  CALL 1
+  0007  L4  POP 0
+  0008  L1  PUSH_UNIT 0
+  0009  L1  RETURN 0
+
+  function fib arity=1 locals=0 stack=4 captures=0
+    0000  L2  PUSH_LOCAL 0
+    0001  L2  PUSH_CONST 0 ; 2
+    0002  L2  LT 0
+    0003  L2  JUMP_IF_FALSE 2 ; -> 6
+    0004  L2  PUSH_LOCAL 0
+    0005  L2  JUMP 11 ; -> 17
+    0006  L2  PUSH_GLOBAL 1 ; fib
+    0007  L2  PUSH_LOCAL 0
+    0008  L2  PUSH_CONST 2 ; 1
+    0009  L2  SUB 0
+    0010  L2  CALL 1
+    0011  L2  PUSH_GLOBAL 1 ; fib
+    0012  L2  PUSH_LOCAL 0
+    0013  L2  PUSH_CONST 0 ; 2
+    0014  L2  SUB 0
+    0015  L2  CALL 1
+    0016  L2  ADD 0
+    0017  L1  RETURN 0

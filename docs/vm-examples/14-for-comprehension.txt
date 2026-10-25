@@ -1,0 +1,40 @@
+function <top> arity=0 locals=0 stack=4 captures=0
+  0000  L2  PUSH_GLOBAL 0 ; List
+  0001  L2  PUSH_CONST 1 ; 1
+  0002  L2  PUSH_CONST 2 ; 2
+  0003  L2  PUSH_CONST 3 ; 3
+  0004  L2  CALL 3
+  0005  L3  MAKE_FN 0 ; -> block 0
+  0006  L3  SEND_APPLY 4 ; withFilter/1
+  0007  L2  MAKE_FN 1 ; -> block 1
+  0008  L2  SEND_APPLY 5 ; flatMap/1
+  0009  L1  STORE_GLOBAL 6 ; pairs
+  0010  L7  PUSH_GLOBAL 7 ; println
+  0011  L7  PUSH_GLOBAL 6 ; pairs
+  0012  L7  CALL 1
+  0013  L7  POP 0
+  0014  L1  PUSH_UNIT 0
+  0015  L1  RETURN 0
+
+  function <lambda> arity=1 locals=0 stack=2 captures=0
+    0000  L3  PUSH_LOCAL 0
+    0001  L3  PUSH_CONST 0 ; 2
+    0002  L3  NE 0
+    0003  L3  RETURN 0
+
+  function <lambda> arity=1 locals=0 stack=3 captures=0
+    0000  L4  PUSH_GLOBAL 0 ; List
+    0001  L4  PUSH_CONST 1 ; 10
+    0002  L4  PUSH_CONST 2 ; 20
+    0003  L4  CALL 2
+    0004  L4  PUSH_LOCAL 0
+    0005  L4  MAKE_FN 0 ; -> block 0
+    0006  L4  SEND_APPLY 3 ; map/1
+    0007  L2  RETURN 0
+
+    function <lambda> arity=1 locals=1 stack=2 captures=1
+      captures: slot 1 <- parent slot 0
+      0000  L5  PUSH_LOCAL 1
+      0001  L5  PUSH_LOCAL 0
+      0002  L5  MUL 0
+      0003  L4  RETURN 0

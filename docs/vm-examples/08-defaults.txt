@@ -1,0 +1,56 @@
+function <top> arity=0 locals=0 stack=5 captures=0
+  0000  L1  MAKE_FN 0 ; -> block 0
+  0001  L1  STORE_GLOBAL 0 ; greet
+  0002  L3  MAKE_FN 1 ; -> block 1
+  0003  L3  STORE_GLOBAL 1 ; area
+  0004  L4  MAKE_FN 2 ; -> block 2
+  0005  L4  STORE_GLOBAL 2 ; area#1
+  0006  L6  PUSH_GLOBAL 3 ; println
+  0007  L6  PUSH_GLOBAL 0 ; greet
+  0008  L6  PUSH_CONST 4 ; "Ada"
+  0009  L6  CALL 1
+  0010  L6  CALL 1
+  0011  L6  POP 0
+  0012  L7  PUSH_GLOBAL 3 ; println
+  0013  L7  PUSH_GLOBAL 0 ; greet
+  0014  L7  PUSH_CONST 4 ; "Ada"
+  0015  L7  PUSH_CONST 5 ; "Hi"
+  0016  L7  CALL_KW 6 ; apply/1(greeting=)
+  0017  L7  CALL 1
+  0018  L7  POP 0
+  0019  L8  PUSH_GLOBAL 3 ; println
+  0020  L8  PUSH_GLOBAL 1 ; area
+  0021  L8  PUSH_CONST 7 ; 3
+  0022  L8  CALL 1
+  0023  L8  PUSH_GLOBAL 2 ; area#1
+  0024  L8  PUSH_CONST 7 ; 3
+  0025  L8  PUSH_CONST 8 ; 4
+  0026  L8  CALL 2
+  0027  L8  ADD 0
+  0028  L8  CALL 1
+  0029  L8  POP 0
+  0030  L1  PUSH_UNIT 0
+  0031  L1  RETURN 0
+
+  function greet arity=2 locals=0 stack=3 captures=0
+    0000  L1  PUSH_LOCAL 1
+    0001  L1  PUSH_CONST 0 ; ", "
+    0002  L1  PUSH_LOCAL 0
+    0003  L1  CONCAT 3
+    0004  L1  RETURN 0
+
+    function greet$default$1 arity=2 locals=0 stack=1 captures=0
+      0000  L1  PUSH_CONST 0 ; "Hello"
+      0001  L1  RETURN 0
+
+  function area arity=1 locals=0 stack=2 captures=0
+    0000  L3  PUSH_LOCAL 0
+    0001  L3  PUSH_LOCAL 0
+    0002  L3  MUL 0
+    0003  L3  RETURN 0
+
+  function area arity=2 locals=0 stack=2 captures=0
+    0000  L4  PUSH_LOCAL 0
+    0001  L4  PUSH_LOCAL 1
+    0002  L4  MUL 0
+    0003  L4  RETURN 0

@@ -1,0 +1,127 @@
+function <top> arity=0 locals=5 stack=5 captures=0
+  0000  L1  PUSH_GLOBAL 0 ; @Product
+  0001  L1  PUSH_GLOBAL 1 ; @AnyRef
+  0002  L1  PUSH_GLOBAL 2 ; @Any
+  0003  L1  MAKE_FN 0 ; -> block 0
+  0004  L1  MAKE_CLASS 3 ; class Point @Point parents=3 members=[<init>] fields=[x,y]
+  0005  L1  STORE_GLOBAL 4 ; @Point
+  0006  L1  PUSH_GLOBAL 1 ; @AnyRef
+  0007  L1  PUSH_GLOBAL 2 ; @Any
+  0008  L1  MAKE_FN 1 ; -> block 1
+  0009  L1  MAKE_FN 2 ; -> block 2
+  0010  L1  MAKE_FN 3 ; -> block 3
+  0011  L1  MAKE_CLASS 5 ; class Point @Point.type parents=2 members=[apply,unapply,<init>]
+  0012  L1  STORE_GLOBAL 6 ; @Point.type
+  0013  L1  MAKE_FN 4 ; -> block 4
+  0014  L1  MAKE_LAZY 0
+  0015  L1  STORE_GLOBAL 7 ; Point
+  0016  L3  MAKE_FN 5 ; -> block 5
+  0017  L3  STORE_GLOBAL 8 ; describe
+  0018  L7  PUSH_CONST 9 ; 1
+  0019  L7  PUSH_CONST 10 ; 2
+  0020  L7  MAKE_TUPLE 2
+  0021  L7  STORE_LOCAL 0
+  0022  L7  PUSH_LOCAL 0
+  0023  L7  TEST_PROTO 11 ; @Tuple2
+  0024  L7  JUMP_IF_FALSE 12 ; -> 37
+  0025  L7  PUSH_LOCAL 0
+  0026  L7  UNAPPLY_FIELDS 12 ; [_1,_2]
+  0027  L7  STORE_LOCAL 1
+  0028  L7  STORE_LOCAL 2
+  0029  L7  PUSH_LOCAL 2
+  0030  L7  STORE_LOCAL 3
+  0031  L7  PUSH_LOCAL 1
+  0032  L7  STORE_LOCAL 4
+  0033  L7  PUSH_LOCAL 3
+  0034  L7  PUSH_LOCAL 4
+  0035  L7  MAKE_TUPLE 2
+  0036  L7  JUMP 2 ; -> 39
+  0037  L7  PUSH_LOCAL 0
+  0038  L7  MATCH_ERROR 0
+  0039  L7  STORE_GLOBAL 13 ; <t0>
+  0040  L7  PUSH_GLOBAL 13 ; <t0>
+  0041  L7  SEND 14 ; _1/0
+  0042  L7  STORE_GLOBAL 15 ; a
+  0043  L7  PUSH_GLOBAL 13 ; <t0>
+  0044  L7  SEND 16 ; _2/0
+  0045  L7  STORE_GLOBAL 17 ; b
+  0046  L8  PUSH_GLOBAL 18 ; println
+  0047  L8  PUSH_GLOBAL 8 ; describe
+  0048  L8  PUSH_GLOBAL 4 ; @Point
+  0049  L8  PUSH_GLOBAL 15 ; a
+  0050  L8  PUSH_GLOBAL 17 ; b
+  0051  L8  NEW 19 ; <init>/2
+  0052  L8  CALL 1
+  0053  L8  CALL 1
+  0054  L8  POP 0
+  0055  L1  PUSH_UNIT 0
+  0056  L1  RETURN 0
+
+  function Point.<init> arity=3 method locals=0 stack=2 captures=0
+    0000  L1  PUSH_LOCAL 1
+    0001  L1  PUSH_LOCAL 2
+    0002  L1  STORE_FIELDS_IF_NEW 0 ; [x,y]
+    0003  L1  PUSH_LOCAL 0
+    0004  L1  RETURN 0
+
+  function apply arity=3 method locals=0 stack=3 captures=0
+    0000  L1  PUSH_GLOBAL 0 ; @Point
+    0001  L1  PUSH_LOCAL 1
+    0002  L1  PUSH_LOCAL 2
+    0003  L1  NEW 1 ; <init>/2
+    0004  L1  RETURN 0
+
+  function unapply arity=2 method locals=0 stack=1 captures=0
+    0000  L1  PUSH_LOCAL 1
+    0001  L1  RETURN 0
+
+  function Point.<init> arity=1 method locals=0 stack=1 captures=0
+    0000  L1  PUSH_LOCAL 0
+    0001  L1  RETURN 0
+
+  function <object Point> arity=0 locals=0 stack=1 captures=0
+    0000  L1  PUSH_GLOBAL 0 ; @Point.type
+    0001  L1  NEW 1 ; <init>/0
+    0002  L1  RETURN 0
+
+  function describe arity=1 locals=7 stack=5 captures=0
+    0000  L3  PUSH_LOCAL 0
+    0001  L3  STORE_LOCAL 1
+    0002  L4  PUSH_LOCAL 1
+    0003  L4  TEST_PROTO 0 ; @Point
+    0004  L4  JUMP_IF_FALSE 14 ; -> 19
+    0005  L4  PUSH_LOCAL 1
+    0006  L4  UNAPPLY_FIELDS 1 ; [x,y]
+    0007  L4  STORE_LOCAL 2
+    0008  L4  STORE_LOCAL 3
+    0009  L4  PUSH_CONST 2 ; 0
+    0010  L4  PUSH_LOCAL 3
+    0011  L4  EQ 0
+    0012  L4  JUMP_IF_FALSE 6 ; -> 19
+    0013  L4  PUSH_CONST 2 ; 0
+    0014  L4  PUSH_LOCAL 2
+    0015  L4  EQ 0
+    0016  L4  JUMP_IF_FALSE 2 ; -> 19
+    0017  L4  PUSH_CONST 3 ; "origin"
+    0018  L4  JUMP 20 ; -> 39
+    0019  L5  PUSH_LOCAL 1
+    0020  L5  TEST_PROTO 0 ; @Point
+    0021  L5  JUMP_IF_FALSE 15 ; -> 37
+    0022  L5  PUSH_LOCAL 1
+    0023  L5  UNAPPLY_FIELDS 1 ; [x,y]
+    0024  L5  STORE_LOCAL 4
+    0025  L5  STORE_LOCAL 5
+    0026  L5  PUSH_LOCAL 5
+    0027  L5  STORE_LOCAL 6
+    0028  L5  PUSH_LOCAL 4
+    0029  L5  STORE_LOCAL 7
+    0030  L5  PUSH_CONST 4 ; "("
+    0031  L5  PUSH_LOCAL 6
+    0032  L5  PUSH_CONST 5 ; ", "
+    0033  L5  PUSH_LOCAL 7
+    0034  L5  PUSH_CONST 6 ; ")"
+    0035  L5  CONCAT 5
+    0036  L5  JUMP 2 ; -> 39
+    0037  L3  PUSH_LOCAL 1
+    0038  L3  MATCH_ERROR 0
+    0039  L3  RETURN 0

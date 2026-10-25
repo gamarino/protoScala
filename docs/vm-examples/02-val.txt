@@ -1,0 +1,26 @@
+function <top> arity=0 locals=0 stack=4 captures=0
+  0000  L1  MAKE_FN 0 ; -> block 0
+  0001  L1  STORE_GLOBAL 0 ; area
+  0002  L6  PUSH_GLOBAL 1 ; println
+  0003  L6  PUSH_GLOBAL 0 ; area
+  0004  L6  PUSH_CONST 2 ; 3
+  0005  L6  PUSH_CONST 3 ; 4
+  0006  L6  CALL 2
+  0007  L6  CALL 1
+  0008  L6  POP 0
+  0009  L1  PUSH_UNIT 0
+  0010  L1  RETURN 0
+
+  function area arity=2 locals=2 stack=2 captures=0
+    0000  L2  PUSH_LOCAL 0
+    0001  L2  PUSH_LOCAL 1
+    0002  L2  MUL 0
+    0003  L2  STORE_LOCAL 2
+    0004  L3  PUSH_LOCAL 2
+    0005  L3  PUSH_CONST 0 ; 1
+    0006  L3  SUB 0
+    0007  L3  STORE_LOCAL 3
+    0008  L4  PUSH_LOCAL 3
+    0009  L4  PUSH_CONST 0 ; 1
+    0010  L4  ADD 0
+    0011  L1  RETURN 0

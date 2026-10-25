@@ -1,0 +1,59 @@
+function <top> arity=0 locals=0 stack=3 captures=0
+  0000  L1  MAKE_FN 0 ; -> block 0
+  0001  L1  STORE_GLOBAL 0 ; adder
+  0002  L3  MAKE_FN 1 ; -> block 1
+  0003  L3  STORE_GLOBAL 1 ; counter
+  0004  L7  PUSH_GLOBAL 0 ; adder
+  0005  L7  PUSH_CONST 2 ; 5
+  0006  L7  CALL 1
+  0007  L7  STORE_GLOBAL 3 ; add5
+  0008  L8  PUSH_GLOBAL 4 ; println
+  0009  L8  PUSH_GLOBAL 3 ; add5
+  0010  L8  PUSH_CONST 5 ; 10
+  0011  L8  CALL 1
+  0012  L8  CALL 1
+  0013  L8  POP 0
+  0014  L9  PUSH_GLOBAL 1 ; counter
+  0015  L9  CALL 0
+  0016  L9  STORE_GLOBAL 6 ; next
+  0017  L10  PUSH_GLOBAL 6 ; next
+  0018  L10  CALL 0
+  0019  L10  POP 0
+  0020  L11  PUSH_GLOBAL 4 ; println
+  0021  L11  PUSH_GLOBAL 6 ; next
+  0022  L11  CALL 0
+  0023  L11  CALL 1
+  0024  L11  POP 0
+  0025  L1  PUSH_UNIT 0
+  0026  L1  RETURN 0
+
+  function adder arity=1 locals=0 stack=1 captures=0
+    0000  L1  PUSH_LOCAL 0
+    0001  L1  MAKE_FN 0 ; -> block 0
+    0002  L1  RETURN 0
+
+    function <lambda> arity=1 locals=1 stack=2 captures=1
+      captures: slot 1 <- parent slot 0
+      0000  L1  PUSH_LOCAL 0
+      0001  L1  PUSH_LOCAL 1
+      0002  L1  ADD 0
+      0003  L1  RETURN 0
+
+  function counter arity=0 locals=1 stack=1 captures=0
+    0000  L4  MAKE_CELL 0
+    0001  L4  PUSH_CONST 0 ; 0
+    0002  L4  STORE_CELL 0
+    0003  L5  PUSH_LOCAL 0
+    0004  L5  MAKE_FN 0 ; -> block 0
+    0005  L3  RETURN 0
+
+    function <lambda> arity=0 locals=1 stack=2 captures=1
+      captures: slot 0 <- parent slot 0
+      0000  L5  PUSH_CELL 0
+      0001  L5  PUSH_CONST 0 ; 1
+      0002  L5  ADD 0
+      0003  L5  STORE_CELL 0
+      0004  L5  PUSH_UNIT 0
+      0005  L5  POP 0
+      0006  L5  PUSH_CELL 0
+      0007  L5  RETURN 0

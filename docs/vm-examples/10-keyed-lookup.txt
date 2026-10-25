@@ -1,0 +1,24 @@
+function <top> arity=0 locals=0 stack=4 captures=0
+  0000  L1  PUSH_GLOBAL 0 ; Map
+  0001  L1  PUSH_CONST 1 ; "ada"
+  0002  L1  PUSH_CONST 2 ; 36
+  0003  L1  SEND_APPLY 3 ; ->/1
+  0004  L1  PUSH_CONST 4 ; "alan"
+  0005  L1  PUSH_CONST 5 ; 41
+  0006  L1  SEND_APPLY 3 ; ->/1
+  0007  L1  CALL 2
+  0008  L1  STORE_GLOBAL 6 ; ages
+  0009  L2  PUSH_GLOBAL 7 ; println
+  0010  L2  PUSH_GLOBAL 6 ; ages
+  0011  L2  PUSH_CONST 1 ; "ada"
+  0012  L2  CALL 1
+  0013  L2  CALL 1
+  0014  L2  POP 0
+  0015  L3  PUSH_GLOBAL 7 ; println
+  0016  L3  PUSH_GLOBAL 6 ; ages
+  0017  L3  PUSH_CONST 8 ; "grace"
+  0018  L3  SEND_APPLY 9 ; get/1
+  0019  L3  CALL 1
+  0020  L3  POP 0
+  0021  L1  PUSH_UNIT 0
+  0022  L1  RETURN 0

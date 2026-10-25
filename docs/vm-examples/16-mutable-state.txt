@@ -1,0 +1,56 @@
+function <top> arity=0 locals=0 stack=5 captures=0
+  0000  L3  PUSH_GLOBAL 0 ; @AnyRef
+  0001  L3  PUSH_GLOBAL 1 ; @Any
+  0002  L5  MAKE_FN 0 ; -> block 0
+  0003  L4  MAKE_FN 1 ; -> block 1
+  0004  L3  MAKE_FN 2 ; -> block 2
+  0005  L3  MAKE_CLASS 2 ; class Counter @Counter parents=2 members=[inc,count_=,<init>]
+  0006  L3  STORE_GLOBAL 3 ; @Counter
+  0007  L1  PUSH_CONST 4 ; 0
+  0008  L1  STORE_GLOBAL 5 ; hits
+  0009  L7  PUSH_GLOBAL 3 ; @Counter
+  0010  L7  NEW 6 ; <init>/0
+  0011  L7  STORE_GLOBAL 7 ; c
+  0012  L8  PUSH_GLOBAL 7 ; c
+  0013  L8  SEND_APPLY 8 ; inc/0
+  0014  L8  POP 0
+  0015  L9  PUSH_GLOBAL 7 ; c
+  0016  L9  SEND_APPLY 8 ; inc/0
+  0017  L9  POP 0
+  0018  L10  PUSH_GLOBAL 5 ; hits
+  0019  L10  PUSH_CONST 9 ; 1
+  0020  L10  ADD 0
+  0021  L10  STORE_GLOBAL 5 ; hits
+  0022  L10  PUSH_UNIT 0
+  0023  L10  POP 0
+  0024  L11  PUSH_GLOBAL 10 ; println
+  0025  L11  PUSH_GLOBAL 7 ; c
+  0026  L11  SEND 11 ; count/0
+  0027  L11  PUSH_GLOBAL 5 ; hits
+  0028  L11  ADD 0
+  0029  L11  CALL 1
+  0030  L11  POP 0
+  0031  L1  PUSH_UNIT 0
+  0032  L1  RETURN 0
+
+  function inc arity=1 method locals=0 stack=3 captures=0
+    0000  L5  PUSH_LOCAL 0
+    0001  L5  PUSH_LOCAL 0
+    0002  L5  SEND 0 ; count/0
+    0003  L5  PUSH_CONST 1 ; 1
+    0004  L5  ADD 0
+    0005  L5  SEND 2 ; count_=/1
+    0006  L5  RETURN 0
+
+  function count_= arity=2 method locals=0 stack=2 captures=0
+    0000  L4  PUSH_LOCAL 0
+    0001  L4  PUSH_LOCAL 1
+    0002  L4  SET_FIELD 0 ; count
+    0003  L4  PUSH_UNIT 0
+    0004  L4  RETURN 0
+
+  function Counter.<init> arity=1 method locals=0 stack=1 captures=0
+    0000  L4  PUSH_CONST 0 ; 0
+    0001  L4  STORE_FIELD 1 ; count
+    0002  L3  PUSH_LOCAL 0
+    0003  L3  RETURN 0

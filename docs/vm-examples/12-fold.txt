@@ -1,0 +1,24 @@
+function <top> arity=0 locals=0 stack=5 captures=0
+  0000  L1  PUSH_GLOBAL 0 ; List
+  0001  L1  PUSH_CONST 1 ; 1
+  0002  L1  PUSH_CONST 2 ; 2
+  0003  L1  PUSH_CONST 3 ; 3
+  0004  L1  PUSH_CONST 4 ; 4
+  0005  L1  CALL 4
+  0006  L1  PUSH_CONST 5 ; 0
+  0007  L1  SEND_APPLY 6 ; foldLeft/1
+  0008  L1  MAKE_FN 0 ; -> block 0
+  0009  L1  CALL 1
+  0010  L1  STORE_GLOBAL 7 ; total
+  0011  L2  PUSH_GLOBAL 8 ; println
+  0012  L2  PUSH_GLOBAL 7 ; total
+  0013  L2  CALL 1
+  0014  L2  POP 0
+  0015  L1  PUSH_UNIT 0
+  0016  L1  RETURN 0
+
+  function <lambda> arity=2 locals=0 stack=2 captures=0
+    0000  L1  PUSH_LOCAL 0
+    0001  L1  PUSH_LOCAL 1
+    0002  L1  ADD 0
+    0003  L1  RETURN 0

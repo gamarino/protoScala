@@ -1,0 +1,60 @@
+function <top> arity=0 locals=0 stack=4 captures=0
+  0000  L1  MAKE_FN 0 ; -> block 0
+  0001  L1  STORE_GLOBAL 0 ; safeDiv
+  0002  L10  PUSH_GLOBAL 1 ; println
+  0003  L10  PUSH_GLOBAL 0 ; safeDiv
+  0004  L10  PUSH_CONST 2 ; 6
+  0005  L10  PUSH_CONST 3 ; 3
+  0006  L10  CALL 2
+  0007  L10  CALL 1
+  0008  L10  POP 0
+  0009  L11  PUSH_GLOBAL 1 ; println
+  0010  L11  PUSH_GLOBAL 0 ; safeDiv
+  0011  L11  PUSH_CONST 4 ; 1
+  0012  L11  PUSH_CONST 5 ; 0
+  0013  L11  CALL 2
+  0014  L11  CALL 1
+  0015  L11  POP 0
+  0016  L1  PUSH_UNIT 0
+  0017  L1  RETURN 0
+
+  function safeDiv arity=2 locals=2 stack=3 captures=0
+    0000  L3  PUSH_LOCAL 1
+    0001  L3  PUSH_CONST 0 ; 0
+    0002  L3  EQ 0
+    0003  L3  JUMP_IF_FALSE 8 ; -> 12
+    0004  L3  PUSH_GLOBAL 1 ; @ArithmeticException
+    0005  L3  PUSH_CONST 2 ; "divide by zero"
+    0006  L3  NEW 3 ; <init>/1
+    0007  L3  THROW 0
+    0008  L3  PUSH_UNIT 0
+    0009  L3  POP 0
+    0010  L3  PUSH_UNIT 0
+    0011  L3  JUMP 1 ; -> 13
+    0012  L3  PUSH_UNIT 0
+    0013  L3  POP 0
+    0014  L4  PUSH_LOCAL 0
+    0015  L4  PUSH_LOCAL 1
+    0016  L4  SEND_APPLY 4 ; //1
+    0017  L2  JUMP 8 ; -> 26
+    0018  L6  PUSH_LOCAL 2
+    0019  L6  TEST_PROTO 1 ; @ArithmeticException
+    0020  L6  JUMP_IF_FALSE 4 ; -> 25
+    0021  L6  PUSH_LOCAL 2
+    0022  L6  STORE_LOCAL 3
+    0023  L6  PUSH_CONST 5 ; -1
+    0024  L6  JUMP 1 ; -> 26
+    0025  L2  RETHROW 2
+    0026  L2  JUMP 5 ; -> 32
+    0027  L8  PUSH_GLOBAL 6 ; println
+    0028  L8  PUSH_CONST 7 ; "done"
+    0029  L8  CALL 1
+    0030  L2  POP 0
+    0031  L2  RETHROW 2
+    0032  L8  PUSH_GLOBAL 6 ; println
+    0033  L8  PUSH_CONST 7 ; "done"
+    0034  L8  CALL 1
+    0035  L2  POP 0
+    0036  L1  RETURN 0
+    handler [0, 17) -> 18  depth=0 slot=2 catch
+    handler [0, 26) -> 27  depth=0 slot=2 finally

@@ -424,6 +424,7 @@ std::string commentFor(const BytecodeModule& m, Op op, std::uint64_t operand, st
         case Op::UNAPPLY_FIELDS:
         case Op::STORE_FIELDS_IF_NEW:
         case Op::SEND_KW:
+        case Op::CALL_KW:
             return " ; " + formatConst(m.constAt(operand));
         case Op::STORE_FIELD:
         case Op::STORE_FIELD_IF_NEW:
@@ -459,6 +460,15 @@ std::string BytecodeModule::disassemble() const {
             out += " locals=" + std::to_string(m.localCount_) +
                    " stack=" + std::to_string(m.maxStack_) +
                    " captures=" + std::to_string(m.captures_.size()) + "\n";
+            // Where each capture comes from: the enclosing frame's slot that
+            // MAKE_FN reads, and the slot of this frame it is copied into.
+            if (!m.captures_.empty()) {
+                out += pad + "  captures:";
+                for (const CaptureSpec& c : m.captures_)
+                    out += " slot " + std::to_string(c.localSlot) + " <- parent slot " +
+                           std::to_string(c.parentSlot) + ";";
+                out.back() = '\n';
+            }
 
             std::size_t pc = 0;
             while (pc < m.code_.size()) {
