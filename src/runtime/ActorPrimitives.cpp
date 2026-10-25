@@ -57,23 +57,21 @@ Band bandArg(ProtoContext* ctx, const ProtoObject* v, const char* method) {
                          "Priority.Low, got " + typeName(ctx, layoutOf(), v));
 }
 
-// Builds the envelope in its own child context and queues it. Returns the
+// Builds the envelope in the caller's context and queues it. Returns the
 // reply future for an ask, PROTO_NONE for a tell.
 const ProtoObject* sendEnvelope(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* actor,
                                 const ProtoObject* msg, Band band, bool wantsReply) {
     ActorScheduler& s = ActorScheduler::instance();
     if (!s.isActor(ctx, actor)) throw ScalaError("IllegalArgumentException", "not an actor");
-    proto::ProtoContext scope(ctx->space, ctx);
-    auto* env = const_cast<ProtoObject*>(L.envelopeProto->newChild(&scope, /*isMutable=*/true));
-    scope.returnValue = env;
-    env->setAttribute(&scope, L.msgKey, msg);
+    // Young cells of ctx until the mailbox (anchored for the session) holds them.
+    auto* env = const_cast<ProtoObject*>(L.envelopeProto->newChild(ctx, /*isMutable=*/true));
+    env->setAttribute(ctx, L.msgKey, msg);
     const ProtoObject* future = PROTO_NONE;
     if (wantsReply) {
-        future = futures::create(&scope, L);
-        env->setAttribute(&scope, L.futureKey, future);
+        future = futures::create(ctx, L);
+        env->setAttribute(ctx, L.futureKey, future);
     }
-    s.send(&scope, actor, band, env);
-    scope.returnValue = future;
+    s.send(ctx, actor, band, env);
     return future;
 }
 
@@ -195,10 +193,8 @@ PRIM(future_value) {
     ExecutionEngine* engine = activeCallContext()->engine;
     if (futures::state(ctx, L, self) == futures::kPending)
         return engine->invoke(ctx, L.hooks.noneValue, nullptr, 0);
-    proto::ProtoContext scope(ctx->space, ctx);
-    const ProtoObject* t = futures::tryOf(&scope, L, self);
-    scope.returnValue = t;
-    return engine->invoke(&scope, L.hooks.someCompanion, &t, 1);
+    const ProtoObject* t = futures::tryOf(ctx, L, self);  // young in ctx, or the future's own
+    return engine->invoke(ctx, L.hooks.someCompanion, &t, 1);
 }
 
 PRIM(future_toString) {
@@ -273,16 +269,15 @@ PRIM(cont_flatMap) {
     try {
         debug::NativeBoundary boundary(debug::Boundary::Captures);  // into `derived`
         const ProtoObject* v = futures::valueOf(ctx, L, source);
+        // `inner` is anchored in ctx by the body's frame.
         const ProtoObject* inner = activeCallContext()->engine->invoke(ctx, body, &v, 1);
-        proto::ProtoContext scope(ctx->space, ctx);
-        scope.returnValue = inner;
-        if (!futures::isFuture(&scope, L, inner))
-            futures::completeError(&scope, L, derived, "ClassCastException",
+        if (!futures::isFuture(ctx, L, inner))
+            futures::completeError(ctx, L, derived, "ClassCastException",
                                    "flatMap expects a function returning a Future, got " +
-                                       typeName(&scope, L, inner));
+                                       typeName(ctx, L, inner));
         else
-            futures::onComplete(&scope, L, inner,
-                                makeCont(&scope, L, &cont_forward, derived, nullptr, inner));
+            futures::onComplete(ctx, L, inner,
+                                makeCont(ctx, L, &cont_forward, derived, nullptr, inner));
     } catch (const proto::ProtoException& t) {
         futures::completeWith(ctx, L, derived, t.value());
     } catch (ScalaError& e) {
@@ -318,10 +313,8 @@ const ProtoObject* derive(ProtoContext* ctx, const RuntimeLayout& L, const Proto
                           const ProtoObject* body, proto::ProtoMethod fn, const char* method) {
     if (!isCallable(ctx, L, body))
         throw ScalaError("IllegalArgumentException", std::string(method) + " expects a function");
-    proto::ProtoContext scope(ctx->space, ctx);
-    const ProtoObject* derived = futures::create(&scope, L);
-    scope.returnValue = derived;
-    futures::onComplete(&scope, L, source, makeCont(&scope, L, fn, derived, body, source));
+    const ProtoObject* derived = futures::create(ctx, L);  // young in ctx
+    futures::onComplete(ctx, L, source, makeCont(ctx, L, fn, derived, body, source));
     return derived;
 }
 
@@ -358,11 +351,7 @@ PRIM(futureBody_handler) {
         debug::NativeBoundary boundary(debug::Boundary::Captures);
         r = activeCallContext()->engine->invoke(ctx, self, nullptr, 0);
     }
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.returnValue = r;
-    const ProtoObject* pair = makeTuple2(&scope, L, state, r);
-    scope.returnValue = pair;
-    return pair;
+    return makeTuple2(ctx, L, state, r);  // r is anchored in ctx by the body's frame
 }
 
 PRIM(futureObject_apply) {
@@ -374,31 +363,24 @@ PRIM(futureObject_apply) {
                          "reached through a method value");
     ActorScheduler& s = ActorScheduler::instance();
     s.ensureStarted(ctx->space, ctx, L, activeCallContext()->engine);
-    proto::ProtoContext scope(ctx->space, ctx);
-    const ProtoObject* handler = scope.fromMethod(const_cast<ProtoObject*>(body), &futureBody_handler);
-    scope.returnValue = handler;
-    const ProtoObject* actor = s.spawn(&scope, handler, L.unit, "future");
-    scope.returnValue = actor;
-    return sendEnvelope(&scope, L, actor, L.unit, Band::Medium, /*wantsReply=*/true);
+    const ProtoObject* handler = ctx->fromMethod(const_cast<ProtoObject*>(body), &futureBody_handler);
+    const ProtoObject* actor = s.spawn(ctx, handler, L.unit, "future");
+    return sendEnvelope(ctx, L, actor, L.unit, Band::Medium, /*wantsReply=*/true);
 }
 
 PRIM(futureObject_successful) {
     const RuntimeLayout& L = layoutOf();
     const ProtoObject* v = arg(ctx, args, 0, "Future.successful", 1);
-    proto::ProtoContext scope(ctx->space, ctx);
-    const ProtoObject* f = futures::create(&scope, L);
-    scope.returnValue = f;
-    futures::complete(&scope, L, f, v, false);
+    const ProtoObject* f = futures::create(ctx, L);
+    futures::complete(ctx, L, f, v, false);
     return f;
 }
 
 PRIM(futureObject_failed) {
     const RuntimeLayout& L = layoutOf();
     const ProtoObject* e = arg(ctx, args, 0, "Future.failed", 1);
-    proto::ProtoContext scope(ctx->space, ctx);
-    const ProtoObject* f = futures::create(&scope, L);
-    scope.returnValue = f;
-    futures::complete(&scope, L, f, e, true);
+    const ProtoObject* f = futures::create(ctx, L);
+    futures::complete(ctx, L, f, e, true);
     return f;
 }
 
@@ -467,43 +449,39 @@ PRIM(threadObject_start) {
     const ActiveCallContext* blueprint = activeCallContext();
     if (!blueprint || !blueprint->engine || !blueprint->layout)
         throw ScalaError("IllegalStateException", "Thread.start: no active runtime to hand over");
-    proto::ProtoContext scope(ctx->space, ctx);
-    auto* handle = const_cast<ProtoObject*>(L.threadProto->newChild(&scope, /*isMutable=*/true));
-    scope.returnValue = handle;
-    handle->setAttribute(&scope, L.bodyKey, body);
+    auto* handle = const_cast<ProtoObject*>(L.threadProto->newChild(ctx, /*isMutable=*/true));
+    handle->setAttribute(ctx, L.bodyKey, body);
     // Anchored for the session, like an actor (D46): the OS thread reads the
     // body through the handle, so nothing may collect it.
     auto* reg = const_cast<ProtoObject*>(L.actorRegistry);
-    for (;;) {
-        proto::ProtoContext one(scope.space, &scope);
-        one.resizeAutomaticLocals(1);
-        const ProtoObject* cur = reg->getOwnAttributeDirect(&one, L.threadsKey);
-        one.setAutomaticLocal(0, cur);   // rooted across appendLast (P1)
-        const ProtoObject* next = cur->asList(&one)->appendLast(&one, handle)->asObject(&one);
-        one.returnValue = next;
-        if (reg->setAttributeIfEqual(&one, L.threadsKey, cur, next)) break;
+    {
+        // `cur` is read from shared state another thread may replace: pinned
+        // across appendLast (CallerSlots.h).
+        CallerSlots held(ctx, 1);
+        for (;;) {
+            const ProtoObject* cur = reg->getOwnAttributeDirect(ctx, L.threadsKey);
+            held.pin(0, cur);
+            const ProtoObject* next = cur->asList(ctx)->appendLast(ctx, handle)->asObject(ctx);
+            if (reg->setAttributeIfEqual(ctx, L.threadsKey, cur, next)) break;
+        }
     }
-    const proto::ProtoString* name = proto::ProtoString::createSymbol(&scope, "protoscala-thread");
+    const proto::ProtoString* name = proto::ProtoString::createSymbol(ctx, "protoscala-thread");
     // Built before newThread: thread creation publishes it (see threadEntry).
-    // Both addresses are tagged SmallIntegers, so neither allocates; the list
-    // itself does, so each intermediate is rooted across the next append (P1).
-    const ProtoObject* engineRef = scope.fromInteger(
+    // Both addresses are tagged SmallIntegers, so neither allocates; every
+    // intermediate list is a young cell of ctx.
+    const ProtoObject* engineRef = ctx->fromInteger(
         static_cast<long long>(reinterpret_cast<std::intptr_t>(blueprint->engine)));
-    const ProtoObject* layoutRef = scope.fromInteger(
+    const ProtoObject* layoutRef = ctx->fromInteger(
         static_cast<long long>(reinterpret_cast<std::intptr_t>(blueprint->layout)));
-    scope.resizeAutomaticLocals(1);
-    const ProtoList* targs = scope.newList()->appendLast(&scope, handle);
-    scope.setAutomaticLocal(0, targs->asObject(&scope));
-    targs = targs->appendLast(&scope, engineRef);
-    scope.setAutomaticLocal(0, targs->asObject(&scope));
-    targs = targs->appendLast(&scope, layoutRef);
-    scope.setAutomaticLocal(0, targs->asObject(&scope));
     static std::atomic<long long> started{0};  // Thread-N for the debugger (threadEntry)
-    targs = targs->appendLast(&scope, proto::makeSmallInt(++started));
-    scope.setAutomaticLocal(0, targs->asObject(&scope));
-    const proto::ProtoThread* t = scope.space->newThread(&scope, name, &threadEntry, targs, nullptr);
-    handle->setAttribute(&scope, L.threadRefKey,
-                         scope.fromInteger(static_cast<long long>(reinterpret_cast<std::intptr_t>(t))));
+    const ProtoList* targs = ctx->newList()
+                                 ->appendLast(ctx, handle)
+                                 ->appendLast(ctx, engineRef)
+                                 ->appendLast(ctx, layoutRef)
+                                 ->appendLast(ctx, proto::makeSmallInt(++started));
+    const proto::ProtoThread* t = ctx->space->newThread(ctx, name, &threadEntry, targs, nullptr);
+    handle->setAttribute(ctx, L.threadRefKey,
+                         ctx->fromInteger(static_cast<long long>(reinterpret_cast<std::intptr_t>(t))));
     return handle;
 }
 

@@ -492,6 +492,7 @@ add_library(protoscala_runtime OBJECT
     src/runtime/Values.cpp
     src/runtime/Format.cpp
     src/runtime/ExecutionEngine.cpp
+    src/runtime/CallerSlots.cpp
     src/runtime/Debugger.cpp
     src/runtime/Primitives.cpp
     src/runtime/ProductPrimitives.cpp

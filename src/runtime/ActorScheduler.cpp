@@ -1,4 +1,5 @@
 #include "runtime/ActorScheduler.h"
+#include "runtime/CallerSlots.h"
 #include "runtime/Errors.h"
 #include "runtime/ErrorFactory.h"
 #include "runtime/ExecutionEngine.h"
@@ -144,14 +145,14 @@ const proto::ProtoObject* ActorScheduler::spawn(proto::ProtoContext* ctx,
                                                 const proto::ProtoObject* initialState,
                                                 const char* kind) {
     const RuntimeLayout& L = *layout_;
-    proto::ProtoContext scope(ctx->space, ctx);
-    auto* actor = const_cast<proto::ProtoObject*>(L.actorProto->newChild(&scope, /*isMutable=*/true));
-    scope.returnValue = actor;
-    actor->setAttribute(&scope, L.handlerKey, handler);
-    actor->setAttribute(&scope, L.actorStateKey, initialState);
+    // In the caller's context (a native's: Actor.spawn, Future.apply): the
+    // actor is a young cell of ctx until the registry anchors it below.
+    auto* actor = const_cast<proto::ProtoObject*>(L.actorProto->newChild(ctx, /*isMutable=*/true));
+    actor->setAttribute(ctx, L.handlerKey, handler);
+    actor->setAttribute(ctx, L.actorStateKey, initialState);
     for (unsigned b = 0; b < kBands; ++b) {
-        actor->setAttribute(&scope, L.mailboxKey[b], Mailbox::create(&scope));
-        actor->setAttribute(&scope, L.pendingKey[b], scope.newList()->asObject(&scope));
+        actor->setAttribute(ctx, L.mailboxKey[b], Mailbox::create(ctx));
+        actor->setAttribute(ctx, L.pendingKey[b], ctx->newList()->asObject(ctx));
     }
     ActorState* st;
     {
@@ -166,19 +167,17 @@ const proto::ProtoObject* ActorScheduler::spawn(proto::ProtoContext* ctx,
         const std::string at = debug::currentLocation();
         if (!at.empty()) st->debugName += " at " + at;
     }
-    actor->setAttribute(&scope, L.stateRefKey,
-                        scope.fromInteger(static_cast<long long>(reinterpret_cast<std::intptr_t>(st))));
+    actor->setAttribute(ctx, L.stateRefKey,
+                        ctx->fromInteger(static_cast<long long>(reinterpret_cast<std::intptr_t>(st))));
     // Anchor before returning: from here the GC reaches the actor, its
     // mailboxes and everything they hold from a root slot (D46).
     auto* reg = const_cast<proto::ProtoObject*>(L.actorRegistry);
+    CallerSlots held(ctx, 1);
     for (;;) {
-        proto::ProtoContext one(scope.space, &scope);
-        one.resizeAutomaticLocals(1);
-        const proto::ProtoObject* cur = reg->getOwnAttributeDirect(&one, L.actorsKey);
-        one.setAutomaticLocal(0, cur);   // rooted across appendLast (P1)
-        const proto::ProtoObject* next = cur->asList(&one)->appendLast(&one, actor)->asObject(&one);
-        one.returnValue = next;
-        if (reg->setAttributeIfEqual(&one, L.actorsKey, cur, next)) break;
+        const proto::ProtoObject* cur = reg->getOwnAttributeDirect(ctx, L.actorsKey);
+        held.pin(0, cur);   // shared state: pinned across appendLast (P1)
+        const proto::ProtoObject* next = cur->asList(ctx)->appendLast(ctx, actor)->asObject(ctx);
+        if (reg->setAttributeIfEqual(ctx, L.actorsKey, cur, next)) break;
     }
     return actor;
 }
@@ -323,28 +322,29 @@ void ActorScheduler::deliver(proto::ProtoContext* ctx, ActorState* a,
                              const proto::ProtoObject* envelope, bool* suspended) {
     const RuntimeLayout& L = *layout_;
     auto* actor = const_cast<proto::ProtoObject*>(a->actor);
-    proto::ProtoContext call(ctx->space, ctx);
-    call.resizeAutomaticLocals(4);
-    const proto::ProtoObject** slot = call.getAutomaticLocals();
-    slot[0] = actor->getOwnAttributeDirect(&call, L.handlerKey);
-    slot[1] = actor->getOwnAttributeDirect(&call, L.actorStateKey);
-    const proto::ProtoObject* msg = envelope->getOwnAttributeDirect(&call, L.msgKey);
+    // `ctx` is the message's own context (runTurn: one per message, P2), so the
+    // four values the turn holds live in its slots; no second context per call.
+    ctx->resizeAutomaticLocals(4);
+    const proto::ProtoObject** slot = ctx->getAutomaticLocals();
+    slot[0] = actor->getOwnAttributeDirect(ctx, L.handlerKey);
+    slot[1] = actor->getOwnAttributeDirect(ctx, L.actorStateKey);
+    const proto::ProtoObject* msg = envelope->getOwnAttributeDirect(ctx, L.msgKey);
     slot[2] = msg ? msg : PROTO_NONE;
-    const proto::ProtoObject* fut = envelope->getOwnAttributeDirect(&call, L.futureKey);
+    const proto::ProtoObject* fut = envelope->getOwnAttributeDirect(ctx, L.futureKey);
     slot[3] = fut ? fut : PROTO_NONE;
     setCurrentActor(actor);
     debug::Activity activity;
     if (debug::attached()) activity.set(a->debugName);
     try {
-        const proto::ProtoObject* r = engine_->invoke(&call, slot[0], slot + 1, 2);
-        call.returnValue = r;
-        applyHandlerResult(&call, a, r, slot[3]);
+        const proto::ProtoObject* r = engine_->invoke(ctx, slot[0], slot + 1, 2);
+        ctx->returnValue = r;
+        applyHandlerResult(ctx, a, r, slot[3]);
     } catch (FutureYield&) {
         // The snapshot and __waiting_on__ are already on the actor (written by
         // `await` and by every frame on the way out). Remember the message's
         // own future so the resumed turn can complete it.
-        if (slot[3] != PROTO_NONE) actor->setAttribute(&call, L.turnFutureKey, slot[3]);
-        else actor->removeAttribute(&call, L.turnFutureKey);
+        if (slot[3] != PROTO_NONE) actor->setAttribute(ctx, L.turnFutureKey, slot[3]);
+        else actor->removeAttribute(ctx, L.turnFutureKey);
         setCurrentActor(nullptr);
         *suspended = true;
         return;
@@ -353,18 +353,18 @@ void ActorScheduler::deliver(proto::ProtoContext* ctx, ActorState* a,
         // is reported, the actor keeps its previous state and stays alive
         // (plan A0-7 invariant 6). Any language value, a module's error included.
         // Rooted before completeWith allocates.
-        call.returnValue = t.value();
-        const std::string text = describeThrown(&call, t.value());
+        ctx->returnValue = t.value();
+        const std::string text = describeThrown(ctx, t.value());
         std::fflush(stdout);
         std::fprintf(stderr, "protoscala: actor handler failed: %s\n", text.c_str());
-        if (slot[3] != PROTO_NONE) futures::completeWith(&call, L, slot[3], t.value());
+        if (slot[3] != PROTO_NONE) futures::completeWith(ctx, L, slot[3], t.value());
     } catch (ScalaError& e) {
         // A native failure: materialised into a Throwable by completeError, so
         // the ask's Failure always carries a real exception value.
         std::fflush(stdout);
         std::fprintf(stderr, "protoscala: actor handler failed: %s\n", e.what());
         if (slot[3] != PROTO_NONE)
-            futures::completeError(&call, L, slot[3], e.className().c_str(), e.message());
+            futures::completeError(ctx, L, slot[3], e.className().c_str(), e.message());
     }
     setCurrentActor(nullptr);
 }

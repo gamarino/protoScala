@@ -16,10 +16,9 @@ Contents:
 - [5. How to add a primitive](#5-how-to-add-a-primitive)
 - [6. Known oddities](#6-known-oddities)
 
-The call path described here is `main` at commit `3ac106e8`. A local branch,
-`perf/result-in-caller-slot`, changes how a call's result is rooted (in the
-caller's slot instead of a `ReturnReference`); sections 1.3 and 1.5 describe
-`main`. The opcode table in [STATUS.md](STATUS.md#opcode-table-mirrors-srccompileropcodesh-design-35)
+The call path described here is `main` after the caller-context change of
+2026-10-25: a native method runs in its caller's context, and only a method
+activation creates a `ProtoContext` (sections 1.3, 1.5 and 5). The opcode table in [STATUS.md](STATUS.md#opcode-table-mirrors-srccompileropcodesh-design-35)
 is a summary; this document is the full reference.
 
 ## Start here
@@ -164,15 +163,18 @@ bits 0..23 (`BytecodeModule::emit`); beyond that `emit` throws
 
 `ExecutionEngine::execute` runs one activation of one body. It creates
 exactly **one `ProtoContext` per activation** (the frame), chained to the
-caller's context through `previous`. The context's automatic locals hold the
-whole frame, so every value the frame holds is in a slot the garbage
-collector traces:
+caller's context through `previous`, and it is the only place the VM creates
+one (with `resumeFrames`, which rebuilds a suspended activation, and the
+transpiled body's `gen::Frame`): a native method runs in its caller's context
+(section 5). The context's automatic locals hold the whole frame, so every
+value the frame holds is in a slot the garbage collector traces:
 
 ```
 slot 0 .. arity-1                    parameters; for a method, slot 0 is `this`;
                                      a variadic function's last parameter is a List
 slot arity .. arity+localCount-1     vals, vars, captures, cells, pattern and catch temporaries
 slot arity+localCount ..             operand stack, capacity maxStack
+then kPrimitiveSlots (8) slots       spare slots for the natives the frame calls (CallerSlots)
 ```
 
 Slots are allocated in source order and never reused within one body. On
@@ -250,15 +252,16 @@ replaces them with the result. `ExecutionEngine::invoke` dispatches:
 
 1. `null`: `NullPointerException: cannot call null`.
 2. **A protoScala function** (`compiledModuleOf` finds `__code__`): `execute`
-   runs it in a new frame. A bound method (`__self__`) first gets a
-   **scope context** holding `[self, a1..an]` (ExecutionEngine.cpp:215), then
-   the frame.
-3. **A native method** (a protoCore method cell): `callNative` creates a
-   **scope context** (ExecutionEngine.cpp:165), copies the arguments into its
-   slots and calls the C function with a `ProtoArguments` view over them.
+   runs it in a new frame. A bound method (`__self__`) passes `[self, a1..an]`
+   as a C++ array (`ArgBuffer`), which the frame copies into its slots.
+3. **A native method** (a protoCore method cell): `callNative` calls the C
+   function **in the caller's context** with a `ProtoArguments` view over the
+   arguments where they are (the operand stack, or the caller's array), and
+   installs a `PrimitiveWindow` over the calling frame's spare slots for it
+   (section 5). No context is created.
 4. **Anything else**: `send(callee, "apply", args)`, Scala's universal
-   `apply` (DESIGN §5.1). `send` creates a scope context
-   (ExecutionEngine.cpp:238) for `[receiver, args]`.
+   `apply` (DESIGN §5.1). `send` assembles `[receiver, args]` in an
+   `ArgBuffer`; no context is created.
 
 **`SEND site`** and **`SEND_APPLY site`** expect `[receiver, a1 .. an]`. The
 site gives the member name and `n`. `SEND` is a member written without an
@@ -276,8 +279,8 @@ argument list (`xs.head`, `c.count`) and the compiler's own sends (setters,
    `SEND` with no arguments.
 3. `SEND_APPLY` of a parameterless method (`def p = e`) runs it and applies
    the result (`c.g()` where `def g = () => n`).
-4. `callMember`: a native method is called through `callNative` (a scope
-   context); a protoScala method runs in a new frame with the receiver in
+4. `callMember`: a native method is called through `callNative` (in the
+   caller's context); a protoScala method runs in a new frame with the receiver in
    slot 0, no extra context; `obj.m` without an argument list on a method
    with parameters is an eta-expansion (`bindMethod`); a function-valued
    field is answered (`SEND`) or applied (`SEND_APPLY`); a `lazy val` member
@@ -288,10 +291,10 @@ receiver, a1..an, v1..vm]`, the site naming the `m` keywords. The VM builds a
 `ProtoKeywordArguments` of (interned parameter name, value) pairs over the
 operand-stack slots, without allocating, and the **callee** binds them
 (`bindKeywordsAndDefaults`): an unknown name, a duplicate and a missing
-argument each raise `IllegalArgumentException` naming the parameter. Both
-create a scope context for every call (ExecutionEngine.cpp:677, 722; a bound
-method adds a second one at 734). A native method receives the pairs in its
-fifth parameter.
+argument each raise `IllegalArgumentException` naming the parameter. Neither
+creates a context: a Scala callee gets its frame, a native method runs through
+`callNative` in the caller's context and receives the pairs in its fifth
+parameter.
 
 **Defaults** are bound by the callee too: a call with fewer positional
 arguments than parameters, to a function with defaults, runs the default
@@ -301,8 +304,9 @@ captures) as its own parameters, so it can read earlier parameters
 (example 08).
 
 **`CALL_SPREAD n`** and **`NEW_SPREAD site`** (`f(xs*)`, `new C(xs*)`) copy
-the `n` fixed arguments and the list's elements into a scope context
-(ExecutionEngine.cpp:1210, 1349) and call as `CALL` / `NEW`.
+the `n` fixed arguments and the list's elements into an `ArgBuffer` (they are
+rooted: the frame's slots and the list in `sp[-1]`) and call as `CALL` /
+`NEW`.
 
 **`NEW site`**, **`INVOKE_INIT site`** and **`SEND_SUPER site`** are the
 object-model calls (section 2.8): `instantiate` creates the instance with
@@ -326,6 +330,13 @@ calls `safepoint()` at exactly one instruction:
 - **`JUMP_BACK`** (every `while` iteration), on every execution, with no
   stride: a `while` loop is one frame, and its garbage would otherwise never
   reach the collector (DESIGN Q21; `ops::safepoint`).
+
+One more point submits a frame's young chain: a native that loops for long
+(`foreach`, `map`, `foldLeft`, ...) and holds a `SafepointPermit` calls
+`CallerSlots::tick()`, which every 64 iterations calls `safepoint()` on the
+calling frame's context, the native's own context (section 5). It does so
+only when the native is the frame's outermost native activation and keeps
+everything it still needs in traced slots.
 
 There is no poll at frame entry. A frame's young generation is submitted
 when its context is destroyed, and protoCore itself parks a thread for a
@@ -418,12 +429,14 @@ also a contract for the emitter.
 
 ## 2. Opcode reference
 
-There are **61 opcodes** (`src/compiler/Opcodes.h`): values 0 to 39, 64 to
-82, 96 and 97. Values 40..63, 83..95, 98..127 and 128..159 are reserved. The
+There are **60 opcodes** (`src/compiler/Opcodes.h`): values 1 to 39, 64 to
+82, 96 and 97. Value 0 is not an opcode: a zeroed code word is a defect, and
+the VM raises `unknown opcode 0` (a `NOP` that was never emitted was removed
+on 2026-10-25). Values 40..63, 83..95, 98..127 and 128..159 are reserved. The
 enum, the name table (`opName`) and the VM's `switch` (`runLoop`) agree: each
-lists the same 61. The compiler emits 59 of them directly; `EXTEND` is emitted
-by `BytecodeModule::emit` for an operand above 2^24 - 1, and `NOP` is never
-emitted (section 6). The examples of section 3 show all 59.
+lists the same 60. The compiler emits 59 of them directly; `EXTEND` is emitted
+by `BytecodeModule::emit` for an operand above 2^24 - 1. The examples of
+section 3 show all 59.
 
 Notation: the stack effect is `before -> after`, top of stack on the right.
 "Errors" names what the instruction itself raises; a `std::logic_error` is an
@@ -434,7 +447,6 @@ instruction may allocate in the frame's context.
 
 | Op | # | Operand | Stack | Semantics | Emitted by |
 |---|---|---|---|---|---|
-| `NOP` | 0 | none | `->` | Does nothing. | never (section 6) |
 | `EXTEND` | 1 | bits 24..47 of the next operand | `->` | Combined with the next word when the VM decodes it; never dispatched on its own. | `BytecodeModule::emit`, for any operand above 16,777,215 |
 | `PUSH_CONST` | 2 | constant index | `-> v` | Pushes an `Int`, `BigInt`, `Double`, `String` or `Char` constant as a protoCore value (`ops::constantOf`). A string is a new protoCore string each time and a `BigInt` is rebuilt from its digits: both allocate. A name constant raises `std::logic_error`. | literals (`compileExpr`), interpolation pieces, list-pattern lengths and indices |
 | `PUSH_UNIT` | 3 | 0 | `-> ()` | Pushes the Unit value. | a block without a final expression, `if` without `else`, `while`, an assignment, the end of `<top>`, the unreachable slot after `throw` |
@@ -2279,32 +2291,29 @@ type (`"abc".length`, `xs.head`) or on the globals object (`println`).
 
 **The context rule (maintainer's rule).** A `ProtoContext` is created only
 when a method, that is interpreted code with its own locals, is activated; a
-primitive runs in its caller's context. **`main` does not follow this rule
-today.** Every native call made by the VM goes through
-`ExecutionEngine::callNative`, which creates a scope context per call
-(ExecutionEngine.cpp:165) and copies the arguments into its slots. The other
-places that create a context for something that is not a method activation:
+primitive runs in its caller's context. Since 2026-10-25 the VM follows it:
+`ExecutionEngine::callNative` calls every native in the context it was given
+(the calling frame's, or a host context), and no native, helper or call path
+opens a context of its own. The contexts that remain:
 
-| Where | What |
-|---|---|
-| ExecutionEngine.cpp:165 | `callNative`: every native method call (`CALL` of a native, `SEND`/`SEND_APPLY` of a native member, a native constructor) |
-| ExecutionEngine.cpp:126 | `sendSmalltalk`: a protoST message; `callNative` then adds a second context |
-| ExecutionEngine.cpp:215 | `invoke` of a bound method: a scope for `[self, args]`, then the frame |
-| ExecutionEngine.cpp:238 | `send`: every C++-initiated send, including `slowBinary` (an operator on a user class) and `NEG`/`NOT` on a non-primitive |
-| ExecutionEngine.cpp:367 | `callWithReceiver` with named arguments to a native method |
-| ExecutionEngine.cpp:677 | `sendKeywords` (`SEND_KW`), for native and Scala callees alike |
-| ExecutionEngine.cpp:722, 734 | `callKeywords` (`CALL_KW`); a second one for a bound method |
-| ExecutionEngine.cpp:1210, 1349 | `CALL_SPREAD`, `NEW_SPREAD` argument scopes |
-| ExecutionEngine.cpp:1326 | `NEW` with named arguments: a scope that is created and never used (section 6) |
-| ExecutionEngine.cpp:443, 460, 502 | `construct`, `makeClass` (`MAKE_CLASS`), `makeTuple` (`MAKE_TUPLE`) |
-| ExecutionEngine.cpp:408 | `forceMember` (the first read of a `lazy val` member), then the thunk's frame |
-| PrimitiveSupport.h:98, 126, 162 | `ListBuilder` (one per collection result), `callOne` (one per callback invocation, besides the callee's frame), `addFlat`'s probe |
+| Where | What | Why it is not a per-call context |
+|---|---|---|
+| `ExecutionEngine::execute`, `resumeFrames` | the frame of an interpreted body | a method activation |
+| `gen::Frame` (`GeneratedSupport.cpp`) | the frame of a transpiled body | a method activation |
+| `Session.cpp` (session start-up, one per `evaluate` call and its error report, a transpiled module run, a module load or foreign binding) | the unit of work's context | host code: the REPL, the script runner and the module loader, each a child of the session's root context, like a thread's root |
+| `Session::debugEvaluate`, `DapServer.cpp` (variables, evaluate, a stop's evaluation) | the debugger's evaluation on a stopped thread | host code: the debugger's own work must not leave its garbage or its anchors in the program's stopped frame |
+| `ActorScheduler.cpp`: `drainOne` (one per turn), `runTurn` (one per message), `resumeSuspendedTurn` | a worker's turn and message | host code: the worker thread's units of work. Without them a worker's session-long context retains every envelope it delivered (measured, see the comment in `drainOne`); a message's handler call gets its frame from `execute` |
 
-`Primitives.cpp` and `CollectionPrimitives.cpp` open further scopes inside
-individual primitives (`grep -n "ProtoContext [a-z]*(" src/runtime/*.cpp`).
-Write new primitives so that they are correct either way: allocate only in
-the `ctx` you are given or in a scope you open, and root what you hold
-(step 4).
+A native therefore runs on the calling frame's young chain: what it
+allocates is a young cell of that context and stays live until the chain is
+submitted, by the frame's `safepoint()` or its destruction, and nothing
+submits it while the native runs unless the native allows it (below). A
+callback's result is anchored in the same context by the callee frame's
+destructor (a `ReturnReference`). The full contract, adapted from
+protoClojure, is the header comment of `src/runtime/CallerSlots.h`.
+
+Write new primitives so that they follow it: allocate in the `ctx` you are
+given, never create a context, and root what you hold (step 4).
 
 1. **Write the function** with the `PRIM` macro of
    `src/runtime/PrimitiveSupport.h`, which expands to the `ProtoMethod`
@@ -2329,19 +2338,37 @@ the `ctx` you are given or in a scope you open, and root what you hold
    reports `Not found`. Prefer a method on a prototype, or Scala code in
    `lib/prelude.scala`, when C++ speed is not needed.
 3. **Calling convention.** The receiver is `self`; the arguments are in
-   `args` (the slots of the scope context `callNative` filled). Return a
+   `args`, a view over the caller's storage (the operand stack, or the array a
+   C++ caller passed), valid for the duration of the call. Return a
    value, never `nullptr` (the VM turns `nullptr` into `null`). A primitive
    that calls back into Scala uses `activeCallContext()->engine->invoke(ctx,
    f, argv, n)` (or `callOne` for one argument), with `argv` in traced slots;
    it may throw `FutureYield` through you, so do not catch `...`.
 4. **Rooting** (protoCore EMBEDDER-CONFORMANCE rule 3): no `ProtoObject*` may
-   be held only in a C++ local across an allocation or a `safepoint()`. The
-   arguments are rooted by the caller for the whole call. A value you create
-   and then keep while you allocate again must sit in a traced slot: open a
-   scope (`proto::ProtoContext scope(ctx->space, ctx);
-   scope.resizeAutomaticLocals(n); scope.setAutomaticLocal(i, v)`) or use
-   `ListBuilder` for a list; set `scope.returnValue` to the result before the
-   scope ends, so it survives the scope's destructor.
+   be held only in a C++ local across a submission of the young chain it
+   lives on. The arguments are rooted by the caller for the whole call, and
+   what you allocate is a young cell of `ctx`, live until `ctx`'s chain is
+   submitted; a callback's result is anchored in `ctx` by its frame. So a
+   native that never submits needs no slots, with one exception: a value read
+   from shared mutable state that another thread may replace (a registry, a
+   mailbox read with compare-and-swap) is pinned with `CallerSlots::pin`. A
+   native that loops for long should hand its garbage to the collector: it
+   holds a `SafepointPermit`, keeps every value it needs across an iteration
+   in `CallerSlots` (traced spare slots of the calling frame, at most eight)
+   or in its arguments, calls `tick()` once per iteration, and returns an
+   accumulator through `ret()`. `ListBuilder` does this for a list result.
+   Model, `prim_seq_foreach` in `src/runtime/CollectionPrimitives.cpp`:
+   ```cpp
+   SafepointPermit permit(ctx);  // what a tick must keep is an argument
+   CallerSlots ticker(ctx, 0);
+   for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i) {
+       (void)callOne(ctx, f, xs->getAt(ctx, static_cast<int>(i)));
+       ticker.tick();
+   }
+   ```
+   A native called by another native (through `invoke`) never submits, and
+   neither does one called from host code: the permit takes effect only for
+   the calling frame's outermost native activation.
 5. **Test fixture.** Add `tests/conformance/<area>/<name>.scala`; the glob in
    `tests/CMakeLists.txt` makes it one CTest case. The first line is the
    directive: `// EXPECT: <text>` (exit 0, last non-empty line of standard
@@ -2358,7 +2385,9 @@ the `ctx` you are given or in a scope you open, and root what you hold
 ## 6. Known oddities
 
 Found while writing this document, verified against `main` at `3ac106e8`.
-None is fixed here.
+The ones fixed since (the context rule, `NOP`, the STATUS.md opcode table, the
+stale comments and the unused context in `NEW`) were removed from this list on
+2026-10-25.
 
 - **`@tailrec` is accepted and ignored** (verified). A self-recursive call in
   tail position is an ordinary `CALL` (example 06), so
@@ -2367,25 +2396,9 @@ None is fixed here.
   deeply for the 32 MiB thread stack` for `count(1000000, 0)`, where scalac
   compiles a loop. Neither `docs/STATUS.md` nor `docs/LANGUAGE.md` lists this
   as a deviation.
-- **`NOP` (0) is never emitted** by the compiler, the transpiler or the
-  prelude image builder. The VM and the emitter accept it. It is dead.
 - **`EXTEND` (1) is reachable only for operands above 16,777,215**, which
   needs more than 2^24 constants, blocks, slots or arguments in one function;
   it is covered by `tests/unit/test_bytecode.cpp`, not by any program.
-- **The STATUS.md opcode table omits `STORE_FIELD_IF_NEW` (81)** and still
-  marks 81..95 as reserved, although 81 and 82 are in use.
-- **Stale comments.** `Opcodes.h` and STATUS.md describe `CALL_KW`'s keyword
-  arguments as a `ProtoSparseList` keyed by symbol addresses, and so does the
-  comment above `prim_kwprobe_call`; the VM passes a `ProtoKeywordArguments`
-  of (name, value) pairs (`SiteKeywords` in `ExecutionEngine.cpp`). The class
-  list at the top of `OpcodeOps.h` does not mention `STORE_FIELDS_IF_NEW`
-  (82), and `CppEmitter.h` says "the 60 opcodes" where there are 61. The
-  comment at the top of `tests/unit/test_prelude_image.cpp` says
-  `disassemble()` prints the constant pool; it prints each instruction's
-  constant as a comment, not the pool.
-- **An unused context in `NEW` with named arguments.** The `NEW` case of
-  `runLoop` (ExecutionEngine.cpp:1326) creates a `ProtoContext scope` and
-  then calls `instantiate(&frame, ...)`; the scope is never used.
 - **Top-level tuple destructuring rebuilds the tuple.** `val (a, b) = (1, 2)`
   at the top level matches the tuple, builds a second tuple of the bound
   values, stores it in a hidden global `<t0>` and reads `a` and `b` back with

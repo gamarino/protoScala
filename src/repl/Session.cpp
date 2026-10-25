@@ -2,6 +2,7 @@
 #include "compiler/Compiler.h"
 #include "frontend/Desugar.h"
 #include "frontend/Parser.h"
+#include "runtime/CallerSlots.h"
 #include "runtime/ActorScheduler.h"
 #include "runtime/Debugger.h"
 #include "runtime/Errors.h"
@@ -275,14 +276,13 @@ void Session::callMain(proto::ProtoContext* ctx, const std::string& mainKey, boo
                        const std::vector<std::string>& args) {
     const auto* key = proto::ProtoString::createSymbol(ctx, mainKey.c_str());
     const unsigned n = takesArgs ? static_cast<unsigned>(args.size()) : 0;
-    // One scope for the call: slots [0, n) hold the argument Strings, slot n the
-    // @main function, so every value stays rooted while the next one is allocated.
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(n + 1);
-    scope.setAutomaticLocal(n, runtime_.layout().globals->getOwnAttributeDirect(&scope, key));
-    for (unsigned k = 0; k < n; ++k)
-        scope.setAutomaticLocal(k, makeString(&scope, args[k]));
-    engine_.callTopLevel(&scope, scope.getAutomaticLocal(n), scope.getAutomaticLocals(), n);
+    // In the evaluation's context: the @main function is a global and the
+    // argument Strings are young cells of ctx, live until its chain is
+    // submitted (no context of its own: runtime/CallerSlots.h).
+    const proto::ProtoObject* fn = runtime_.layout().globals->getOwnAttributeDirect(ctx, key);
+    ArgBuffer strings(n);
+    for (unsigned k = 0; k < n; ++k) strings[k] = makeString(ctx, args[k]);
+    engine_.callTopLevel(ctx, fn, strings.data(), n);
 }
 
 std::string Session::showThrown(proto::ProtoContext* ctx, const proto::ProtoObject* v) {

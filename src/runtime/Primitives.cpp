@@ -183,28 +183,25 @@ PRIM(prim_try_of) {
         throw ScalaError("IllegalArgumentException",
                          "Try.apply expects a block or a function, got " + typeName(ctx, L, f));
     ExecutionEngine* engine = activeCallContext()->engine;
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(2);
-    const ProtoObject** slot = scope.getAutomaticLocals();
+    // In the caller's context (CallerSlots.h). The caught value is pinned only
+    // while its exception is in flight, so it is pinned here for the Failure.
+    CallerSlots slot(ctx, 1);
     try {
         {
             debug::NativeBoundary boundary(debug::Boundary::Captures);  // becomes a Failure
-            slot[0] = engine->invoke(&scope, f, nullptr, 0);
+            slot.set(0, engine->invoke(ctx, f, nullptr, 0));
         }
-        slot[1] = engine->invoke(&scope, L.hooks.success, &slot[0], 1);
+        return engine->invoke(ctx, L.hooks.success, slot.data(), 1);
     } catch (const proto::ProtoException& t) {
         // A Scala `throw` from the block, a module's error or protoCore's: the
         // exception value travels straight into Failure, with no translation
         // (D44 retired).
-        slot[0] = t.value();
-        slot[1] = engine->invoke(&scope, L.hooks.failure, slot, 1);
+        slot.pin(0, t.value());
     } catch (const ScalaError& e) {
         // A native failure: materialised into the prelude class its name means.
-        slot[0] = engine->materialise(&scope, e);
-        slot[1] = engine->invoke(&scope, L.hooks.failure, slot, 1);
+        slot.set(0, engine->materialise(ctx, e));
     }
-    scope.returnValue = slot[1];
-    return slot[1];
+    return engine->invoke(ctx, L.hooks.failure, slot.data(), 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -850,10 +847,13 @@ PRIM(string_drop) {
 long long stringWhilePrefix(ProtoContext* ctx, const ProtoObject* self, const ProtoObject* p,
                             const char* method) {
     const long long n = stringLength(ctx, self);
+    // Everything held across a tick is an argument (CallerSlots.h).
+    SafepointPermit permit(ctx);
+    CallerSlots ticker(ctx, 0);
     for (long long i = 0; i < n; ++i) {
-        ProtoContext step(ctx->space, ctx);
-        if (!truth(&step, callOne(&step, p, asStr(self)->getAt(&step, static_cast<int>(i))), method))
+        if (!truth(ctx, callOne(ctx, p, asStr(self)->getAt(ctx, static_cast<int>(i))), method))
             return i;
+        ticker.tick();
     }
     return n;
 }
@@ -883,23 +883,22 @@ PRIM(string_toList) {
 PRIM(string_map) {
     const ProtoObject* f = arg(ctx, args, 0, "map", 1);
     const long long n = stringLength(ctx, self);
-    ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(2);
-    const ProtoObject** slot = scope.getAutomaticLocals();
-    slot[0] = scope.newList()->asObject(&scope);
+    // Everything held across a tick is an argument or in the builder.
+    SafepointPermit permit(ctx);
+    ListBuilder b(ctx);
     bool allText = true;
     for (long long i = 0; i < n; ++i) {
-        slot[1] = callOne(&scope, f, asStr(self)->getAt(&scope, static_cast<int>(i)));
-        allText = allText && (isCharFast(slot[1]) ||
-                              proto::ProtoObject::isStringTagFast(slot[1]));
-        slot[0] = slot[0]->asList(&scope)->appendLast(&scope, slot[1])->asObject(&scope);
+        const ProtoObject* r = callOne(ctx, f, asStr(self)->getAt(ctx, static_cast<int>(i)));
+        allText = allText && (isCharFast(r) || proto::ProtoObject::isStringTagFast(r));
+        b.add(r);
     }
-    if (!allText) return slot[0];
+    const ProtoObject* results = b.finish();
+    if (!allText) return results;
     const RuntimeLayout& L = layoutOf();
-    const proto::ProtoList* xs = slot[0]->asList(&scope);
+    const proto::ProtoList* xs = results->asList(ctx);
     std::string out;
-    for (long long i = 0; i < n; ++i) out += show(&scope, L, xs->getAt(&scope, static_cast<int>(i)));
-    return str(&scope, out);
+    for (long long i = 0; i < n; ++i) out += show(ctx, L, xs->getAt(ctx, static_cast<int>(i)));
+    return str(ctx, out);
 }
 
 PRIM(string_filter) {
@@ -907,10 +906,12 @@ PRIM(string_filter) {
     const long long n = stringLength(ctx, self);
     std::string out;
     const RuntimeLayout& L = layoutOf();
+    SafepointPermit permit(ctx);  // what a tick must keep is an argument or text
+    CallerSlots ticker(ctx, 0);
     for (long long i = 0; i < n; ++i) {
-        ProtoContext step(ctx->space, ctx);
-        const ProtoObject* c = asStr(self)->getAt(&step, static_cast<int>(i));
-        if (truth(&step, callOne(&step, p, c), "filter")) out += show(&step, L, c);
+        const ProtoObject* c = asStr(self)->getAt(ctx, static_cast<int>(i));
+        if (truth(ctx, callOne(ctx, p, c), "filter")) out += show(ctx, L, c);
+        ticker.tick();
     }
     return str(ctx, out);
 }
@@ -918,9 +919,11 @@ PRIM(string_filter) {
 PRIM(string_foreach) {
     const ProtoObject* f = arg(ctx, args, 0, "foreach", 1);
     const long long n = stringLength(ctx, self);
+    SafepointPermit permit(ctx);  // what a tick must keep is an argument
+    CallerSlots ticker(ctx, 0);
     for (long long i = 0; i < n; ++i) {
-        ProtoContext step(ctx->space, ctx);
-        (void)callOne(&step, f, asStr(self)->getAt(&step, static_cast<int>(i)));
+        (void)callOne(ctx, f, asStr(self)->getAt(ctx, static_cast<int>(i)));
+        ticker.tick();
     }
     return layoutOf().unit;
 }
@@ -954,10 +957,12 @@ PRIM(string_count) {
     const ProtoObject* p = arg(ctx, args, 0, "count", 1);
     const long long n = stringLength(ctx, self);
     long long hits = 0;
+    SafepointPermit permit(ctx);  // what a tick must keep is an argument
+    CallerSlots ticker(ctx, 0);
     for (long long i = 0; i < n; ++i) {
-        ProtoContext step(ctx->space, ctx);
-        if (truth(&step, callOne(&step, p, asStr(self)->getAt(&step, static_cast<int>(i))), "count"))
+        if (truth(ctx, callOne(ctx, p, asStr(self)->getAt(ctx, static_cast<int>(i))), "count"))
             ++hits;
+        ticker.tick();
     }
     return ctx->fromInteger(hits);
 }
@@ -966,10 +971,11 @@ const ProtoObject* stringAllAny(ProtoContext* ctx, const ProtoObject* self, cons
                                 bool wantAll, const char* method) {
     const ProtoObject* p = arg(ctx, args, 0, method, 1);
     const long long n = stringLength(ctx, self);
-    for (long long i = 0; i < n; ++i) {
-        ProtoContext step(ctx->space, ctx);
+    SafepointPermit permit(ctx);  // what a tick must keep is an argument
+    CallerSlots ticker(ctx, 0);
+    for (long long i = 0; i < n; ++i, ticker.tick()) {
         const bool hit =
-            truth(&step, callOne(&step, p, asStr(self)->getAt(&step, static_cast<int>(i))), method);
+            truth(ctx, callOne(ctx, p, asStr(self)->getAt(ctx, static_cast<int>(i))), method);
         if (wantAll && !hit) return PROTO_FALSE;
         if (!wantAll && hit) return PROTO_TRUE;
     }
@@ -1096,19 +1102,16 @@ const ProtoObject* callFromForeignRuntime(ProtoContext* ctx, const ProtoObject* 
             "a protoScala function was called from another runtime outside a call protoScala "
             "made into that runtime on this thread");
     const proto::proto_ulong n = argCount(ctx, args);
-    ProtoContext scope(parent->space, parent, nullptr, nullptr, nullptr, nullptr,
-                       static_cast<size_t>(n));
-    for (proto::proto_ulong i = 0; i < n; ++i)
-        scope.setAutomaticLocal(static_cast<unsigned>(i), args->getAt(ctx, static_cast<int>(i)));
-    const ProtoObject* r = leaveProtoScala(&scope, [&] {
+    // The foreign caller roots its arguments; the callee's frame, created in
+    // `parent`, copies them (no context of its own: CallerSlots.h).
+    ArgBuffer argv(static_cast<std::size_t>(n));
+    for (proto::proto_ulong i = 0; i < n; ++i) argv[i] = args->getAt(ctx, static_cast<int>(i));
+    return leaveProtoScala(parent, [&] {
         // The foreign runtime's frames are on the native stack: an `await` inside
         // must not suspend across them (D43).
         ExecutionEngine::NativeDepthGuard depth;
-        return active->engine->invoke(&scope, self, scope.getAutomaticLocals(),
-                                      static_cast<unsigned>(n));
+        return active->engine->invoke(parent, self, argv.data(), static_cast<unsigned>(n));
     });
-    scope.returnValue = r;
-    return r;
 }
 
 PRIM(function_apply) {
@@ -1116,14 +1119,10 @@ PRIM(function_apply) {
     if (!active || ctx->space != active->layout->space) return callFromForeignRuntime(ctx, self, args);
     ExecutionEngine* engine = active->engine;
     const proto::proto_ulong n = argCount(ctx, args);
-    ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(static_cast<unsigned>(n));
-    for (proto::proto_ulong i = 0; i < n; ++i)
-        scope.setAutomaticLocal(static_cast<unsigned>(i), args->getAt(&scope, static_cast<int>(i)));
-    const ProtoObject* r = engine->invoke(&scope, self, scope.getAutomaticLocals(),
-                                          static_cast<unsigned>(n));
-    scope.returnValue = r;
-    return r;
+    // The arguments are rooted by our caller; the callee's frame copies them.
+    ArgBuffer argv(static_cast<std::size_t>(n));
+    for (proto::proto_ulong i = 0; i < n; ++i) argv[i] = args->getAt(ctx, static_cast<int>(i));
+    return engine->invoke(ctx, self, argv.data(), static_cast<unsigned>(n));
 }
 
 // __installExtension(target, name, fn): installs an extension method on a
@@ -1296,15 +1295,11 @@ void installPrimitives(ProtoContext* ctx, const RuntimeLayout& L) {
 
 // __kwprobe.call(positional..., named = ...) -> a deterministic report.
 //
-// A foreign method reached through UMD receives keyword arguments in protoCore's
-// `keywordParameters` ProtoSparseList, whose key is the ADDRESS of the interned
-// ProtoString symbol for the parameter's name. Recovering the name from the key
-// is therefore a cast: the key IS that symbol's address, and an interned string
-// is PERENNIAL — never collected, never moved — so the address stays valid for
-// the life of the ProtoSpace. That perenniality is also why an integer-keyed
-// ProtoSparseList is the right structure here and ProtoMap is not: ProtoMap
-// exists for arbitrary COLLECTABLE object keys the collector must trace, which is
-// a different problem (the same principle that makes ProtoTuple interned).
+// A foreign method reached through UMD receives keyword arguments as protoCore's
+// ProtoKeywordArguments (`keywordParameters`): (interned parameter name, value)
+// pairs over the caller's operand stack, valid for the duration of the call
+// (protoCore docs/CALLING_CONVENTION.md). Each pair carries the interned
+// ProtoString name itself, so reading the name back is direct.
 //
 // Declared with the raw ProtoMethod signature rather than the PRIM macro,
 // because it is the one native in the tree that USES its fifth parameter and the

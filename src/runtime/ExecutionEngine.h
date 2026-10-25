@@ -2,8 +2,11 @@
  * ExecutionEngine — the recursive bytecode VM (DESIGN §3.6).
  *
  * execute() recurses natively once per call; each frame owns one
- * ProtoContext (P2) whose automatic locals hold parameters, locals and the
- * operand stack (P1), sized exactly from the module's metadata. The stack
+ * ProtoContext (P2) whose automatic locals hold parameters, locals, the
+ * operand stack (P1), sized exactly from the module's metadata, and
+ * kPrimitiveSlots spare slots for the natives it calls (CallerSlots.h). A
+ * native method runs in its caller's context: only a method activation, an
+ * interpreted body with locals of its own, creates a ProtoContext. The stack
  * guard runs on every call. Native primitives re-enter the VM through
  * activeCallContext()->engine->invoke(), which run() installs on the thread
  * and restores on every exit path (protoClojure src/runtime/Primitives.h:109-170).
@@ -287,9 +290,12 @@ private:
                                       const proto::ProtoObject* const* args, unsigned argc,
                                       const proto::ProtoObject* captures,
                                       const proto::ProtoKeywordArguments* keywords = nullptr);
+    // A native method, run in the caller's context `ctx` (no context of its
+    // own: CallerSlots.h). `args` must be rooted by the caller.
     const proto::ProtoObject* callNative(proto::ProtoContext* ctx, proto::ProtoMethod fn,
                                          const proto::ProtoObject* self,
-                                         const proto::ProtoObject* const* args, unsigned argc);
+                                         const proto::ProtoObject* const* args, unsigned argc,
+                                         const proto::ProtoKeywordArguments* keywords = nullptr);
     PROTOSCALA_NOINLINE const proto::ProtoObject* slowBinary(proto::ProtoContext* ctx, Op op,
                                                            const proto::ProtoObject* a,
                                                            const proto::ProtoObject* b);

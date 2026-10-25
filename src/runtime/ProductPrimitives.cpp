@@ -273,15 +273,12 @@ const ProtoObject* product_copy(ProtoContext* ctx, const ProtoObject* self, cons
         return self->setAttributes(ctx, m, keys, changed);
     }
 
-    ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(static_cast<unsigned>(n));
-    if (copyValues(&scope, self, fields, n, positional, args, keywords,
-                   scope.getAutomaticLocals()) != givenNames)
-        rejectCopyKeywords(&scope, fields, n, positional, keywords);
-    const ProtoObject* r = activeCallContext()->engine->construct(
-        &scope, cls, scope.getAutomaticLocals(), static_cast<unsigned>(n));
-    scope.returnValue = r;
-    return r;
+    // The values are self's fields or our arguments, all rooted: a C++ array
+    // carries them to the constructor's frame (CallerSlots.h).
+    ArgBuffer values(static_cast<std::size_t>(n));
+    if (copyValues(ctx, self, fields, n, positional, args, keywords, values.data()) != givenNames)
+        rejectCopyKeywords(ctx, fields, n, positional, keywords);
+    return activeCallContext()->engine->construct(ctx, cls, values.data(), static_cast<unsigned>(n));
 }
 
 // The elements of `t` from the arguments: _1 .. _n.

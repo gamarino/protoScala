@@ -21,6 +21,7 @@
 
 #include "compiler/BytecodeModule.h"
 #include "compiler/Opcodes.h"
+#include "runtime/CallerSlots.h"
 #include "runtime/Errors.h"
 #include "runtime/ErrorFactory.h"
 #include "runtime/FutureYield.h"
@@ -275,28 +276,25 @@ const proto::ProtoObject* runModuleBody(proto::ProtoContext* ctx, proto::ProtoMe
     // exception escaping a dlopen'd initializer must be translated exactly once,
     // by the same template every other foreign entry uses.
     return leaveProtoScala(ctx, [&]() -> const proto::ProtoObject* {
-        proto::ProtoContext scope(ctx->space, ctx);
+        // In the loader's context: the top level is a body with a frame of its own
+        // (gen::Frame), and the module object is a young cell of ctx.
         const RuntimeLayout& L = layoutOf("runModuleBody");
         {
             // The top level runs FIRST: it is what binds the module's globals, and an
             // exported function may read one on its first call.
             const proto::ProtoArguments none(nullptr, 0);
-            const proto::ProtoObject* r = body(&scope, nullptr, nullptr, &none, nullptr);
-            scope.returnValue = r ? r : PROTO_NONE;
+            (void)body(ctx, nullptr, nullptr, &none, nullptr);
         }
         // The module object: one object carrying a proto::ProtoMethod cell per exported
         // top-level function, so a foreign runtime can call one with protoCore alone.
         // Mutable because it is built attribute by attribute, and its identity is what
         // the provider registers.
-        const proto::ProtoObject* mod = L.anyProto->newChild(&scope, /*isMutable=*/true);
-        scope.resizeAutomaticLocals(1);
-        scope.setAutomaticLocal(0, mod);
-        mod->setAttribute(&scope, L.nameKey, makeString(&scope, logicalPath));
+        const proto::ProtoObject* mod = L.anyProto->newChild(ctx, /*isMutable=*/true);
+        mod->setAttribute(ctx, L.nameKey, makeString(ctx, logicalPath));
         for (std::size_t k = 0; k < exportCount; ++k) {
-            const auto* key = proto::ProtoString::createSymbol(&scope, exports[k].name);
-            mod->setAttribute(&scope, key, scope.fromMethod(nullptr, exports[k].entry));
+            const auto* key = proto::ProtoString::createSymbol(ctx, exports[k].name);
+            mod->setAttribute(ctx, key, ctx->fromMethod(nullptr, exports[k].entry));
         }
-        scope.returnValue = mod;
         return mod;
     });
 }
@@ -305,28 +303,26 @@ int runMain(proto::ProtoContext* ctx, const char* mainKey, bool takesArgs, int a
     ExecutionEngine& eng = engineOf("runMain");
     const RuntimeLayout& L = layoutOf("runMain");
     const auto* key = proto::ProtoString::createSymbol(ctx, mainKey);
-    proto::ProtoContext scope(ctx->space, ctx);
     const unsigned n = takesArgs ? static_cast<unsigned>(argc) : 0u;
-    scope.resizeAutomaticLocals(n + 1);
-    const proto::ProtoObject* fn = L.globals->getOwnAttributeDirect(&scope, key);
+    // The host's context: `fn` is a global, the argument strings are young
+    // cells of ctx (no context of its own: CallerSlots.h).
+    const proto::ProtoObject* fn = L.globals->getOwnAttributeDirect(ctx, key);
     if (!fn || fn == PROTO_NONE) {
         std::fflush(stdout);
         std::fprintf(stderr, "protoscala: the module declares no @main method named '%s'\n",
                      mainKey);
         return 1;
     }
-    scope.setAutomaticLocal(n, fn);
-    for (unsigned k = 0; k < n; ++k)
-        scope.setAutomaticLocal(k, makeString(&scope, argv[k]));
+    ArgBuffer strings(n);
+    for (unsigned k = 0; k < n; ++k) strings[k] = makeString(ctx, argv[k]);
     try {
-        eng.callTopLevel(&scope, scope.getAutomaticLocal(n), scope.getAutomaticLocals(), n);
+        eng.callTopLevel(ctx, fn, strings.data(), n);
     } catch (const proto::ProtoException& t) {
         // The same shape Session::evaluate produces, reported through the
         // VALUE's own toString, so a user-defined class says what its class says
         // and the differential harness compares identical text.
         std::fflush(stdout);
-        proto::ProtoContext show(ctx->space, ctx);
-        const std::string text = describeThrown(&show, t.value());
+        const std::string text = describeThrown(ctx, t.value());
         std::fprintf(stderr, "<module>:%d: error: %s\n", thrownLine(t), text.c_str());
         return 1;
     } catch (const ScalaError& e) {
@@ -344,21 +340,18 @@ int runApp(proto::ProtoContext* ctx, const char* appKey) {
     ExecutionEngine& eng = engineOf("runApp");
     const RuntimeLayout& L = layoutOf("runApp");
     const auto* key = proto::ProtoString::createSymbol(ctx, appKey);
-    proto::ProtoContext scope(ctx->space, ctx);
-    const proto::ProtoObject* holder = L.globals->getOwnAttributeDirect(&scope, key);
+    const proto::ProtoObject* holder = L.globals->getOwnAttributeDirect(ctx, key);  // a global
     if (!holder || holder == PROTO_NONE) {
         std::fflush(stdout);
         std::fprintf(stderr, "protoscala: the module declares no App object named '%s'\n", appKey);
         return 1;
     }
-    scope.returnValue = holder;
     try {
         // Forcing the lazy holder runs the object's body, which is the program.
-        eng.force(&scope, holder);
+        eng.force(ctx, holder);
     } catch (const proto::ProtoException& t) {
         std::fflush(stdout);
-        proto::ProtoContext show(ctx->space, ctx);
-        const std::string text = describeThrown(&show, t.value());
+        const std::string text = describeThrown(ctx, t.value());
         std::fprintf(stderr, "<module>:%d: error: %s\n", thrownLine(t), text.c_str());
         return 1;
     } catch (const ScalaError& e) {
@@ -369,6 +362,14 @@ int runApp(proto::ProtoContext* ctx, const char* appKey) {
     std::fflush(stdout);
     return 0;
 }
+
+namespace {
+// The spare slots the enclosing frame published, one entry per live gen::Frame
+// on this thread. Frame is a class of the public GeneratedModule.h, so the
+// saved value cannot be a member without changing the module ABI; frames nest
+// strictly, so a thread-local stack restores them in order.
+thread_local std::vector<FrameSpare> tl_savedSpares;
+}  // namespace
 
 Frame::Frame(proto::ProtoContext* parent, const BlockRec& blk, const proto::ProtoObject* self,
              const proto::ProtoArguments* args, const proto::ProtoKeywordArguments* kwargs)
@@ -399,7 +400,9 @@ Frame::Frame(proto::ProtoContext* parent, const BlockRec& blk, const proto::Prot
 
     stackBase_ = arity + blk.localCount;
     pendingSlot_ = stackBase_ + blk.maxStack;
-    frame_.resizeAutomaticLocals(pendingSlot_ + 1);
+    // The pending slot, then the spare slots of the natives this frame calls
+    // (runtime/CallerSlots.h), published at the end of the constructor.
+    frame_.resizeAutomaticLocals(pendingSlot_ + 1 + kPrimitiveSlots);
     slots_ = frame_.getAutomaticLocals();
     ctx_ = &frame_;
 
@@ -410,18 +413,15 @@ Frame::Frame(proto::ProtoContext* parent, const BlockRec& blk, const proto::Prot
     if (blk.variadic) {
         // The tail, gathered from the argument LIST rather than from the slots: a
         // native block receives a ProtoList, not the C array execute() has, so the
-        // trailing values were never written into slots in the first place. They go
-        // through a child context's traced locals, because `newList` wants a
-        // contiguous run and a C++ array of ProtoObject* across an allocation is
-        // exactly what P1 forbids.
+        // trailing values were never written into slots in the first place.
+        // `newList` wants a contiguous run; the values are the caller's rooted
+        // arguments, so a C++ array carries them (CallerSlots.h).
         const unsigned first = fixed - selfSlots;
         const unsigned count = given > first ? given - first : 0u;
-        proto::ProtoContext tail(frame_.space, &frame_);
-        tail.resizeAutomaticLocals(count ? count : 1u);
-        const proto::ProtoObject** t = tail.getAutomaticLocals();
+        ArgBuffer t(count);
         for (unsigned k = 0; k < count; ++k)
-            t[k] = args->getAt(&tail, static_cast<int>(first + k));
-        slots_[fixed] = tail.newList(count, t)->asObject(&tail);
+            t[k] = args->getAt(&frame_, static_cast<int>(first + k));
+        slots_[fixed] = frame_.newList(count, t.data())->asObject(&frame_);
     }
     // The capture slots, in the order MAKE_FN pushed them, bound AFTER the
     // positional arguments and the variadic tail, exactly as
@@ -439,9 +439,17 @@ Frame::Frame(proto::ProtoContext* parent, const BlockRec& blk, const proto::Prot
         for (std::uint32_t k = 0; k < blk.captureCount; ++k)
             slots_[blk.captureSlots[k]] = caps->getAt(&frame_, static_cast<int>(k));
     }
+    // Last, so that a constructor that throws leaves the stack untouched (the
+    // destructor of a partly constructed Frame does not run).
+    tl_savedSpares.push_back(currentFrameSpare());
+    currentFrameSpare() = FrameSpare{&frame_, slots_ + pendingSlot_ + 1};
 }
 
-Frame::~Frame() = default;
+
+Frame::~Frame() {
+    currentFrameSpare() = tl_savedSpares.back();
+    tl_savedSpares.pop_back();
+}
 
 const proto::ProtoObject* Frame::finish(const proto::ProtoObject* v) {
     frame_.returnValue = v;
@@ -577,14 +585,11 @@ const proto::ProtoObject* callSpread(proto::ProtoContext* ctx, const proto::Prot
                          typeName(ctx, L, rest) + " cannot be spliced as arguments");
     const proto::ProtoList* list = rest->asList(ctx);
     const unsigned extra = static_cast<unsigned>(list->getSize(ctx));
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(argc + extra);
-    const proto::ProtoObject** a = scope.getAutomaticLocals();
+    // The frame's slots and the list's elements: rooted, a C++ array carries them.
+    ArgBuffer a(argc + extra);
     for (unsigned k = 0; k < argc; ++k) a[k] = args[k];
-    for (unsigned k = 0; k < extra; ++k) a[argc + k] = list->getAt(&scope, static_cast<int>(k));
-    const proto::ProtoObject* r = ops::call(&scope, engineOf("callSpread"), callee, a, argc + extra);
-    scope.returnValue = r;
-    return r;
+    for (unsigned k = 0; k < extra; ++k) a[argc + k] = list->getAt(ctx, static_cast<int>(k));
+    return ops::call(ctx, engineOf("callSpread"), callee, a.data(), argc + extra);
 }
 
 const proto::ProtoObject* send(proto::ProtoContext* ctx, const BlockRec& blk, std::size_t siteIdx,
@@ -854,16 +859,12 @@ const proto::ProtoObject* constructSpread(proto::ProtoContext* ctx, const BlockR
                          typeName(ctx, L, rest) + " cannot be spliced as arguments");
     const proto::ProtoList* list = rest->asList(ctx);
     const unsigned extra = static_cast<unsigned>(list->getSize(ctx));
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(c.argc + extra + 1);
-    const proto::ProtoObject** a = scope.getAutomaticLocals();
+    ArgBuffer a(c.argc + extra + 1);  // rooted values, as in callSpread
     for (unsigned k = 0; k <= c.argc; ++k) a[k] = base[k];   // [cls a1..an]
     for (unsigned k = 0; k < extra; ++k)
-        a[c.argc + 1 + k] = list->getAt(&scope, static_cast<int>(k));
-    const proto::ProtoObject* r = ops::Engine::instantiate(
-        engineOf("constructSpread"), &scope, a, blk.symbols[siteIdx], c.argc + extra, nullptr);
-    scope.returnValue = r;
-    return r;
+        a[c.argc + 1 + k] = list->getAt(ctx, static_cast<int>(k));
+    return ops::Engine::instantiate(engineOf("constructSpread"), ctx, a.data(),
+                                    blk.symbols[siteIdx], c.argc + extra, nullptr);
 }
 
 const proto::ProtoObject* invokeInit(proto::ProtoContext* ctx, const BlockRec& blk,

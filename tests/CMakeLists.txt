@@ -32,7 +32,7 @@ foreach(cli_test help version unknown-option script-errors main-args
                  repl-basic repl-multiline repl-errors repl-load repl-history-hygiene
                  repl-redefinition repl-results repl-indented-input repl-classes deep-source
                  tutorial-repl actors-shutdown actors-stress modules
-                 io-stdin io-program io-blocking-pool)
+                 io-stdin io-program io-blocking-pool native-callbacks-survive-gc)
     add_test(NAME cli/${cli_test}
         COMMAND ${PROTOSCALA_SH} "${CMAKE_CURRENT_SOURCE_DIR}/cli/${cli_test}.sh" "$<TARGET_FILE:protoscala>")
 endforeach()
@@ -69,7 +69,8 @@ set_tests_properties(cli/actors-shutdown cli/actors-stress PROPERTIES TIMEOUT 60
 # every other test.
 set_tests_properties(cli/actors-stress PROPERTIES
     ENVIRONMENT "PROTOCORE_HEAP_LIMIT_CELLS=8000000")
-set_tests_properties(cli/gc-pressure cli/actor-bench-smoke PROPERTIES TIMEOUT 600)
+set_tests_properties(cli/gc-pressure cli/actor-bench-smoke cli/native-callbacks-survive-gc
+    PROPERTIES TIMEOUT 600)
 
 # --- Adaptive heap controller (the default memory policy, Session.cpp) ---------
 # The driver reads protoCore's per-cycle trace (PROTOCORE_HEAP_TRACE=1) from the

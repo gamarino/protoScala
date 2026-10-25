@@ -1,5 +1,6 @@
 #include "runtime/Futures.h"
 #include "runtime/ActorScheduler.h"
+#include "runtime/CallerSlots.h"
 #include "runtime/Debugger.h"
 #include "runtime/Errors.h"
 #include "runtime/ErrorFactory.h"
@@ -148,16 +149,14 @@ bool complete(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::Pro
 
 bool completeError(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* f,
                    const char* className, const std::string& message) {
-    proto::ProtoContext scope(ctx->space, ctx);
     // The native error is materialised into the prelude class its name means, so
     // the future carries a real Throwable a Scala `catch` can match (plan A0-6).
     const ActiveCallContext* active = activeCallContext();
     if (!active || !active->engine)
         throw std::logic_error("futures::completeError without an active engine");
-    const proto::ProtoObject* err =
-        active->engine->materialise(&scope, ScalaError(className, message));
-    scope.returnValue = err;
-    return complete(&scope, L, f, err, /*failed=*/true);
+    // A young cell of ctx (no context of its own: CallerSlots.h).
+    const proto::ProtoObject* err = active->engine->materialise(ctx, ScalaError(className, message));
+    return complete(ctx, L, f, err, /*failed=*/true);
 }
 
 bool completeWith(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* f,
@@ -168,19 +167,17 @@ bool completeWith(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto:
 bool addWaiter(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* f,
                const proto::ProtoObject* actor) {
     auto* fut = const_cast<proto::ProtoObject*>(f);
+    CallerSlots held(ctx, 1);  // the caller's context (CallerSlots.h)
     for (;;) {
         if (state(ctx, L, f) != kPending) return false;
-        proto::ProtoContext scope(ctx->space, ctx);
-        scope.resizeAutomaticLocals(1);
-        const proto::ProtoObject* cur = fut->getOwnAttributeDirect(&scope, L.waitersKey);
-        scope.setAutomaticLocal(0, cur);   // rooted across appendLast (P1)
+        const proto::ProtoObject* cur = fut->getOwnAttributeDirect(ctx, L.waitersKey);
+        held.pin(0, cur);   // shared state: pinned across appendLast (P1)
         const proto::ProtoObject* next =
-            cur->asList(&scope)->appendLast(&scope, actor)->asObject(&scope);
-        scope.returnValue = next;
-        if (fut->setAttributeIfEqual(&scope, L.waitersKey, cur, next))
+            cur->asList(ctx)->appendLast(ctx, actor)->asObject(ctx);
+        if (fut->setAttributeIfEqual(ctx, L.waitersKey, cur, next))
             // Re-check: a completion that won between the state read and this
             // CAS has already walked the old list, so we must not park.
-            return state(&scope, L, f) == kPending;
+            return state(ctx, L, f) == kPending;
     }
 }
 
@@ -199,26 +196,24 @@ void reportContinuationFailure(proto::ProtoContext* ctx, const proto::ProtoExcep
 void runContinuations(proto::ProtoContext* ctx, const RuntimeLayout& L,
                       const proto::ProtoObject* f) {
     auto* fut = const_cast<proto::ProtoObject*>(f);
-    proto::ProtoContext held(ctx->space, ctx);
-    held.resizeAutomaticLocals(1);
-    const proto::ProtoObject* conts = fut->getOwnAttributeDirect(&held, L.contsKey);
-    if (!conts || conts == PROTO_NONE || conts->asList(&held)->getSize(&held) == 0) return;
-    held.setAutomaticLocal(0, conts);   // rooted across newList and after the CAS (P1)
+    // In the caller's context (CallerSlots.h).
+    CallerSlots held(ctx, 1);
+    const proto::ProtoObject* conts = fut->getOwnAttributeDirect(ctx, L.contsKey);
+    if (!conts || conts == PROTO_NONE || conts->asList(ctx)->getSize(ctx) == 0) return;
+    held.pin(0, conts);   // shared state: pinned across newList and after the CAS (P1)
     // Take the list once: a continuation registered after this point is run by
     // onComplete itself, because the future is already completed.
-    if (!fut->setAttributeIfEqual(&held, L.contsKey, conts, held.newList()->asObject(&held)))
+    if (!fut->setAttributeIfEqual(ctx, L.contsKey, conts, ctx->newList()->asObject(ctx)))
         return;
-    const proto::ProtoList* list = conts->asList(&held);
+    const proto::ProtoList* list = conts->asList(ctx);
     ActorTurnPause pause;
-    for (proto::proto_ulong i = 0; i < list->getSize(&held); ++i) {
-        proto::ProtoContext scope(held.space, &held);
-        const proto::ProtoObject* arg = tryOf(&scope, L, f);
-        scope.returnValue = arg;
+    for (proto::proto_ulong i = 0; i < list->getSize(ctx); ++i) {
+        const proto::ProtoObject* arg = tryOf(ctx, L, f);
         try {
             debug::NativeBoundary boundary(debug::Boundary::Reports);  // reported below
-            callHook(&scope, list->getAt(&scope, static_cast<int>(i)), &arg, 1);
+            callHook(ctx, list->getAt(ctx, static_cast<int>(i)), &arg, 1);
         } catch (const proto::ProtoException& e) {
-            reportContinuationFailure(&scope, e);
+            reportContinuationFailure(ctx, e);
         } catch (ScalaError& e) {
             std::fflush(stdout);
             std::fprintf(stderr, "protoscala: future continuation failed: %s\n", e.what());
@@ -233,32 +228,27 @@ void onComplete(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::P
     auto* fut = const_cast<proto::ProtoObject*>(f);
     for (;;) {
         if (state(ctx, L, f) != kPending) {
-            proto::ProtoContext scope(ctx->space, ctx);
-            const proto::ProtoObject* arg = tryOf(&scope, L, f);
-            scope.returnValue = arg;
+            const proto::ProtoObject* arg = tryOf(ctx, L, f);  // young in ctx, or the future's own
             ActorTurnPause pause;
             try {
                 debug::NativeBoundary boundary(debug::Boundary::Reports);  // reported below
-                callHook(&scope, fn, &arg, 1);
+                callHook(ctx, fn, &arg, 1);
             } catch (const proto::ProtoException& e) {
-                reportContinuationFailure(&scope, e);
+                reportContinuationFailure(ctx, e);
             } catch (ScalaError& e) {
                 std::fflush(stdout);
                 std::fprintf(stderr, "protoscala: future continuation failed: %s\n", e.what());
             }
             return;
         }
-        proto::ProtoContext scope(ctx->space, ctx);
-        scope.resizeAutomaticLocals(1);
-        const proto::ProtoObject* cur = fut->getOwnAttributeDirect(&scope, L.contsKey);
-        scope.setAutomaticLocal(0, cur);   // rooted across appendLast (P1)
-        const proto::ProtoObject* next =
-            cur->asList(&scope)->appendLast(&scope, fn)->asObject(&scope);
-        scope.returnValue = next;
-        if (fut->setAttributeIfEqual(&scope, L.contsKey, cur, next)) {
+        CallerSlots held(ctx, 1);  // the caller's context (CallerSlots.h)
+        const proto::ProtoObject* cur = fut->getOwnAttributeDirect(ctx, L.contsKey);
+        held.pin(0, cur);   // shared state: pinned across appendLast (P1)
+        const proto::ProtoObject* next = cur->asList(ctx)->appendLast(ctx, fn)->asObject(ctx);
+        if (fut->setAttributeIfEqual(ctx, L.contsKey, cur, next)) {
             // A completion that won between the state read and this CAS has
             // already taken the old list, so run it here instead.
-            if (state(&scope, L, f) != kPending) runContinuations(&scope, L, f);
+            if (state(ctx, L, f) != kPending) runContinuations(ctx, L, f);
             return;
         }
     }

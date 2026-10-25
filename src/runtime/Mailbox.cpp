@@ -1,4 +1,5 @@
 #include "runtime/Mailbox.h"
+#include "runtime/CallerSlots.h"
 #include "protoCore.h"
 
 namespace protoScala {
@@ -43,44 +44,35 @@ void Mailbox::push(proto::ProtoContext* ctx, const proto::ProtoObject* q,
                    const proto::ProtoObject* item) {
     const proto::ProtoString* key = itemsKey(ctx);
     auto* target = const_cast<proto::ProtoObject*>(q);
+    // In the caller's context (CallerSlots.h); the rebuilt list is young there.
+    CallerSlots held(ctx, 1);
     for (;;) {
-        proto::ProtoContext scope(ctx->space, ctx);   // the rebuilt list stays rooted here
-        scope.resizeAutomaticLocals(2);
-        const proto::ProtoObject* cur = target->getOwnAttributeDirect(&scope, key);
-        // The snapshot MUST be rooted before appendLast allocates: another
+        const proto::ProtoObject* cur = target->getOwnAttributeDirect(ctx, key);
+        // The snapshot MUST be pinned before appendLast allocates: another
         // producer may win the compare-and-swap meanwhile, which makes the list
         // we are still walking unreachable from `__items__` and therefore
         // collectable under the concurrent GC (P1). Holding it only in a C++
         // local crashes inside the AVL insert under a small heap.
-        scope.setAutomaticLocal(0, cur);
-        scope.setAutomaticLocal(1, item);
-        const proto::ProtoObject* next =
-            cur->asList(&scope)->appendLast(&scope, item)->asObject(&scope);
-        scope.returnValue = next;
-        if (target->setAttributeIfEqual(&scope, key, cur, next)) return;
+        held.pin(0, cur);
+        const proto::ProtoObject* next = cur->asList(ctx)->appendLast(ctx, item)->asObject(ctx);
+        if (target->setAttributeIfEqual(ctx, key, cur, next)) return;
     }
 }
 
 const proto::ProtoList* Mailbox::takeAll(proto::ProtoContext* ctx, const proto::ProtoObject* q) {
     const proto::ProtoString* key = itemsKey(ctx);
     auto* target = const_cast<proto::ProtoObject*>(q);
+    CallerSlots held(ctx, 1);  // the caller's context (CallerSlots.h)
     for (;;) {
-        proto::ProtoContext scope(ctx->space, ctx);
-        scope.resizeAutomaticLocals(1);
-        const proto::ProtoObject* cur = target->getOwnAttributeDirect(&scope, key);
-        scope.setAutomaticLocal(0, cur);   // rooted across newList's allocation
-        const proto::ProtoList* items = cur->asList(&scope);
-        if (items->getSize(&scope) == 0) {
-            scope.returnValue = cur;
-            ctx->returnValue = cur;        // the caller keeps the empty list
-            return items;
-        }
-        const proto::ProtoObject* empty = scope.newList()->asObject(&scope);
-        if (target->setAttributeIfEqual(&scope, key, cur, empty)) {
-            scope.returnValue = cur;
+        const proto::ProtoObject* cur = target->getOwnAttributeDirect(ctx, key);
+        held.pin(0, cur);   // pinned across newList's allocation
+        const proto::ProtoList* items = cur->asList(ctx);
+        if (items->getSize(ctx) == 0) return items;  // an empty list holds nothing
+        const proto::ProtoObject* empty = ctx->newList()->asObject(ctx);
+        if (target->setAttributeIfEqual(ctx, key, cur, empty)) {
             // From here `__items__` no longer refers to the batch, so the
-            // caller's context is what keeps it alive.
-            ctx->returnValue = cur;
+            // caller's young chain is what keeps it alive.
+            anchorInContext(ctx, cur);
             return items;
         }
     }

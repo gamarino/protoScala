@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **Native methods run in their caller's context (the maintainer's context
+  rule).** A `ProtoContext` is now created only when a method, an interpreted
+  or transpiled body with locals of its own, is activated. Before, every
+  native call created one (`callNative`), a Smalltalk message two, and bound
+  methods, `send`, keyword and spread calls, constructors, class and tuple
+  creation, lazy members, the transpiled-block entry and about a hundred
+  scopes inside primitives (sixty in `CollectionPrimitives.cpp`, some per
+  element) created more. A native now roots what it holds with
+  `CallerSlots` (`src/runtime/CallerSlots.h`, adapted from protoClojure):
+  traced spare slots every frame keeps above its operand stack, and a loop
+  that calls back into Scala hands the frame's garbage to the collector under
+  a `SafepointPermit`. Host-level contexts (REPL evaluations, debugger
+  evaluations, actor turns and messages) remain and are listed with their
+  reasons in `docs/VM.md` section 5. New check
+  `cli/native-callbacks-survive-gc`.
+
+### Removed
+- **`NOP` (opcode 0).** It was never emitted; value 0 is now not an opcode,
+  and a zeroed code word raises `unknown opcode 0`.
+
+### Fixed
+- **Docs and comments:** the STATUS.md opcode table lists
+  `STORE_FIELD_IF_NEW` (81) and marks only 83..95 reserved; `CALL_KW`'s
+  named arguments are described as protoCore's `ProtoKeywordArguments`
+  pairs, not a `ProtoSparseList`, in `Opcodes.h`, STATUS.md, DESIGN.md §5.2,
+  `ExecutionEngine.cpp` and above `prim_kwprobe_call`; `OpcodeOps.h`'s class
+  list includes `STORE_FIELDS_IF_NEW`; the comment of
+  `test_prelude_image.cpp` says what `disassemble()` prints.
+
 ### Added
 - **`docs/VM.md`: the bytecode VM for contributors.** A reading order through
   the source (parser, desugarer, compiler, `BytecodeModule`, VM, primitives),

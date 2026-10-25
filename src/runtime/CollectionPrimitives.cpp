@@ -75,17 +75,11 @@ long long rangeBound(ProtoContext* ctx, const ProtoObject* v, const char* method
 // setAttribute allocates.
 const ProtoObject* newRange(ProtoContext* ctx, const RuntimeLayout& L, long long start,
                             long long end, long long step, bool inclusive) {
-    proto::ProtoContext scope(ctx->space, ctx);
-    const ProtoObject* r = L.rangeProto->newChild(&scope, /*isMutable=*/false);
-    scope.returnValue = r;
-    r = r->setAttribute(&scope, L.rangeStartKey, proto::makeSmallInt(start));
-    scope.returnValue = r;
-    r = r->setAttribute(&scope, L.rangeEndKey, proto::makeSmallInt(end));
-    scope.returnValue = r;
-    r = r->setAttribute(&scope, L.rangeStepKey, proto::makeSmallInt(step));
-    scope.returnValue = r;
-    r = r->setAttribute(&scope, L.rangeInclusiveKey, boolean(inclusive));
-    scope.returnValue = r;
+    const ProtoObject* r = L.rangeProto->newChild(ctx, /*isMutable=*/false);
+    r = r->setAttribute(ctx, L.rangeStartKey, proto::makeSmallInt(start));
+    r = r->setAttribute(ctx, L.rangeEndKey, proto::makeSmallInt(end));
+    r = r->setAttribute(ctx, L.rangeStepKey, proto::makeSmallInt(step));
+    r = r->setAttribute(ctx, L.rangeInclusiveKey, boolean(inclusive));
     return r;
 }
 
@@ -181,19 +175,15 @@ PRIM(prim_range_sum) {
 const ProtoList* rangeToList(ProtoContext* ctx, const RangeView& v) {
     const long long n = v.length();
     const ProtoList* out = ctx->newList();
-    ctx->returnValue = out->asObject(ctx);
     for (long long i = 0; i < n; ++i) {
         out = out->appendLast(ctx, proto::makeSmallInt(v.at(i)));
-        ctx->returnValue = out->asObject(ctx);
     }
     return out;
 }
 
 PRIM(prim_range_toList) {
     expectArgs(ctx, args, "toList", 0);
-    proto::ProtoContext scope(ctx->space, ctx);
-    const ProtoObject* r = rangeToList(&scope, viewOf(&scope, layoutOf(), self))->asObject(&scope);
-    scope.returnValue = r;
+    const ProtoObject* r = rangeToList(ctx, viewOf(ctx, layoutOf(), self))->asObject(ctx);
     return r;
 }
 
@@ -216,12 +206,13 @@ PRIM(prim_range_foreach) {
     const ProtoObject* f = arg(ctx, args, 0, "foreach", 1);
     ExecutionEngine* engine = activeCallContext()->engine;
     const long long n = v.length();
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(1);
-    const ProtoObject** slot = scope.getAutomaticLocals();
+    SafepointPermit permit(ctx);  // what a tick must keep is in slots or arguments
+    CallerSlots slots(ctx, 1);  // the caller's context (CallerSlots.h)
+    const ProtoObject** slot = slots.data();
     for (long long i = 0; i < n; ++i) {
         slot[0] = proto::makeSmallInt(v.at(i));
-        (void)engine->invoke(&scope, f, slot, 1);
+        (void)engine->invoke(ctx, f, slot, 1);
+        slots.tick();
     }
     return L.unit;
 }
@@ -234,16 +225,17 @@ PRIM(prim_range_map) {
     const ProtoObject* f = arg(ctx, args, 0, "map", 1);
     ExecutionEngine* engine = activeCallContext()->engine;
     const long long n = v.length();
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(2);
-    const ProtoObject** slot = scope.getAutomaticLocals();
-    slot[0] = scope.newList()->asObject(&scope);
+    SafepointPermit permit(ctx);  // what a tick must keep is in slots or arguments
+    CallerSlots slots(ctx, 2);  // the caller's context (CallerSlots.h)
+    const ProtoObject** slot = slots.data();
+    slot[0] = ctx->newList()->asObject(ctx);
     for (long long i = 0; i < n; ++i) {
         slot[1] = proto::makeSmallInt(v.at(i));
-        slot[1] = engine->invoke(&scope, f, &slot[1], 1);
-        slot[0] = slot[0]->asList(&scope)->appendLast(&scope, slot[1])->asObject(&scope);
+        slot[1] = engine->invoke(ctx, f, &slot[1], 1);
+        slot[0] = slot[0]->asList(ctx)->appendLast(ctx, slot[1])->asObject(ctx);
+        slots.tick();
     }
-    return slot[0];
+    return slots.ret(slot[0]);
 }
 
 PRIM(prim_range_flatMap) {
@@ -251,24 +243,25 @@ PRIM(prim_range_flatMap) {
     const ProtoObject* f = arg(ctx, args, 0, "flatMap", 1);
     ExecutionEngine* engine = activeCallContext()->engine;
     const long long n = v.length();
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(2);
-    const ProtoObject** slot = scope.getAutomaticLocals();
-    slot[0] = scope.newList()->asObject(&scope);
+    SafepointPermit permit(ctx);  // what a tick must keep is in slots or arguments
+    CallerSlots slots(ctx, 2);  // the caller's context (CallerSlots.h)
+    const ProtoObject** slot = slots.data();
+    slot[0] = ctx->newList()->asObject(ctx);
     for (long long i = 0; i < n; ++i) {
         slot[1] = proto::makeSmallInt(v.at(i));
-        slot[1] = engine->invoke(&scope, f, &slot[1], 1);
-        const SeqView inner = seqViewOf(&scope, layoutOf(), slot[1]);
+        slot[1] = engine->invoke(ctx, f, &slot[1], 1);
+        const SeqView inner = seqViewOf(ctx, layoutOf(), slot[1]);
         if (!inner.valid)
             throw ScalaError("IllegalArgumentException",
                              "flatMap expects a collection, got " +
-                                 typeName(&scope, layoutOf(), slot[1]));
+                                 typeName(ctx, layoutOf(), slot[1]));
         for (long long k = 0; k < inner.size; ++k)
-            slot[0] = slot[0]->asList(&scope)
-                          ->appendLast(&scope, seqElemAt(&scope, inner, k))
-                          ->asObject(&scope);
+            slot[0] = slot[0]->asList(ctx)
+                          ->appendLast(ctx, seqElemAt(ctx, inner, k))
+                          ->asObject(ctx);
+        slots.tick();
     }
-    return slot[0];
+    return slots.ret(slot[0]);
 }
 
 PRIM(prim_range_filter) {
@@ -276,16 +269,17 @@ PRIM(prim_range_filter) {
     const ProtoObject* p = arg(ctx, args, 0, "filter", 1);
     ExecutionEngine* engine = activeCallContext()->engine;
     const long long n = v.length();
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(2);
-    const ProtoObject** slot = scope.getAutomaticLocals();
-    slot[0] = scope.newList()->asObject(&scope);
+    SafepointPermit permit(ctx);  // what a tick must keep is in slots or arguments
+    CallerSlots slots(ctx, 2);  // the caller's context (CallerSlots.h)
+    const ProtoObject** slot = slots.data();
+    slot[0] = ctx->newList()->asObject(ctx);
     for (long long i = 0; i < n; ++i) {
         slot[1] = proto::makeSmallInt(v.at(i));
-        if (engine->invoke(&scope, p, &slot[1], 1) == PROTO_TRUE)
-            slot[0] = slot[0]->asList(&scope)->appendLast(&scope, slot[1])->asObject(&scope);
+        if (engine->invoke(ctx, p, &slot[1], 1) == PROTO_TRUE)
+            slot[0] = slot[0]->asList(ctx)->appendLast(ctx, slot[1])->asObject(ctx);
+        slots.tick();
     }
-    return slot[0];
+    return slots.ret(slot[0]);
 }
 
 // `for i <- r if p yield e` goes through withFilter, which the Phase 2
@@ -294,16 +288,15 @@ PRIM(prim_range_filter) {
 PRIM(prim_range_withFilter) {
     const RuntimeLayout& L = layoutOf();
     const ProtoObject* p = arg(ctx, args, 0, "withFilter", 1);
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(3);
-    const ProtoObject** slot = scope.getAutomaticLocals();
-    slot[0] = rangeToList(&scope, viewOf(&scope, L, self))->asObject(&scope);
-    slot[1] = scope.newList(1, &p)->asObject(&scope);
-    const ProtoObject* w = L.withFilterProto->newChild(&scope, /*isMutable=*/false);
+    CallerSlots slots(ctx, 3);  // the caller's context (CallerSlots.h)
+    const ProtoObject** slot = slots.data();
+    slot[0] = rangeToList(ctx, viewOf(ctx, L, self))->asObject(ctx);
+    slot[1] = ctx->newList(1, &p)->asObject(ctx);
+    const ProtoObject* w = L.withFilterProto->newChild(ctx, /*isMutable=*/false);
     slot[2] = w;
-    w = w->setAttribute(&scope, L.listKey, slot[0]);
+    w = w->setAttribute(ctx, L.listKey, slot[0]);
     slot[2] = w;
-    w = w->setAttribute(&scope, L.predsKey, slot[1]);
+    w = w->setAttribute(ctx, L.predsKey, slot[1]);
     slot[2] = w;
     return w;
 }
@@ -313,12 +306,13 @@ PRIM(prim_range_exists) {
     const ProtoObject* p = arg(ctx, args, 0, "exists", 1);
     ExecutionEngine* engine = activeCallContext()->engine;
     const long long n = v.length();
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(1);
-    const ProtoObject** slot = scope.getAutomaticLocals();
+    SafepointPermit permit(ctx);  // what a tick must keep is in slots or arguments
+    CallerSlots slots(ctx, 1);  // the caller's context (CallerSlots.h)
+    const ProtoObject** slot = slots.data();
     for (long long i = 0; i < n; ++i) {
         slot[0] = proto::makeSmallInt(v.at(i));
-        if (engine->invoke(&scope, p, slot, 1) == PROTO_TRUE) return PROTO_TRUE;
+        if (engine->invoke(ctx, p, slot, 1) == PROTO_TRUE) return PROTO_TRUE;
+        slots.tick();
     }
     return PROTO_FALSE;
 }
@@ -328,12 +322,13 @@ PRIM(prim_range_forall) {
     const ProtoObject* p = arg(ctx, args, 0, "forall", 1);
     ExecutionEngine* engine = activeCallContext()->engine;
     const long long n = v.length();
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(1);
-    const ProtoObject** slot = scope.getAutomaticLocals();
+    SafepointPermit permit(ctx);  // what a tick must keep is in slots or arguments
+    CallerSlots slots(ctx, 1);  // the caller's context (CallerSlots.h)
+    const ProtoObject** slot = slots.data();
     for (long long i = 0; i < n; ++i) {
         slot[0] = proto::makeSmallInt(v.at(i));
-        if (engine->invoke(&scope, p, slot, 1) != PROTO_TRUE) return PROTO_FALSE;
+        if (engine->invoke(ctx, p, slot, 1) != PROTO_TRUE) return PROTO_FALSE;
+        slots.tick();
     }
     return PROTO_TRUE;
 }
@@ -344,12 +339,13 @@ PRIM(prim_range_count) {
     ExecutionEngine* engine = activeCallContext()->engine;
     const long long n = v.length();
     long long hits = 0;
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(1);
-    const ProtoObject** slot = scope.getAutomaticLocals();
+    SafepointPermit permit(ctx);  // what a tick must keep is in slots or arguments
+    CallerSlots slots(ctx, 1);  // the caller's context (CallerSlots.h)
+    const ProtoObject** slot = slots.data();
     for (long long i = 0; i < n; ++i) {
         slot[0] = proto::makeSmallInt(v.at(i));
-        if (engine->invoke(&scope, p, slot, 1) == PROTO_TRUE) ++hits;
+        if (engine->invoke(ctx, p, slot, 1) == PROTO_TRUE) ++hits;
+        slots.tick();
     }
     return proto::makeSmallInt(hits);
 }
@@ -360,15 +356,16 @@ PRIM(prim_range_find) {
     const ProtoObject* p = arg(ctx, args, 0, "find", 1);
     ExecutionEngine* engine = activeCallContext()->engine;
     const long long n = v.length();
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(1);
-    const ProtoObject** slot = scope.getAutomaticLocals();
+    SafepointPermit permit(ctx);  // what a tick must keep is in slots or arguments
+    CallerSlots slots(ctx, 1);  // the caller's context (CallerSlots.h)
+    const ProtoObject** slot = slots.data();
     for (long long i = 0; i < n; ++i) {
         slot[0] = proto::makeSmallInt(v.at(i));
-        if (engine->invoke(&scope, p, slot, 1) == PROTO_TRUE)
-            return engine->invoke(&scope, L.hooks.someCompanion, slot, 1);
+        if (engine->invoke(ctx, p, slot, 1) == PROTO_TRUE)
+            return engine->invoke(ctx, L.hooks.someCompanion, slot, 1);
+        slots.tick();
     }
-    return engine->invoke(&scope, L.hooks.noneValue, nullptr, 0);
+    return engine->invoke(ctx, L.hooks.noneValue, nullptr, 0);
 }
 
 PRIM(prim_range_mkString) {
@@ -404,10 +401,8 @@ const ProtoObject* newVector(ProtoContext* ctx, const RuntimeLayout& L, const Pr
 PRIM(prim_range_toVector) {
     expectArgs(ctx, args, "toVector", 0);
     const RuntimeLayout& L = layoutOf();
-    proto::ProtoContext scope(ctx->space, ctx);
-    const ProtoList* data = rangeToList(&scope, viewOf(&scope, L, self));
-    scope.returnValue = data->asObject(&scope);
-    return newVector(&scope, L, data);
+    const ProtoList* data = rangeToList(ctx, viewOf(ctx, L, self));
+    return newVector(ctx, L, data);
 }
 
 PRIM(prim_range_toString) {
@@ -439,13 +434,9 @@ const ProtoList* seqData(ProtoContext* ctx, const RuntimeLayout& L, const ProtoO
 }
 
 const ProtoObject* newVector(ProtoContext* ctx, const RuntimeLayout& L, const ProtoList* data) {
-    proto::ProtoContext scope(ctx->space, ctx);
-    const ProtoObject* payload = data->asObject(&scope);
-    scope.returnValue = payload;
-    const ProtoObject* v = L.vectorProto->newChild(&scope, /*isMutable=*/false);
-    scope.returnValue = v;
-    v = v->setAttribute(&scope, L.vecDataKey, payload);
-    scope.returnValue = v;
+    const ProtoObject* payload = data->asObject(ctx);
+    const ProtoObject* v = L.vectorProto->newChild(ctx, /*isMutable=*/false);
+    v = v->setAttribute(ctx, L.vecDataKey, payload);
     return v;
 }
 
@@ -467,10 +458,8 @@ const ProtoList* seqArg(ProtoContext* ctx, const RuntimeLayout& L, const ProtoOb
     if (!sv.valid) wrongType(ctx, method, "a collection", v);
     if (!sv.isRange && sv.list) return sv.list;
     const ProtoList* out = ctx->newList();
-    ctx->returnValue = out->asObject(ctx);
     for (long long k = 0; k < sv.size; ++k) {
         out = out->appendLast(ctx, seqElemAt(ctx, sv, k));
-        ctx->returnValue = out->asObject(ctx);
     }
     return out;
 }
@@ -536,18 +525,9 @@ PRIM(prim_seq_last) {
 
 const ProtoObject* optionOf(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* v) {
     ExecutionEngine* engine = activeCallContext()->engine;
-    proto::ProtoContext scope(ctx->space, ctx);
-    if (!v) {
-        const ProtoObject* none = engine->invoke(&scope, L.hooks.noneValue, nullptr, 0);
-        scope.returnValue = none;
-        return none;
-    }
-    scope.resizeAutomaticLocals(1);
-    const ProtoObject** slot = scope.getAutomaticLocals();
-    slot[0] = v;
-    const ProtoObject* some = engine->invoke(&scope, L.hooks.someCompanion, slot, 1);
-    scope.returnValue = some;
-    return some;
+    if (!v) return engine->invoke(ctx, L.hooks.noneValue, nullptr, 0);
+    const ProtoObject* const argv[1] = {v};  // rooted by the caller
+    return engine->invoke(ctx, L.hooks.someCompanion, argv, 1);
 }
 
 PRIM(prim_seq_headOption) {
@@ -604,10 +584,14 @@ PRIM(prim_seq_drop) {
 long long whilePrefix(ProtoContext* ctx, const ProtoList* xs, const ProtoObject* p,
                       const char* method) {
     const auto n = static_cast<long long>(xs->getSize(ctx));
+    // xs is held in a slot, p is an argument: ticks are safe (CallerSlots.h).
+    SafepointPermit permit(ctx);
+    CallerSlots held(ctx, 1);
+    held.set(0, xs->asObject(ctx));
     for (long long i = 0; i < n; ++i) {
-        proto::ProtoContext step(ctx->space, ctx);
-        if (!truth(&step, callOne(&step, p, xs->getAt(&step, static_cast<int>(i))), method))
+        if (!truth(ctx, callOne(ctx, p, xs->getAt(ctx, static_cast<int>(i))), method))
             return i;
+        held.tick();
     }
     return n;
 }
@@ -631,18 +615,16 @@ PRIM(prim_seq_dropWhile) {
 // tuple node and interned tuples are perennial (DESIGN §4.6, R2).
 const ProtoObject* makePair(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* a,
                             const ProtoObject* b) {
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(2);
-    const ProtoObject** slot = scope.getAutomaticLocals();
+    CallerSlots slots(ctx, 2);  // the caller's context (CallerSlots.h)
+    const ProtoObject** slot = slots.data();
     slot[0] = a;
     slot[1] = b;
     // Through the TupleN companion's `apply`, as ActorPrimitives does: the
     // companion has no `<init>` of its own, so `construct` is not the entry
     // point. This is a Tuple2 case-class instance either way, never a
     // ProtoTuple.
-    const ProtoObject* r = activeCallContext()->engine->send(&scope, L.tupleCompanion[2],
+    const ProtoObject* r = activeCallContext()->engine->send(ctx, L.tupleCompanion[2],
                                                             L.applyName, slot, 2);
-    scope.returnValue = r;
     return r;
 }
 
@@ -651,14 +633,12 @@ PRIM(prim_seq_splitAt) {
     const ProtoList* xs = seqData(ctx, L, self, "splitAt");
     const auto n = static_cast<long long>(xs->getSize(ctx));
     const long long k = clampIndex(intArg(ctx, arg(ctx, args, 0, "splitAt", 1), "splitAt"), n);
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(2);
-    const ProtoObject** slot = scope.getAutomaticLocals();
-    slot[0] = rewrap(&scope, L, self, xs->getSlice(&scope, 0, static_cast<int>(k)));
-    slot[1] = rewrap(&scope, L, self,
-                     xs->getSlice(&scope, static_cast<int>(k), static_cast<int>(n)));
-    const ProtoObject* r = makePair(&scope, L, slot[0], slot[1]);
-    scope.returnValue = r;
+    CallerSlots slots(ctx, 2);  // the caller's context (CallerSlots.h)
+    const ProtoObject** slot = slots.data();
+    slot[0] = rewrap(ctx, L, self, xs->getSlice(ctx, 0, static_cast<int>(k)));
+    slot[1] = rewrap(ctx, L, self,
+                     xs->getSlice(ctx, static_cast<int>(k), static_cast<int>(n)));
+    const ProtoObject* r = makePair(ctx, L, slot[0], slot[1]);
     return r;
 }
 
@@ -677,11 +657,9 @@ PRIM(prim_seq_reverse) {
 PRIM(prim_seq_concat) {
     const RuntimeLayout& L = layoutOf();
     const ProtoList* xs = seqData(ctx, L, self, "++");
-    proto::ProtoContext scope(ctx->space, ctx);
-    const ProtoList* ys = seqArg(&scope, L, arg(&scope, args, 0, "++", 1), "++");
-    const ProtoList* out = xs->extend(&scope, ys);
-    scope.returnValue = out->asObject(&scope);
-    return rewrap(&scope, L, self, out);
+    const ProtoList* ys = seqArg(ctx, L, arg(ctx, args, 0, "++", 1), "++");
+    const ProtoList* out = xs->extend(ctx, ys);
+    return rewrap(ctx, L, self, out);
 }
 
 PRIM(prim_seq_appended) {   // xs :+ x
@@ -714,7 +692,11 @@ PRIM(prim_seq_contains) {
     const RuntimeLayout& L = layoutOf();
     const ProtoList* xs = seqData(ctx, L, self, "contains");
     const ProtoObject* x = arg(ctx, args, 0, "contains", 1);
-    for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i)
+    // No allocation here, so no young chain grows; the ticks keep a long walk
+    // from delaying a stop-the-world. What they must keep is an argument.
+    SafepointPermit permit(ctx);
+    CallerSlots ticker(ctx, 0);
+    for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i, ticker.tick())
         if (valuesEqual(ctx, L, xs->getAt(ctx, static_cast<int>(i)), x)) return PROTO_TRUE;
     return PROTO_FALSE;
 }
@@ -723,7 +705,11 @@ PRIM(prim_seq_indexOf) {
     const RuntimeLayout& L = layoutOf();
     const ProtoList* xs = seqData(ctx, L, self, "indexOf");
     const ProtoObject* x = arg(ctx, args, 0, "indexOf", 1);
-    for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i)
+    // No allocation here, so no young chain grows; the ticks keep a long walk
+    // from delaying a stop-the-world. What they must keep is an argument.
+    SafepointPermit permit(ctx);
+    CallerSlots ticker(ctx, 0);
+    for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i, ticker.tick())
         if (valuesEqual(ctx, L, xs->getAt(ctx, static_cast<int>(i)), x))
             return proto::makeSmallInt(static_cast<long long>(i));
     return proto::makeSmallInt(-1);
@@ -733,10 +719,12 @@ PRIM(prim_seq_exists) {
     const RuntimeLayout& L = layoutOf();
     const ProtoList* xs = seqData(ctx, L, self, "exists");
     const ProtoObject* p = arg(ctx, args, 0, "exists", 1);
+    SafepointPermit permit(ctx);  // what a tick must keep is an argument
+    CallerSlots ticker(ctx, 0);
     for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i) {
-        proto::ProtoContext step(ctx->space, ctx);
-        if (truth(&step, callOne(&step, p, xs->getAt(&step, static_cast<int>(i))), "exists"))
+        if (truth(ctx, callOne(ctx, p, xs->getAt(ctx, static_cast<int>(i))), "exists"))
             return PROTO_TRUE;
+        ticker.tick();
     }
     return PROTO_FALSE;
 }
@@ -745,10 +733,12 @@ PRIM(prim_seq_forall) {
     const RuntimeLayout& L = layoutOf();
     const ProtoList* xs = seqData(ctx, L, self, "forall");
     const ProtoObject* p = arg(ctx, args, 0, "forall", 1);
+    SafepointPermit permit(ctx);  // what a tick must keep is an argument
+    CallerSlots ticker(ctx, 0);
     for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i) {
-        proto::ProtoContext step(ctx->space, ctx);
-        if (!truth(&step, callOne(&step, p, xs->getAt(&step, static_cast<int>(i))), "forall"))
+        if (!truth(ctx, callOne(ctx, p, xs->getAt(ctx, static_cast<int>(i))), "forall"))
             return PROTO_FALSE;
+        ticker.tick();
     }
     return PROTO_TRUE;
 }
@@ -757,10 +747,12 @@ PRIM(prim_seq_count) {
     const RuntimeLayout& L = layoutOf();
     const ProtoList* xs = seqData(ctx, L, self, "count");
     const ProtoObject* p = arg(ctx, args, 0, "count", 1);
+    SafepointPermit permit(ctx);  // what a tick must keep is an argument
+    CallerSlots ticker(ctx, 0);
     long long hits = 0;
     for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i) {
-        proto::ProtoContext step(ctx->space, ctx);
-        if (truth(&step, callOne(&step, p, xs->getAt(&step, static_cast<int>(i))), "count")) ++hits;
+        if (truth(ctx, callOne(ctx, p, xs->getAt(ctx, static_cast<int>(i))), "count")) ++hits;
+        ticker.tick();
     }
     return proto::makeSmallInt(hits);
 }
@@ -769,10 +761,12 @@ PRIM(prim_seq_find) {
     const RuntimeLayout& L = layoutOf();
     const ProtoList* xs = seqData(ctx, L, self, "find");
     const ProtoObject* p = arg(ctx, args, 0, "find", 1);
+    SafepointPermit permit(ctx);  // what a tick must keep is an argument
+    CallerSlots ticker(ctx, 0);
     for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i) {
         const ProtoObject* x = xs->getAt(ctx, static_cast<int>(i));
-        proto::ProtoContext step(ctx->space, ctx);
-        if (truth(&step, callOne(&step, p, x), "find")) return optionOf(ctx, L, x);
+        if (truth(ctx, callOne(ctx, p, x), "find")) return optionOf(ctx, L, x);
+        ticker.tick();
     }
     return optionOf(ctx, L, nullptr);
 }
@@ -781,22 +775,20 @@ PRIM(prim_seq_partition) {
     const RuntimeLayout& L = layoutOf();
     const ProtoList* xs = seqData(ctx, L, self, "partition");
     const ProtoObject* p = arg(ctx, args, 0, "partition", 1);
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(2);
-    const ProtoObject** slot = scope.getAutomaticLocals();
-    slot[0] = scope.newList()->asObject(&scope);
-    slot[1] = scope.newList()->asObject(&scope);
-    for (proto::proto_ulong i = 0, n = xs->getSize(&scope); i < n; ++i) {
-        const ProtoObject* x = xs->getAt(&scope, static_cast<int>(i));
-        const unsigned which = truth(&scope, callOne(&scope, p, x), "partition") ? 0u : 1u;
-        slot[which] = slot[which]->asList(&scope)->appendLast(&scope, x)->asObject(&scope);
+    CallerSlots slots(ctx, 2);  // the caller's context (CallerSlots.h)
+    const ProtoObject** slot = slots.data();
+    slot[0] = ctx->newList()->asObject(ctx);
+    slot[1] = ctx->newList()->asObject(ctx);
+    for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i) {
+        const ProtoObject* x = xs->getAt(ctx, static_cast<int>(i));
+        const unsigned which = truth(ctx, callOne(ctx, p, x), "partition") ? 0u : 1u;
+        slot[which] = slot[which]->asList(ctx)->appendLast(ctx, x)->asObject(ctx);
     }
-    const ProtoObject* yes = rewrap(&scope, L, self, slot[0]->asList(&scope));
+    const ProtoObject* yes = rewrap(ctx, L, self, slot[0]->asList(ctx));
     slot[0] = yes;
-    const ProtoObject* no = rewrap(&scope, L, self, slot[1]->asList(&scope));
+    const ProtoObject* no = rewrap(ctx, L, self, slot[1]->asList(ctx));
     slot[1] = no;
-    const ProtoObject* r = makePair(&scope, L, slot[0], slot[1]);
-    scope.returnValue = r;
+    const ProtoObject* r = makePair(ctx, L, slot[0], slot[1]);
     return r;
 }
 
@@ -806,6 +798,7 @@ PRIM(prim_seq_map) {
     const RuntimeLayout& L = layoutOf();
     const ProtoList* xs = seqData(ctx, L, self, "map");
     const ProtoObject* f = arg(ctx, args, 0, "map", 1);
+    SafepointPermit permit(ctx);  // what a tick must keep is an argument or in the builder
     ListBuilder b(ctx);
     for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i)
         b.add(callOne(b.context(), f, xs->getAt(b.context(), static_cast<int>(i))));
@@ -816,6 +809,7 @@ PRIM(prim_seq_flatMap) {
     const RuntimeLayout& L = layoutOf();
     const ProtoList* xs = seqData(ctx, L, self, "flatMap");
     const ProtoObject* f = arg(ctx, args, 0, "flatMap", 1);
+    SafepointPermit permit(ctx);  // what a tick must keep is an argument or in the builder
     ListBuilder b(ctx);
     for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i)
         addFlat(b, callOne(b.context(), f, xs->getAt(b.context(), static_cast<int>(i))), "flatMap");
@@ -826,6 +820,7 @@ PRIM(prim_seq_filter) {
     const RuntimeLayout& L = layoutOf();
     const ProtoList* xs = seqData(ctx, L, self, "filter");
     const ProtoObject* p = arg(ctx, args, 0, "filter", 1);
+    SafepointPermit permit(ctx);  // what a tick must keep is an argument or in the builder
     ListBuilder b(ctx);
     for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i) {
         const ProtoObject* x = xs->getAt(b.context(), static_cast<int>(i));
@@ -838,6 +833,7 @@ PRIM(prim_seq_filterNot) {
     const RuntimeLayout& L = layoutOf();
     const ProtoList* xs = seqData(ctx, L, self, "filterNot");
     const ProtoObject* p = arg(ctx, args, 0, "filterNot", 1);
+    SafepointPermit permit(ctx);  // what a tick must keep is an argument or in the builder
     ListBuilder b(ctx);
     for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i) {
         const ProtoObject* x = xs->getAt(b.context(), static_cast<int>(i));
@@ -851,11 +847,9 @@ PRIM(prim_seq_filterNot) {
 PRIM(prim_seq_withFilter) {
     const RuntimeLayout& L = layoutOf();
     const ProtoObject* p = arg(ctx, args, 0, "withFilter", 1);
-    proto::ProtoContext scope(ctx->space, ctx);
     const ProtoObject* preds[1] = {p};
-    const ProtoObject* r = makeWithFilter(&scope, seqData(&scope, L, self, "withFilter")->asObject(&scope),
-                                          scope.newList(1, preds));
-    scope.returnValue = r;
+    const ProtoObject* r = makeWithFilter(ctx, seqData(ctx, L, self, "withFilter")->asObject(ctx),
+                                          ctx->newList(1, preds));
     return r;
 }
 
@@ -863,22 +857,25 @@ PRIM(prim_seq_foreach) {
     const RuntimeLayout& L = layoutOf();
     const ProtoList* xs = seqData(ctx, L, self, "foreach");
     const ProtoObject* f = arg(ctx, args, 0, "foreach", 1);
-    for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i)
+    SafepointPermit permit(ctx);  // what a tick must keep is an argument
+    CallerSlots ticker(ctx, 0);
+    for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i) {
         (void)callOne(ctx, f, xs->getAt(ctx, static_cast<int>(i)));
+        ticker.tick();
+    }
     return L.unit;
 }
 
 PRIM(prim_seq_zip) {
     const RuntimeLayout& L = layoutOf();
     const ProtoList* xs = seqData(ctx, L, self, "zip");
-    proto::ProtoContext scope(ctx->space, ctx);
-    const ProtoList* ys = seqArg(&scope, L, arg(&scope, args, 0, "zip", 1), "zip");
-    const proto::proto_ulong n = std::min(xs->getSize(&scope), ys->getSize(&scope));
-    ListBuilder b(&scope);
+    const ProtoList* ys = seqArg(ctx, L, arg(ctx, args, 0, "zip", 1), "zip");
+    const proto::proto_ulong n = std::min(xs->getSize(ctx), ys->getSize(ctx));
+    ListBuilder b(ctx);
     for (proto::proto_ulong i = 0; i < n; ++i)
         b.add(makePair(b.context(), L, xs->getAt(b.context(), static_cast<int>(i)),
                        ys->getAt(b.context(), static_cast<int>(i))));
-    return rewrap(&scope, L, self, b.finish()->asList(&scope));
+    return rewrap(ctx, L, self, b.finish()->asList(ctx));
 }
 
 PRIM(prim_seq_zipWithIndex) {
@@ -899,7 +896,7 @@ PRIM(prim_seq_distinct) {
     ListBuilder b(ctx);
     for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i) {
         const ProtoObject* x = xs->getAt(b.context(), static_cast<int>(i));
-        const ProtoList* seen = b.context()->getAutomaticLocal(0)->asList(b.context());
+        const ProtoList* seen = b.current();
         bool dup = false;
         for (proto::proto_ulong k = 0, m = seen->getSize(b.context()); k < m && !dup; ++k)
             dup = valuesEqual(b.context(), L, seen->getAt(b.context(), static_cast<int>(k)), x);
@@ -943,40 +940,37 @@ const ProtoObject* foldImpl(ProtoContext* ctx, const ProtoList* xs, const ProtoO
                             const ProtoObject* f, bool left) {
     ExecutionEngine* engine = activeCallContext()->engine;
     const auto n = static_cast<long long>(xs->getSize(ctx));
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(2);
-    const ProtoObject** slot = scope.getAutomaticLocals();
+    // The accumulator, the element and xs itself in slots, f an argument of the
+    // calling native: ticks are safe (CallerSlots.h).
+    SafepointPermit permit(ctx);
+    CallerSlots slots(ctx, 3);
+    const ProtoObject** slot = slots.data();
     slot[0] = z;
-    for (long long k = 0; k < n; ++k) {
+    slot[2] = xs->asObject(ctx);
+    for (long long k = 0; k < n; ++k, slots.tick()) {
         const long long i = left ? k : n - 1 - k;
         if (left) {
-            slot[1] = xs->getAt(&scope, static_cast<int>(i));
-            slot[0] = engine->invoke(&scope, f, slot, 2);   // (acc, x)
+            slot[1] = xs->getAt(ctx, static_cast<int>(i));
+            slot[0] = engine->invoke(ctx, f, slot, 2);   // (acc, x)
         } else {
             // foldRight calls f(x, acc), so the pair is built the other way up.
-            const ProtoObject* pair[2] = {xs->getAt(&scope, static_cast<int>(i)), slot[0]};
+            const ProtoObject* pair[2] = {xs->getAt(ctx, static_cast<int>(i)), slot[0]};
             slot[1] = pair[0];
             const ProtoObject* argv[2] = {slot[1], slot[0]};
-            slot[0] = engine->invoke(&scope, f, argv, 2);
+            slot[0] = engine->invoke(ctx, f, argv, 2);
         }
     }
-    scope.returnValue = slot[0];
-    return slot[0];
+    return slots.ret(slot[0]);
 }
 
 // A one-shot applier for the curried spelling xs.foldLeft(z)(f), the same
 // pattern Actor.spawn(state)(handler) uses (A0-16, C11).
 const ProtoObject* makeFoldPartial(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* src,
                                    const ProtoObject* seed, bool left) {
-    proto::ProtoContext scope(ctx->space, ctx);
-    const ProtoObject* o = L.foldPartialProto->newChild(&scope, /*isMutable=*/false);
-    scope.returnValue = o;
-    o = o->setAttribute(&scope, L.foldSrcKey, src);
-    scope.returnValue = o;
-    o = o->setAttribute(&scope, L.foldSeedKey, seed);
-    scope.returnValue = o;
-    o = o->setAttribute(&scope, L.foldLeftKey, boolean(left));
-    scope.returnValue = o;
+    const ProtoObject* o = L.foldPartialProto->newChild(ctx, /*isMutable=*/false);
+    o = o->setAttribute(ctx, L.foldSrcKey, src);
+    o = o->setAttribute(ctx, L.foldSeedKey, seed);
+    o = o->setAttribute(ctx, L.foldLeftKey, boolean(left));
     return o;
 }
 
@@ -1009,14 +1003,10 @@ const ProtoObject* reduceImpl(ProtoContext* ctx, const ProtoList* xs, const Prot
     if (n == 0) throw ScalaError("UnsupportedOperationException",
                                  std::string(method) + " of empty collection");
     const int seedIndex = left ? 0 : static_cast<int>(n - 1);
-    proto::ProtoContext scope(ctx->space, ctx);
-    const ProtoObject* seed = xs->getAt(&scope, seedIndex);
-    scope.returnValue = seed;
-    const ProtoList* rest = left ? xs->getSlice(&scope, 1, static_cast<int>(n))
-                                 : xs->getSlice(&scope, 0, static_cast<int>(n - 1));
-    scope.returnValue = rest->asObject(&scope);
-    const ProtoObject* r = foldImpl(&scope, rest, seed, f, left);
-    scope.returnValue = r;
+    const ProtoObject* seed = xs->getAt(ctx, seedIndex);
+    const ProtoList* rest = left ? xs->getSlice(ctx, 1, static_cast<int>(n))
+                                 : xs->getSlice(ctx, 0, static_cast<int>(n - 1));
+    const ProtoObject* r = foldImpl(ctx, rest, seed, f, left);
     return r;
 }
 
@@ -1043,14 +1033,11 @@ PRIM(prim_seq_sum) {
     expectArgs(ctx, args, "sum", 0);
     const ProtoList* xs = seqData(ctx, L, self, "sum");
     const auto n = static_cast<long long>(xs->getSize(ctx));
-    proto::ProtoContext scope(ctx->space, ctx);
     const ProtoObject* acc = proto::makeSmallInt(0);
-    scope.returnValue = acc;
     for (long long i = 0; i < n; ++i) {
-        const ProtoObject* x = widenChar(xs->getAt(&scope, static_cast<int>(i)));
-        if (!isNumberFast(x)) wrongType(&scope, "sum", "a number", x);
-        acc = acc->add(&scope, x);
-        scope.returnValue = acc;
+        const ProtoObject* x = widenChar(xs->getAt(ctx, static_cast<int>(i)));
+        if (!isNumberFast(x)) wrongType(ctx, "sum", "a number", x);
+        acc = acc->add(ctx, x);
     }
     return acc;
 }
@@ -1060,14 +1047,11 @@ PRIM(prim_seq_product) {
     expectArgs(ctx, args, "product", 0);
     const ProtoList* xs = seqData(ctx, L, self, "product");
     const auto n = static_cast<long long>(xs->getSize(ctx));
-    proto::ProtoContext scope(ctx->space, ctx);
     const ProtoObject* acc = proto::makeSmallInt(1);
-    scope.returnValue = acc;
     for (long long i = 0; i < n; ++i) {
-        const ProtoObject* x = widenChar(xs->getAt(&scope, static_cast<int>(i)));
-        if (!isNumberFast(x)) wrongType(&scope, "product", "a number", x);
-        acc = acc->multiply(&scope, x);
-        scope.returnValue = acc;
+        const ProtoObject* x = widenChar(xs->getAt(ctx, static_cast<int>(i)));
+        if (!isNumberFast(x)) wrongType(ctx, "product", "a number", x);
+        acc = acc->multiply(ctx, x);
     }
     return acc;
 }
@@ -1114,21 +1098,19 @@ const ProtoObject* extremum(ProtoContext* ctx, const RuntimeLayout& L, const Pro
     const auto n = static_cast<long long>(xs->getSize(ctx));
     if (n == 0) throw ScalaError("UnsupportedOperationException",
                                  std::string(method) + " of empty collection");
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(4);
-    const ProtoObject** slot = scope.getAutomaticLocals();
-    slot[0] = xs->getAt(&scope, 0);                                  // best element
-    slot[1] = keyFn ? callOne(&scope, keyFn, slot[0]) : slot[0];      // its key
+    CallerSlots slots(ctx, 4);  // the caller's context (CallerSlots.h)
+    const ProtoObject** slot = slots.data();
+    slot[0] = xs->getAt(ctx, 0);                                  // best element
+    slot[1] = keyFn ? callOne(ctx, keyFn, slot[0]) : slot[0];      // its key
     for (long long i = 1; i < n; ++i) {
-        slot[2] = xs->getAt(&scope, static_cast<int>(i));
-        slot[3] = keyFn ? callOne(&scope, keyFn, slot[2]) : slot[2];
-        const int c = compareValues(&scope, slot[3], slot[1], method);
+        slot[2] = xs->getAt(ctx, static_cast<int>(i));
+        slot[3] = keyFn ? callOne(ctx, keyFn, slot[2]) : slot[2];
+        const int c = compareValues(ctx, slot[3], slot[1], method);
         if (wantMax ? c > 0 : c < 0) {
             slot[0] = slot[2];
             slot[1] = slot[3];
         }
     }
-    scope.returnValue = slot[0];
     return slot[0];
 }
 
@@ -1151,9 +1133,10 @@ PRIM(prim_seq_maxBy) {
 
 // --- sorting ---------------------------------------------------------------
 
-// Stable merge sort over a slot array of a dedicated context: the comparator may
-// re-enter the VM and allocate, so no element may live in a std::vector across
-// it (P1). Indices are plain unsigned and never hold objects.
+// Stable merge sort in the caller's context. The arrays need no tracing: the
+// elements are reachable from the receiver, keyFn's results are anchored in ctx
+// by their frames, and nothing submits ctx's young chain while the sort runs
+// (CallerSlots.h). Indices are plain unsigned and never hold objects.
 const ProtoObject* sortSeq(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* self,
                            const ProtoObject* keyFn, const ProtoObject* lessFn,
                            const char* method) {
@@ -1161,24 +1144,23 @@ const ProtoObject* sortSeq(ProtoContext* ctx, const RuntimeLayout& L, const Prot
     const auto n = static_cast<unsigned>(xs->getSize(ctx));
     if (n < 2) return self;
     ExecutionEngine* engine = activeCallContext()->engine;
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(3u * n + 2u);
-    const ProtoObject** slot = scope.getAutomaticLocals();
+    std::vector<const ProtoObject*> storage(3u * n + 2u, PROTO_NONE);
+    const ProtoObject** slot = storage.data();
     const ProtoObject** elems = slot;            // [0, n)      the elements
     const ProtoObject** keys = slot + n;         // [n, 2n)     keyFn's results, or the elements
     const ProtoObject** scratch = slot + 2u * n; // [2n, 3n)    the result order
-    for (unsigned i = 0; i < n; ++i) elems[i] = xs->getAt(&scope, static_cast<int>(i));
+    for (unsigned i = 0; i < n; ++i) elems[i] = xs->getAt(ctx, static_cast<int>(i));
     for (unsigned i = 0; i < n; ++i)
-        keys[i] = keyFn ? callOne(&scope, keyFn, elems[i]) : elems[i];
+        keys[i] = keyFn ? callOne(ctx, keyFn, elems[i]) : elems[i];
     std::vector<unsigned> idx(n), buf(n);        // indices only: no ProtoObject* in std::
     for (unsigned i = 0; i < n; ++i) idx[i] = i;
     auto before = [&](unsigned a, unsigned b) -> bool {
         if (lessFn) {
             slot[3u * n] = elems[a];
             slot[3u * n + 1] = elems[b];
-            return truth(&scope, engine->invoke(&scope, lessFn, slot + 3u * n, 2), method);
+            return truth(ctx, engine->invoke(ctx, lessFn, slot + 3u * n, 2), method);
         }
-        return compareValues(&scope, keys[a], keys[b], method) < 0;
+        return compareValues(ctx, keys[a], keys[b], method) < 0;
     };
     for (unsigned width = 1; width < n; width *= 2) {
         for (unsigned lo = 0; lo < n; lo += 2 * width) {
@@ -1194,9 +1176,8 @@ const ProtoObject* sortSeq(ProtoContext* ctx, const RuntimeLayout& L, const Prot
         }
     }
     for (unsigned i = 0; i < n; ++i) scratch[i] = elems[idx[i]];
-    const ProtoList* out = scope.newList(n, scratch);
-    scope.returnValue = out->asObject(&scope);
-    return rewrap(&scope, L, self, out);
+    const ProtoList* out = ctx->newList(n, scratch);
+    return rewrap(ctx, L, self, out);
 }
 
 PRIM(prim_seq_sorted) {
@@ -1263,10 +1244,8 @@ SEQ_NAMED(prim_vector_hashHash, vectorHash, "##")
 
 PRIM(prim_vectorCompanion_apply) {
     const RuntimeLayout& L = layoutOf();
-    proto::ProtoContext scope(ctx->space, ctx);
-    const ProtoList* data = args ? args->asList(&scope) : scope.newList();
-    scope.returnValue = data->asObject(&scope);
-    return newVector(&scope, L, data);
+    const ProtoList* data = args ? args->asList(ctx) : ctx->newList();
+    return newVector(ctx, L, data);
 }
 
 PRIM(prim_vectorCompanion_empty) {
@@ -1366,13 +1345,9 @@ const proto::ProtoMap* mapDataOf(ProtoContext* ctx, const RuntimeLayout& L, cons
 
 const ProtoObject* wrapMap(ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoMap* data,
                            bool isSet) {
-    proto::ProtoContext scope(ctx->space, ctx);
-    const ProtoObject* payload = data->asObject(&scope);
-    scope.returnValue = payload;
-    const ProtoObject* o = (isSet ? L.setProto : L.mapProto)->newChild(&scope, /*isMutable=*/false);
-    scope.returnValue = o;
-    o = o->setAttribute(&scope, L.mapDataKey, payload);
-    scope.returnValue = o;
+    const ProtoObject* payload = data->asObject(ctx);
+    const ProtoObject* o = (isSet ? L.setProto : L.mapProto)->newChild(ctx, /*isMutable=*/false);
+    o = o->setAttribute(ctx, L.mapDataKey, payload);
     return o;
 }
 
@@ -1417,13 +1392,11 @@ void collectEntry(ProtoContext* ctx, void* self, const ProtoObject* k, const Pro
 // Every entry of `data` as a List of `what` (pairs, keys or values).
 const ProtoObject* entriesOf(ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoMap* data,
                              int what) {
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(1);
-    const ProtoObject** slot = scope.getAutomaticLocals();
-    slot[0] = scope.newList()->asObject(&scope);
-    Collector c{&scope, slot, &L, what};
-    proto::hashedForEach(&scope, data, &c, &collectEntry);
-    scope.returnValue = slot[0];
+    CallerSlots slots(ctx, 1);  // the caller's context (CallerSlots.h)
+    const ProtoObject** slot = slots.data();
+    slot[0] = ctx->newList()->asObject(ctx);
+    Collector c{ctx, slot, &L, what};
+    proto::hashedForEach(ctx, data, &c, &collectEntry);
     return slot[0];
 }
 
@@ -1485,8 +1458,7 @@ const ProtoObject* mapSize(ProtoContext* ctx, const ProtoObject* self, const pro
                            const char* method) {
     const RuntimeLayout& L = layoutOf();
     expectArgs(ctx, args, method, 0);
-    proto::ProtoContext scope(ctx->space, ctx);
-    return proto::makeSmallInt(entryCount(&scope, mapDataOf(&scope, L, self, method)));
+    return proto::makeSmallInt(entryCount(ctx, mapDataOf(ctx, L, self, method)));
 }
 SEQ_NAMED(prim_map_size, mapSize, "size")
 SEQ_NAMED(prim_map_length, mapSize, "length")
@@ -1534,12 +1506,9 @@ PRIM(prim_map_head) {
 
 const ProtoObject* mapPut(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* self,
                           const ProtoObject* k, const ProtoObject* v, const char* method) {
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.returnValue = self;
-    const proto::ProtoMap* out = proto::hashedPut(&scope, mapDataOf(&scope, L, self, method),
+    const proto::ProtoMap* out = proto::hashedPut(ctx, mapDataOf(ctx, L, self, method),
                                                   scalaKeySemantics(), k, v);
-    scope.returnValue = out->asObject(&scope);
-    return wrapMap(&scope, L, out, selfIsSet(&scope, L, self));
+    return wrapMap(ctx, L, out, selfIsSet(ctx, L, self));
 }
 
 PRIM(prim_map_plus) {
@@ -1562,12 +1531,9 @@ const ProtoObject* mapMinus(ProtoContext* ctx, const ProtoObject* self, const pr
                             const char* method) {
     const RuntimeLayout& L = layoutOf();
     const ProtoObject* k = arg(ctx, args, 0, method, 1);
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.returnValue = self;
-    const proto::ProtoMap* out = proto::hashedRemove(&scope, mapDataOf(&scope, L, self, method),
+    const proto::ProtoMap* out = proto::hashedRemove(ctx, mapDataOf(ctx, L, self, method),
                                                      scalaKeySemantics(), k);
-    scope.returnValue = out->asObject(&scope);
-    return wrapMap(&scope, L, out, selfIsSet(&scope, L, self));
+    return wrapMap(ctx, L, out, selfIsSet(ctx, L, self));
 }
 SEQ_NAMED(prim_map_minus, mapMinus, "-")
 SEQ_NAMED(prim_map_removed, mapMinus, "removed")
@@ -1614,14 +1580,12 @@ const proto::ProtoMap* asKeyedData(ProtoContext* ctx, const RuntimeLayout& L,
     const SeqView sv = seqViewOf(ctx, L, other);
     if (!sv.valid) wrongType(ctx, method, "a collection", other);
     const proto::ProtoMap* data = ctx->newMap();
-    ctx->returnValue = data->asObject(ctx);
     for (long long i = 0; i < sv.size; ++i) {
         const ProtoObject* e = seqElemAt(ctx, sv, i);
         const ProtoObject* k = e;
         const ProtoObject* v = e;
         if (pairs) pairOf(ctx, L, e, method, &k, &v);
         data = proto::hashedPut(ctx, data, scalaKeySemantics(), k, v);
-        ctx->returnValue = data->asObject(ctx);
     }
     return data;
 }
@@ -1631,27 +1595,26 @@ const ProtoObject* bulk(ProtoContext* ctx, const ProtoObject* self, const proto:
     const RuntimeLayout& L = layoutOf();
     const bool set = selfIsSet(ctx, L, self);
     const ProtoObject* other = arg(ctx, args, 0, method, 1);
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(1);
-    const ProtoObject** slot = scope.getAutomaticLocals();
-    const proto::ProtoMap* mine = mapDataOf(&scope, L, self, method);
-    const proto::ProtoMap* theirs = asKeyedData(&scope, L, other, !set, method);
+    CallerSlots slots(ctx, 1);  // the caller's context (CallerSlots.h)
+    const ProtoObject** slot = slots.data();
+    const proto::ProtoMap* mine = mapDataOf(ctx, L, self, method);
+    const proto::ProtoMap* theirs = asKeyedData(ctx, L, other, !set, method);
     BulkState st;
     st.L = &L;
-    st.scope = &scope;
+    st.scope = ctx;
     st.slot = slot;
     st.op = op;
     if (op == BulkOp::KeepCommon || op == BulkOp::KeepMissing) {
-        st.out = scope.newMap();
+        st.out = ctx->newMap();
         st.other = theirs;
-        slot[0] = st.out->asObject(&scope);
-        proto::hashedForEach(&scope, mine, &st, &bulkVisit);
+        slot[0] = st.out->asObject(ctx);
+        proto::hashedForEach(ctx, mine, &st, &bulkVisit);
     } else {
         st.out = mine;
-        slot[0] = st.out->asObject(&scope);
-        proto::hashedForEach(&scope, theirs, &st, &bulkVisit);
+        slot[0] = st.out->asObject(ctx);
+        proto::hashedForEach(ctx, theirs, &st, &bulkVisit);
     }
-    return wrapMap(&scope, L, st.out, set);
+    return wrapMap(ctx, L, st.out, set);
 }
 
 PRIM(prim_map_concat) { return bulk(ctx, self, args, BulkOp::Add, "++"); }
@@ -1692,9 +1655,8 @@ void subsetVisit(ProtoContext* ctx, void* raw, const ProtoObject* k, const Proto
 PRIM(prim_set_subsetOf) {
     const RuntimeLayout& L = layoutOf();
     const ProtoObject* other = arg(ctx, args, 0, "subsetOf", 1);
-    proto::ProtoContext scope(ctx->space, ctx);
-    SubsetState st{asKeyedData(&scope, L, other, /*pairs=*/false, "subsetOf"), true};
-    proto::hashedForEach(&scope, mapDataOf(&scope, L, self, "subsetOf"), &st, &subsetVisit);
+    SubsetState st{asKeyedData(ctx, L, other, /*pairs=*/false, "subsetOf"), true};
+    proto::hashedForEach(ctx, mapDataOf(ctx, L, self, "subsetOf"), &st, &subsetVisit);
     return boolean(st.all);
 }
 
@@ -1706,21 +1668,19 @@ PRIM(prim_set_subsetOf) {
 const ProtoObject* callOnEntry(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* f,
                                const ProtoObject* k, const ProtoObject* v, bool isSet) {
     ExecutionEngine* engine = activeCallContext()->engine;
-    proto::ProtoContext step(ctx->space, ctx);
-    step.resizeAutomaticLocals(2);
-    const ProtoObject** slot = step.getAutomaticLocals();
-    const BytecodeModule* m = compiledModuleOf(&step, L, f);
+    CallerSlots slots(ctx, 2);  // the caller's context (CallerSlots.h)
+    const ProtoObject** slot = slots.data();
+    const BytecodeModule* m = compiledModuleOf(ctx, L, f);
     const unsigned arity = m ? (m->isMethod() ? m->arity() - 1 : m->arity()) : 1;
     const ProtoObject* r = nullptr;
     if (isSet || arity == 1) {
-        slot[0] = isSet ? k : makePair(&step, L, k, v);
-        r = engine->invoke(&step, f, slot, 1);
+        slot[0] = isSet ? k : makePair(ctx, L, k, v);
+        r = engine->invoke(ctx, f, slot, 1);
     } else {
         slot[0] = k;
         slot[1] = v;
-        r = engine->invoke(&step, f, slot, 2);
+        r = engine->invoke(ctx, f, slot, 2);
     }
-    step.returnValue = r;
     return r;
 }
 
@@ -1804,9 +1764,8 @@ EntryFnState entryState(const RuntimeLayout& L, ProtoContext* scope, const Proto
 PRIM(prim_map_foreach) {
     const RuntimeLayout& L = layoutOf();
     const ProtoObject* f = arg(ctx, args, 0, "foreach", 1);
-    proto::ProtoContext scope(ctx->space, ctx);
-    EntryFnState st = entryState(L, &scope, nullptr, f, selfIsSet(&scope, L, self));
-    proto::hashedForEach(&scope, mapDataOf(&scope, L, self, "foreach"), &st, &foreachVisit);
+    EntryFnState st = entryState(L, ctx, nullptr, f, selfIsSet(ctx, L, self));
+    proto::hashedForEach(ctx, mapDataOf(ctx, L, self, "foreach"), &st, &foreachVisit);
     return L.unit;
 }
 
@@ -1816,71 +1775,69 @@ PRIM(prim_map_map) {
     const RuntimeLayout& L = layoutOf();
     const ProtoObject* f = arg(ctx, args, 0, "map", 1);
     const bool set = selfIsSet(ctx, L, self);
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(2);
-    const ProtoObject** slot = scope.getAutomaticLocals();
-    slot[0] = scope.newList()->asObject(&scope);
-    EntryFnState st = entryState(L, &scope, slot, f, set);
-    proto::hashedForEach(&scope, mapDataOf(&scope, L, self, "map"), &st, &mapVisit);
-    const proto::ProtoList* results = slot[0]->asList(&scope);
-    const proto::proto_ulong n = results->getSize(&scope);
+    CallerSlots slots(ctx, 2);  // the caller's context (CallerSlots.h)
+    const ProtoObject** slot = slots.data();
+    slot[0] = ctx->newList()->asObject(ctx);
+    EntryFnState st = entryState(L, ctx, slot, f, set);
+    proto::hashedForEach(ctx, mapDataOf(ctx, L, self, "map"), &st, &mapVisit);
+    const proto::ProtoList* results = slot[0]->asList(ctx);
+    const proto::proto_ulong n = results->getSize(ctx);
     // A Set rebuilds a Set; a Map rebuilds a Map when every result is a pair.
     bool allPairs = !set;
     for (proto::proto_ulong i = 0; i < n && allPairs; ++i) {
-        const ProtoObject* e = results->getAt(&scope, static_cast<int>(i));
-        allPairs = isScalaInstance(&scope, L, e) &&
-                   e->getAttribute(&scope, L.tupleKey) == PROTO_TRUE;
+        const ProtoObject* e = results->getAt(ctx, static_cast<int>(i));
+        allPairs = isScalaInstance(ctx, L, e) &&
+                   e->getAttribute(ctx, L.tupleKey) == PROTO_TRUE;
     }
     if (!set && !allPairs) return slot[0];
-    const proto::ProtoMap* out = scope.newMap();
-    slot[1] = out->asObject(&scope);
+    const proto::ProtoMap* out = ctx->newMap();
+    slot[1] = out->asObject(ctx);
     for (proto::proto_ulong i = 0; i < n; ++i) {
-        const ProtoObject* e = results->getAt(&scope, static_cast<int>(i));
+        const ProtoObject* e = results->getAt(ctx, static_cast<int>(i));
         const ProtoObject* k = e;
         const ProtoObject* v = e;
-        if (!set) pairOf(&scope, L, e, "map", &k, &v);
-        out = proto::hashedPut(&scope, out, scalaKeySemantics(), k, v);
-        slot[1] = out->asObject(&scope);
+        if (!set) pairOf(ctx, L, e, "map", &k, &v);
+        out = proto::hashedPut(ctx, out, scalaKeySemantics(), k, v);
+        slot[1] = out->asObject(ctx);
     }
-    return wrapMap(&scope, L, out, set);
+    return wrapMap(ctx, L, out, set);
 }
 
 PRIM(prim_map_flatMap) {
     const RuntimeLayout& L = layoutOf();
     const ProtoObject* f = arg(ctx, args, 0, "flatMap", 1);
     const bool set = selfIsSet(ctx, L, self);
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(2);
-    const ProtoObject** slot = scope.getAutomaticLocals();
-    slot[0] = scope.newList()->asObject(&scope);
-    EntryFnState st = entryState(L, &scope, slot, f, set);
-    proto::hashedForEach(&scope, mapDataOf(&scope, L, self, "flatMap"), &st, &mapVisit);
+    CallerSlots slots(ctx, 2);  // the caller's context (CallerSlots.h)
+    const ProtoObject** slot = slots.data();
+    slot[0] = ctx->newList()->asObject(ctx);
+    EntryFnState st = entryState(L, ctx, slot, f, set);
+    proto::hashedForEach(ctx, mapDataOf(ctx, L, self, "flatMap"), &st, &mapVisit);
     // Flatten what the function returned, then rebuild the receiver's kind.
-    const proto::ProtoList* results = slot[0]->asList(&scope);
-    ListBuilder b(&scope);
-    for (proto::proto_ulong i = 0, n = results->getSize(&scope); i < n; ++i)
+    const proto::ProtoList* results = slot[0]->asList(ctx);
+    ListBuilder b(ctx);
+    for (proto::proto_ulong i = 0, n = results->getSize(ctx); i < n; ++i)
         addFlat(b, results->getAt(b.context(), static_cast<int>(i)), "flatMap");
     slot[0] = b.finish();
-    const proto::ProtoList* flat = slot[0]->asList(&scope);
-    const proto::proto_ulong n = flat->getSize(&scope);
+    const proto::ProtoList* flat = slot[0]->asList(ctx);
+    const proto::proto_ulong n = flat->getSize(ctx);
     bool allPairs = !set;
     for (proto::proto_ulong i = 0; i < n && allPairs; ++i) {
-        const ProtoObject* e = flat->getAt(&scope, static_cast<int>(i));
-        allPairs = isScalaInstance(&scope, L, e) &&
-                   e->getAttribute(&scope, L.tupleKey) == PROTO_TRUE;
+        const ProtoObject* e = flat->getAt(ctx, static_cast<int>(i));
+        allPairs = isScalaInstance(ctx, L, e) &&
+                   e->getAttribute(ctx, L.tupleKey) == PROTO_TRUE;
     }
     if (!set && !allPairs) return slot[0];
-    const proto::ProtoMap* out = scope.newMap();
-    slot[1] = out->asObject(&scope);
+    const proto::ProtoMap* out = ctx->newMap();
+    slot[1] = out->asObject(ctx);
     for (proto::proto_ulong i = 0; i < n; ++i) {
-        const ProtoObject* e = flat->getAt(&scope, static_cast<int>(i));
+        const ProtoObject* e = flat->getAt(ctx, static_cast<int>(i));
         const ProtoObject* k = e;
         const ProtoObject* v = e;
-        if (!set) pairOf(&scope, L, e, "flatMap", &k, &v);
-        out = proto::hashedPut(&scope, out, scalaKeySemantics(), k, v);
-        slot[1] = out->asObject(&scope);
+        if (!set) pairOf(ctx, L, e, "flatMap", &k, &v);
+        out = proto::hashedPut(ctx, out, scalaKeySemantics(), k, v);
+        slot[1] = out->asObject(ctx);
     }
-    return wrapMap(&scope, L, out, set);
+    return wrapMap(ctx, L, out, set);
 }
 
 const ProtoObject* mapFilter(ProtoContext* ctx, const ProtoObject* self, const proto::ProtoArguments* args,
@@ -1888,15 +1845,14 @@ const ProtoObject* mapFilter(ProtoContext* ctx, const ProtoObject* self, const p
     const RuntimeLayout& L = layoutOf();
     const ProtoObject* f = arg(ctx, args, 0, method, 1);
     const bool set = selfIsSet(ctx, L, self);
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(1);
-    const ProtoObject** slot = scope.getAutomaticLocals();
-    EntryFnState st = entryState(L, &scope, slot, f, set);
-    st.out = scope.newMap();
-    slot[0] = st.out->asObject(&scope);
-    proto::hashedForEach(&scope, mapDataOf(&scope, L, self, method), &st,
+    CallerSlots slots(ctx, 1);  // the caller's context (CallerSlots.h)
+    const ProtoObject** slot = slots.data();
+    EntryFnState st = entryState(L, ctx, slot, f, set);
+    st.out = ctx->newMap();
+    slot[0] = st.out->asObject(ctx);
+    proto::hashedForEach(ctx, mapDataOf(ctx, L, self, method), &st,
                          keep ? &filterVisit : &filterNotVisit);
-    return wrapMap(&scope, L, st.out, set);
+    return wrapMap(ctx, L, st.out, set);
 }
 
 PRIM(prim_map_filter) { return mapFilter(ctx, self, args, /*keep=*/true, "filter"); }
@@ -1906,68 +1862,59 @@ PRIM(prim_map_filterNot) { return mapFilter(ctx, self, args, /*keep=*/false, "fi
 // body interleave exactly as the Phase 2 WithFilter does for a List.
 PRIM(prim_map_withFilter) {
     const ProtoObject* p = arg(ctx, args, 0, "withFilter", 1);
-    proto::ProtoContext scope(ctx->space, ctx);
-    const ProtoObject* entries = mapEntries(&scope, self, nullptr, "withFilter", 0);
-    scope.returnValue = entries;
+    const ProtoObject* entries = mapEntries(ctx, self, nullptr, "withFilter", 0);
     const ProtoObject* preds[1] = {p};
-    const ProtoObject* r = makeWithFilter(&scope, entries, scope.newList(1, preds));
-    scope.returnValue = r;
+    const ProtoObject* r = makeWithFilter(ctx, entries, ctx->newList(1, preds));
     return r;
 }
 
 PRIM(prim_map_count) {
     const RuntimeLayout& L = layoutOf();
     const ProtoObject* f = arg(ctx, args, 0, "count", 1);
-    proto::ProtoContext scope(ctx->space, ctx);
-    EntryFnState st = entryState(L, &scope, nullptr, f, selfIsSet(&scope, L, self));
-    proto::hashedForEach(&scope, mapDataOf(&scope, L, self, "count"), &st, &countVisit);
+    EntryFnState st = entryState(L, ctx, nullptr, f, selfIsSet(ctx, L, self));
+    proto::hashedForEach(ctx, mapDataOf(ctx, L, self, "count"), &st, &countVisit);
     return proto::makeSmallInt(st.count);
 }
 
 PRIM(prim_map_exists) {
     const RuntimeLayout& L = layoutOf();
     const ProtoObject* f = arg(ctx, args, 0, "exists", 1);
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(1);
-    EntryFnState st = entryState(L, &scope, scope.getAutomaticLocals(), f,
-                                 selfIsSet(&scope, L, self));
+    CallerSlots slots(ctx, 1);  // the caller's context (CallerSlots.h)
+    EntryFnState st = entryState(L, ctx, slots.data(), f,
+                                 selfIsSet(ctx, L, self));
     st.flag = false;
-    proto::hashedForEach(&scope, mapDataOf(&scope, L, self, "exists"), &st, &existsVisit);
+    proto::hashedForEach(ctx, mapDataOf(ctx, L, self, "exists"), &st, &existsVisit);
     return boolean(st.flag);
 }
 
 PRIM(prim_map_forall) {
     const RuntimeLayout& L = layoutOf();
     const ProtoObject* f = arg(ctx, args, 0, "forall", 1);
-    proto::ProtoContext scope(ctx->space, ctx);
-    EntryFnState st = entryState(L, &scope, nullptr, f, selfIsSet(&scope, L, self));
+    EntryFnState st = entryState(L, ctx, nullptr, f, selfIsSet(ctx, L, self));
     st.flag = true;
-    proto::hashedForEach(&scope, mapDataOf(&scope, L, self, "forall"), &st, &forallVisit);
+    proto::hashedForEach(ctx, mapDataOf(ctx, L, self, "forall"), &st, &forallVisit);
     return boolean(st.flag);
 }
 
 PRIM(prim_map_find) {
     const RuntimeLayout& L = layoutOf();
     const ProtoObject* f = arg(ctx, args, 0, "find", 1);
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(1);
-    EntryFnState st = entryState(L, &scope, scope.getAutomaticLocals(), f,
-                                 selfIsSet(&scope, L, self));
+    CallerSlots slots(ctx, 1);  // the caller's context (CallerSlots.h)
+    EntryFnState st = entryState(L, ctx, slots.data(), f,
+                                 selfIsSet(ctx, L, self));
     st.flag = false;
-    proto::hashedForEach(&scope, mapDataOf(&scope, L, self, "find"), &st, &existsVisit);
-    return optionOf(&scope, L, st.flag ? st.found : nullptr);
+    proto::hashedForEach(ctx, mapDataOf(ctx, L, self, "find"), &st, &existsVisit);
+    return optionOf(ctx, L, st.flag ? st.found : nullptr);
 }
 
 PRIM(prim_map_foldLeft) {
     const RuntimeLayout& L = layoutOf();
-    proto::ProtoContext scope(ctx->space, ctx);
-    const ProtoObject* entries = mapEntries(&scope, self, nullptr, "foldLeft", 0);
-    scope.returnValue = entries;
-    const proto::proto_ulong n = argCount(&scope, args);
-    if (n == 1) return makeFoldPartial(&scope, L, entries, args->getAt(&scope, 0), /*left=*/true);
+    const ProtoObject* entries = mapEntries(ctx, self, nullptr, "foldLeft", 0);
+    const proto::proto_ulong n = argCount(ctx, args);
+    if (n == 1) return makeFoldPartial(ctx, L, entries, args->getAt(ctx, 0), /*left=*/true);
     if (n != 2) wrongArgCount("foldLeft", "1 or 2", n);
-    return foldImpl(&scope, entries->asList(&scope), args->getAt(&scope, 0),
-                    args->getAt(&scope, 1), /*left=*/true);
+    return foldImpl(ctx, entries->asList(ctx), args->getAt(ctx, 0),
+                    args->getAt(ctx, 1), /*left=*/true);
 }
 
 // --- conversions, rendering, equality --------------------------------------
@@ -1976,17 +1923,13 @@ PRIM(prim_map_toMap) {
     const RuntimeLayout& L = layoutOf();
     expectArgs(ctx, args, "toMap", 0);
     if (isMapFast(ctx, L, self)) return self;
-    proto::ProtoContext scope(ctx->space, ctx);
-    const proto::ProtoMap* data = asKeyedData(&scope, L, self, /*pairs=*/true, "toMap");
-    scope.returnValue = data->asObject(&scope);
-    return wrapMap(&scope, L, data, /*isSet=*/false);
+    const proto::ProtoMap* data = asKeyedData(ctx, L, self, /*pairs=*/true, "toMap");
+    return wrapMap(ctx, L, data, /*isSet=*/false);
 }
 
 const ProtoObject* toSetImpl(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* self) {
-    proto::ProtoContext scope(ctx->space, ctx);
-    const proto::ProtoMap* data = asKeyedData(&scope, L, self, /*pairs=*/false, "toSet");
-    scope.returnValue = data->asObject(&scope);
-    return wrapMap(&scope, L, data, /*isSet=*/true);
+    const proto::ProtoMap* data = asKeyedData(ctx, L, self, /*pairs=*/false, "toSet");
+    return wrapMap(ctx, L, data, /*isSet=*/true);
 }
 
 PRIM(prim_seq_toSet) {
@@ -1999,10 +1942,8 @@ PRIM(prim_seq_toSet) {
 PRIM(prim_map_keySet) {
     const RuntimeLayout& L = layoutOf();
     expectArgs(ctx, args, "keySet", 0);
-    proto::ProtoContext scope(ctx->space, ctx);
-    const ProtoObject* keys = mapEntries(&scope, self, nullptr, "keySet", 1);
-    scope.returnValue = keys;
-    return toSetImpl(&scope, L, keys);
+    const ProtoObject* keys = mapEntries(ctx, self, nullptr, "keySet", 1);
+    return toSetImpl(ctx, L, keys);
 }
 
 // D58: ascending-hash order, deterministic for a given key set and unrelated to
@@ -2012,19 +1953,17 @@ const ProtoObject* mapShow(ProtoContext* ctx, const ProtoObject* self, const pro
     const RuntimeLayout& L = layoutOf();
     expectArgs(ctx, args, method, 0);
     const bool set = selfIsSet(ctx, L, self);
-    proto::ProtoContext scope(ctx->space, ctx);
-    const ProtoObject* entries = mapEntries(&scope, self, nullptr, method, 0);
-    scope.returnValue = entries;
-    const proto::ProtoList* l = entries->asList(&scope);
+    const ProtoObject* entries = mapEntries(ctx, self, nullptr, method, 0);
+    const proto::ProtoList* l = entries->asList(ctx);
     std::string out = set ? "Set(" : "Map(";
-    for (proto::proto_ulong i = 0, n = l->getSize(&scope); i < n; ++i) {
+    for (proto::proto_ulong i = 0, n = l->getSize(ctx); i < n; ++i) {
         if (i) out += ", ";
-        const ProtoObject* e = l->getAt(&scope, static_cast<int>(i));
+        const ProtoObject* e = l->getAt(ctx, static_cast<int>(i));
         if (set) {
-            out += show(&scope, L, e);
+            out += show(ctx, L, e);
         } else {
-            out += show(&scope, L, e->getAttribute(&scope, L.tupleFieldKey[1])) + " -> " +
-                   show(&scope, L, e->getAttribute(&scope, L.tupleFieldKey[2]));
+            out += show(ctx, L, e->getAttribute(ctx, L.tupleFieldKey[1])) + " -> " +
+                   show(ctx, L, e->getAttribute(ctx, L.tupleFieldKey[2]));
         }
     }
     return str(ctx, out + ")");
@@ -2044,14 +1983,12 @@ PRIM(prim_map_mkString) {
     } else if (argn != 0) {
         wrongArgCount("mkString", "0, 1 or 3", argn);
     }
-    proto::ProtoContext scope(ctx->space, ctx);
-    const ProtoObject* entries = mapEntries(&scope, self, nullptr, "mkString", 0);
-    scope.returnValue = entries;
-    const proto::ProtoList* l = entries->asList(&scope);
+    const ProtoObject* entries = mapEntries(ctx, self, nullptr, "mkString", 0);
+    const proto::ProtoList* l = entries->asList(ctx);
     std::string out = start;
-    for (proto::proto_ulong i = 0, n = l->getSize(&scope); i < n; ++i) {
+    for (proto::proto_ulong i = 0, n = l->getSize(ctx); i < n; ++i) {
         if (i) out += sep;
-        out += show(&scope, L, l->getAt(&scope, static_cast<int>(i)));
+        out += show(ctx, L, l->getAt(ctx, static_cast<int>(i)));
     }
     return str(ctx, out + end);
 }
@@ -2113,9 +2050,8 @@ const ProtoObject* keyedHash(ProtoContext* ctx, const ProtoObject* self, const p
                              const char* method) {
     const RuntimeLayout& L = layoutOf();
     expectArgs(ctx, args, method, 0);
-    proto::ProtoContext scope(ctx->space, ctx);
-    HashState st{&L, 0, selfIsSet(&scope, L, self)};
-    proto::hashedForEach(&scope, mapDataOf(&scope, L, self, method), &st, &hashVisit);
+    HashState st{&L, 0, selfIsSet(ctx, L, self)};
+    proto::hashedForEach(ctx, mapDataOf(ctx, L, self, method), &st, &hashVisit);
     return proto::makeSmallInt(st.acc);
 }
 SEQ_NAMED(prim_map_hashCode, keyedHash, "hashCode")
@@ -2125,21 +2061,20 @@ SEQ_NAMED(prim_map_hashHash, keyedHash, "##")
 
 PRIM(prim_mapCompanion_apply) {
     const RuntimeLayout& L = layoutOf();
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(1);
-    const ProtoObject** slot = scope.getAutomaticLocals();
-    const proto::ProtoMap* data = scope.newMap();
-    slot[0] = data->asObject(&scope);
-    const proto::proto_ulong n = argCount(&scope, args);
+    CallerSlots slots(ctx, 1);  // the caller's context (CallerSlots.h)
+    const ProtoObject** slot = slots.data();
+    const proto::ProtoMap* data = ctx->newMap();
+    slot[0] = data->asObject(ctx);
+    const proto::proto_ulong n = argCount(ctx, args);
     for (proto::proto_ulong i = 0; i < n; ++i) {
-        const ProtoObject* pair = args->getAt(&scope, static_cast<int>(i));
+        const ProtoObject* pair = args->getAt(ctx, static_cast<int>(i));
         const ProtoObject* k = nullptr;
         const ProtoObject* v = nullptr;
-        pairOf(&scope, L, pair, "Map(...)", &k, &v);
-        data = proto::hashedPut(&scope, data, scalaKeySemantics(), k, v);
-        slot[0] = data->asObject(&scope);   // rooted across the next hashedPut
+        pairOf(ctx, L, pair, "Map(...)", &k, &v);
+        data = proto::hashedPut(ctx, data, scalaKeySemantics(), k, v);
+        slot[0] = data->asObject(ctx);   // rooted across the next hashedPut
     }
-    return wrapMap(&scope, L, data, /*isSet=*/false);
+    return wrapMap(ctx, L, data, /*isSet=*/false);
 }
 
 PRIM(prim_mapCompanion_empty) {
@@ -2150,18 +2085,17 @@ PRIM(prim_mapCompanion_empty) {
 
 PRIM(prim_setCompanion_apply) {
     const RuntimeLayout& L = layoutOf();
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(1);
-    const ProtoObject** slot = scope.getAutomaticLocals();
-    const proto::ProtoMap* data = scope.newMap();
-    slot[0] = data->asObject(&scope);
-    const proto::proto_ulong n = argCount(&scope, args);
+    CallerSlots slots(ctx, 1);  // the caller's context (CallerSlots.h)
+    const ProtoObject** slot = slots.data();
+    const proto::ProtoMap* data = ctx->newMap();
+    slot[0] = data->asObject(ctx);
+    const proto::proto_ulong n = argCount(ctx, args);
     for (proto::proto_ulong i = 0; i < n; ++i) {
-        const ProtoObject* e = args->getAt(&scope, static_cast<int>(i));
-        data = proto::hashedPut(&scope, data, scalaKeySemantics(), e, e);
-        slot[0] = data->asObject(&scope);
+        const ProtoObject* e = args->getAt(ctx, static_cast<int>(i));
+        data = proto::hashedPut(ctx, data, scalaKeySemantics(), e, e);
+        slot[0] = data->asObject(ctx);
     }
-    return wrapMap(&scope, L, data, /*isSet=*/true);
+    return wrapMap(ctx, L, data, /*isSet=*/true);
 }
 
 PRIM(prim_setCompanion_empty) {
@@ -2185,23 +2119,22 @@ PRIM(prim_seq_groupBy) {
     const RuntimeLayout& L = layoutOf();
     const ProtoList* xs = seqData(ctx, L, self, "groupBy");
     const ProtoObject* f = arg(ctx, args, 0, "groupBy", 1);
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(3);
-    const ProtoObject** slot = scope.getAutomaticLocals();
-    const proto::ProtoMap* data = scope.newMap();
-    slot[0] = data->asObject(&scope);
-    for (proto::proto_ulong i = 0, n = xs->getSize(&scope); i < n; ++i) {
-        slot[1] = xs->getAt(&scope, static_cast<int>(i));
-        slot[2] = callOne(&scope, f, slot[1]);
-        const ProtoObject* bucket = proto::hashedGet(&scope, data, scalaKeySemantics(), slot[2]);
+    CallerSlots slots(ctx, 3);  // the caller's context (CallerSlots.h)
+    const ProtoObject** slot = slots.data();
+    const proto::ProtoMap* data = ctx->newMap();
+    slot[0] = data->asObject(ctx);
+    for (proto::proto_ulong i = 0, n = xs->getSize(ctx); i < n; ++i) {
+        slot[1] = xs->getAt(ctx, static_cast<int>(i));
+        slot[2] = callOne(ctx, f, slot[1]);
+        const ProtoObject* bucket = proto::hashedGet(ctx, data, scalaKeySemantics(), slot[2]);
         const proto::ProtoList* group =
-            bucket ? bucket->asList(&scope) : scope.newList();
-        const ProtoObject* extended = group->appendLast(&scope, slot[1])->asObject(&scope);
+            bucket ? bucket->asList(ctx) : ctx->newList();
+        const ProtoObject* extended = group->appendLast(ctx, slot[1])->asObject(ctx);
         slot[1] = extended;
-        data = proto::hashedPut(&scope, data, scalaKeySemantics(), slot[2], extended);
-        slot[0] = data->asObject(&scope);
+        data = proto::hashedPut(ctx, data, scalaKeySemantics(), slot[2], extended);
+        slot[0] = data->asObject(ctx);
     }
-    return wrapMap(&scope, L, data, /*isSet=*/false);
+    return wrapMap(ctx, L, data, /*isSet=*/false);
 }
 
 } // namespace

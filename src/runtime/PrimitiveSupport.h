@@ -6,6 +6,7 @@
  */
 #pragma once
 #include "support/Attributes.h"
+#include "runtime/CallerSlots.h"
 #include "runtime/Errors.h"
 #include "runtime/ExecutionEngine.h"
 #include "runtime/Values.h"
@@ -89,46 +90,49 @@ inline const ProtoObject* str(ProtoContext* ctx, const std::string& s) { return 
 
 
 // ---------------------------------------------------------------------------
-// Building a list from a native (P1: nothing lives in a C++ local across an
-// allocation). Shared by Primitives.cpp and CollectionPrimitives.cpp.
+// Building a list from a native, in the caller's context (no context of its
+// own: CallerSlots.h). Shared by Primitives.cpp and CollectionPrimitives.cpp.
+//
+// The accumulator lives in a CallerSlots slot. Each append leaves a
+// root-to-leaf path of the old list behind as garbage, a young cell of the
+// caller's context; `add` ticks, so inside a native that holds a
+// SafepointPermit a long build hands that garbage to the collector as it goes.
+// `add` takes a value rooted by the caller or a young cell of the caller's
+// context (a fresh result qualifies). `finish()` returns a pointer anchored in
+// the caller's chain when a submission happened during the build; the caller
+// stores it in a slot or returns it before anything else allocates.
 // ---------------------------------------------------------------------------
 
 class ListBuilder {
 public:
-    explicit ListBuilder(ProtoContext* parent) : scope_(parent->space, parent) {
-        scope_.resizeAutomaticLocals(2);
-        scope_.setAutomaticLocal(0, scope_.newList()->asObject(&scope_));
+    explicit ListBuilder(ProtoContext* ctx) : ctx_(ctx), slots_(ctx, 1) {
+        slots_.set(0, ctx->newList()->asObject(ctx));
     }
-    ProtoContext* context() { return &scope_; }
+    // The caller's context, in which the build runs.
+    ProtoContext* context() { return ctx_; }
     void add(const ProtoObject* v) {
-        scope_.setAutomaticLocal(1, v);
-        const ProtoList* l = scope_.getAutomaticLocal(0)->asList(&scope_);
-        scope_.setAutomaticLocal(0, l->appendLast(&scope_, v)->asObject(&scope_));
+        slots_.set(0, acc()->appendLast(ctx_, v)->asObject(ctx_));
+        slots_.tick();
     }
     void addAll(const ProtoList* other) {
-        const ProtoList* l = scope_.getAutomaticLocal(0)->asList(&scope_);
-        scope_.setAutomaticLocal(0, l->extend(&scope_, other)->asObject(&scope_));
+        slots_.set(0, acc()->extend(ctx_, other)->asObject(ctx_));
+        slots_.tick();
     }
-    // The finished list; the builder's context hands it to its parent on exit.
-    const ProtoObject* finish() {
-        const ProtoObject* r = scope_.getAutomaticLocal(0);
-        scope_.returnValue = r;
-        return r;
-    }
+    const ProtoObject* finish() { return slots_.ret(slots_.get(0)); }
+    // The elements added so far (held by the builder).
+    const ProtoList* current() const { return acc(); }
 
 private:
-    ProtoContext scope_;
+    const ProtoList* acc() const { return slots_.get(0)->asList(ctx_); }
+    ProtoContext* ctx_;
+    CallerSlots slots_;
 };
 
-// f(x) in a short-lived context (its garbage is released when it ends); the
-// result is handed to `parent`.
-inline const ProtoObject* callOne(ProtoContext* parent, const ProtoObject* f, const ProtoObject* x) {
-    ProtoContext step(parent->space, parent);
-    step.resizeAutomaticLocals(1);
-    step.setAutomaticLocal(0, x);
-    const ProtoObject* r = activeCallContext()->engine->invoke(&step, f, step.getAutomaticLocals(), 1);
-    step.returnValue = r;
-    return r;
+// f(x) in the caller's context: `x` is rooted by the caller, and the callee's
+// frame anchors its result in `ctx` (a ReturnReference).
+inline const ProtoObject* callOne(ProtoContext* ctx, const ProtoObject* f, const ProtoObject* x) {
+    const ProtoObject* const argv[1] = {x};
+    return activeCallContext()->engine->invoke(ctx, f, argv, 1);
 }
 
 inline bool truth(ProtoContext* ctx, const ProtoObject* v, const char* method) {
@@ -155,16 +159,9 @@ inline void addFlat(ListBuilder& b, const ProtoObject* r, const char* method) {
                                                    " expects a function returning a collection or an "
                                                    "Option, got " + typeName(ctx, L, r));
     ExecutionEngine* engine = activeCallContext()->engine;
-    const ProtoObject* v;
-    {
-        // The calls run in a child context that is closed before the builder
-        // allocates again (the innermost context allocates, Design note 6).
-        ProtoContext probe(ctx->space, ctx);
-        if (engine->send(&probe, r, L.isEmptyName, nullptr, 0) == PROTO_TRUE) return;
-        v = engine->send(&probe, r, L.getName, nullptr, 0);
-        probe.returnValue = v;  // re-rooted in the builder's context when `probe` ends
-    }
-    b.add(v);
+    // In the caller's context: `get`'s result is anchored there by its frame.
+    if (engine->send(ctx, r, L.isEmptyName, nullptr, 0) == PROTO_TRUE) return;
+    b.add(engine->send(ctx, r, L.getName, nullptr, 0));
 }
 
 // xs.withFilter(p): Scala's lazy WithFilter. Its map/flatMap/foreach test the

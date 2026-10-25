@@ -3,6 +3,7 @@
 #include "runtime/OpcodeOps.h"
 #include "compiler/GlobalTable.h"
 #include "compiler/BytecodeModule.h"
+#include "runtime/CallerSlots.h"
 #include "runtime/Debugger.h"
 #include "runtime/ErrorFactory.h"
 #include "runtime/Errors.h"
@@ -101,8 +102,8 @@ const proto::ProtoObject* ExecutionEngine::smalltalkEntryOf(proto::ProtoContext*
 }
 
 // A Smalltalk message (D135). The selector and the arguments travel as the
-// entry's positional arguments, in traced slots; the values are the cells
-// themselves, in both directions. callNative is the boundary: a protoST error
+// entry's positional arguments; the values are the cells themselves, in both
+// directions. callNative is the boundary: a protoST error
 // arrives as the ProtoException carrying it and passes through untouched, a
 // refusal (another thread, an actor) as a std::exception the frame translates.
 const proto::ProtoObject* ExecutionEngine::sendSmalltalk(proto::ProtoContext* ctx,
@@ -123,15 +124,15 @@ const proto::ProtoObject* ExecutionEngine::sendSmalltalk(proto::ProtoContext* ct
     std::string why;
     const std::optional<std::string> selector = smalltalkSelector(scalaName, argc, &why);
     if (!selector) throw ScalaError("IllegalArgumentException", why);
-    proto::ProtoContext scope(ctx->space, ctx, nullptr, nullptr, nullptr, nullptr, argc + 1);
-    scope.setAutomaticLocal(0, reinterpret_cast<const proto::ProtoObject*>(
-                                   proto::ProtoString::createSymbol(&scope, selector->c_str())));
-    for (unsigned k = 0; k < argc; ++k) scope.setAutomaticLocal(k + 1, base[k + 1]);
-    ForeignCallMark mark(&scope);
-    const proto::ProtoObject* r =
-        callNative(&scope, entry->asMethod(&scope), base[0], scope.getAutomaticLocals(), argc + 1);
-    scope.returnValue = r;
-    return r;
+    // The selector is an interned symbol (perennial) and the arguments are the
+    // caller's traced slots base[1..argc], so a C++ array carries them: no
+    // context of its own (the maintainer's context rule, CallerSlots.h).
+    ArgBuffer a(argc + 1);
+    a[0] = reinterpret_cast<const proto::ProtoObject*>(
+        proto::ProtoString::createSymbol(ctx, selector->c_str()));
+    for (unsigned k = 0; k < argc; ++k) a[k + 1] = base[k + 1];
+    ForeignCallMark mark(ctx);
+    return callNative(ctx, entry->asMethod(ctx), base[0], a.data(), argc + 1);
 }
 ExecutionEngine::NativeDepthGuard::NativeDepthGuard() { ++tl_nativeDepth; }
 ExecutionEngine::NativeDepthGuard::~NativeDepthGuard() { --tl_nativeDepth; }
@@ -157,14 +158,15 @@ const proto::ProtoObject* ExecutionEngine::callTopLevel(proto::ProtoContext* ctx
 const proto::ProtoObject* ExecutionEngine::callNative(proto::ProtoContext* ctx, proto::ProtoMethod fn,
                                                       const proto::ProtoObject* self,
                                                       const proto::ProtoObject* const* args,
-                                                      unsigned argc) {
-    // `args` need not be traced memory (a native may call back with a C++
-    // array), so they are copied into the scope's slots, which the collector
-    // traces and the thread's slot stack provides without allocation; the
-    // native reads them there (protoCore's array call form).
-    proto::ProtoContext scope(ctx->space, ctx, nullptr, nullptr, nullptr, nullptr, argc);
-    for (unsigned k = 0; k < argc; ++k) scope.setAutomaticLocal(k, args[k]);
-    const proto::ProtoArguments list(scope.getAutomaticLocals(), argc);
+                                                      unsigned argc,
+                                                      const proto::ProtoKeywordArguments* keywords) {
+    // The native runs in the caller's context: a ProtoContext belongs to a
+    // method activation only (the maintainer's context rule). The arguments are
+    // read in place (protoCore's array call form): the caller roots them, in its
+    // frame's slots or in storage it traces. The window gives the native the
+    // calling frame's spare slots (CallerSlots.h).
+    const proto::ProtoArguments list(args, argc);
+    NativeCallScope window(ctx);
     // A native that re-enters the VM raises the depth for everything it calls,
     // and the destructor lowers it on unwinding too, so a FutureYield passing
     // through does not leave it raised (D43, A0-2).
@@ -183,7 +185,7 @@ const proto::ProtoObject* ExecutionEngine::callNative(proto::ProtoContext* ctx, 
     // (see runFrame).
     std::exception_ptr passOn;
     try {
-        r = fn(&scope, self, nullptr, &list, nullptr);
+        r = fn(ctx, self, nullptr, &list, keywords);
     } catch (FutureYield&) {
         passOn = std::current_exception();  // a cooperative suspension, not an error
     } catch (const proto::ProtoException&) {
@@ -196,9 +198,7 @@ const proto::ProtoObject* ExecutionEngine::callNative(proto::ProtoContext* ctx, 
         passOn = std::make_exception_ptr(ScalaError("RuntimeException", "native exception"));
     }
     if (passOn) std::rethrow_exception(passOn);
-    if (!r) r = PROTO_NONE;
-    scope.returnValue = r;
-    return r;
+    return r ? r : PROTO_NONE;
 }
 
 const proto::ProtoObject* ExecutionEngine::invoke(proto::ProtoContext* ctx,
@@ -212,14 +212,11 @@ const proto::ProtoObject* ExecutionEngine::invoke(proto::ProtoContext* ctx,
             if (!self) throw std::logic_error("invoke: unbound method");
             const proto::ProtoObject* caps =
                 m->captureCount() ? callee->getOwnAttributeDirect(ctx, layout_.capturesKey) : nullptr;
-            proto::ProtoContext scope(ctx->space, ctx);
-            scope.resizeAutomaticLocals(argc + 1);
-            const proto::ProtoObject** a = scope.getAutomaticLocals();
+            // `self` is reachable from the callee, which the caller roots.
+            ArgBuffer a(argc + 1);
             a[0] = self;
             for (unsigned k = 0; k < argc; ++k) a[k + 1] = args[k];
-            const proto::ProtoObject* r = execute(&scope, *m, a, argc + 1, caps);
-            scope.returnValue = r;
-            return r;
+            return execute(ctx, *m, a.data(), argc + 1, caps);
         }
         const proto::ProtoObject* caps =
             m->captureCount() ? callee->getOwnAttributeDirect(ctx, layout_.capturesKey) : nullptr;
@@ -235,14 +232,13 @@ const proto::ProtoObject* ExecutionEngine::send(proto::ProtoContext* ctx,
                                                 const proto::ProtoString* name,
                                                 const proto::ProtoObject* const* args,
                                                 unsigned argc) {
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(argc + 1);
-    const proto::ProtoObject** base = scope.getAutomaticLocals();
+    // dispatch may overwrite base[0] with an intermediate result (a
+    // parameterless member's value), a young cell of `ctx`'s chain or a
+    // callee's anchored return value, so the buffer needs no tracing.
+    ArgBuffer base(argc + 1);
     base[0] = receiver;
     for (unsigned k = 0; k < argc; ++k) base[k + 1] = args[k];
-    const proto::ProtoObject* r = dispatch(&scope, base, name, argc);
-    scope.returnValue = r;
-    return r;
+    return dispatch(ctx, base.data(), name, argc);
 }
 
 // A private member is addressed by its class-qualified key (D5). A receiver
@@ -361,18 +357,7 @@ const proto::ProtoObject* ExecutionEngine::callWithReceiver(proto::ProtoContext*
                                                             const proto::ProtoObject** base,
                                                             unsigned argc,
                                                             const proto::ProtoKeywordArguments* keywords) {
-    if (m->isMethod(ctx)) {
-        if (keywords) {
-            // The arguments sit in traced slots at base + 1: read in place.
-            proto::ProtoContext scope(ctx->space, ctx);
-            const proto::ProtoArguments positional(base + 1, argc);
-            const proto::ProtoObject* r =
-                m->asMethod(ctx)(&scope, base[0], nullptr, &positional, keywords);
-            scope.returnValue = r ? r : PROTO_NONE;
-            return r ? r : PROTO_NONE;
-        }
-        return callNative(ctx, m->asMethod(ctx), base[0], base + 1, argc);
-    }
+    if (m->isMethod(ctx)) return callNative(ctx, m->asMethod(ctx), base[0], base + 1, argc, keywords);
     const BytecodeModule* mod = compiledModuleOf(ctx, layout_, m);
     if (!mod || !mod->isMethod()) throw std::logic_error("callWithReceiver: not a method");
     return execute(ctx, *mod, base, argc + 1, nullptr, keywords);
@@ -405,12 +390,10 @@ const proto::ProtoObject* ExecutionEngine::forceMember(proto::ProtoContext* ctx,
         return holder->getOwnAttributeDirect(ctx, L.valueKey);
     const BytecodeModule* mod =
         compiledModuleOf(ctx, L, holder->getOwnAttributeDirect(ctx, L.thunkKey));
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(1);
-    scope.setAutomaticLocal(0, receiver);
-    const proto::ProtoObject* v = execute(&scope, *mod, scope.getAutomaticLocals(), 1, nullptr);
-    holder->setAttribute(&scope, L.valueKey, v);  // mutable holder: in place
-    scope.returnValue = v;
+    // The receiver is rooted by the caller; the thunk's frame copies it.
+    const proto::ProtoObject* const self[1] = {receiver};
+    const proto::ProtoObject* v = execute(ctx, *mod, self, 1, nullptr);
+    holder->setAttribute(ctx, L.valueKey, v);  // mutable holder: in place
     return v;
 }
 
@@ -440,14 +423,11 @@ const proto::ProtoObject* ExecutionEngine::construct(proto::ProtoContext* ctx,
                                                      const proto::ProtoObject* cls,
                                                      const proto::ProtoObject* const* args,
                                                      unsigned argc) {
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(argc + 1);
-    const proto::ProtoObject** a = scope.getAutomaticLocals();
+    // instantiate replaces a[0] with the fresh instance, a young cell of ctx.
+    ArgBuffer a(argc + 1);
     a[0] = cls;
     for (unsigned k = 0; k < argc; ++k) a[k + 1] = args[k];
-    const proto::ProtoObject* r = instantiate(&scope, a, layout_.initKey, argc);
-    scope.returnValue = r;
-    return r;
+    return instantiate(ctx, a.data(), layout_.initKey, argc);
 }
 
 // MAKE_CLASS: an immutable prototype whose chain is exactly the pushed
@@ -457,8 +437,8 @@ const proto::ProtoObject* ExecutionEngine::makeClass(proto::ProtoContext* ctx,
                                                      const BytecodeModule::Const& spec,
                                                      const proto::ProtoObject* const* base) {
     const RuntimeLayout& L = layout_;
-    proto::ProtoContext scope(ctx->space, ctx);  // every intermediate shape is young in `scope`
-    const proto::ProtoList* chain = scope.newList(spec.argc, base);
+    // Every intermediate shape is a young cell of ctx: no context of its own.
+    const proto::ProtoList* chain = ctx->newList(spec.argc, base);
     // The prototype is MUTABLE (Phase 4). Two things need it, and neither has an
     // alternative that keeps the object model intact:
     //
@@ -473,25 +453,24 @@ const proto::ProtoObject* ExecutionEngine::makeClass(proto::ProtoContext* ctx,
     // object instead of building a fresh immutable copy per member. Instances are
     // unaffected — their own mutability is the separate `__mutable__` decision.
     const proto::ProtoObject* shape =
-        L.anyProto->newChild(&scope, /*isMutable=*/true)->setParents(&scope, chain);
+        L.anyProto->newChild(ctx, /*isMutable=*/true)->setParents(ctx, chain);
     for (std::size_t k = 0; k < spec.nameSymbols.size(); ++k)
-        shape = shape->setAttribute(&scope, spec.nameSymbols[k], base[spec.argc + k]);
-    shape = shape->setAttribute(&scope, spec.keySymbol, PROTO_TRUE);
-    shape = shape->setAttribute(&scope, L.nameKey, makeString(&scope, spec.sval));
+        shape = shape->setAttribute(ctx, spec.nameSymbols[k], base[spec.argc + k]);
+    shape = shape->setAttribute(ctx, spec.keySymbol, PROTO_TRUE);
+    shape = shape->setAttribute(ctx, L.nameKey, makeString(ctx, spec.sval));
     if (spec.flags & BytecodeModule::kClassMutableInstances)
-        shape = shape->setAttribute(&scope, L.mutableKey, PROTO_TRUE);
+        shape = shape->setAttribute(ctx, L.mutableKey, PROTO_TRUE);
     if (spec.flags & BytecodeModule::kClassCase) {
-        shape = shape->setAttribute(&scope, L.prefixKey, makeString(&scope, spec.sval));
+        shape = shape->setAttribute(ctx, L.prefixKey, makeString(ctx, spec.sval));
         if (!(spec.flags & BytecodeModule::kClassCaseObject)) {
-            const proto::ProtoList* fields = scope.newList();
+            const proto::ProtoList* fields = ctx->newList();
             for (const proto::ProtoString* f : spec.fieldSymbols)
-                fields = fields->appendLast(&scope, f->asObject(&scope));
-            shape = shape->setAttribute(&scope, L.fieldsKey, fields->asObject(&scope));
+                fields = fields->appendLast(ctx, f->asObject(ctx));
+            shape = shape->setAttribute(ctx, L.fieldsKey, fields->asObject(ctx));
             if (spec.flags & BytecodeModule::kClassFieldsOnlyInit)
-                shape = shape->setAttribute(&scope, L.fieldsOnlyInitKey, PROTO_TRUE);
+                shape = shape->setAttribute(ctx, L.fieldsOnlyInitKey, PROTO_TRUE);
         }
     }
-    scope.returnValue = shape;
     return shape;
 }
 
@@ -499,10 +478,8 @@ const proto::ProtoObject* ExecutionEngine::makeTuple(proto::ProtoContext* ctx,
                                                      const proto::ProtoObject* const* elems,
                                                      unsigned n) {
     const RuntimeLayout& L = layout_;
-    proto::ProtoContext scope(ctx->space, ctx);
-    const proto::ProtoObject* t = L.tupleProto[n]->newChild(&scope, false);
-    for (unsigned k = 0; k < n; ++k) t = t->setAttribute(&scope, L.tupleFieldKey[k + 1], elems[k]);
-    scope.returnValue = t;
+    const proto::ProtoObject* t = L.tupleProto[n]->newChild(ctx, false);
+    for (unsigned k = 0; k < n; ++k) t = t->setAttribute(ctx, L.tupleFieldKey[k + 1], elems[k]);
     return t;
 }
 
@@ -540,18 +517,8 @@ const proto::ProtoObject* ExecutionEngine::superSend(proto::ProtoContext* ctx,
 
 namespace {
 
-// The keyword ProtoSparseList of a SEND_KW / CALL_KW site.
-//
-// The key is the ADDRESS of the interned parameter-name symbol — protoCore's
-// own calling convention, the same one every runtime in the family speaks
-// (DESIGN §5.2). It is sound because interning guarantees exactly one address
-// per name in a ProtoSpace, so the address IS the name's identity, and an
-// interned string is PERENNIAL: never collected, never moved, so there is
-// nothing for the collector to trace and an integer-keyed ProtoSparseList is
-// exactly the right structure rather than a compromise. ProtoMap exists for
-// arbitrary COLLECTABLE object keys, which is a different problem — the same
-// principle that makes ProtoTuple interned and perennial.
-// The named arguments of a call site: (interned name, value) pairs over the
+// The named arguments of a SEND_KW / CALL_KW / NEW site: (interned name, value)
+// pairs over the
 // values the site left on the operand stack, which the collector traces, so
 // nothing is allocated (protoCore's ProtoKeywordArguments). More names than
 // kInline go to a vector.
@@ -580,9 +547,8 @@ private:
     }
 };
 
-// The name of the first keyword key that is not one of the callee's parameter
-// names. Recovering the name from the key is a cast, and that is only sound
-// because the key IS an interned symbol's address (see SiteKeywords).
+// The name of the first named argument that is not one of the callee's
+// parameters: each pair carries its interned name (SiteKeywords).
 std::string unmatchedKeywordName(proto::ProtoContext* ctx, const BytecodeModule& mod,
                                  const proto::ProtoKeywordArguments* keywords) {
     const auto& symbols = mod.paramNameSymbols();
@@ -655,10 +621,10 @@ void ExecutionEngine::bindKeywordsAndDefaults(proto::ProtoContext& frame, const 
     }
 }
 
-// Named arguments reach every callable through protoCore's keyword
-// ProtoSparseList, keyed by the address of the interned parameter-name symbol
-// (DESIGN §5.2, plan A0-12) — native methods, Scala-defined methods and, once
-// UMD lands, foreign callables alike, with no special case for any of them.
+// Named arguments reach every callable as protoCore's ProtoKeywordArguments,
+// (interned parameter name, value) pairs (DESIGN §5.2, plan A0-12): native
+// methods, Scala-defined methods and foreign callables alike, with no special
+// case for any of them.
 const proto::ProtoObject* ExecutionEngine::sendKeywords(proto::ProtoContext* ctx,
                                                         const proto::ProtoObject** base,
                                                         const BytecodeModule::Const& site) {
@@ -674,41 +640,28 @@ const proto::ProtoObject* ExecutionEngine::sendKeywords(proto::ProtoContext* ctx
                              plainName(site.sval) +
                                  ": a Smalltalk message takes no named arguments");
     if (!m || m == PROTO_NONE) throwMissingMember(ctx, receiver, name);
-    proto::ProtoContext scope(ctx->space, ctx);
-    if (const BytecodeModule* mod = compiledModuleOf(&scope, layout_, m)) {
-        if (mod->isMethod() && !m->getOwnAttributeDirect(&scope, layout_.selfKey)) {
+    if (const BytecodeModule* mod = compiledModuleOf(ctx, layout_, m)) {
+        if (mod->isMethod() && !m->getOwnAttributeDirect(ctx, layout_.selfKey)) {
             // A method of the receiver: `this` travels in slot 0, so the
             // positional arguments start at base[0] (the receiver itself).
             const SiteKeywords siteKeywords(base, site);
-        const proto::ProtoKeywordArguments* keywords = &siteKeywords.args;
-            const proto::ProtoObject* r = execute(&scope, *mod, base, site.argc + 1, nullptr, keywords);
-            scope.returnValue = r;
-            return r;
+            return execute(ctx, *mod, base, site.argc + 1, nullptr, &siteKeywords.args);
         }
         // A function-valued member (or a bound method): call it as a value.
         const SiteKeywords siteKeywords(base, site);
         const proto::ProtoKeywordArguments* keywords = &siteKeywords.args;
         const proto::ProtoObject* caps =
-            mod->captureCount() ? m->getOwnAttributeDirect(&scope, layout_.capturesKey) : nullptr;
-        const proto::ProtoObject* r =
-            mod->isMethod()
-                ? execute(&scope, *mod, base, site.argc + 1, caps, keywords)
-                : execute(&scope, *mod, base + 1, site.argc, caps, keywords);
-        scope.returnValue = r;
-        return r;
+            mod->captureCount() ? m->getOwnAttributeDirect(ctx, layout_.capturesKey) : nullptr;
+        return mod->isMethod() ? execute(ctx, *mod, base, site.argc + 1, caps, keywords)
+                               : execute(ctx, *mod, base + 1, site.argc, caps, keywords);
     }
     if (!m->isMethod(ctx))
         throw ScalaError("IllegalArgumentException",
                          plainName(site.sval) + " is not a method of " +
                              typeName(ctx, layout_, receiver) + ", so it takes no named arguments");
     // The arguments and the keyword values sit in the operand stack: read in place.
-    const proto::ProtoArguments positional(base + 1, site.argc);
     const SiteKeywords siteKeywords(base, site);
-    const proto::ProtoKeywordArguments* keywords = &siteKeywords.args;
-    const proto::ProtoObject* r = m->asMethod(ctx)(&scope, receiver, nullptr, &positional, keywords);
-    if (!r) r = PROTO_NONE;
-    scope.returnValue = r;
-    return r;
+    return callNative(ctx, m->asMethod(ctx), receiver, base + 1, site.argc, &siteKeywords.args);
 }
 
 // CALL_KW: `f(x = 1)` where `f` is a function value, a global `def` or a local
@@ -719,39 +672,29 @@ const proto::ProtoObject* ExecutionEngine::callKeywords(proto::ProtoContext* ctx
                                                         const BytecodeModule::Const& site) {
     const proto::ProtoObject* callee = base[0];
     if (callee == PROTO_NONE) throw ScalaError("NullPointerException", "cannot call null");
-    proto::ProtoContext scope(ctx->space, ctx);
     const SiteKeywords siteKeywords(base, site);
-        const proto::ProtoKeywordArguments* keywords = &siteKeywords.args;
-    if (const BytecodeModule* mod = compiledModuleOf(&scope, layout_, callee)) {
+    const proto::ProtoKeywordArguments* keywords = &siteKeywords.args;
+    if (const BytecodeModule* mod = compiledModuleOf(ctx, layout_, callee)) {
         const proto::ProtoObject* caps =
-            mod->captureCount() ? callee->getOwnAttributeDirect(&scope, layout_.capturesKey) : nullptr;
+            mod->captureCount() ? callee->getOwnAttributeDirect(ctx, layout_.capturesKey) : nullptr;
         const proto::ProtoObject* r;
         if (mod->isMethod()) {
             // A bound method: its receiver travels in slot 0.
             const proto::ProtoObject* self =
-                callee->getOwnAttributeDirect(&scope, layout_.selfKey);
+                callee->getOwnAttributeDirect(ctx, layout_.selfKey);
             if (!self) throw std::logic_error("callKeywords: unbound method");
-            proto::ProtoContext argScope(scope.space, &scope);
-            argScope.resizeAutomaticLocals(site.argc + 1);
-            const proto::ProtoObject** a = argScope.getAutomaticLocals();
+            ArgBuffer a(site.argc + 1);  // self is reachable from the callee in base[0]
             a[0] = self;
             for (unsigned k = 0; k < site.argc; ++k) a[k + 1] = base[1 + k];
-            r = execute(&argScope, *mod, a, site.argc + 1, caps, keywords);
-            argScope.returnValue = r;
+            r = execute(ctx, *mod, a.data(), site.argc + 1, caps, keywords);
         } else {
-            r = execute(&scope, *mod, base + 1, site.argc, caps, keywords);
+            r = execute(ctx, *mod, base + 1, site.argc, caps, keywords);
         }
-        scope.returnValue = r;
         return r;
     }
-    if (callee->isMethod(ctx)) {
-        const proto::ProtoArguments positional(base + 1, site.argc);  // the operand stack, in place
-        const proto::ProtoObject* r = callee->asMethod(ctx)(
-            &scope, callee->asMethodSelf(ctx), nullptr, &positional, keywords);
-        if (!r) r = PROTO_NONE;
-        scope.returnValue = r;
-        return r;
-    }
+    if (callee->isMethod(ctx))  // the operand stack, read in place
+        return callNative(ctx, callee->asMethod(ctx), callee->asMethodSelf(ctx), base + 1,
+                          site.argc, keywords);
     // Any other value: `f(x = 1)` is `f.apply(x = 1)` (DESIGN §5.1).
     BytecodeModule::Const applySite = site;
     applySite.sval = "apply";
@@ -836,17 +779,13 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
         const bool method = mod.isMethod();
         const proto::ProtoObject* self = method ? (argc ? args[0] : PROTO_NONE) : captures;
         const unsigned skip = method ? 1u : 0u;
-        // Copied into the scope's slots (traced, from the slot stack): `args`
-        // need not be traced memory.
+        // Read in place: the caller roots `args`, and the generated frame
+        // (gen::Frame, the body's one context) copies them into its slots.
         const unsigned n = argc > skip ? argc - skip : 0u;
-        proto::ProtoContext scope(parent->space, parent, nullptr, nullptr, nullptr, nullptr, n);
-        for (unsigned k = 0; k < n; ++k) scope.setAutomaticLocal(k, args[skip + k]);
-        const proto::ProtoArguments positional(scope.getAutomaticLocals(), n);
+        const proto::ProtoArguments positional(n ? args + skip : nullptr, n);
         NativeDepthGuard depth;
-        const proto::ProtoObject* r = entry(&scope, self, nullptr, &positional, keywords);
-        if (!r) r = PROTO_NONE;
-        scope.returnValue = r;
-        return r;
+        const proto::ProtoObject* r = entry(parent, self, nullptr, &positional, keywords);
+        return r ? r : PROTO_NONE;
     }
     const unsigned arity = static_cast<unsigned>(mod.arity());
     const unsigned fixed = mod.isVariadic() ? arity - 1 : arity;
@@ -868,8 +807,12 @@ const proto::ProtoObject* ExecutionEngine::execute(proto::ProtoContext* parent,
     const unsigned stackBase = arity + static_cast<unsigned>(mod.localCount());
 
     proto::ProtoContext frame(parent->space, parent);
-    frame.resizeAutomaticLocals(stackBase + static_cast<unsigned>(mod.maxStack()));
+    const unsigned spareBase = stackBase + static_cast<unsigned>(mod.maxStack());
+    frame.resizeAutomaticLocals(spareBase + kPrimitiveSlots);
     const proto::ProtoObject** slots = frame.getAutomaticLocals();  // never resized again
+    // The natives this frame calls run in it and keep what they hold in these
+    // spare slots (CallerSlots.h).
+    FrameSpareScope spare(&frame, slots + spareBase);
     const unsigned positional = argc < fixed ? argc : fixed;
     for (unsigned k = 0; k < positional; ++k) slots[k] = args[k];
     if (mod.isVariadic())
@@ -913,19 +856,19 @@ static void appendSuspendedFrame(proto::ProtoContext* ctx, const RuntimeLayout& 
     if (!actor)
         throw ScalaError("UnsupportedOperationException",
                          "await suspended outside an actor turn");
-    proto::ProtoContext scope(ctx->space, ctx);
-    auto* rec = const_cast<proto::ProtoObject*>(L.frameProto->newChild(&scope, /*isMutable=*/true));
-    scope.returnValue = rec;
+    // In the suspending frame's context: `rec` is young there until the actor's
+    // snapshot (a mutable object the actor keeps) references it.
+    auto* rec = const_cast<proto::ProtoObject*>(L.frameProto->newChild(ctx, /*isMutable=*/true));
     // The module address travels as a SmallInteger, as MAKE_FN already does;
     // modules are owned by the Session for the whole session, so it cannot dangle.
-    rec->setAttribute(&scope, L.modKey,
-                      scope.fromInteger(static_cast<long long>(reinterpret_cast<std::intptr_t>(&mod))));
-    rec->setAttribute(&scope, L.ipKey, proto::makeSmallInt(ipOffset));
-    rec->setAttribute(&scope, L.fbaseKey, proto::makeSmallInt(pendingBase));
-    rec->setAttribute(&scope, L.fslotsKey, scope.newList(pendingBase, slots)->asObject(&scope));
-    const proto::ProtoObject* cur = actor->getOwnAttributeDirect(&scope, L.snapshotKey);
-    actor->setAttribute(&scope, L.snapshotKey,
-                        cur->asList(&scope)->appendFirst(&scope, rec)->asObject(&scope));
+    rec->setAttribute(ctx, L.modKey,
+                      ctx->fromInteger(static_cast<long long>(reinterpret_cast<std::intptr_t>(&mod))));
+    rec->setAttribute(ctx, L.ipKey, proto::makeSmallInt(ipOffset));
+    rec->setAttribute(ctx, L.fbaseKey, proto::makeSmallInt(pendingBase));
+    rec->setAttribute(ctx, L.fslotsKey, ctx->newList(pendingBase, slots)->asObject(ctx));
+    const proto::ProtoObject* cur = actor->getOwnAttributeDirect(ctx, L.snapshotKey);
+    actor->setAttribute(ctx, L.snapshotKey,
+                        cur->asList(ctx)->appendFirst(ctx, rec)->asObject(ctx));
 }
 
 const proto::ProtoObject* ExecutionEngine::resumeFrames(proto::ProtoContext* parent,
@@ -948,8 +891,10 @@ const proto::ProtoObject* ExecutionEngine::resumeFrames(proto::ProtoContext* par
     const unsigned stackBase =
         static_cast<unsigned>(mod.arity()) + static_cast<unsigned>(mod.localCount());
     proto::ProtoContext frame(parent->space, parent);
-    frame.resizeAutomaticLocals(stackBase + static_cast<unsigned>(mod.maxStack()));
+    const unsigned spareBase = stackBase + static_cast<unsigned>(mod.maxStack());
+    frame.resizeAutomaticLocals(spareBase + kPrimitiveSlots);
     const proto::ProtoObject** slots = frame.getAutomaticLocals();
+    FrameSpareScope spare(&frame, slots + spareBase);  // CallerSlots.h
     for (unsigned k = 0; k < base; ++k) slots[k] = saved->getAt(&frame, static_cast<int>(k));
 
     // The inner frames finish first; their result is what this frame's in-flight
@@ -1000,9 +945,6 @@ const proto::ProtoObject** ExecutionEngine::enterHandler(const BytecodeModule& m
 const proto::ProtoObject* ExecutionEngine::materialiseError(proto::ProtoContext* ctx,
                                                             const ScalaError& e) {
     const RuntimeLayout& L = layout_;
-    proto::ProtoContext scope(ctx->space, ctx);
-    scope.resizeAutomaticLocals(1);
-    const proto::ProtoObject** slot = scope.getAutomaticLocals();
     // A named prelude class if there is one, else RuntimeException carrying the
     // original class name in its message, so nothing is ever lost (plan A0-6).
     auto it = L.hooks.throwableClasses.find(e.className());
@@ -1010,13 +952,11 @@ const proto::ProtoObject* ExecutionEngine::materialiseError(proto::ProtoContext*
     const proto::ProtoObject* cls = known ? it->second : L.hooks.runtimeException;
     if (!cls)
         throw std::logic_error("materialiseError: the prelude exception classes are not bound");
-    // The message string is written into a traced slot before the constructor
-    // runs: `construct` allocates, and an accumulator held only in a C++ local
-    // is the Phase 5 Mailbox::push bug.
-    slot[0] = makeString(&scope, known ? e.message() : e.className() + ": " + e.message());
-    const proto::ProtoObject* r = construct(&scope, cls, slot, 1);
-    scope.returnValue = r;
-    return r;
+    // The message string is a young cell of ctx, live until ctx's chain is
+    // submitted, which nothing does while the constructor runs (CallerSlots.h).
+    const proto::ProtoObject* const message[1] = {
+        makeString(ctx, known ? e.message() : e.className() + ": " + e.message())};
+    return construct(ctx, cls, message, 1);
 }
 
 const proto::ProtoObject* ExecutionEngine::materialise(proto::ProtoContext* ctx,
@@ -1139,7 +1079,7 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                 op = static_cast<Op>(next & 0xFF);
             }
             switch (op) {
-                case Op::NOP: case Op::EXTEND: continue;
+                case Op::EXTEND: continue;
                 case Op::PUSH_CONST: {
                     const auto& c = mod.constAt(operand);
                     *sp++ = ops::constantOf(&frame, c.kind, c.ival, c.dval, c.base, c.sval,
@@ -1207,13 +1147,12 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                     const proto::ProtoObject* r;
                     pendingBase = static_cast<unsigned>(base - slots);
                     {
-                        proto::ProtoContext argScope(frame.space, &frame);
-                        argScope.resizeAutomaticLocals(n + extra);
-                        const proto::ProtoObject** a = argScope.getAutomaticLocals();
+                        // The values are the frame's slots and the elements of
+                        // the list in sp[-1]: rooted, so a C++ array carries them.
+                        ArgBuffer a(n + extra);
                         for (unsigned k = 0; k < n; ++k) a[k] = base[1 + k];
-                        for (unsigned k = 0; k < extra; ++k) a[n + k] = list->getAt(&argScope, static_cast<int>(k));
-                        r = invoke(&argScope, base[0], a, n + extra);
-                        argScope.returnValue = r;
+                        for (unsigned k = 0; k < extra; ++k) a[n + k] = list->getAt(&frame, static_cast<int>(k));
+                        r = invoke(&frame, base[0], a.data(), n + extra);
                     }
                     pendingBase = kNoPendingCall;
                     base[0] = r;
@@ -1323,10 +1262,8 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                     if (named == 0) {
                         base[0] = instantiate(&frame, base, site.symbol, site.argc);
                     } else {
-                        proto::ProtoContext scope(frame.space, &frame);
                         const SiteKeywords siteKeywords(base, site);
-        const proto::ProtoKeywordArguments* keywords = &siteKeywords.args;
-                        base[0] = instantiate(&frame, base, site.symbol, site.argc, keywords);
+                        base[0] = instantiate(&frame, base, site.symbol, site.argc, &siteKeywords.args);
                     }
                     pendingBase = kNoPendingCall;
                     sp = base + 1;
@@ -1346,14 +1283,12 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                     const proto::ProtoObject* r;
                     pendingBase = static_cast<unsigned>(base - slots);
                     {
-                        proto::ProtoContext argScope(frame.space, &frame);
-                        argScope.resizeAutomaticLocals(n + extra + 1);
-                        const proto::ProtoObject** a = argScope.getAutomaticLocals();
+                        // As CALL_SPREAD: rooted values, a C++ array.
+                        ArgBuffer a(n + extra + 1);
                         for (unsigned k = 0; k <= n; ++k) a[k] = base[k];
                         for (unsigned k = 0; k < extra; ++k)
-                            a[n + 1 + k] = list->getAt(&argScope, static_cast<int>(k));
-                        r = instantiate(&argScope, a, site.symbol, n + extra);
-                        argScope.returnValue = r;
+                            a[n + 1 + k] = list->getAt(&frame, static_cast<int>(k));
+                        r = instantiate(&frame, a.data(), site.symbol, n + extra);
                     }
                     pendingBase = kNoPendingCall;
                     base[0] = r;
@@ -1637,10 +1572,10 @@ void ExecutionEngine::debugRaised(proto::ProtoContext& frame, debug::FrameRecord
     if (!top) return;  // no frame of the program on this thread
     const unsigned breaks = debug::exceptionBreaks();
     const RuntimeLayout& L = layout_;
-    proto::ProtoContext scope(frame.space, &frame);
-    scope.resizeAutomaticLocals(2);
-    const proto::ProtoObject** held = scope.getAutomaticLocals();
-    held[0] = value;  // the value in flight (pinned by its exception already)
+    // In the faulting frame's context: the values materialised below are young
+    // cells of it, live until the frame's chain is submitted.
+    proto::ProtoContext* const ctx = &frame;
+    const proto::ProtoObject* held[2] = {value, nullptr};  // [0] in flight, pinned by its exception
 
     enum class Fate { Caught, MaybeCaught, Uncaught };
     Fate fate = Fate::Uncaught;
@@ -1656,7 +1591,7 @@ void ExecutionEngine::debugRaised(proto::ProtoContext& frame, debug::FrameRecord
             triedValue = true;
             if (className == "OutOfMemoryError" || className == "StackOverflowError") return nullptr;
             try {
-                held[1] = materialiseError(&scope, ScalaError(className, message));
+                held[1] = materialiseError(ctx, ScalaError(className, message));
             } catch (...) {
                 held[1] = nullptr;
             }
@@ -1670,11 +1605,11 @@ void ExecutionEngine::debugRaised(proto::ProtoContext& frame, debug::FrameRecord
                 if (!f || f->all || f->unknown) return true;
                 const proto::ProtoObject* v = testValue();
                 if (!v) return true;  // cannot tell: assume it is caught
-                const auto* throwable = proto::ProtoString::createSymbol(&scope, kThrowableKey);
+                const auto* throwable = proto::ProtoString::createSymbol(ctx, kThrowableKey);
                 for (const BytecodeModule::CatchFilter::Key& k : f->keys) {
-                    const auto* key = proto::ProtoString::createSymbol(&scope, k.key.c_str());
-                    if (ops::testProtoKey(&scope, key, v)) return true;
-                    if (k.orForeign && !ops::testProtoKey(&scope, throwable, v)) return true;
+                    const auto* key = proto::ProtoString::createSymbol(ctx, k.key.c_str());
+                    if (ops::testProtoKey(ctx, key, v)) return true;
+                    if (k.orForeign && !ops::testProtoKey(ctx, throwable, v)) return true;
                 }
             }
             return false;
@@ -1707,26 +1642,26 @@ void ExecutionEngine::debugRaised(proto::ProtoContext& frame, debug::FrameRecord
         className != "StackOverflowError") {
         debug::Suppress quiet;
         try {
-            held[1] = materialiseError(&scope, ScalaError(className, message));
+            held[1] = materialiseError(ctx, ScalaError(className, message));
         } catch (...) {
             held[1] = nullptr;
         }
     }
     std::string note;
     const unsigned stopping = (raised ? debug::kBreakRaised : 0u) | (uncaught ? debug::kBreakUncaught : 0u);
-    if (!debug::exceptionConditionHolds(stopping, &scope, *top, held[0] ? held[0] : held[1], &note))
+    if (!debug::exceptionConditionHolds(stopping, ctx, *top, held[0] ? held[0] : held[1], &note))
         return;
 
     debug::ExceptionStop ex;
     ex.breakMode = uncaught ? "userUnhandled" : "always";
     if (value) {
         debug::Suppress quiet;
-        const std::string text = describeThrown(&scope, value);
+        const std::string text = describeThrown(ctx, value);
         std::string type;
-        if (isScalaInstance(&scope, L, value)) {
-            const proto::ProtoObject* n = value->getAttribute(&scope, L.nameKey);
+        if (isScalaInstance(ctx, L, value)) {
+            const proto::ProtoObject* n = value->getAttribute(ctx, L.nameKey);
             if (proto::ProtoObject::isStringTagFast(n))
-                type = reinterpret_cast<const proto::ProtoString*>(n)->toStdString(&scope);
+                type = reinterpret_cast<const proto::ProtoString*>(n)->toStdString(ctx);
         }
         if (type.empty()) type = text.substr(0, text.find(": "));
         ex.typeName = type;
@@ -1747,8 +1682,8 @@ void ExecutionEngine::debugRaised(proto::ProtoContext& frame, debug::FrameRecord
         if (op != Op::THROW && op != Op::RETHROW)
             ex.description += " (raised by the runtime on this line)";
     }
-    debug::markReported(&scope, value, value ? nullptr : debug::kNativeError);
-    debug::stopForException(*top, &scope, ex, note.empty() ? nullptr : &note);
+    debug::markReported(ctx, value, value ? nullptr : debug::kNativeError);
+    debug::stopForException(*top, ctx, ex, note.empty() ? nullptr : &note);
 }
 
 const proto::ProtoObject* ExecutionEngine::slowBinary(proto::ProtoContext* ctx, Op op,
