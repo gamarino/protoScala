@@ -951,6 +951,7 @@ private:
             } else {
                 const std::string temp = "<t" + std::to_string(tempCounter_++) + ">";
                 val(temp, std::move(m));
+                as<ValDef>(*out.back()).synthetic = true;
                 for (std::size_t k = 0; k < vars.size(); ++k)
                     val(vars[k], std::make_unique<Select>(pos, std::make_unique<Ident>(pos, temp),
                                                           "_" + std::to_string(k + 1)));
