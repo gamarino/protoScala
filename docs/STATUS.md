@@ -510,7 +510,9 @@ against **scalac 3.9.0**. Tutorial: [chapter 18](tutorial/18-input-and-output.md
 
 - [x] **Streaming sources.** `Source.fromFile(...).getLines()` answers an
       `Iterator[String]` that reads one line at a time; a source is consumed as it
-      is read, as Scala's is (D100 narrowed, D101 retired). `Source.stdin`.
+      is read, as Scala's is (D100 narrowed, D101 retired). `Source.stdin`. A
+      line already in the source's 64 KiB read-ahead is taken without leaving the
+      collector's quorum; only a line that needs a read enters the bracket.
 - [x] **Standard input.** `StdIn.readLine()` (null at the end), `readInt`,
       `readLong`, `readDouble`, `readBoolean` (`EOFException` at the end, with
       Scala's message); output is flushed before the program waits for input, so a

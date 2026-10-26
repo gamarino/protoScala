@@ -555,6 +555,18 @@ Piece rest(SourceState& st) {
     return p;
 }
 
+// Runs `f` with st.m held, inside the bracket a read of this source needs:
+// standard input may wait without bound (a terminal, a pipe), so it is a
+// blocking call; a file is not.
+template <typename F>
+auto readSourceBracketed(ProtoContext* ctx, SourceState& st, F&& f) -> decltype(f()) {
+    auto body = [&]() -> decltype(f()) {
+        std::lock_guard<std::mutex> g(st.m);
+        return f();
+    };
+    return !st.ownsFd ? io::blocking(ctx, body) : io::unmanaged(ctx, body);
+}
+
 // Reads from a source inside the right bracket: standard input may wait
 // without bound (a terminal, a pipe), so it is a blocking call; a file is not.
 // Anything printed so far is flushed before the program waits for input, so a
@@ -564,11 +576,33 @@ template <typename F>
 auto readSource(ProtoContext* ctx, SourceState& st, F&& f) -> decltype(f()) {
     const bool terminal = !st.ownsFd;
     if (terminal) std::fflush(stdout);
-    auto body = [&]() -> decltype(f()) {
-        std::lock_guard<std::mutex> g(st.m);
-        return f();
-    };
-    return terminal ? io::blocking(ctx, body) : io::unmanaged(ctx, body);
+    return readSourceBracketed(ctx, st, std::forward<F>(f));
+}
+
+// Whether nextLine can answer without reading: the buffer holds a whole line
+// (a terminator, and for a CR the byte after it, which decides between a lone
+// CR and a CRLF), or the input has ended. Called with st.m held.
+bool lineBuffered(const SourceState& st) {
+    if (st.eof) return true;
+    const std::size_t i = st.buf.find_first_of("\r\n", st.pos);
+    return i != std::string::npos && !(st.buf[i] == '\r' && i + 1 == st.buf.size());
+}
+
+// The next line of a source, as readSource(nextLine) answers it. A line the
+// source already holds is taken without leaving the collector's quorum: a
+// 64 KiB read holds hundreds of lines, so only the line that needs a read pays
+// for the bracket (and, on standard input, the worker-pool accounting). The
+// lock is only tried: a reader that holds it may be blocked in a read, and a
+// thread inside the quorum must never wait for one. Standard output is flushed
+// first either way, as before every read of standard input.
+std::optional<Piece> readSourceLine(ProtoContext* ctx, SourceState& st) {
+    const bool terminal = !st.ownsFd;
+    if (terminal) std::fflush(stdout);
+    {
+        std::unique_lock<std::mutex> g(st.m, std::try_to_lock);
+        if (g.owns_lock() && lineBuffered(st)) return nextLine(st);  // never reads
+    }
+    return readSourceBracketed(ctx, st, [&] { return nextLine(st); });
 }
 
 // A strict source's text: well-formed UTF-8, or a MalformedInputException that
@@ -638,7 +672,7 @@ PRIM(prim_src_stdin) {
 PRIM(prim_src_line) {
     const long long h = handleArg(ctx, args, "getLines");
     const std::shared_ptr<SourceState> st = sourceFor(h);
-    const std::optional<Piece> p = readSource(ctx, *st, [&] { return nextLine(*st); });
+    const std::optional<Piece> p = readSourceLine(ctx, *st);
     if (!p) return PROTO_NONE;
     return strictText(ctx, *st, *p);
 }
@@ -678,7 +712,7 @@ PRIM(prim_src_close) {
 PRIM(prim_stdin_line) {
     expectArgs(ctx, args, "StdIn.readLine", 0);
     const std::shared_ptr<SourceState> st = stdinState();
-    const std::optional<Piece> p = readSource(ctx, *st, [&] { return nextLine(*st); });
+    const std::optional<Piece> p = readSourceLine(ctx, *st);
     if (!p) return PROTO_NONE;
     return makeString(ctx, io::lenientUTF8(p->bytes));
 }

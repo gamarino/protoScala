@@ -7,6 +7,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- **A buffered line is read without leaving the collector's quorum.**
+  `getLines()` on `Source.fromFile` and `Source.stdin`, and `StdIn.readLine`,
+  take a line their source's 64 KiB read-ahead already holds under a
+  try-locked source mutex, with no `UnmanagedScope` and no worker-pool
+  accounting; only a line that needs a `read(2)` enters the bracket.
+  `Socket.readLine` does the same through protoIO's `readBufferedLine`.
+  Semantics are unchanged (D100's terminators, a CR at the end of the
+  buffer still waits for the next byte, standard output is still flushed
+  before every read of standard input). protoIO's floor rises to **0.2.3**
+  (`7920332`) in CMakeLists.txt and both CI workflows (from `1611ff9`), and
+  CI builds against **protoCore 3.3.1** (tag `v3.3.1`, `5a8cd7c7`; the floor
+  job stays on 3.0.0). Measured on a 115 MB, 1,446,319-line log with a
+  grep-shaped script (counts verified on every run): `UnmanagedScope` entries
+  per 25,078 lines fell from 25,079 to 32 (gdb hit count), but wall time did
+  not move — medians of 5 interleaved rounds, stdin 7.24 -> 7.67 s, file
+  7.15 -> 7.25 s, within the rounds' spread — and `perf stat -r 3` shows
+  +1.1 % instructions, -4.2 % cycles: protoCore 3.3.1 already made the
+  scope's entry cheap. The comparable suite shows no regression (11-run
+  recheck of the noisiest workloads within ±4 %). New tests:
+  `30-io/source-lines-across-refills` (20,000 lines across refills with
+  LF, CRLF and CR, a CRLF and a lone CR on the last byte of the first
+  read, a line longer than the buffer, no final terminator),
+  `30-io/tcp-buffered-lines`, and two cases in `cli/io-stdin` (200,000
+  lines; `StdIn.readLine`, `getLines()` and `mkString` interleaved).
+  2,524 of 2,524 tests pass, also with `PROTOCORE_GC_CONTEXT_THRESHOLD=200`.
 - **Native methods run in their caller's context (the maintainer's context
   rule).** A `ProtoContext` is now created only when a method, an interpreted
   or transpiled body with locals of its own, is activated. Before, every

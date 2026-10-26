@@ -341,11 +341,13 @@ set(PROTOSCALA_ABI_SOVERSION "1")
 # prefix named with -DCMAKE_PREFIX_PATH, or a build tree named with
 # -DprotoIO_DIR), else the sibling source tree ../protoIO built as part of this
 # one.
-# 0.2.2 is the floor: process::run with RunOptions, crash codes as 128 + signal on
+# 0.2.3 is the floor: readBufferedLine, which Socket.readLine uses to take a
+# line already in protoIO's read-ahead buffer without leaving the
+# collector's quorum (IoPrimitives.cpp). 0.2.2 brought process::run with RunOptions, crash codes as 128 + signal on
 # Windows as on POSIX, event-based waits, open files that can be deleted or
 # renamed, the Windows certificate store for TLS, and a listener on both IPv4
 # and IPv6 when no host is named.
-set(PROTOSCALA_PROTOIO_MIN_VERSION "0.2.2")
+set(PROTOSCALA_PROTOIO_MIN_VERSION "0.2.3")
 find_package(protoIO ${PROTOSCALA_PROTOIO_MIN_VERSION} CONFIG QUIET)
 if(protoIO_FOUND)
     message(STATUS "protoScala: installed protoIO ${protoIO_VERSION} from ${protoIO_DIR}")

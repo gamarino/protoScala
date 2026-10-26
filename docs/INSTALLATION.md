@@ -28,9 +28,10 @@ executable sees no protoCore at all.)
   **2.11.0**, the declared minimum, in one Linux job (the floor job); the
   packaging sections below were
   verified against 2.5.0. See protoCore's `docs/INSTALLATION.md`.
-- **protoIO 0.2.2 or newer within 0.2** (the I/O layer the protoCore runtimes
+- **protoIO 0.2.3 or newer within 0.2** (the I/O layer the protoCore runtimes
   share; 0.2.2 brings `process::run` options, crash statuses as 128 + signal on
-  Windows too, the Windows certificate store for TLS and a dual-stack listener), either
+  Windows too, the Windows certificate store for TLS and a dual-stack listener;
+  0.2.3 brings `readBufferedLine`, which `Socket.readLine` uses), either
   installed (`protoio-dev`, or any prefix holding `lib/cmake/protoIO/`, named
   with `-DCMAKE_PREFIX_PATH`), a build tree named with `-DprotoIO_DIR=<protoIO>/
   build_release`, or the source tree checked out beside this one as

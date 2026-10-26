@@ -283,7 +283,11 @@ Performed on the AST before code generation:
   no user code runs inside a protoCore `CriticalSection`. Every I/O call that may
   block is bracketed the same way, with its arguments copied into C++ values
   before the bracket opens and its result built after it closes, so nothing
-  inside touches a ProtoObject (`src/runtime/IoSupport.h`). The need for a GC
+  inside touches a ProtoObject (`src/runtime/IoSupport.h`). A line the reader
+  already holds is not an I/O call: `getLines()`, `StdIn.readLine` and
+  `Socket.readLine` take a buffered line without the bracket (the source's lock
+  only tried, protoIO's `readBufferedLine` for a socket), and enter it only when
+  a read is needed. The need for a GC
   poll at loop back-edges is an open platform question (§9, R1).
 
 ---

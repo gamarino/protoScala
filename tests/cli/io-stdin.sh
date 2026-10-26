@@ -95,4 +95,31 @@ out=$(printf 'one\nthree\ntwo\n' | "$P" "$tut/18-io-count-lines.scala" 2>&1); rc
 [[ $rc -eq 0 && "$out" == "3 lines, the longest is 'three'" ]] ||
     fail "tutorial §18.1: exit $rc, output '$out'"
 
+
+# 7. Lines the reader already holds are answered without a read, and a read
+#    happens only when it lacks one: many lines over many pipe reads, a CRLF
+#    and a lone CR, a last line without a terminator, and StdIn.readLine,
+#    Source.stdin.getLines() and mkString interleaved on the one shared reader.
+cat >"$work/many.scala" <<'SCALA'
+var n = 0L
+var sum = 0L
+for line <- Source.stdin.getLines() do
+  n += 1
+  sum += line.toLong
+println(n.toString + " " + sum)
+SCALA
+out=$(seq 1 200000 | "$P" "$work/many.scala" 2>&1); rc=$?
+[[ $rc -eq 0 && "$out" == "200000 20000100000" ]] || fail "many stdin lines: exit $rc, output '$out'"
+cat >"$work/interleaved.scala" <<'SCALA'
+val a = StdIn.readLine()
+val it = Source.stdin.getLines()
+val b = it.next()
+val c = StdIn.readLine()
+val d = it.next()
+val rest = Source.stdin.mkString
+println(List(a, b, c, d).mkString("|") + " " + rest.length + " " + StdIn.readLine())
+SCALA
+out=$( { printf 'one\r\ntwo\rthree\nfour\n'; seq 1 30000; printf 'tail'; } | "$P" "$work/interleaved.scala" 2>&1); rc=$?
+[[ $rc -eq 0 && "$out" == "one|two|three|four 168898 null" ]] || fail "interleaved stdin reads: exit $rc, output '$out'"
+
 echo OK

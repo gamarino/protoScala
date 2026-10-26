@@ -481,15 +481,21 @@ PRIM(peer_name) {
     return addressList(ctx, a);
 }
 
-// __fdReadLine(fd, max) -> String | null
+// __fdReadLine(fd, max) -> String | null. A line protoIO already holds in its
+// read-ahead buffer is taken without leaving the collector's quorum
+// (readBufferedLine never reads and never waits); only a line that needs a
+// read pays for blocking(). Both take lines off the same buffer, so readLine,
+// read and readBytes on one socket still see each byte once, in order.
 PRIM(fd_read_line) {
     expectArgs(ctx, args, "readLine", 2);
     const int fd = fdArg(ctx, args->getAt(ctx, 0), "readLine");
     const long long max = intArg(ctx, args->getAt(ctx, 1), "readLine");
-    const std::optional<std::string> line = io::blocking(ctx, [&] {
-        return protoio::readLine(fd, max > 0 ? static_cast<std::size_t>(max) : 0);
-    });
-    if (!line) return PROTO_NONE;
+    const std::size_t limit = max > 0 ? static_cast<std::size_t>(max) : 0;
+    std::optional<std::string> line = io::immediate([&] { return protoio::readBufferedLine(fd, limit); });
+    if (!line) {
+        line = io::blocking(ctx, [&] { return protoio::readLine(fd, limit); });
+        if (!line) return PROTO_NONE;
+    }
     return text(ctx, *line);
 }
 
