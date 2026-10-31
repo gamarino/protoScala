@@ -67,13 +67,16 @@ env:
   # interop test asserts with).  Bump deliberately.  It is also the declared
   # minimum, which the floor entry of the `test` job builds.
   PROTOCORE_REF: ${{ github.event_name == 'schedule' && 'master' || 'f63adc0881eb00547cc42c1c1cf18c7c4941b978' }}
-  # protoST 97372a1 (2026-10-30: the live registry keys entries by interned
-  # symbols, gamarino/protoST#7 -- the interop test's ~700 non-interned
-  # attribute names per run came from there), the commit protoScala's interop
+  # protoST 0.8.0 (tag v0.8.0, commit ad996f42, 2026-10-31): the first protoST
+  # built against protoCore 3.4.0 (SOVERSION 5); 97372a1 and older require
+  # SOVERSION 4 and no longer configure against the pinned protoCore.  Since
+  # 97372a1 the live registry keys entries by interned symbols
+  # (gamarino/protoST#7 -- the interop test's ~700 non-interned attribute
+  # names per run came from there).  It is the commit protoScala's interop
   # test was last verified against.  Since a76f11b (2026-10-24) protoST takes
   # STRuntime(proto::ProtoSpace&), a guest in the host's space, which the
   # interop test hosts protoST as.
-  PROTOST_REF: ${{ github.event_name == 'schedule' && 'main' || '97372a1b816df1aea3ad193f04d30cd9b4e4a401' }}
+  PROTOST_REF: ${{ github.event_name == 'schedule' && 'main' || 'ad996f4289f5bbcfe719df81a1c1846c22ba7858' }}
   # protoIO 0.2.3 (main, 7920332): the I/O layer protoScala and protoST link
   # statically, and protoScala's floor (readBufferedLine, which the line
   # readers take a buffered line with).  Bump deliberately, like protoCore.
