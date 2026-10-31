@@ -33,8 +33,12 @@ name: CI
 # breaks, which is worth having, but a red build would then have three possible
 # authors; the schedule keeps that signal separate, and the summary records the
 # commits actually used.  The `test` job runs twice: against the pinned
-# protoCore release (3.3.1) and against the declared minimum (3.0.0, its floor
-# entry -- this repository's only floor job, on 3.0.0 on the schedule too).
+# protoCore release (3.4.0) and against the declared minimum (3.4.0, its floor
+# entry -- this repository's only floor job, on 3.4.0 on the schedule too).
+# The two coincide for now: protoCore 3.4.0 moved to SOVERSION 5, so no older
+# release can satisfy PROTOCORE_ABI_SOVERSION.  When the pin later moves to a
+# newer 3.4.x/3.5.x, the floor entry stays on 3.4.0, which is what keeps it
+# meaningful.
 
 on:
   push:
@@ -57,18 +61,22 @@ env:
   PROTOCORE_REPO: numaes/protoCore
   PROTOST_REPO: gamarino/protoST
   PROTOIO_REPO: gamarino/protoIO
-  # protoCore 3.3.1, SOVERSION 4 (tag v3.3.1, commit 5a8cd7c7; since 3.1.0 one
-  # space per process and ProtoSpace::liveSpaceCount, which the interop test
-  # asserts with).  Bump deliberately.  The declared minimum stays 3.0.0, which the
-  # floor entry of the `test` job builds.
-  PROTOCORE_REF: ${{ github.event_name == 'schedule' && 'master' || '5a8cd7c7aae68edbb34720445736b14685efae6f' }}
-  # protoST 97372a1 (2026-10-30: the live registry keys entries by interned
-  # symbols, gamarino/protoST#7 -- the interop test's ~700 non-interned
-  # attribute names per run came from there), the commit protoScala's interop
+  # protoCore 3.4.0, SOVERSION 5 (tag v3.4.0, commit f63adc08;
+  # ProtoContext::pendingRoot removed, so ProtoContext's layout changed; since
+  # 3.1.0 one space per process and ProtoSpace::liveSpaceCount, which the
+  # interop test asserts with).  Bump deliberately.  It is also the declared
+  # minimum, which the floor entry of the `test` job builds.
+  PROTOCORE_REF: ${{ github.event_name == 'schedule' && 'master' || 'f63adc0881eb00547cc42c1c1cf18c7c4941b978' }}
+  # protoST 0.8.0 (tag v0.8.0, commit ad996f42, 2026-10-31): the first protoST
+  # built against protoCore 3.4.0 (SOVERSION 5); 97372a1 and older require
+  # SOVERSION 4 and no longer configure against the pinned protoCore.  Since
+  # 97372a1 the live registry keys entries by interned symbols
+  # (gamarino/protoST#7 -- the interop test's ~700 non-interned attribute
+  # names per run came from there).  It is the commit protoScala's interop
   # test was last verified against.  Since a76f11b (2026-10-24) protoST takes
   # STRuntime(proto::ProtoSpace&), a guest in the host's space, which the
   # interop test hosts protoST as.
-  PROTOST_REF: ${{ github.event_name == 'schedule' && 'main' || '97372a1b816df1aea3ad193f04d30cd9b4e4a401' }}
+  PROTOST_REF: ${{ github.event_name == 'schedule' && 'main' || 'ad996f4289f5bbcfe719df81a1c1846c22ba7858' }}
   # protoIO 0.2.3 (main, 7920332): the I/O layer protoScala and protoST link
   # statically, and protoScala's floor (readBufferedLine, which the line
   # readers take a buffered line with).  Bump deliberately, like protoCore.
@@ -91,15 +99,18 @@ jobs:
       matrix:
         include:
           - name: Build and test suite
-            # Empty: env.PROTOCORE_REF (3.3.1, or master on the schedule).
+            # Empty: env.PROTOCORE_REF (3.4.0, or master on the schedule).
             protocore_ref: ''
-          # THE FLOOR JOB, the only one in this repository. protoCore 3.0.0
-          # (tag v3.0.0, ce00a4a2), SOVERSION 4: PROTOCORE_MIN_VERSION in CMakeLists.txt on
-          # every platform (the descriptor calling convention). Built on every
-          # event, the schedule included. cross-platform.yml builds 3.0.0 on
-          # macOS and Windows.
-          - name: Build and test suite (protoCore 3.0.0, the declared minimum)
-            protocore_ref: ce00a4a26b6583ea8a58e776eee2ea91c743469e
+          # THE FLOOR JOB, the only one in this repository. protoCore 3.4.0
+          # (tag v3.4.0, f63adc08), SOVERSION 5: PROTOCORE_MIN_VERSION
+          # in CMakeLists.txt on every platform. For now it builds the same
+          # commit as the pinned job: 3.4.0 bumped the SOVERSION, so no older
+          # protoCore can be the floor. It stays on 3.4.0 when the pin later
+          # moves to a newer 3.4.x/3.5.x, which is what keeps it meaningful.
+          # Built on every event, the schedule included. cross-platform.yml
+          # builds 3.4.0 on macOS and Windows.
+          - name: Build and test suite (protoCore 3.4.0 floor)
+            protocore_ref: f63adc0881eb00547cc42c1c1cf18c7c4941b978
     steps:
       - name: Check out protoScala
         uses: actions/checkout@v4
