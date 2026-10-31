@@ -15,7 +15,7 @@ protoScala is also a **platform validation project**: protoCore aims to be a sol
 
 ## A flavour of the language
 
-Every line below runs on 0.6.2 today.
+Every line below runs on 0.6.3 today.
 
 ```scala
 case class Increment(by: Int)
@@ -354,8 +354,8 @@ review.** Phase 5 was implemented before Phases 3 and 4, so the minor version we
 0.2.0 → 0.3.0 (actors) → 0.4.0 (collections) → 0.5.0 (exceptions, enums,
 arguments and extensions) → 0.6.0 (modules, UMD and packaging). 0.6.1
 (2026-10-17) is a patch release of what landed since — Windows, input and
-output, `#!` scripts — and 0.6.2 (2026-10-22) moves to protoCore 3.0.0, so the minor
-version still names the phase.
+output, `#!` scripts — 0.6.2 (2026-10-22) moves to protoCore 3.0.0, and 0.6.3
+(2026-10-31) to protoCore 3.4.0, so the minor version still names the phase.
 
 **Phase 7 is the C++ transpiler, and it is what §"Producing a UMD module" and
 §Building below are documenting**: `protoscalac`, `libprotoScala.so.1`,
@@ -1240,7 +1240,7 @@ path, as a zero-cost-exceptions ABI should be. See
 ## Building
 
 Prerequisites: a C++20 compiler, CMake ≥ 3.21, libreadline (from Phase 1),
-OpenSSL 3 development files (`libssl-dev`), protoCore 3.0.0 or newer built as a
+OpenSSL 3 development files (`libssl-dev`), protoCore 3.4.0 or newer built as a
 sibling directory (or installed and passed via `-DPROTO_CORE_PREFIX=<prefix>`),
 and protoIO, installed (`protoio-dev`) or checked out as the sibling `../protoIO`,
 which the build then compiles as part of this one.
@@ -1260,7 +1260,7 @@ ctest --test-dir build_release
 ```
 
 On **Windows**, protoScala builds natively with Visual Studio 2022 (MSVC) against
-protoCore 3.0.0 or later and runs scripts and the REPL from `cmd.exe` or PowerShell;
+protoCore 3.4.0 or later and runs scripts and the REPL from `cmd.exe` or PowerShell;
 `protoscalac --build-so` builds a `module.dll` with `nmake`, `cl` and `link`, and
 `cpack -G ZIP` makes a self-contained package. The steps, and what differs there
 (no readline, `;`-separated path lists, the Developer environment `protoscalac`

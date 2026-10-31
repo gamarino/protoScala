@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-10-31
+
+**Requires protoCore 3.4.0** (SOVERSION 5), the declared minimum for a build from
+source; the `.deb` depends on `protocore (>= 3.4.0), protocore (<< 4.0.0)`.
+protoCore 3.4.0 removed `ProtoContext::pendingRoot`, which changed
+`ProtoContext`'s layout: protoScala needs a rebuild and no source change, but a
+binary built against 3.4.0 does not load with an older libprotoCore, nor the
+reverse. CI pins protoCore tag `v3.4.0` (`f63adc08`) on every job; the
+floor job builds 3.4.0 too, since no older release has SOVERSION 5. protoIO
+**0.2.3** is required.
+
+This release brings native methods running in their caller's context (a
+`ProtoContext` only per method activation), `@tailrec`, a Debug Adapter Protocol
+server (`protoscala --dap`) with a VS Code extension, `docs/VM.md`, buffered line
+reads that stay in the collector's quorum, and the interop tests hosting protoST in
+protoScala's own ProtoSpace.
+
 ### Changed
 - **A buffered line is read without leaving the collector's quorum.**
   `getLines()` on `Source.fromFile` and `Source.stdin`, and `StdIn.readLine`,
@@ -46,7 +63,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   a `SafepointPermit`. Host-level contexts (REPL evaluations, debugger
   evaluations, actor turns and messages) remain and are listed with their
   reasons in `docs/VM.md` section 5. New check
-  `cli/native-callbacks-survive-gc`.
+  `cli/native-callbacks-survive-gc` (run under a 300,000-cell ceiling, at
+  which spare slots left untraced crash). The innermost frame's spare slots
+  are published through a thread-local local to `ExecutionEngine.cpp`, with
+  the initial-exec TLS model on ELF, to keep the per-activation save and
+  restore cheap (the commit messages of `7e876cff` and `aef12f84` give the
+  interleaved measurements).
+- **CI:** the macOS job runs on `macos-15` (GitHub retires the macOS 14
+  images on 2026-11-02), and the interop test builds against protoST
+  `97372a1`, whose live registry keys entries by interned symbols
+  (gamarino/protoST#7).
 
 ### Removed
 - **`NOP` (opcode 0).** It was never emitted; value 0 is now not an opcode,
@@ -163,6 +189,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `PATH` is (`;` on Windows, `:` elsewhere), like `PROTOSCALA_MODULE_PATH`,
   `PROTOSCALA_PROVIDERS` and `PROTOSCALAC_INCLUDE_DIRS` already were. Test:
   `cli/module-path-list` (two absolute entries, the module in the first).
+- **`Thread-N` is the N-th `Thread.start`.** The number was taken when the
+  new OS thread began running, so two `Thread.start` calls could come out as
+  `Thread-2` and `Thread-1`; it is now taken by `Thread.start` on the calling
+  thread (this made `cli/dap-threads` fail on CI's Windows runner).
 - `protoscala --dap`: what a stopped thread evaluates is now a child of its
   innermost live context (an exception stop raised inside the prelude used the
   context of the frame it showed, which could leave the frames below it out of

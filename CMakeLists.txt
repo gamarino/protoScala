@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(protoScala VERSION 0.6.2 LANGUAGES CXX)
+project(protoScala VERSION 0.6.3 LANGUAGES CXX)
 
 # Default to RelWithDebInfo so casual builds are not -O0 (protoST convention).
 # Override with -DCMAKE_BUILD_TYPE=Release for a stripped -O3.
@@ -91,10 +91,13 @@ endif()
 # (STORE_FIELDS_IF_NEW), which first exists there.
 # 3.0.0: methods receive their arguments as ProtoArguments /
 # ProtoKeywordArguments descriptors (protoCore docs/CALLING_CONVENTION.md).
-set(PROTOCORE_MIN_VERSION      "3.0.0")
-set(PROTOCORE_MIN_VERSION_FULL "3.0.0")
+# 3.4.0: SOVERSION 5, ProtoContext::pendingRoot removed (ProtoContext's layout
+# changed). A rebuild, no source change, but a binary built against 3.4.0
+# headers does not load with an older libprotoCore, nor the reverse.
+set(PROTOCORE_MIN_VERSION      "3.4.0")
+set(PROTOCORE_MIN_VERSION_FULL "3.4.0")
 set(PROTOCORE_NEXT_MAJOR       "4.0.0")
-set(PROTOCORE_ABI_SOVERSION    "4")
+set(PROTOCORE_ABI_SOVERSION    "5")
 # The protoCore release that introduced ProtoMPSCQueue. Kept separate from the
 # floor above so the two can be reasoned about independently.
 set(PROTOSCALA_PMQ_MIN_PROTOCORE "2.1.0")
@@ -275,12 +278,11 @@ else()
         message(FATAL_ERROR
             "The sibling protoCore at ${PROTOCORE_DIR} is "
             "${PROTOCORE_EFFECTIVE_VERSION}; protoScala requires "
-            "${PROTOCORE_MIN_VERSION_FULL} or later. Three requirements set that "
-            "floor and the message should not conflate them: ProtoMPSCQueue "
-            "needs ${PROTOSCALA_PMQ_MIN_PROTOCORE}, PROTOCORE_ABI_SOVERSION "
-            "${PROTOCORE_ABI_SOVERSION} needs 2.2.0, and creating a thread from "
-            "a worker (the actor pool grows while workers block in I/O) needs "
-            "2.6.1. The highest one binds.")
+            "${PROTOCORE_MIN_VERSION_FULL} or later. Several requirements set "
+            "that floor (the comment above PROTOCORE_MIN_VERSION in "
+            "CMakeLists.txt lists them); the binding one is "
+            "PROTOCORE_ABI_SOVERSION ${PROTOCORE_ABI_SOVERSION}, which protoCore "
+            "first ships in 3.4.0.")
     endif()
     message(STATUS "protoScala: sibling protoCore ${PROTOCORE_EFFECTIVE_VERSION} "
                    "from ${PROTOCORE_LIB_DIR}")
@@ -639,9 +641,9 @@ target_compile_options(protoScala PRIVATE ${PROTOSCALA_WARNINGS})
 # neither protoCore nor OpenSSL.
 if(WIN32)
     set(PROTOSCALA_RUNTIME_DLLS "")
-    # protoCore's DLL is whatever file its imported target names (protoCore-3.dll
-    # since 2.9.0, which carries the ABI version in its name), never a spelled-out
-    # file name.
+    # protoCore's DLL is whatever file its imported target names (protoCore-5.dll
+    # since 3.4.0; the name carries the ABI version since 2.9.0), never a
+    # spelled-out file name.
     if(TARGET ${PROTOCORE_LIBRARY})
         list(APPEND PROTOSCALA_RUNTIME_DLLS "$<TARGET_FILE:${PROTOCORE_LIBRARY}>")
     endif()
@@ -970,9 +972,9 @@ elseif(UNIX)
     endif()
     # protoscala links libprotoCore. protoCore's package is named "protocore"
     # for DEB and "protoCore" for RPM (both pinned in protoCore/CMakeLists.txt).
-    # The floor is 2.1.0 because the actor mailbox needs ProtoMPSCQueue; the
-    # ceiling is the next major, because protoCore's major version and its
-    # soname move together.
+    # The floor is PROTOCORE_MIN_VERSION_FULL (3.4.0, the first SOVERSION 5
+    # release; the reasons are listed where it is set); the ceiling is the next
+    # major.
     set(CPACK_DEBIAN_PACKAGE_NAME "protoscala")
     set(CPACK_DEBIAN_PACKAGE_MAINTAINER "gamarino@gmail.com")
     set(CPACK_DEBIAN_PACKAGE_SECTION "interpreters")
