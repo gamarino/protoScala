@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-10-31
+
+**Built and tested against protoCore 3.5.0** (SOVERSION 5, unchanged from
+3.4.0). The declared minimum for a build from source stays **protoCore 3.4.0**,
+which CI's floor entry still builds; the `.deb` is built against the 3.5.0
+package, so it depends on `protocore (>= 3.5.0)` through protoCore's shlibs
+file, besides the declared `protocore (>= 3.4.0), protocore (<< 4.0.0)`.
+
+protoCore 3.5.0 changed `ProtoSet` and `ProtoMultiset` (collision buckets,
+pointer-identity equality, a multiset iterator that returns elements).
+protoScala uses neither, so this release is a rebuild with no source change.
+
+### Changed
+
+- CI pins protoCore tag `v3.5.0` on Linux, macOS and Windows; the floor entry
+  keeps building 3.4.0. The interop test builds protoST 0.8.1 (tag `v0.8.1`),
+  the protoST release built against protoCore 3.5.0.
+
 ## [0.6.3] - 2026-10-31
 
 **Requires protoCore 3.4.0** (SOVERSION 5), the declared minimum for a build from
