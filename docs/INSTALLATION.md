@@ -26,9 +26,10 @@ executable sees no protoCore at all.)
   floors -- 2.11.0 for `ProtoObject::setAttributes`, 2.7.0 for
   `proto::proto_long`, 2.9.0 on Windows for `ProtoSpace::setThreadStackBytes`,
   and the "Why 2.6.1" ones below -- still hold underneath it), installed, with
-  its CMake package configuration. CI builds and tests against **3.4.0 on
-  Linux, macOS and Windows**; the floor job builds 3.4.0 too, the floor and the
-  pin coinciding until the pin moves past 3.4.0. The packaging sections below
+  its CMake package configuration. CI builds and tests against **3.5.0 on
+  Linux, macOS and Windows** (SOVERSION 5 as well); the floor job builds 3.4.0.
+  The 0.6.4 `.deb` is built against protoCore 3.5.0 and so depends on
+  `protocore (>= 3.5.0)` through protoCore's shlibs file. The packaging sections below
   were verified against 2.5.0. See protoCore's `docs/INSTALLATION.md`.
 - **protoIO 0.2.3 or newer within 0.2** (the I/O layer the protoCore runtimes
   share; 0.2.2 brings `process::run` options, crash statuses as 128 + signal on
