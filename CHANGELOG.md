@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **protoST primitives are called as the protoCore method cells they are.**
+  protoST 0.10.0 binds each primitive as a `proto::ProtoMethod` cell instead of
+  an integer marker, and runs a call from outside its own dispatch behind the
+  `__st_send__` boundary. The member classification no longer tests for the
+  marker (a large integer): a member read with no argument list is sent to
+  protoST only when it is a protoST method object. With a protoST before 0.10.0
+  such a read would answer the marker integer, so the interop test needs
+  protoST 0.10.0, and CI's protoST pin moves to `v0.10.0` when it is tagged.
+
 ## [0.6.5] - 2026-11-13
 
 **Built, tested and released against protoCore 3.6.0** (SOVERSION 5, unchanged

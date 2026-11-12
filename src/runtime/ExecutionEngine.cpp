@@ -363,9 +363,12 @@ const proto::ProtoObject* ExecutionEngine::callMember(proto::ProtoContext* ctx,
         base[0] = v;  // the receiver is no longer needed; keep v rooted
         return invoke(ctx, v, base + 1, argc);
     }
-    // A member Scala cannot call. On a protoST object it is one of its methods --
-    // an object carrying protoST bytecode, or a primitive marker (a large
-    // integer) -- and the call sends it as a Smalltalk message (D135). A call
+    // A member Scala cannot call. On a protoST object it is one of its methods
+    // written in Smalltalk -- an object carrying protoST bytecode -- and the call
+    // sends it as a Smalltalk message (D135). (A protoST primitive is a protoCore
+    // method cell since protoST 0.10.0, called directly above; protoST runs a
+    // call from outside its own dispatch behind the same boundary as
+    // __st_send__.) A call
     // with an argument list probes the receiver at once: Scala has no other
     // meaning left for it. A read with NO argument list -- `c.value`, which is
     // also how every Scala field is read -- probes only once the session has met
@@ -376,7 +379,7 @@ const proto::ProtoObject* ExecutionEngine::callMember(proto::ProtoContext* ctx,
     // session that never meets protoST skips them all.
     if (name &&
         (!select || (L.smalltalkSeen.load(std::memory_order_relaxed) &&
-                     (isLargeIntFast(m) || (isObjectCellFast(m) && isForeignObject(ctx, L, m))))))
+                     isObjectCellFast(m) && isForeignObject(ctx, L, m))))
         if (const proto::ProtoObject* st = smalltalkEntryOf(ctx, base[0]))
             return sendSmalltalk(ctx, st, base, name, argc);
     if (select) return m;                            // a field

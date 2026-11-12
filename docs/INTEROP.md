@@ -183,8 +183,10 @@ instance answers it. Its contract is language-neutral and needs protoCore alone:
 the rest are the message's arguments. protoScala calls it whenever a Scala call
 reaches a protoST object — a receiver whose chain answers `__st_send__` with a
 protoCore method — and the member it found is not something Scala can call (a
-protoST method object or a primitive marker), or there is no such member at all
-(every keyword selector).
+protoST method object, written in Smalltalk), or there is no such member at all
+(every keyword selector). A protoST primitive is a protoCore method cell (protoST
+0.10.0), which protoScala calls directly like any native method; protoST runs
+such a call behind the same boundary as `__st_send__`.
 
 **Selector mapping** (`src/umd/SmalltalkSelector.h`; mapping a caller's surface is
 the caller's concern, so it lives on the Scala side):
