@@ -524,7 +524,7 @@ sequence patterns with `_*`, and guards.
 
 | Scala | Representation |
 |---|---|
-| `List[T]` | `ProtoList` (persistent AVL) — maintainer decision. `::` prepends in O(log n); `h :: t` extracts head and tail slice in O(log n). Scala `List` methods are installed on protoCore's list prototype, so a raw `ProtoList` *is* a Scala `List` |
+| `List[T]` | `ProtoList` (persistent; an AVL tree until protoCore 3.5.x, an RRB tree since 3.6.0) — maintainer decision. `::` prepends in O(log n); `h :: t` extracts head and tail slice in O(log n). Scala `List` methods are installed on protoCore's list prototype, so a raw `ProtoList` *is* a Scala `List` |
 | `Vector[T]` | an object (prototype `Vector`) holding a `ProtoList` in one attribute, so `List` and `Vector` stay distinguishable |
 | `Map[K,V]`, `Set[T]` | objects (prototypes `Map`, `Set`) holding a **`ProtoMap`** (§6.1) |
 | `TupleN` | case classes (§4.6) |

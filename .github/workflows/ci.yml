@@ -33,10 +33,10 @@ name: CI
 # breaks, which is worth having, but a red build would then have three possible
 # authors; the schedule keeps that signal separate, and the summary records the
 # commits actually used.  The `test` job runs twice: against the pinned
-# protoCore release (3.5.0) and against the declared minimum (3.4.0, its floor
+# protoCore release (3.6.0) and against the declared minimum (3.4.0, its floor
 # entry -- this repository's only floor job, on 3.4.0 on the schedule too).
 # protoCore 3.4.0 moved to SOVERSION 5, so no older release can satisfy
-# PROTOCORE_ABI_SOVERSION; 3.5.0 kept SOVERSION 5.
+# PROTOCORE_ABI_SOVERSION; 3.5.0 and 3.6.0 kept SOVERSION 5.
 
 on:
   push:
@@ -59,15 +59,15 @@ env:
   PROTOCORE_REPO: numaes/protoCore
   PROTOST_REPO: gamarino/protoST
   PROTOIO_REPO: gamarino/protoIO
-  # protoCore 3.5.0, SOVERSION 5 (tag v3.5.0, commit 64ca282e; the SOVERSION
+  # protoCore 3.6.0, SOVERSION 5 (tag v3.6.0, commit 799d7615; the SOVERSION
   # is unchanged since 3.4.0, which removed ProtoContext::pendingRoot; since
   # 3.1.0 one space per process and ProtoSpace::liveSpaceCount, which the
   # interop test asserts with).  Bump deliberately.  The declared minimum,
   # 3.4.0, is what the floor entry of the `test` job builds.
-  PROTOCORE_REF: ${{ github.event_name == 'schedule' && 'master' || '64ca282e2ec7d2de31255dc7c3a16b06b3cc5e00' }}
+  PROTOCORE_REF: ${{ github.event_name == 'schedule' && 'master' || '799d7615d0b4f8c3ab8bb708c282815d7f7cfb8b' }}
   # protoST 0.8.1 (tag v0.8.1, commit 7bbd10b3, 2026-10-31): the protoST
   # release built against protoCore 3.5.0; it still accepts 3.4.0, so the floor
-  # entry builds it too.  0.8.0 (ad996f42) was the first protoST built against
+  # entry builds it too, and it builds against the 3.6.0 pin unchanged.  0.8.0 (ad996f42) was the first protoST built against
   # protoCore 3.4.0 (SOVERSION 5); 97372a1 and older require SOVERSION 4 and
   # no longer configure against the pinned protoCore.  Since
   # 97372a1 the live registry keys entries by interned symbols
@@ -99,14 +99,14 @@ jobs:
       matrix:
         include:
           - name: Build and test suite
-            # Empty: env.PROTOCORE_REF (3.5.0, or master on the schedule).
+            # Empty: env.PROTOCORE_REF (3.6.0, or master on the schedule).
             protocore_ref: ''
           # THE FLOOR JOB, the only one in this repository. protoCore 3.4.0
           # (tag v3.4.0, f63adc08), SOVERSION 5: PROTOCORE_MIN_VERSION
-          # in CMakeLists.txt on every platform, one release behind the 3.5.0
+          # in CMakeLists.txt on every platform, two releases behind the 3.6.0
           # pin: 3.4.0 bumped the SOVERSION, so no older protoCore can be the
           # floor. Built on every event, the schedule included.
-          # cross-platform.yml builds the 3.5.0 pin on macOS and Windows.
+          # cross-platform.yml builds the 3.6.0 pin on macOS and Windows.
           - name: Build and test suite (protoCore 3.4.0 floor)
             protocore_ref: f63adc0881eb00547cc42c1c1cf18c7c4941b978
     steps:

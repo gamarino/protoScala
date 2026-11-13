@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-11-13
+
+**Built, tested and released against protoCore 3.6.0** (SOVERSION 5, unchanged
+since 3.4.0; `protoCore.h` changed only in comments). The declared minimum for
+a build from source stays **protoCore 3.4.0**, which CI's floor entry still
+builds; the `.deb` is built against the 3.6.0 package, so it depends on
+`protocore (>= 3.6.0)` through protoCore's shlibs file, besides the declared
+`protocore (>= 3.4.0), protocore (<< 4.0.0)`. This release is a rebuild with
+no source change.
+
+protoCore 3.6.0 changes the representation of `ProtoList`, which backs Scala
+`List` and `Vector`: every list of more than 5 elements is now a relaxed radix
+balanced (RRB) tree instead of a persistent AVL tree. Every operation stays
+persistent and O(log n). The effect on protoScala programs runs in both
+directions. Indexed access, appending at the end, `updated`, removing the last
+element and iteration are faster (protoCore measured, at 100,000 elements:
+random access 586 ns to 36 ns, append 777 ns to 30 ns, iteration 80 ns to
+41 ns per element). Prepending is slower, and that includes `::` and `+:`
+(276 ns to 471 ns at 100,000 elements), as are insertion in the middle,
+slicing (`take`, `drop`, `splitAt`, `init`), concatenation (`++`,
+protoCore's `extend`: 283 ns to 754 ns, up to 4.5x slower at 1,000 elements)
+and removal at arbitrary positions, by 1.2x to 2.7x at 100,000 elements.
+Measured interleaved against protoCore 3.5.2, median of 5 runs, the 3.6.0
+code takes 29 % less time on `benchmarks/comparable/list_ops`; the other
+comparable benchmarks are within 4 % either way.
+
+### Changed
+
+- CI pins protoCore tag `v3.6.0` (`799d7615`) on Linux, macOS and Windows; the
+  floor entry keeps building 3.4.0. The interop test still builds protoST 0.8.1
+  (tag `v0.8.1`).
+
 ## [0.6.4] - 2026-10-31
 
 **Built and tested against protoCore 3.5.0** (SOVERSION 5, unchanged from

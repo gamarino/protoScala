@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(protoScala VERSION 0.6.4 LANGUAGES CXX)
+project(protoScala VERSION 0.6.5 LANGUAGES CXX)
 
 # Default to RelWithDebInfo so casual builds are not -O0 (protoST convention).
 # Override with -DCMAKE_BUILD_TYPE=Release for a stripped -O3.
@@ -96,6 +96,8 @@ endif()
 # headers does not load with an older libprotoCore, nor the reverse.
 # 3.5.0 keeps SOVERSION 5; it changed ProtoSet and ProtoMultiset, which
 # protoScala does not use, so the floor stays 3.4.0.
+# 3.6.0 keeps SOVERSION 5; ProtoList became an RRB tree (internal, protoCore.h
+# changed only in comments), so the floor stays 3.4.0.
 set(PROTOCORE_MIN_VERSION      "3.4.0")
 set(PROTOCORE_MIN_VERSION_FULL "3.4.0")
 set(PROTOCORE_NEXT_MAJOR       "4.0.0")
