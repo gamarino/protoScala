@@ -65,6 +65,14 @@ const char* classFor(const protoio::Error& e) {
         case K::LineTooLong:        return "IOException";
         case K::BodyTooLarge:       return "IOException";
         case K::InvalidArgument:    return "IllegalArgumentException";
+        // Kinds added by protoIO 0.3.0 (Internal: a failure inside OpenSSL),
+        // 0.4.0 (Conflict: guarded file operations) and 0.5.0 (DepthLimit:
+        // MessagePack). protoScala calls none of the operations that raise
+        // them; they are listed so the switch stays exhaustive, and keep the
+        // IOException the fallback below already gave them.
+        case K::Internal:           return "IOException";
+        case K::Conflict:           return "IOException";
+        case K::DepthLimit:         return "IOException";
     }
     return "IOException";
 }

@@ -15,7 +15,7 @@ protoScala is also a **platform validation project**: protoCore aims to be a sol
 
 ## A flavour of the language
 
-Every line below runs on 0.6.5 today.
+Every line below runs on 0.6.6 today.
 
 ```scala
 case class Increment(by: Int)
@@ -355,9 +355,9 @@ review.** Phase 5 was implemented before Phases 3 and 4, so the minor version we
 arguments and extensions) → 0.6.0 (modules, UMD and packaging). 0.6.1
 (2026-10-17) is a patch release of what landed since — Windows, input and
 output, `#!` scripts — 0.6.2 (2026-10-22) moves to protoCore 3.0.0, 0.6.3
-(2026-10-31) to protoCore 3.4.0, 0.6.4 (2026-10-31) to protoCore 3.5.0 and
-0.6.5 (2026-11-13) to protoCore 3.6.0, so the minor version still names the
-phase.
+(2026-10-31) to protoCore 3.4.0, 0.6.4 (2026-10-31) to protoCore 3.5.0,
+0.6.5 (2026-11-13) to protoCore 3.6.0 and 0.6.6 (2026-11-14) to protoST 0.12.0
+and protoIO 0.7.0, so the minor version still names the phase.
 
 **Phase 7 is the C++ transpiler, and it is what §"Producing a UMD module" and
 §Building below are documenting**: `protoscalac`, `libprotoScala.so.1`,

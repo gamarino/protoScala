@@ -13,8 +13,9 @@ name: Cross-platform
 # 799d7615; SOVERSION 5, so its DLL is protoCore-5.dll), as ci.yml's
 # main job. The minimum, 3.4.0 on every platform, is built by ci.yml's floor job
 # (Linux) only. protoIO
-# 0.2.3 (main, 7920332): the floor everywhere (readBufferedLine). Bump
-# deliberately.
+# 0.7.0 (tag v0.7.0, a4274c43): the floor everywhere, as in ci.yml (protoST
+# 0.12.0 requires 0.7.x and protoIO's package is SameMinorVersion compatible).
+# Bump deliberately.
 
 on:
   push:
@@ -33,7 +34,7 @@ env:
   PROTOCORE_REPO: numaes/protoCore
   PROTOCORE_REF: 799d7615d0b4f8c3ab8bb708c282815d7f7cfb8b
   PROTOIO_REPO: gamarino/protoIO
-  PROTOIO_REF: 792033281f77d4a771e4e417a7173a0e6d0a42fa
+  PROTOIO_REF: a4274c439483ce49f031c14bad8d9ba3cee58504
   # Clock-dependent, as in ci.yml: their verdict is a timeout.
   CLOCK_DEPENDENT_TESTS: '^embedder-conformance/isolate\.'
 

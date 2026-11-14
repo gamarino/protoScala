@@ -65,22 +65,22 @@ env:
   # interop test asserts with).  Bump deliberately.  The declared minimum,
   # 3.4.0, is what the floor entry of the `test` job builds.
   PROTOCORE_REF: ${{ github.event_name == 'schedule' && 'master' || '799d7615d0b4f8c3ab8bb708c282815d7f7cfb8b' }}
-  # protoST 0.8.1 (tag v0.8.1, commit 7bbd10b3, 2026-10-31): the protoST
-  # release built against protoCore 3.5.0; it still accepts 3.4.0, so the floor
-  # entry builds it too, and it builds against the 3.6.0 pin unchanged.  0.8.0 (ad996f42) was the first protoST built against
-  # protoCore 3.4.0 (SOVERSION 5); 97372a1 and older require SOVERSION 4 and
-  # no longer configure against the pinned protoCore.  Since
-  # 97372a1 the live registry keys entries by interned symbols
-  # (gamarino/protoST#7 -- the interop test's ~700 non-interned attribute
-  # names per run came from there).  It is the commit protoScala's interop
-  # test was last verified against.  Since a76f11b (2026-10-24) protoST takes
-  # STRuntime(proto::ProtoSpace&), a guest in the host's space, which the
-  # interop test hosts protoST as.
-  PROTOST_REF: ${{ github.event_name == 'schedule' && 'main' || '7bbd10b334f5059be7b94da5ee0a885fcae63ae4' }}
-  # protoIO 0.2.3 (main, 7920332): the I/O layer protoScala and protoST link
-  # statically, and protoScala's floor (readBufferedLine, which the line
-  # readers take a buffered line with).  Bump deliberately, like protoCore.
-  PROTOIO_REF: ${{ github.event_name == 'schedule' && 'main' || '792033281f77d4a771e4e417a7173a0e6d0a42fa' }}
+  # protoST 0.12.0 (tag v0.12.0, commit b7e206a0, 2026-11-13), built against
+  # protoCore 3.6.0; it accepts 3.4.0, so the floor entry builds it too.
+  # protoST 0.10.0 made every primitive a protoCore method cell (it was an
+  # integer marker) and changed STRuntime's layout, so the interop test needs
+  # 0.10.0 or later and must be recompiled against it, never relinked; 0.12.0
+  # requires protoIO 0.7.x at configure time.  Since 97372a1 the live registry
+  # keys entries by interned symbols (gamarino/protoST#7), and since a76f11b
+  # (2026-10-24) protoST takes STRuntime(proto::ProtoSpace&), a guest in the
+  # host's space, which the interop test hosts protoST as.
+  PROTOST_REF: ${{ github.event_name == 'schedule' && 'main' || 'b7e206a05be19cd97f33acdfcff5967b1a95c3fc' }}
+  # protoIO 0.7.0 (tag v0.7.0, commit a4274c43, 2026-11-13): the I/O layer
+  # protoScala and protoST link statically, one archive for both.  protoST
+  # 0.12.0 requires 0.7.x, and protoIO's package is SameMinorVersion
+  # compatible, so protoScala's floor is 0.7.0 too (CMakeLists.txt).  Bump
+  # deliberately, like protoCore.
+  PROTOIO_REF: ${{ github.event_name == 'schedule' && 'main' || 'a4274c439483ce49f031c14bad8d9ba3cee58504' }}
   # The only ctest cases in this suite whose verdict is a clock.  For the two
   # deadlocking ones the TIMEOUT *is* the verdict (tests/unit/CMakeLists.txt),
   # and embedder-conformance/isolate.heap.ceiling_progress is documented as
