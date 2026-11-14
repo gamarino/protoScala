@@ -28,13 +28,16 @@ executable sees no protoCore at all.)
   and the "Why 2.6.1" ones below -- still hold underneath it), installed, with
   its CMake package configuration. CI builds and tests against **3.6.0 on
   Linux, macOS and Windows** (SOVERSION 5 as well); the floor job builds 3.4.0.
-  The 0.6.5 `.deb` is built against protoCore 3.6.0 and so depends on
+  The 0.6.6 `.deb` is built against protoCore 3.6.0 and so depends on
   `protocore (>= 3.6.0)` through protoCore's shlibs file. The packaging sections below
   were verified against 2.5.0. See protoCore's `docs/INSTALLATION.md`.
-- **protoIO 0.2.3 or newer within 0.2** (the I/O layer the protoCore runtimes
+- **protoIO 0.7.0 or newer within 0.7** (the I/O layer the protoCore runtimes
   share; 0.2.2 brings `process::run` options, crash statuses as 128 + signal on
   Windows too, the Windows certificate store for TLS and a dual-stack listener;
-  0.2.3 brings `readBufferedLine`, which `Socket.readLine` uses), either
+  0.2.3 brings `readBufferedLine`, which `Socket.readLine` uses; protoScala
+  calls nothing newer, but protoIO's CMake package accepts only a request for
+  its own minor version, and protoST 0.12.0, which the interop test links into
+  the same executable, requires 0.7), either
   installed (`protoio-dev`, or any prefix holding `lib/cmake/protoIO/`, named
   with `-DCMAKE_PREFIX_PATH`), a build tree named with `-DprotoIO_DIR=<protoIO>/
   build_release`, or the source tree checked out beside this one as
@@ -326,7 +329,8 @@ That includes the 977 `transpiled/*` and 12 `benchmarks-transpiled/*` cases,
 each building a `module.dll` with `cl`. macOS registers the same 2437; Linux
 registers 2438 (CI run 38103313571; 2435 run there, against protoCore 2.14.2 and,
 in the floor job, 2.11.0), the one more being `umd/protost-interop`, which needs
-protoST beside the tree.
+protoST beside the tree (0.10.0 or later, the first whose primitives are
+method cells; CI builds 0.12.0).
 
 ---
 

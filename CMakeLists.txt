@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(protoScala VERSION 0.6.5 LANGUAGES CXX)
+project(protoScala VERSION 0.6.6 LANGUAGES CXX)
 
 # Default to RelWithDebInfo so casual builds are not -O0 (protoST convention).
 # Override with -DCMAKE_BUILD_TYPE=Release for a stripped -O3.
@@ -353,7 +353,13 @@ set(PROTOSCALA_ABI_SOVERSION "1")
 # Windows as on POSIX, event-based waits, open files that can be deleted or
 # renamed, the Windows certificate store for TLS, and a listener on both IPv4
 # and IPv6 when no host is named.
-set(PROTOSCALA_PROTOIO_MIN_VERSION "0.2.3")
+# 0.7.0 is the floor since protoScala 0.6.6, although protoScala calls no API
+# newer than 0.2.3: protoIO's package is SameMinorVersion-compatible, so a
+# request for 0.2.3 refuses every 0.3+ package, and protoST 0.12.0 -- linked
+# into the same test executable by umd/protost-interop -- requires 0.7.x.
+# Asking for 0.7.0 lets both link the one protoIO archive CI builds, and lets
+# an installed protoio-dev 0.7 be found at all.
+set(PROTOSCALA_PROTOIO_MIN_VERSION "0.7.0")
 find_package(protoIO ${PROTOSCALA_PROTOIO_MIN_VERSION} CONFIG QUIET)
 if(protoIO_FOUND)
     message(STATUS "protoScala: installed protoIO ${protoIO_VERSION} from ${protoIO_DIR}")

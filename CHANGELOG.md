@@ -6,6 +6,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-11-14
+
+**Built and tested against protoCore 3.6.0, protoST 0.12.0 and protoIO 0.7.0.**
+protoCore is unchanged from 0.6.5 (SOVERSION 5; the declared minimum for a
+build from source stays **3.4.0**, which CI's floor entry builds); the `.deb`
+is built against the 3.6.0 package, so it depends on `protocore (>= 3.6.0)`
+through protoCore's shlibs file, besides the declared
+`protocore (>= 3.4.0), protocore (<< 4.0.0)`. protoST 0.10.0 changed how a
+protoST primitive is represented and the layout of `STRuntime`, so the protoST
+interop test needs protoST 0.10.0 or later and must be recompiled against it,
+not relinked.
+
+### Changed
+
+- **protoST primitives are called as the protoCore method cells they are.**
+  protoST 0.10.0 binds each primitive as a `proto::ProtoMethod` cell instead of
+  an integer marker, and runs a call from outside its own dispatch behind the
+  `__st_send__` boundary. The member classification no longer tests for the
+  marker (a large integer): a member read with no argument list is sent to
+  protoST only when it is a protoST method object. With a protoST before 0.10.0
+  such a read would answer the marker integer, so `umd/protost-interop` needs
+  protoST 0.10.0 or later.
+- **protoIO 0.7.0 is required** (was 0.2.3). protoScala calls no protoIO API
+  newer than 0.2.3, but protoIO's CMake package accepts only a request for its
+  own minor version, so `find_package(protoIO 0.2.3)` refused every protoIO
+  since 0.3.0 and the build fell back to compiling the sibling source; protoST
+  0.12.0, which the interop test links into the same executable, requires
+  0.7.x. The three `protoio::Error::Kind` values added since 0.2.3
+  (`Internal`, `Conflict`, `DepthLimit`) are mapped to `IOException`, the
+  fallback they already reached; protoScala calls none of the operations that
+  raise them (docs/DECISIONS-LOG.md, 2026-11-14).
+- CI pins protoST tag `v0.12.0` (`b7e206a0`, was 0.8.1) and protoIO tag
+  `v0.7.0` (`a4274c43`, was 0.2.3 at `7920332`) on Linux, and protoIO
+  `v0.7.0` on macOS and Windows; protoCore stays at tag `v3.6.0`, and the floor
+  entry keeps building protoCore 3.4.0 (with protoST 0.12.0, whose floor is
+  also 3.4.0).
+
 ## [0.6.5] - 2026-11-13
 
 **Built, tested and released against protoCore 3.6.0** (SOVERSION 5, unchanged
