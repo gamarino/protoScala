@@ -180,3 +180,27 @@ TEST(FieldGroups, AGroupedConstructionAllocatesFewerCells) {
     // An immutable `this` rebuilt five times against one tree built once.
     EXPECT_LT(grouped, perField - 5.0) << "per field " << perField << ", grouped " << grouped;
 }
+
+TEST(FieldGroups, ClassTemplateInstancePrepopulatesShapeForClonesAndSubclasses) {
+    EvalHarness h;
+    // Inherited private parameter (`Base::secret`), body val (`tag`), and
+    // subclass parameters (`x`, `y`): all four fields are registered in Sub's
+    // template instance shape at MAKE_CLASS time.
+    EXPECT_EQ(h.eval("class Base(secret: Int) { val tag: Int = secret * 2; def readSecret: Int = secret }"), "");
+    EXPECT_EQ(h.eval("class Sub(val x: Int, val y: Int) extends Base(x + y)"), "");
+    EXPECT_EQ(h.eval("val s = new Sub(3, 4)"), "");
+    EXPECT_EQ(h.eval("s\"${s.x} ${s.y} ${s.tag} ${s.readSecret}\""), "3 4 14 7");
+
+    // Verify that the class prototype carries the pre-built `__template__` object.
+    proto::ProtoContext* ctx = h.runtime().rootContext();
+    const RuntimeLayout& L = h.runtime().layout();
+    const proto::ProtoObject* subCls =
+        L.globals->getOwnAttributeDirect(ctx, proto::ProtoString::createSymbol(ctx, "@Sub"));
+    ASSERT_NE(subCls, nullptr);
+    const proto::ProtoObject* tmpl = subCls->getOwnAttributeDirect(ctx, L.instanceTemplateKey);
+    ASSERT_NE(tmpl, nullptr);
+    EXPECT_NE(tmpl, PROTO_NONE);
+    // Uninitialised template slots answer PROTO_FALSE to hasOwnAttribute so
+    // STORE_FIELD_IF_NEW / STORE_FIELDS_IF_NEW preserve override semantics.
+    EXPECT_EQ(tmpl->hasOwnAttribute(ctx, proto::ProtoString::createSymbol(ctx, "x")), PROTO_FALSE);
+}

@@ -96,10 +96,11 @@ endif()
 # headers does not load with an older libprotoCore, nor the reverse.
 # 3.5.0 keeps SOVERSION 5; it changed ProtoSet and ProtoMultiset, which
 # protoScala does not use, so the floor stays 3.4.0.
-# 3.6.0 keeps SOVERSION 5; ProtoList became an RRB tree (internal, protoCore.h
-# changed only in comments), so the floor stays 3.4.0.
-set(PROTOCORE_MIN_VERSION      "3.4.0")
-set(PROTOCORE_MIN_VERSION_FULL "3.4.0")
+# 3.6.0 keeps SOVERSION 5; ProtoList became an RRB tree and ProtoObject gained
+# ProtoShape + 4x6^d attribute indirection and ProtoObject::newClone, which
+# ExecutionEngine::makeClass / instantiate use to clone class instance templates.
+set(PROTOCORE_MIN_VERSION      "3.6.0")
+set(PROTOCORE_MIN_VERSION_FULL "3.6.0")
 set(PROTOCORE_NEXT_MAJOR       "4.0.0")
 set(PROTOCORE_ABI_SOVERSION    "5")
 # The protoCore release that introduced ProtoMPSCQueue. Kept separate from the
@@ -238,16 +239,16 @@ else()
     endif()
     unset(_protoCore_abi_file)
     # The developer tree has no version to check; probe for the newest API the
-    # sources use instead (ProtoObject::setAttributes, protoCore 2.11.0).
-    file(STRINGS "${PROTOCORE_DIR}/headers/protoCore.h" _protoCore_setAttributes
-         REGEX "setAttributes\\(")
-    if(NOT _protoCore_setAttributes)
+    # sources use instead (ProtoObject::newClone, protoCore 3.6.0).
+    file(STRINGS "${PROTOCORE_DIR}/headers/protoCore.h" _protoCore_newClone
+         REGEX "newClone\\(")
+    if(NOT _protoCore_newClone)
         message(FATAL_ERROR
             "The protoCore tree in ${PROTOCORE_DIR} predates "
-            "ProtoObject::setAttributes (protoCore 2.11.0); protoScala needs "
+            "ProtoObject::newClone (protoCore 3.6.0); protoScala needs "
             "protoCore ${PROTOCORE_MIN_VERSION_FULL} or later. Update and rebuild it.")
     endif()
-    unset(_protoCore_setAttributes)
+    unset(_protoCore_newClone)
     set(PROTOCORE_INCLUDE_DIRS ${PROTOCORE_DIR} ${PROTOCORE_DIR}/headers)
     # protoCore's embedder conformance suite (P4): a static archive beside
     # libprotoCore in the same build tree.  Optional, so a protoCore older than

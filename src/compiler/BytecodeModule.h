@@ -88,8 +88,9 @@ public:
         std::string key;                  // type key (the membership marker)
         std::uint32_t parentCount = 0;    // values pushed before the members
         std::vector<std::string> memberKeys;
-        std::vector<std::string> fields;  // case classes: product elements, in order
+        std::vector<std::string> fields;  // instance attribute keys (case classes: product elements first)
         std::uint32_t flags = 0;
+        long long extraFieldCount = 0;    // case classes: non-product instance fields appended to `fields`
     };
 
     struct CaptureSpec {

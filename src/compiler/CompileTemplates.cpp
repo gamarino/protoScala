@@ -513,6 +513,35 @@ void Compiler::compileTemplate(const TemplateDef& t, const ClassInfo& info) {
         keys.push_back(auxCtorKey(paramsOfDef(as<DefDef>(*s)).size()));
         compileAuxConstructor(as<DefDef>(*s), info);
     }
+    std::vector<std::string> instanceFields = info.fields;
+    auto addInstanceField = [&](const std::string& key) {
+        if (std::find(instanceFields.begin(), instanceFields.end(), key) == instanceFields.end())
+            instanceFields.push_back(key);
+    };
+    for (const Param& p : t.ctorParams)
+        addInstanceField(info.members.at(p.name).key);
+    for (const NodePtr& s : t.body) {
+        if (s->kind == NodeKind::ValDef && as<ValDef>(*s).rhs)
+            addInstanceField(info.members.at(as<ValDef>(*s).name).key);
+    }
+    for (std::size_t k = 1; k < info.linearization.size(); ++k) {
+        const ClassInfo* a = globals_.findTypeByKey(info.linearization[k]);
+        if (!a || a->builtin) continue;
+        for (const std::string& p : a->ctorParams) {
+            auto it = a->members.find(p);
+            if (it != a->members.end() && it->second.concrete)
+                addInstanceField(it->second.key);
+        }
+        std::vector<std::string> ancestorKeys;
+        for (const auto& [mname, m] : a->members) {
+            if (m.concrete && (m.kind == MemberKind::Val || m.kind == MemberKind::Var ||
+                               m.kind == MemberKind::LazyVal))
+                ancestorKeys.push_back(m.key);
+        }
+        std::sort(ancestorKeys.begin(), ancestorKeys.end());
+        for (const std::string& akey : ancestorKeys) addInstanceField(akey);
+    }
+
     BytecodeModule::ClassSpecData spec;
     // The SIMPLE name: `object O { case class C }` prints `C(1)`, not `O.C(1)`,
     // which is what scalac prints too.
@@ -520,7 +549,10 @@ void Compiler::compileTemplate(const TemplateDef& t, const ClassInfo& info) {
     spec.key = info.key;
     spec.parentCount = static_cast<std::uint32_t>(chain.size());
     spec.memberKeys = keys;
-    spec.fields = info.fields;
+    spec.fields = std::move(instanceFields);
+    spec.extraFieldCount = info.isCase
+                               ? static_cast<long long>(spec.fields.size() - info.fields.size())
+                               : 0;
     spec.flags = (info.isCase ? BytecodeModule::kClassCase : 0u) |
                  (info.isCase && info.kind == ClassKind::Object ? BytecodeModule::kClassCaseObject
                                                                 : 0u) |
@@ -603,12 +635,12 @@ bool Compiler::compileConstructor(const TemplateDef& t, const ClassInfo& info) {
     // so `class P(val x: Double)` with `new P(4)` stores 4.0 as scalac does.
     const std::size_t beforeWidening = mod->code().size();
     widenDoubleParams(t.ctorParams, /*method=*/true);
-    bool fieldsOnly = info.isCase && info.kind == ClassKind::Class && !info.mutableInstances &&
+    bool fieldsOnly = fieldGroups() && info.kind == ClassKind::Class && !info.mutableInstances &&
                       !info.primaryVariadic && mod->code().size() == beforeWidening &&
-                      info.fields.size() == t.ctorParams.size();
+                      (!info.isCase || info.fields.size() == t.ctorParams.size());
     for (std::size_t k = 0; fieldsOnly && k < t.ctorParams.size(); ++k)
         fieldsOnly = !t.ctorParams[k].byName &&
-                     info.fields[k] == info.members.at(t.ctorParams[k].name).key;
+                     (!info.isCase || info.fields[k] == info.members.at(t.ctorParams[k].name).key);
 
     // Parameter fields first, as scalac assigns them: a superclass constructor
     // that calls an overridden method must already see them. compileInitCall

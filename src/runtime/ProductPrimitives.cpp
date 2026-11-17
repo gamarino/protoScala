@@ -284,9 +284,10 @@ const ProtoObject* product_copy(ProtoContext* ctx, const ProtoObject* self, cons
 // The elements of `t` from the arguments: _1 .. _n.
 const ProtoObject* fillTuple(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* t,
                              const proto::ProtoArguments* args, proto::proto_ulong n) {
+    const ProtoObject* elems[kMaxTupleArity];
     for (proto::proto_ulong k = 0; k < n; ++k)
-        t = t->setAttribute(ctx, L.tupleFieldKey[k + 1], args->getAt(ctx, static_cast<int>(k)));
-    return t;
+        elems[k] = args->getAt(ctx, static_cast<int>(k));
+    return t->setAttributes(ctx, static_cast<unsigned>(n), &L.tupleFieldKey[1], elems);
 }
 
 // TupleN.<init>(this, a1..an): the fields _1.._n (tuples have no Scala body).
@@ -307,7 +308,8 @@ PRIM(tuple_apply) {
     const proto::proto_ulong n = fields ? fields->getSize(ctx) : 0;
     if (n < 2 || n > kMaxTupleArity) throw std::logic_error("tuple companion without an arity");
     expectArgs(ctx, args, "apply", n);
-    return fillTuple(ctx, L, L.tupleProto[n]->newChild(ctx, false), args, n);
+    const ProtoObject* tmpl = L.tupleProto[n]->getOwnAttributeDirect(ctx, L.instanceTemplateKey);
+    return fillTuple(ctx, L, tmpl ? tmpl : L.tupleProto[n]->newChild(ctx, false), args, n);
 }
 
 } // namespace

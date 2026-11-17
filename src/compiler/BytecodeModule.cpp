@@ -183,7 +183,7 @@ std::size_t BytecodeModule::addNames(const std::vector<std::string>& names) {
 }
 
 std::size_t BytecodeModule::addClassSpec(const ClassSpecData& spec) {
-    Const c{ConstKind::ClassSpec, 0, 0.0, spec.displayName};
+    Const c{ConstKind::ClassSpec, spec.extraFieldCount, 0.0, spec.displayName};
     c.argc = spec.parentCount;
     c.names = spec.memberKeys;
     c.fields = spec.fields;
@@ -376,7 +376,14 @@ std::string formatConst(const BytecodeModule::Const& c) {
         case BytecodeModule::ConstKind::ClassSpec: {
             std::string out = "class " + c.sval + " " + c.key + " parents=" +
                               std::to_string(c.argc) + " members=" + nameList(c.names);
-            if (c.flags & BytecodeModule::kClassCase) out += " fields=" + nameList(c.fields);
+            if (c.flags & BytecodeModule::kClassCase) {
+                const std::size_t prodCount =
+                    c.ival > 0 && static_cast<std::size_t>(c.ival) <= c.fields.size()
+                        ? c.fields.size() - static_cast<std::size_t>(c.ival)
+                        : c.fields.size();
+                out += " fields=" + nameList(std::vector<std::string>(
+                                        c.fields.begin(), c.fields.begin() + prodCount));
+            }
             return out;
         }
         case BytecodeModule::ConstKind::SuperSite:

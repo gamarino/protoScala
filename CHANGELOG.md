@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Class and tuple prototype templates (`__template__`) with `ProtoObject::newClone`.**
+  `MAKE_CLASS` (`ExecutionEngine::makeClass`) and `Runtime::Runtime` (`Tuple2`..`Tuple22`)
+  now build an immutable template instance (`__template__`) per non-trait class whose
+  `ProtoShape` is pre-populated with all own and inherited instance field keys (slots
+  left unset via `removeAttribute` so `hasOwnAttribute` answers `PROTO_FALSE` until
+  the constructor assigns each field, preserving `STORE_FIELD_IF_NEW` / `STORE_FIELDS_IF_NEW`
+  override semantics). `ExecutionEngine::instantiate`, `makeTuple`, and `tuple_apply`
+  derive every new instance from this template via `ProtoObject::newClone` (or direct
+  `setAttributes` when `kClassFieldsOnlyInit` holds), so all instances of a class share
+  a single `ParentLink` and a single `ProtoShape` chain across the per-thread shape cache.
+  Measured on `benchmarks/run_benchmarks.py` (Release): `object_tree` improves from
+  `331.2 ms` to `226.5 ms` (**1.46× faster**, −31.6%), `map_build` from `258.3 ms` to
+  `202.4–207.2 ms` (**1.25×–1.28× faster**, −21.6%), `case_copy` from `628.8 ms` to
+  `539.4 ms` (**1.17× faster**, −14.2%), and overall geomean vs CPython from `0.91×`
+  to `0.82×`.
+- Require `protoCore >= 3.6.0` with `ProtoObject::newClone`.
+
 ## [0.6.6] - 2026-11-14
 
 **Built and tested against protoCore 3.6.0, protoST 0.12.0 and protoIO 0.7.0.**

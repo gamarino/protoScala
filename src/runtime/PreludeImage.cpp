@@ -62,6 +62,7 @@ void replayConst(BytecodeModule& m, const PreludeConstRec& c) {
             spec.memberKeys = stringsAt(c.namesFirst, c.namesCount);
             spec.fields = stringsAt(c.fieldsFirst, c.fieldsCount);
             spec.flags = c.flags;
+            spec.extraFieldCount = c.ival;
             m.addClassSpec(spec);
             return;
         }

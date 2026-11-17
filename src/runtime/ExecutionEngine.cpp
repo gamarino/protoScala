@@ -439,17 +439,35 @@ const proto::ProtoObject* ExecutionEngine::instantiate(proto::ProtoContext* ctx,
                                                        const proto::ProtoKeywordArguments* keywords) {
     const RuntimeLayout& L = layout_;
     const proto::ProtoObject* cls = base[0];
-    // Mutability is inherited: a subclass of a class with a `var` field also
-    // builds mutable instances, so this is a chain lookup (the shape's chain
-    // is the linearization, as TEST_PROTO relies on). The constructor is not:
-    // inheriting a parent's <init> would skip the subclass's own fields.
-    const bool mutableInstances = cls->getAttribute(ctx, L.mutableKey) == PROTO_TRUE;
     const proto::ProtoObject* init = cls->getOwnAttributeDirect(ctx, ctorKey);
-    base[0] = cls->newChild(ctx, mutableInstances);  // the instance's chain keeps cls alive
-    if (!init)
+    const proto::ProtoObject* tmpl = cls->getOwnAttributeDirect(ctx, L.instanceTemplateKey);
+    if (!init) {
+        const proto::ProtoObject* probe = tmpl ? tmpl : cls->newChild(ctx, false);
         throw ScalaError("IllegalArgumentException",
-                         typeName(ctx, L, base[0]) + " has no constructor taking " +
+                         typeName(ctx, L, probe) + " has no constructor taking " +
                              std::to_string(argc) + " arguments");
+    }
+    if (tmpl && ctorKey == L.initKey && !keywords && !debug::attached() &&
+        cls->getOwnAttributeDirect(ctx, L.fieldsOnlyInitKey) == PROTO_TRUE) {
+        const proto::ProtoObject* flistObj = cls->getOwnAttributeDirect(ctx, L.ctorFieldsKey);
+        const proto::ProtoList* flist = isListFast(flistObj) ? flistObj->asList(ctx) : nullptr;
+        if (flist && flist->getSize(ctx) == argc) {
+            if (argc == 0) return tmpl->newClone(ctx, false);
+            constexpr unsigned kFastMax = 32;
+            if (argc <= kFastMax) {
+                const proto::ProtoString* keys[kFastMax];
+                for (unsigned k = 0; k < argc; ++k)
+                    keys[k] = reinterpret_cast<const proto::ProtoString*>(
+                        flist->getAt(ctx, static_cast<int>(k)));
+                return tmpl->setAttributes(ctx, argc, keys, base + 1);
+            }
+        }
+    }
+    // Mutability is inherited: makeClass records it directly on cls, with a
+    // chain fallback when a prototype was built without a template instance.
+    const bool mutableInstances = cls->getOwnAttributeDirect(ctx, L.mutableKey) == PROTO_TRUE ||
+                                  (!tmpl && cls->getAttribute(ctx, L.mutableKey) == PROTO_TRUE);
+    base[0] = tmpl ? tmpl->newClone(ctx, mutableInstances) : cls->newChild(ctx, mutableInstances);
     return callWithReceiver(ctx, init, base, argc, keywords);
 }
 
@@ -492,18 +510,48 @@ const proto::ProtoObject* ExecutionEngine::makeClass(proto::ProtoContext* ctx,
         shape = shape->setAttribute(ctx, spec.nameSymbols[k], base[spec.argc + k]);
     shape = shape->setAttribute(ctx, spec.keySymbol, PROTO_TRUE);
     shape = shape->setAttribute(ctx, L.nameKey, makeString(ctx, spec.sval));
-    if (spec.flags & BytecodeModule::kClassMutableInstances)
+    if ((spec.flags & BytecodeModule::kClassMutableInstances) ||
+        shape->getAttribute(ctx, L.mutableKey) == PROTO_TRUE)
         shape = shape->setAttribute(ctx, L.mutableKey, PROTO_TRUE);
+
+    const std::size_t totalFields = spec.fieldSymbols.size();
+    const std::size_t extraFields =
+        (spec.ival > 0 && static_cast<std::size_t>(spec.ival) <= totalFields)
+            ? static_cast<std::size_t>(spec.ival)
+            : 0;
+    const std::size_t productCount = totalFields - extraFields;
+
     if (spec.flags & BytecodeModule::kClassCase) {
         shape = shape->setAttribute(ctx, L.prefixKey, makeString(ctx, spec.sval));
         if (!(spec.flags & BytecodeModule::kClassCaseObject)) {
             const proto::ProtoList* fields = ctx->newList();
-            for (const proto::ProtoString* f : spec.fieldSymbols)
-                fields = fields->appendLast(ctx, f->asObject(ctx));
-            shape = shape->setAttribute(ctx, L.fieldsKey, fields->asObject(ctx));
-            if (spec.flags & BytecodeModule::kClassFieldsOnlyInit)
+            for (std::size_t k = 0; k < productCount; ++k)
+                fields = fields->appendLast(ctx, spec.fieldSymbols[k]->asObject(ctx));
+            const proto::ProtoObject* fieldsObj = fields->asObject(ctx);
+            shape = shape->setAttribute(ctx, L.fieldsKey, fieldsObj);
+            if (spec.flags & BytecodeModule::kClassFieldsOnlyInit) {
                 shape = shape->setAttribute(ctx, L.fieldsOnlyInitKey, PROTO_TRUE);
+                shape = shape->setAttribute(ctx, L.ctorFieldsKey, fieldsObj);
+            }
         }
+    } else if (spec.flags & BytecodeModule::kClassFieldsOnlyInit) {
+        const proto::ProtoList* fields = ctx->newList();
+        for (std::size_t k = 0; k < totalFields; ++k)
+            fields = fields->appendLast(ctx, spec.fieldSymbols[k]->asObject(ctx));
+        shape = shape->setAttribute(ctx, L.fieldsOnlyInitKey, PROTO_TRUE);
+        shape = shape->setAttribute(ctx, L.ctorFieldsKey, fields->asObject(ctx));
+    }
+
+    if (!(spec.flags & BytecodeModule::kClassTrait)) {
+        const proto::ProtoObject* tmpl = shape->newChild(ctx, /*isMutable=*/false);
+        if (totalFields > 0) {
+            std::vector<const proto::ProtoObject*> initVals(totalFields, PROTO_NONE);
+            tmpl = tmpl->setAttributes(ctx, static_cast<unsigned>(totalFields),
+                                       spec.fieldSymbols.data(), initVals.data());
+            for (const proto::ProtoString* f : spec.fieldSymbols)
+                tmpl = tmpl->removeAttribute(ctx, f);
+        }
+        shape = shape->setAttribute(ctx, L.instanceTemplateKey, tmpl);
     }
     return shape;
 }
@@ -512,9 +560,10 @@ const proto::ProtoObject* ExecutionEngine::makeTuple(proto::ProtoContext* ctx,
                                                      const proto::ProtoObject* const* elems,
                                                      unsigned n) {
     const RuntimeLayout& L = layout_;
-    const proto::ProtoObject* t = L.tupleProto[n]->newChild(ctx, false);
-    for (unsigned k = 0; k < n; ++k) t = t->setAttribute(ctx, L.tupleFieldKey[k + 1], elems[k]);
-    return t;
+    const proto::ProtoObject* tmpl =
+        L.tupleProto[n]->getOwnAttributeDirect(ctx, L.instanceTemplateKey);
+    const proto::ProtoObject* t = tmpl ? tmpl : L.tupleProto[n]->newChild(ctx, false);
+    return t->setAttributes(ctx, n, &L.tupleFieldKey[1], elems);
 }
 
 // super.m(args) in a method defined by the template site.key (DESIGN §4.4):

@@ -95,6 +95,8 @@ Runtime::Runtime(proto::ProtoSpace& space) : space_(space) {
     L.tupleKey = key("__tuple__");
     L.mutableKey = key("__mutable__");
     L.fieldsOnlyInitKey = key("__fields_only_init__");
+    L.instanceTemplateKey = key("__template__");
+    L.ctorFieldsKey = key("__ctor_fields__");
     L.selfKey = key("__self__");
     L.listKey = key("__list__");
     L.predsKey = key("__preds__");
@@ -135,10 +137,20 @@ Runtime::Runtime(proto::ProtoSpace& space) : space_(space) {
         t->setAttribute(ctx, L.prefixKey, makeString(ctx, name));
         t->setAttribute(ctx, L.tupleKey, PROTO_TRUE);
         const proto::ProtoObject* keys[kMaxTupleArity];
-        for (unsigned k = 1; k <= n; ++k) keys[k - 1] = L.tupleFieldKey[k]->asObject(ctx);
+        const proto::ProtoObject* nones[kMaxTupleArity];
+        for (unsigned k = 1; k <= n; ++k) {
+            keys[k - 1] = L.tupleFieldKey[k]->asObject(ctx);
+            nones[k - 1] = PROTO_NONE;
+        }
         const proto::ProtoObject* fields = ctx->newList(n, keys)->asObject(ctx);
         t->setAttribute(ctx, L.fieldsKey, fields);
+        t->setAttribute(ctx, L.ctorFieldsKey, fields);
         t->setAttribute(ctx, L.fieldsOnlyInitKey, PROTO_TRUE);  // tuple_init fills _1.._n only
+        const proto::ProtoObject* tmpl =
+            t->newChild(ctx, false)->setAttributes(ctx, n, &L.tupleFieldKey[1], nones);
+        for (unsigned k = 1; k <= n; ++k)
+            tmpl = tmpl->removeAttribute(ctx, L.tupleFieldKey[k]);
+        t->setAttribute(ctx, L.instanceTemplateKey, tmpl);
         // The companion carries the same element keys: its native `apply`
         // reads its arity from them (ProductPrimitives.cpp).
         proto::ProtoObject* companion = L.tupleCompanion[n];

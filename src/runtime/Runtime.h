@@ -75,6 +75,8 @@ struct RuntimeLayout {
     const proto::ProtoString* tupleKey = nullptr;     // "__tuple__": PROTO_TRUE on Tuple2..22
     const proto::ProtoString* mutableKey = nullptr;   // "__mutable__": instances are mutable
     const proto::ProtoString* fieldsOnlyInitKey = nullptr;  // "__fields_only_init__": see kClassFieldsOnlyInit
+    const proto::ProtoString* instanceTemplateKey = nullptr; // "__template__": archetype instance for newClone
+    const proto::ProtoString* ctorFieldsKey = nullptr;       // "__ctor_fields__": parameter keys when kClassFieldsOnlyInit
     const proto::ProtoString* selfKey = nullptr;      // "__self__": receiver of a bound method
     const proto::ProtoString* listKey = nullptr;      // "__list__": the source of a WithFilter
     const proto::ProtoString* predsKey = nullptr;     // "__preds__": its predicates (ProtoList)
