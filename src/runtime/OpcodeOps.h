@@ -311,7 +311,7 @@ inline const proto::ProtoObject* neg(proto::ProtoContext* ctx, ExecutionEngine& 
                                      const proto::ProtoObject* a) {
     if (proto::isSmallInt(a) && proto::asSmallInt(a) != proto::PROTO_SMALL_INT_MIN)
         return proto::makeSmallInt(-proto::asSmallInt(a));
-    if (isNumberFast(a)) return a->negate(ctx);
+    if (isNumberFast(ctx, a)) return a->negate(ctx);
     return eng.send(ctx, a, Engine::layout(eng).unaryMinusName, nullptr, 0);
 }
 

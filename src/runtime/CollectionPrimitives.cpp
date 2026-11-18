@@ -63,7 +63,7 @@ RangeView viewOf(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* r
 // more than 2^53 elements would cost an allocation on every Range method.
 long long rangeBound(ProtoContext* ctx, const ProtoObject* v, const char* method) {
     if (!proto::isSmallInt(v)) {
-        if (!isNumberFast(v) && !isCharFast(v)) wrongType(ctx, method, "an Int", v);
+        if (!isNumberFast(ctx, v) && !isCharFast(ctx, v)) wrongType(ctx, method, "an Int", v);
         throw ScalaError("IllegalArgumentException",
                          "a Range bound must fit a 54-bit integer");
     }
@@ -428,7 +428,7 @@ PRIM(prim_range_toString) {
 // A Vector's payload, or the receiver itself when it is a raw List.
 const ProtoList* seqData(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* self,
                          const char* method) {
-    if (isListFast(self)) return self->asList(ctx);
+    if (isListFast(ctx, self)) return self->asList(ctx);
     if (isVectorFast(ctx, L, self)) return self->getAttribute(ctx, L.vecDataKey)->asList(ctx);
     wrongType(ctx, method, "a List or a Vector", self);
 }
@@ -443,11 +443,11 @@ const ProtoObject* newVector(ProtoContext* ctx, const RuntimeLayout& L, const Pr
 // A result of the same kind as the receiver.
 const ProtoObject* rewrap(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* self,
                           const ProtoList* data) {
-    return isListFast(self) ? data->asObject(ctx) : newVector(ctx, L, data);
+    return isListFast(ctx, self) ? data->asObject(ctx) : newVector(ctx, L, data);
 }
 
 bool isVectorReceiver(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* self) {
-    return !isListFast(self) && isVectorFast(ctx, L, self);
+    return !isListFast(ctx, self) && isVectorFast(ctx, L, self);
 }
 
 // Every element of any Seq kind the argument may be (a List, a Vector or a
@@ -1035,8 +1035,8 @@ PRIM(prim_seq_sum) {
     const auto n = static_cast<long long>(xs->getSize(ctx));
     const ProtoObject* acc = proto::makeSmallInt(0);
     for (long long i = 0; i < n; ++i) {
-        const ProtoObject* x = widenChar(xs->getAt(ctx, static_cast<int>(i)));
-        if (!isNumberFast(x)) wrongType(ctx, "sum", "a number", x);
+        const ProtoObject* x = widenChar(ctx, xs->getAt(ctx, static_cast<int>(i)));
+        if (!isNumberFast(ctx, x)) wrongType(ctx, "sum", "a number", x);
         acc = acc->add(ctx, x);
     }
     return acc;
@@ -1049,8 +1049,8 @@ PRIM(prim_seq_product) {
     const auto n = static_cast<long long>(xs->getSize(ctx));
     const ProtoObject* acc = proto::makeSmallInt(1);
     for (long long i = 0; i < n; ++i) {
-        const ProtoObject* x = widenChar(xs->getAt(ctx, static_cast<int>(i)));
-        if (!isNumberFast(x)) wrongType(ctx, "product", "a number", x);
+        const ProtoObject* x = widenChar(ctx, xs->getAt(ctx, static_cast<int>(i)));
+        if (!isNumberFast(ctx, x)) wrongType(ctx, "product", "a number", x);
         acc = acc->multiply(ctx, x);
     }
     return acc;
@@ -1067,9 +1067,9 @@ PRIM(prim_seq_product) {
 // order is numbers (Char included, by code point), strings and booleans.
 int compareValues(ProtoContext* ctx, const ProtoObject* a, const ProtoObject* b,
                   const char* method) {
-    const ProtoObject* x = widenChar(a);
-    const ProtoObject* y = widenChar(b);
-    const bool numeric = isNumberFast(x) && isNumberFast(y);
+    const ProtoObject* x = widenChar(ctx, a);
+    const ProtoObject* y = widenChar(ctx, b);
+    const bool numeric = isNumberFast(ctx, x) && isNumberFast(ctx, y);
     const bool strings = proto::ProtoObject::isStringTagFast(x) &&
                          proto::ProtoObject::isStringTagFast(y);
     const bool booleans = (x == PROTO_TRUE || x == PROTO_FALSE) &&
@@ -1283,9 +1283,9 @@ bool scalaIsIdentityKey(ProtoContext* ctx, const ProtoObject* key) {
 
     // --- bullet 2 first: every value-equality kind, so the fallthrough at the
     //     bottom can default to identity without swallowing one of them.
-    if (isNumberFast(key)) return false;                          // numbers
+    if (isNumberFast(ctx, key)) return false;                          // numbers
     if (proto::ProtoObject::isStringTagFast(key)) return false;   // strings
-    if (isListFast(key)) return false;                            // collections
+    if (isListFast(ctx, key)) return false;                            // collections
     if (isVectorFast(ctx, L, key) || isMapFast(ctx, L, key) ||
         isSetFast(ctx, L, key) || isRangeFast(ctx, L, key))
         return false;                                             // collections
@@ -1298,7 +1298,7 @@ bool scalaIsIdentityKey(ProtoContext* ctx, const ProtoObject* key) {
     //     Map('a' -> 1) must be found by a lookup of 97. Sending it down the
     //     value path does that for free, because scalaHash already hashes a Char
     //     to its code point and valuesEqual already widens a Char to it.
-    if (isCharFast(key)) return false;
+    if (isCharFast(ctx, key)) return false;
 
     // --- bullet 1: unique-word immediates. `==` on each of these IS word
     //     identity, which is bullet 1's own criterion.

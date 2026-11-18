@@ -125,7 +125,7 @@ proto::ProtoContext* ExecutionEngine::foreignReentryContext(const proto::ProtoSp
 
 const proto::ProtoObject* ExecutionEngine::smalltalkEntryOf(proto::ProtoContext* ctx,
                                                             const proto::ProtoObject* receiver) const {
-    if (receiver == PROTO_NONE || !isObjectCellFast(receiver)) return nullptr;
+    if (receiver == PROTO_NONE || !isObjectCellFast(ctx, receiver)) return nullptr;
     const proto::ProtoObject* e = receiver->getAttribute(ctx, layout_.stSendKey);
     if (!e || e == PROTO_NONE || !e->isMethod(ctx)) return nullptr;
     layout_.smalltalkSeen.store(true, std::memory_order_relaxed);
@@ -357,7 +357,7 @@ const proto::ProtoObject* ExecutionEngine::callMember(proto::ProtoContext* ctx,
         if (select) return m;                        // a function-valued field
         return invoke(ctx, m, base + 1, argc);       // obj.f(args) = obj.f.apply(args)
     }
-    if (isObjectCellFast(m) && m->getPrototype(ctx) == L.lazyProto) {  // a lazy val member
+    if (m && m->getPrototype(ctx) == L.lazyProto) {  // a lazy val member (an object cell)
         const proto::ProtoObject* v = forceMember(ctx, m, base[0]);
         if (select) return v;
         base[0] = v;  // the receiver is no longer needed; keep v rooted
@@ -379,7 +379,7 @@ const proto::ProtoObject* ExecutionEngine::callMember(proto::ProtoContext* ctx,
     // session that never meets protoST skips them all.
     if (name &&
         (!select || (L.smalltalkSeen.load(std::memory_order_relaxed) &&
-                     isObjectCellFast(m) && isForeignObject(ctx, L, m))))
+                     isObjectCellFast(ctx, m) && isForeignObject(ctx, L, m))))
         if (const proto::ProtoObject* st = smalltalkEntryOf(ctx, base[0]))
             return sendSmalltalk(ctx, st, base, name, argc);
     if (select) return m;                            // a field
@@ -450,7 +450,7 @@ const proto::ProtoObject* ExecutionEngine::instantiate(proto::ProtoContext* ctx,
     if (tmpl && ctorKey == L.initKey && !keywords && !debug::attached() &&
         cls->getOwnAttributeDirect(ctx, L.fieldsOnlyInitKey) == PROTO_TRUE) {
         const proto::ProtoObject* flistObj = cls->getOwnAttributeDirect(ctx, L.ctorFieldsKey);
-        const proto::ProtoList* flist = isListFast(flistObj) ? flistObj->asList(ctx) : nullptr;
+        const proto::ProtoList* flist = isListFast(ctx, flistObj) ? flistObj->asList(ctx) : nullptr;
         if (flist && flist->getSize(ctx) == argc) {
             if (argc == 0) return tmpl->newClone(ctx, false);
             constexpr unsigned kFastMax = 32;
@@ -791,16 +791,16 @@ bool ExecutionEngine::testType(proto::ProtoContext* ctx, TypeCode code,
                                const proto::ProtoObject* v) const {
     const RuntimeLayout& L = layout_;
     const bool isBool = v == PROTO_TRUE || v == PROTO_FALSE;
-    const bool anyVal = isNumberFast(v) || isCharFast(v) || isBool || v == L.unit;
+    const bool anyVal = isNumberFast(ctx, v) || isCharFast(ctx, v) || isBool || v == L.unit;
     switch (code) {
-        case TypeCode::Integer:  return isIntegerFast(v);
-        case TypeCode::Double:   return isDoubleFast(v);
+        case TypeCode::Integer:  return isIntegerFast(ctx, v);
+        case TypeCode::Double:   return isDoubleFast(ctx, v);
         case TypeCode::Boolean:  return isBool;
-        case TypeCode::Char:     return isCharFast(v);
+        case TypeCode::Char:     return isCharFast(ctx, v);
         case TypeCode::String:   return proto::ProtoObject::isStringTagFast(v);
         case TypeCode::Unit:     return v == L.unit;
-        case TypeCode::List:     return isListFast(v);
-        case TypeCode::ConsList: return isListFast(v) && v->asList(ctx)->getSize(ctx) > 0;
+        case TypeCode::List:     return isListFast(ctx, v);
+        case TypeCode::ConsList: return isListFast(ctx, v) && v->asList(ctx)->getSize(ctx) > 0;
         case TypeCode::Function: return v != PROTO_NONE && (compiledModuleOf(ctx, L, v) || v->isMethod(ctx));
         case TypeCode::AnyRef:   return v != PROTO_NONE && !anyVal;
         case TypeCode::AnyVal:   return anyVal;
@@ -1222,7 +1222,7 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                     const unsigned n = static_cast<unsigned>(operand);
                     const proto::ProtoObject** base = sp - n - 2;  // callee
                     const proto::ProtoObject* listObj = sp[-1];
-                    if (!isListFast(listObj))
+                    if (!isListFast(&frame, listObj))
                         throw ScalaError("ClassCastException",
                                          typeName(&frame, L, listObj) + " cannot be spliced as arguments");
                     const proto::ProtoList* list = listObj->asList(&frame);
@@ -1357,7 +1357,7 @@ const proto::ProtoObject* ExecutionEngine::runLoop(proto::ProtoContext& frame,
                     const unsigned n = site.argc;
                     const proto::ProtoObject** base = sp - n - 2;  // [cls a1..an list]
                     const proto::ProtoObject* listObj = sp[-1];
-                    if (!isListFast(listObj))
+                    if (!isListFast(&frame, listObj))
                         throw ScalaError("ClassCastException",
                                          typeName(&frame, L, listObj) +
                                              " cannot be spliced as arguments");
@@ -1781,12 +1781,12 @@ const proto::ProtoObject* ExecutionEngine::slowBinary(proto::ProtoContext* ctx, 
             ->appendLast(ctx, reinterpret_cast<const proto::ProtoString*>(sb))->asObject(ctx);
     }
     // "ab" * 3
-    if (op == Op::MUL && proto::ProtoObject::isStringTagFast(a) && isIntegerFast(b))
+    if (op == Op::MUL && proto::ProtoObject::isStringTagFast(a) && isIntegerFast(ctx, b))
         return a->multiply(ctx, b);
     // Numbers, with Char promoted to its code point (Scala Char arithmetic yields Int).
-    const proto::ProtoObject* x = widenChar(a);
-    const proto::ProtoObject* y = widenChar(b);
-    if (isNumberFast(x) && isNumberFast(y)) {
+    const proto::ProtoObject* x = widenChar(ctx, a);
+    const proto::ProtoObject* y = widenChar(ctx, b);
+    if (isNumberFast(ctx, x) && isNumberFast(ctx, y)) {
         switch (op) {
             case Op::ADD: return x->add(ctx, y);
             case Op::SUB: return x->subtract(ctx, y);

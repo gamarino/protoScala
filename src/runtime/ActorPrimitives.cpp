@@ -30,7 +30,7 @@ bool isCallable(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* v)
     if (!v || v == PROTO_NONE) return false;
     if (v->isMethod(ctx)) return true;
     if (compiledModuleOf(ctx, L, v)) return true;
-    return isObjectCellFast(v) && v->hasAttribute(ctx, L.applyName) == PROTO_TRUE;
+    return isObjectCellFast(ctx, v) && v->hasAttribute(ctx, L.applyName) == PROTO_TRUE;
 }
 
 const ProtoObject* makeTuple2(ProtoContext* ctx, const RuntimeLayout& L, const ProtoObject* a,

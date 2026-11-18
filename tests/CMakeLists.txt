@@ -56,6 +56,12 @@ foreach(cli_test ${PROTOSCALA_TRANSPILER_CLI_TESTS})
 endforeach()
 
 set_tests_properties(cli/actors-shutdown cli/actors-stress PROPERTIES TIMEOUT 600)
+
+# protoScala depends on protoCore's public API only: no proto_internal.h, no
+# hand-copied pointer tags, embedded types or cell layouts under src/.
+add_test(NAME source/no-protocore-internals
+    COMMAND ${PROTOSCALA_SH} "${CMAKE_CURRENT_SOURCE_DIR}/cli/no-protocore-internals.sh"
+            "${CMAKE_SOURCE_DIR}")
 # `actors-stress` deliberately builds the largest live set in the tree: 8
 # threads queue 200000 messages into ONE actor's mailbox, and the run is timed
 # from the moment the last worker could start draining, so the backlog is held

@@ -53,13 +53,13 @@ const BytecodeModule* compiledModuleOf(proto::ProtoContext* ctx, const RuntimeLa
 }
 
 bool isScalaInstance(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v) {
-    if (!isObjectCellFast(v) || v == PROTO_NONE) return false;
+    if (!isObjectCellFast(ctx, v) || v == PROTO_NONE) return false;
     if (compiledModuleOf(ctx, L, v)) return false;  // function objects
     return v->hasAttribute(ctx, L.nameKey) == PROTO_TRUE;  // presence, never a PROTO_NONE compare
 }
 
 bool isForeignObject(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v) {
-    return isObjectCellFast(v) && v != PROTO_NONE && !isScalaInstance(ctx, L, v) &&
+    return isObjectCellFast(ctx, v) && v != PROTO_NONE && !isScalaInstance(ctx, L, v) &&
            !compiledModuleOf(ctx, L, v) && !v->isMethod(ctx) &&
            v->isInstanceOf(ctx, L.anyProto) != PROTO_TRUE;
 }
@@ -165,32 +165,35 @@ std::string formatDouble(double d) {
 // for every other kind. Prototype identity is exact here because each of the
 // four is built only by newChild of its pinned prototype and none is
 // subclassable (they are final builtin types), and it also tells a Set from a
-// Map, which carry the same `__map__` payload key.
+// Map, which carry the same `__map__` payload key. No separate object-cell
+// test is needed: getPrototype answers a runtime-built prototype only for an
+// object cell that inherits from it (every other value answers a ProtoSpace
+// prototype of its kind).
 bool isRangeFast(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v) {
-    return L.rangeProto != nullptr && isObjectCellFast(v) && v->getPrototype(ctx) == L.rangeProto;
+    return L.rangeProto != nullptr && v && v->getPrototype(ctx) == L.rangeProto;
 }
 
 bool isVectorFast(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v) {
-    return L.vectorProto != nullptr && isObjectCellFast(v) && v->getPrototype(ctx) == L.vectorProto;
+    return L.vectorProto != nullptr && v && v->getPrototype(ctx) == L.vectorProto;
 }
 
 bool isMapFast(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v) {
-    return L.mapProto != nullptr && isObjectCellFast(v) && v->getPrototype(ctx) == L.mapProto;
+    return L.mapProto != nullptr && v && v->getPrototype(ctx) == L.mapProto;
 }
 
 bool isSetFast(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v) {
-    return L.setProto != nullptr && isObjectCellFast(v) && v->getPrototype(ctx) == L.setProto;
+    return L.setProto != nullptr && v && v->getPrototype(ctx) == L.setProto;
 }
 
 SeqView seqViewOf(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v) {
     SeqView out;
-    if (isListFast(v)) {
+    if (isListFast(ctx, v)) {
         out.list = v->asList(ctx);
         out.size = static_cast<long long>(out.list->getSize(ctx));
         out.valid = true;
         return out;
     }
-    if (!isObjectCellFast(v)) return out;            // cheap reject before two probes
+    if (!isObjectCellFast(ctx, v)) return out;            // cheap reject before two probes
     if (isVectorFast(ctx, L, v)) {
         out.list = v->getAttribute(ctx, L.vecDataKey)->asList(ctx);
         out.size = static_cast<long long>(out.list->getSize(ctx));
@@ -225,16 +228,16 @@ std::string show(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::
     if (v == PROTO_TRUE) return "true";
     if (v == PROTO_FALSE) return "false";
     if (proto::isSmallInt(v)) return std::to_string(proto::asSmallInt(v));
-    if (isLargeIntFast(v)) return v->asIntegerString(ctx, 10)->toStdString(ctx);
-    if (isDoubleFast(v)) return formatDouble(v->asDouble(ctx));
-    if (isCharFast(v)) {
+    if (isLargeIntFast(ctx, v)) return v->asIntegerString(ctx, 10)->toStdString(ctx);
+    if (isDoubleFast(ctx, v)) return formatDouble(v->asDouble(ctx));
+    if (isCharFast(ctx, v)) {
         std::string out;
-        appendUtf8(out, charValueFast(v));
+        appendUtf8(out, charValueFast(ctx, v));
         return out;
     }
     if (proto::ProtoObject::isStringTagFast(v))
         return reinterpret_cast<const proto::ProtoString*>(v)->toStdString(ctx);
-    if (isListFast(v)) {
+    if (isListFast(ctx, v)) {
         checkNativeStack();  // nested lists recurse
         const proto::ProtoList* list = v->asList(ctx);
         const proto::proto_ulong n = list->getSize(ctx);
@@ -265,11 +268,16 @@ bool valuesEqual(proto::ProtoContext* ctx, const RuntimeLayout& L,
                  const proto::ProtoObject* a, const proto::ProtoObject* b) {
     if (!a) a = PROTO_NONE;
     if (!b) b = PROTO_NONE;
-    const bool aNum = isNumberFast(a) || isCharFast(a);
-    const bool bNum = isNumberFast(b) || isCharFast(b);
+    // A String receiver first (an inline test): it is no number, no Seq and
+    // no Scala instance, so it equals only an equal String.
+    if (proto::ProtoObject::isStringTagFast(a))
+        return a == b || (proto::ProtoObject::isStringTagFast(b) &&
+                          a->partialCompare(ctx, b) == std::partial_ordering::equivalent);
+    const bool aNum = isNumberFast(ctx, a) || isCharFast(ctx, a);
+    const bool bNum = isNumberFast(ctx, b) || isCharFast(ctx, b);
     if (aNum && bNum) {
-        const proto::ProtoObject* x = widenChar(a);
-        const proto::ProtoObject* y = widenChar(b);
+        const proto::ProtoObject* x = widenChar(ctx, a);
+        const proto::ProtoObject* y = widenChar(ctx, b);
         if (proto::isSmallInt(x) && proto::isSmallInt(y)) return x == y;
         return x->partialCompare(ctx, y) == std::partial_ordering::equivalent;  // NaN: unordered
     }
@@ -309,11 +317,11 @@ std::string typeName(proto::ProtoContext* ctx, const RuntimeLayout& L, const pro
     if (!v || v == PROTO_NONE) return "Null";
     if (v == L.unit) return "Unit";
     if (v == PROTO_TRUE || v == PROTO_FALSE) return "Boolean";
-    if (isIntegerFast(v)) return "Int";
-    if (isDoubleFast(v)) return "Double";
-    if (isCharFast(v)) return "Char";
+    if (isIntegerFast(ctx, v)) return "Int";
+    if (isDoubleFast(ctx, v)) return "Double";
+    if (isCharFast(ctx, v)) return "Char";
     if (proto::ProtoObject::isStringTagFast(v)) return "String";
-    if (isListFast(v)) return "List";
+    if (isListFast(ctx, v)) return "List";
     if (isScalaInstance(ctx, L, v)) return classNameOf(ctx, L, v);
     if (compiledModuleOf(ctx, L, v) || v->isMethod(ctx)) return "Function";
     return "Object";
@@ -324,11 +332,11 @@ std::int32_t scalaHash(proto::ProtoContext* ctx, const RuntimeLayout& L, const p
     if (v == PROTO_TRUE) return 1231;
     if (v == PROTO_FALSE) return 1237;
     if (proto::isSmallInt(v)) return hashing::longHash(proto::asSmallInt(v));
-    if (isLargeIntFast(v)) return hashing::javaStringHash(show(ctx, L, v));  // provisional (BigInt)
-    if (isDoubleFast(v)) return hashing::doubleHash(v->asDouble(ctx));
-    if (isCharFast(v)) return static_cast<std::int32_t>(charValueFast(v));
-    if (proto::ProtoObject::isStringTagFast(v))
+    if (proto::ProtoObject::isStringTagFast(v))  // inline test, before the out-of-line ones
         return hashing::javaStringHash(reinterpret_cast<const proto::ProtoString*>(v)->toStdString(ctx));
+    if (isLargeIntFast(ctx, v)) return hashing::javaStringHash(show(ctx, L, v));  // provisional (BigInt)
+    if (isDoubleFast(ctx, v)) return hashing::doubleHash(v->asDouble(ctx));
+    if (isCharFast(ctx, v)) return static_cast<std::int32_t>(charValueFast(ctx, v));
     // One hash for every Seq kind, over the same view valuesEqual uses.
     // Required, not optional: an ==/## split would make Map(List(0,1,2) -> 1)
     // miss a lookup by (0 until 3) and let Set hold duplicates (plan A0-8).

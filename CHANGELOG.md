@@ -8,6 +8,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **protoCore's public API only: no hand-copied pointer tags.** The value-kind
+  tests of `src/runtime/Values.h` copied protoCore's internal tag values (`(p & 0x3F)
+  == 15` for a Double, `0x3FF == 0x081` for a Char, tags 2/25 for a list, tag 0 for
+  an object cell). They are now compositions of `headers/protoCore.h` alone:
+  `isDouble`, `isInteger` with `isSmallInt`, `getPrototype` against the ProtoSpace kind
+  prototypes (`listPrototype`, `unicodeCharPrototype`), `getFirstParent` and
+  `isCellPointer` for "a plain object cell", and `asLong` for a Char's code point. The
+  helpers now take the `ProtoContext`. No behaviour changes: the full suite gives the
+  same result as before (2527 of 2527 plus the new check). The new CTest case
+  `source/no-protocore-internals` (`tests/cli/no-protocore-internals.sh`) fails if
+  `src/` or `include/` includes `proto_internal.h`, names a `POINTER_TAG_*` /
+  `EMBEDDED_TYPE_*` constant or masks a pointer with `0x3F` / `0x3FF`.
+  **Measured cost** (interleaved A/B, `perf stat -r 3` cycles, medians of 7-9 rounds,
+  every run's printed result verified, protoCore master `eced46bd`, shared machine at
+  load 8-13): `case_copy`, `object_tree` and `map_build` +4.6 % to +5.4 %; the other ten
+  `benchmarks/comparable` workloads (fib, fib30, tak, sum_loop, int_sum_loop,
+  range_iterate, attr_lookup, list_ops, str_concat, factorial_100) within the run-to-run
+  noise (-10 % to +1 %). The cost is the out-of-line `getPrototype` / `getFirstParent`
+  calls that replace a one-instruction tag test. Two exact reorderings keep it there:
+  `scalaHash` and `valuesEqual` test the inline string predicate before the out-of-line
+  numeric ones, and `widenChar` tests `isSmallInt` before the Char test.
+
 - **Class and tuple prototype templates (`__template__`) with `ProtoObject::newClone`.**
   `MAKE_CLASS` (`ExecutionEngine::makeClass`) and `Runtime::Runtime` (`Tuple2`..`Tuple22`)
   now build an immutable template instance (`__template__`) per non-trait class whose

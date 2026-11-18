@@ -129,7 +129,7 @@ unsigned ActorScheduler::suspendedCount() const {
 }
 
 bool ActorScheduler::isActor(proto::ProtoContext* ctx, const proto::ProtoObject* v) const {
-    if (!layout_ || !v || v == PROTO_NONE || !isObjectCellFast(v)) return false;
+    if (!layout_ || !v || v == PROTO_NONE || !isObjectCellFast(ctx, v)) return false;
     return v->hasOwnAttribute(ctx, layout_->stateRefKey) == PROTO_TRUE;
 }
 

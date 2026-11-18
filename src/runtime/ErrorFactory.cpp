@@ -150,7 +150,7 @@ std::string describeThrown(proto::ProtoContext* ctx, const proto::ProtoObject* v
     try {
         const ActiveCallContext* active = activeCallContext();
         const RuntimeLayout* L = active ? active->layout : nullptr;
-        const bool foreign = L && v && v != PROTO_NONE && isObjectCellFast(v) &&
+        const bool foreign = L && v && v != PROTO_NONE && isObjectCellFast(ctx, v) &&
                              v->isInstanceOf(ctx, L->anyProto) != PROTO_TRUE &&
                              !v->isMethod(ctx);
         if (foreign) {

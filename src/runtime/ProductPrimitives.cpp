@@ -28,7 +28,7 @@ using proto::ProtoString;
 // The element keys of `self`'s class; nullptr for a case object.
 const ProtoList* fieldsOf(ProtoContext* ctx, const ProtoObject* self) {
     const ProtoObject* f = self->getAttribute(ctx, layoutOf().fieldsKey);
-    return isListFast(f) ? f->asList(ctx) : nullptr;
+    return isListFast(ctx, f) ? f->asList(ctx) : nullptr;
 }
 
 const ProtoString* keyAt(ProtoContext* ctx, const ProtoList* fields, proto::proto_ulong i) {
@@ -52,7 +52,7 @@ std::string prefixOf(ProtoContext* ctx, const ProtoObject* self) {
 // synthesised equals and canEqual belong to the case class, not the subclass.
 const ProtoObject* caseClassOf(ProtoContext* ctx, const ProtoObject* self) {
     const RuntimeLayout& L = layoutOf();
-    const ProtoObject* cls = isObjectCellFast(self) ? self->getPrototype(ctx) : nullptr;
+    const ProtoObject* cls = isObjectCellFast(ctx, self) ? self->getPrototype(ctx) : nullptr;
     if (!cls) return nullptr;
     if (cls->hasOwnAttribute(ctx, L.prefixKey) == PROTO_TRUE) return cls;
     // A class prototype's parents are its whole linearization (makeClass).
@@ -67,7 +67,7 @@ const ProtoObject* caseClassOf(ProtoContext* ctx, const ProtoObject* self) {
 // `v.isInstanceOf[cls]`: cls is v's class or one of its linearization (D29:
 // the class only, type arguments are erased).
 bool isInstanceOf(ProtoContext* ctx, const ProtoObject* v, const ProtoObject* cls) {
-    if (!isObjectCellFast(v) || v == PROTO_NONE) return false;
+    if (!isObjectCellFast(ctx, v) || v == PROTO_NONE) return false;
     const ProtoObject* c = v->getPrototype(ctx);
     if (!c) return false;
     if (c == cls) return true;

@@ -14,42 +14,72 @@ namespace protoScala {
 
 class BytecodeModule;
 
-// Char: tag 1 + embedded type 2 in the low 10 bits, code point in bits 10..
-// (protoCore headers/proto_internal.h:142,251, core/ProtoContext.cpp:788-794;
-// protoCore has no public isUnicodeChar).
-inline bool isCharFast(const proto::ProtoObject* v) {
-    return (reinterpret_cast<proto::proto_ulong>(v) & PROTO_UL(0x3FF)) == PROTO_UL(0x081);
+// Value-kind tests. Every one is built from protoCore's public API only
+// (headers/protoCore.h); protoScala never copies protoCore's pointer tags,
+// embedded types or cell layouts (tests/source_checks enforce this).
+//
+// Two public facts carry the compositions below:
+//  - ProtoObject::getPrototype answers, for every non-object value, the
+//    ProtoSpace prototype of its kind (listPrototype, unicodeCharPrototype,
+//    ...); for an object cell it answers the object's first parent, or
+//    objectPrototype when it has none.
+//  - ProtoObject::getFirstParent answers PROTO_NONE for every non-object
+//    value and for a parentless object.
+// So "a plain object cell" is: a cell pointer whose first parent exists, or
+// whose prototype is objectPrototype (or none at all: objectPrototype itself).
+
+// Is `v` a plain object cell (not a list, string, number, method, ...)?
+inline bool isObjectCellFast(proto::ProtoContext* ctx, const proto::ProtoObject* v) {
+    // Inline rejects first; then the common case, an object with a parent,
+    // is decided by one call.
+    if (!v || proto::isSmallInt(v) || proto::ProtoObject::isStringTagFast(v)) return false;
+    if (v->getFirstParent(ctx) != PROTO_NONE) return true;
+    if (!proto::ProtoObject::isCellPointer(v)) return false;
+    const proto::ProtoObject* p = v->getPrototype(ctx);
+    return p == nullptr || p == ctx->space->objectPrototype;
 }
-inline char32_t charValueFast(const proto::ProtoObject* v) {
-    return static_cast<char32_t>(reinterpret_cast<proto::proto_ulong>(v) >> 10);
+// Is `v` a value of the primitive kind whose public prototype is `kindProto`
+// (and not an object that merely inherits from that prototype)?
+inline bool isPrimitiveOfKind(proto::ProtoContext* ctx, const proto::ProtoObject* v,
+                              const proto::ProtoObject* kindProto) {
+    if (!v || v->getPrototype(ctx) != kindProto) return false;
+    return !proto::ProtoObject::isCellPointer(v) || v->getFirstParent(ctx) == PROTO_NONE;
+}
+// Char: a protoCore Unicode character (ProtoContext::fromUnicodeChar).
+// protoCore has no public isUnicodeChar; a Unicode character is the one
+// non-cell value whose prototype is ProtoSpace::unicodeCharPrototype.
+inline bool isCharFast(proto::ProtoContext* ctx, const proto::ProtoObject* v) {
+    return v && !proto::isSmallInt(v) && !proto::ProtoObject::isCellPointer(v) &&
+           v->getPrototype(ctx) == ctx->space->unicodeCharPrototype;
+}
+// The code point of a Char (ProtoObject::asLong answers it for a Unicode
+// character). Caller must have validated with isCharFast().
+inline char32_t charValueFast(proto::ProtoContext* ctx, const proto::ProtoObject* v) {
+    return static_cast<char32_t>(v->asLong(ctx));
 }
 // A Char as the SmallInteger of its code point (Scala Char widens to Int in
-// arithmetic and ==); other values unchanged. Allocates nothing.
-inline const proto::ProtoObject* widenChar(const proto::ProtoObject* v) {
-    return isCharFast(v) ? proto::makeSmallInt(static_cast<long long>(charValueFast(v))) : v;
+// arithmetic and ==); other values unchanged. Allocates nothing. The
+// SmallInteger test first keeps the arithmetic fast path at one inline test.
+inline const proto::ProtoObject* widenChar(proto::ProtoContext* ctx, const proto::ProtoObject* v) {
+    if (proto::isSmallInt(v)) return v;
+    return isCharFast(ctx, v) ? proto::makeSmallInt(static_cast<long long>(charValueFast(ctx, v))) : v;
 }
-// POINTER_TAG_DOUBLE = 15, POINTER_TAG_LARGE_INTEGER = 14 (headers/proto_internal.h:236-237).
-inline bool isDoubleFast(const proto::ProtoObject* v) {
-    return v && (reinterpret_cast<proto::proto_ulong>(v) & PROTO_UL(0x3F)) == 15;
+inline bool isDoubleFast(proto::ProtoContext* ctx, const proto::ProtoObject* v) {
+    return v && v->isDouble(ctx);
 }
-inline bool isLargeIntFast(const proto::ProtoObject* v) {
-    return v && (reinterpret_cast<proto::proto_ulong>(v) & PROTO_UL(0x3F)) == 14;
+inline bool isLargeIntFast(proto::ProtoContext* ctx, const proto::ProtoObject* v) {
+    return v && !proto::isSmallInt(v) && v->isInteger(ctx);
 }
-inline bool isIntegerFast(const proto::ProtoObject* v) {
-    return proto::isSmallInt(v) || isLargeIntFast(v);
+inline bool isIntegerFast(proto::ProtoContext* ctx, const proto::ProtoObject* v) {
+    return proto::isSmallInt(v) || isLargeIntFast(ctx, v);
 }
-inline bool isNumberFast(const proto::ProtoObject* v) {
-    return isIntegerFast(v) || isDoubleFast(v);
+inline bool isNumberFast(proto::ProtoContext* ctx, const proto::ProtoObject* v) {
+    return isIntegerFast(ctx, v) || isDoubleFast(ctx, v);
 }
-// POINTER_TAG_LIST = 2, POINTER_TAG_LIST_SMALL = 25 (protoClojure src/compiler/Compiler.cpp:16-36).
-inline bool isListFast(const proto::ProtoObject* v) {
-    const proto::proto_ulong t = reinterpret_cast<proto::proto_ulong>(v) & PROTO_UL(0x3F);
-    return v && (t == 2 || t == 25);
-}
-
-// POINTER_TAG_OBJECT is 0 (protoCore core/ProtoObject.cpp:560-575): an object cell.
-inline bool isObjectCellFast(const proto::ProtoObject* v) {
-    return v && (reinterpret_cast<proto::proto_ulong>(v) & PROTO_UL(0x3F)) == 0;
+// A protoCore ProtoList (both of its storage forms). ProtoObject::asList is
+// not the test: it also answers for strings and for objects wrapping a list.
+inline bool isListFast(proto::ProtoContext* ctx, const proto::ProtoObject* v) {
+    return isPrimitiveOfKind(ctx, v, ctx->space->listPrototype);
 }
 
 // Appends the UTF-8 encoding of code point `c` to `out`.

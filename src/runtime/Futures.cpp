@@ -73,7 +73,7 @@ const proto::ProtoObject* create(proto::ProtoContext* ctx, const RuntimeLayout& 
 }
 
 bool isFuture(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v) {
-    return v && v != PROTO_NONE && isObjectCellFast(v) &&
+    return v && v != PROTO_NONE && isObjectCellFast(ctx, v) &&
            v->hasAttribute(ctx, L.fstateKey) == PROTO_TRUE;
 }
 
