@@ -62,19 +62,19 @@ std::string formatOne(proto::ProtoContext* ctx, const RuntimeLayout& L, const Fo
             // Java's %b: null and false are "false", everything else is "true".
             return pad((v == PROTO_NONE || v == PROTO_FALSE) ? "false" : "true", spec);
         case 'c': {
-            if (!isCharFast(v))
+            if (!isCharFast(ctx, v))
                 throw ScalaError("IllegalArgumentException",
                                  "%c expects a Char, got " + typeName(ctx, L, v));
             std::string body;
-            appendUtf8(body, charValueFast(v));
+            appendUtf8(body, charValueFast(ctx, v));
             return pad(body, spec);
         }
         case 'd': case 'o': case 'x': case 'X': {
-            if (!isIntegerFast(v) && !isCharFast(v))
+            if (!isIntegerFast(ctx, v) && !isCharFast(ctx, v))
                 throw ScalaError("IllegalArgumentException",
                                  std::string("%") + spec.conversion + " expects an integer, got " +
                                      typeName(ctx, L, v));
-            const proto::ProtoObject* n = widenChar(v);
+            const proto::ProtoObject* n = widenChar(ctx, v);
             const int base = spec.conversion == 'd' ? 10 : spec.conversion == 'o' ? 8 : 16;
             // asIntegerString is bignum-safe: it works for LargeInteger too (D1).
             std::string digits = n->asIntegerString(ctx, base)->toStdString(ctx);
@@ -96,7 +96,7 @@ std::string formatOne(proto::ProtoContext* ctx, const RuntimeLayout& L, const Fo
             return padNumeric(sign, digits, spec);
         }
         case 'e': case 'E': case 'f': case 'g': case 'G': {
-            if (!isNumberFast(v))
+            if (!isNumberFast(ctx, v))
                 throw ScalaError("IllegalArgumentException",
                                  std::string("%") + spec.conversion +
                                      " expects a number, got " + typeName(ctx, L, v));

@@ -29,8 +29,8 @@ using namespace prim;  // the shared helpers (PrimitiveSupport.h)
 
 // A numeric operand (Int, Double, or Char widened to Int).
 const ProtoObject* numberArg(ProtoContext* ctx, const ProtoObject* v, const char* method) {
-    const ProtoObject* w = widenChar(v);
-    if (!isNumberFast(w)) wrongType(ctx, method, "a number", v);
+    const ProtoObject* w = widenChar(ctx, v);
+    if (!isNumberFast(ctx, w)) wrongType(ctx, method, "a number", v);
     return w;
 }
 
@@ -85,9 +85,9 @@ std::string trimAscii(const std::string& s) {
 // Text of a String or Char argument (StringOps accepts both for contains,
 // indexOf and friends).
 std::string textArg(ProtoContext* ctx, const ProtoObject* v, const char* method) {
-    if (isCharFast(v)) {
+    if (isCharFast(ctx, v)) {
         std::string out;
-        appendUtf8(out, charValueFast(v));
+        appendUtf8(out, charValueFast(ctx, v));
         return out;
     }
     if (!proto::ProtoObject::isStringTagFast(v)) wrongType(ctx, method, "a String", v);
@@ -139,12 +139,13 @@ PRIM(prim_varargs) { return ctx->newList(args->count(), args->values())->asObjec
 // __isInstanceOf(v, type): a type pattern whose type is a VALUE (D133), such as
 // a foreign module's error prototype in `case e: g.NegativeRadius`. The test is
 // protoCore's prototype chain, the one every language on protoCore selects
-// exceptions by (protoCore docs/EXCEPTIONS.md). Scala's null is an instance of
-// nothing, and a type that is not an object has no instances.
+// exceptions by (protoCore docs/EXCEPTIONS.md), which answers every value and
+// every type: a value that is no prototype (a number, a string, ...) has no
+// instances. Scala's null is an instance of nothing.
 PRIM(prim_is_instance_of) {
     const ProtoObject* v = arg(ctx, args, 0, "__isInstanceOf", 2);
     const ProtoObject* type = args->getAt(ctx, 1);
-    if (v == PROTO_NONE || type == PROTO_NONE || !isObjectCellFast(type)) return PROTO_FALSE;
+    if (v == PROTO_NONE || type == PROTO_NONE) return PROTO_FALSE;
     return v->isInstanceOf(ctx, type) == PROTO_TRUE ? PROTO_TRUE : PROTO_FALSE;
 }
 
@@ -230,7 +231,7 @@ PRIM(any_hashCode) {
     expectArgs(ctx, args, "hashCode", 0);
     const RuntimeLayout& L = layoutOf();
     if (isScalaInstance(ctx, L, self)) return ctx->fromInteger(identityHash(ctx, self));
-    if (isDoubleFast(self)) return ctx->fromInteger(hashing::javaDoubleHash(self->asDouble(ctx)));
+    if (isDoubleFast(ctx, self)) return ctx->fromInteger(hashing::javaDoubleHash(self->asDouble(ctx)));
     return ctx->fromInteger(scalaHash(ctx, L, self));
 }
 PRIM(any_hashHash) { expectArgs(ctx, args, "##", 0); return ctx->fromInteger(scalaHash(ctx, layoutOf(), self)); }
@@ -258,9 +259,9 @@ const ProtoObject* arith(ProtoContext* ctx, Arith op, const char* method,
         const ProtoObject* lhs = toScalaString(ctx, layoutOf(), self);
         return asStr(lhs)->appendLast(ctx, asStr(rhs))->asObject(ctx);
     }
-    const ProtoObject* x = widenChar(self);
+    const ProtoObject* x = widenChar(ctx, self);
     const ProtoObject* y = numberArg(ctx, rhs, method);
-    const bool dbl = isDoubleFast(x) || isDoubleFast(y);
+    const bool dbl = isDoubleFast(ctx, x) || isDoubleFast(ctx, y);
     switch (op) {
         case Arith::Add: return x->add(ctx, y);
         case Arith::Sub: return x->subtract(ctx, y);
@@ -281,7 +282,7 @@ enum class Cmp { Lt, Le, Gt, Ge };
 
 const ProtoObject* compare(ProtoContext* ctx, Cmp op, const char* method,
                            const ProtoObject* self, const proto::ProtoArguments* args) {
-    const ProtoObject* x = widenChar(self);
+    const ProtoObject* x = widenChar(ctx, self);
     const ProtoObject* y = numberArg(ctx, arg(ctx, args, 0, method, 1), method);
     const auto c = x->partialCompare(ctx, y);  // IEEE: NaN compares false
     switch (op) {
@@ -297,9 +298,9 @@ const ProtoObject* compare(ProtoContext* ctx, Cmp op, const char* method,
 // NaN wins, and max(-0.0, 0.0) is 0.0).
 const ProtoObject* maxMin(ProtoContext* ctx, bool isMax, const char* method,
                           const ProtoObject* self, const proto::ProtoArguments* args) {
-    const ProtoObject* x = widenChar(self);
+    const ProtoObject* x = widenChar(ctx, self);
     const ProtoObject* y = numberArg(ctx, arg(ctx, args, 0, method, 1), method);
-    if (isDoubleFast(x) || isDoubleFast(y)) {
+    if (isDoubleFast(ctx, x) || isDoubleFast(ctx, y)) {
         const double a = x->asDouble(ctx), b = y->asDouble(ctx);
         double r;
         if (std::isnan(a) || std::isnan(b)) r = std::nan("");
@@ -310,7 +311,7 @@ const ProtoObject* maxMin(ProtoContext* ctx, bool isMax, const char* method,
     const auto c = x->partialCompare(ctx, y);
     // Char max Char is a Char (RichChar); any other mix is an Int.
     const ProtoObject* rhs = arg(ctx, args, 0, method, 1);
-    const bool chars = isCharFast(self) && isCharFast(rhs);
+    const bool chars = isCharFast(ctx, self) && isCharFast(ctx, rhs);
     const bool pickSelf = isMax ? c >= 0 : c <= 0;
     if (chars) return pickSelf ? self : rhs;
     return pickSelf ? x : y;
@@ -334,8 +335,8 @@ PRIM(num_min) { return maxMin(ctx, false, "min", self, args); }
 PRIM(num_abs) { expectArgs(ctx, args, "abs", 0); return self->abs(ctx); }
 // A Char operand of unary and bitwise operators widens to its code point, as
 // in Scala (`-'a'` is -97, `'a' & 0x60` is 96).
-PRIM(num_neg) { expectArgs(ctx, args, "unary_-", 0); return widenChar(self)->negate(ctx); }
-PRIM(num_pos) { expectArgs(ctx, args, "unary_+", 0); return widenChar(self); }
+PRIM(num_neg) { expectArgs(ctx, args, "unary_-", 0); return widenChar(ctx, self)->negate(ctx); }
+PRIM(num_pos) { expectArgs(ctx, args, "unary_+", 0); return widenChar(ctx, self); }
 
 // Conversions installed under several names: one thin wrapper per name, so
 // an argument-count error names the method that was called.
@@ -347,7 +348,7 @@ const ProtoObject* identity(ProtoContext* ctx, const ProtoObject* self, const pr
 const ProtoObject* toDouble(ProtoContext* ctx, const ProtoObject* self, const proto::ProtoArguments* args,
                             const char* method) {
     expectArgs(ctx, args, method, 0);
-    return ctx->fromDouble(widenChar(self)->asDouble(ctx));
+    return ctx->fromDouble(widenChar(ctx, self)->asDouble(ctx));
 }
 
 #define NAMED(fn, helper, method) \
@@ -370,15 +371,15 @@ NAMED(char_toChar, identity, "toChar")
 // ---------------------------------------------------------------------------
 
 const ProtoObject* integerArg(ProtoContext* ctx, const ProtoObject* v, const char* method) {
-    const ProtoObject* w = widenChar(v);
-    if (!isIntegerFast(w)) wrongType(ctx, method, "an Int", v);
+    const ProtoObject* w = widenChar(ctx, v);
+    if (!isIntegerFast(ctx, w)) wrongType(ctx, method, "an Int", v);
     return w;
 }
 
-PRIM(int_and) { return widenChar(self)->bitwiseAnd(ctx, integerArg(ctx, arg(ctx, args, 0, "&", 1), "&")); }
-PRIM(int_or)  { return widenChar(self)->bitwiseOr(ctx, integerArg(ctx, arg(ctx, args, 0, "|", 1), "|")); }
-PRIM(int_xor) { return widenChar(self)->bitwiseXor(ctx, integerArg(ctx, arg(ctx, args, 0, "^", 1), "^")); }
-PRIM(int_not) { expectArgs(ctx, args, "unary_~", 0); return widenChar(self)->bitwiseNot(ctx); }
+PRIM(int_and) { return widenChar(ctx, self)->bitwiseAnd(ctx, integerArg(ctx, arg(ctx, args, 0, "&", 1), "&")); }
+PRIM(int_or)  { return widenChar(ctx, self)->bitwiseOr(ctx, integerArg(ctx, arg(ctx, args, 0, "|", 1), "|")); }
+PRIM(int_xor) { return widenChar(ctx, self)->bitwiseXor(ctx, integerArg(ctx, arg(ctx, args, 0, "^", 1), "^")); }
+PRIM(int_not) { expectArgs(ctx, args, "unary_~", 0); return widenChar(ctx, self)->bitwiseNot(ctx); }
 
 // Shift amounts are not masked to a word width (D1, D112): with no fixed integer
 // width there is no width to mask to, and masking to 5 or 6 bits would be
@@ -392,8 +393,8 @@ int shiftAmount(ProtoContext* ctx, const proto::ProtoArguments* args, const char
     return static_cast<int>(n);
 }
 
-PRIM(int_shl) { return widenChar(self)->shiftLeft(ctx, shiftAmount(ctx, args, "<<")); }
-PRIM(int_shr) { return widenChar(self)->shiftRight(ctx, shiftAmount(ctx, args, ">>")); }
+PRIM(int_shl) { return widenChar(ctx, self)->shiftLeft(ctx, shiftAmount(ctx, args, "<<")); }
+PRIM(int_shr) { return widenChar(ctx, self)->shiftRight(ctx, shiftAmount(ctx, args, ">>")); }
 
 // `>>>` is a *width-relative* operator: Scala fills the vacated bits from a
 // 32-bit Int or a 64-bit Long, and protoScala's integers have neither width
@@ -403,7 +404,7 @@ PRIM(int_shr) { return widenChar(self)->shiftRight(ctx, shiftAmount(ctx, args, "
 // (`-8 >>> 1` is 2147483644 as an Int and 9223372036854775804 as a Long), so it
 // stays an error rather than becoming a silently wrong number (D15).
 PRIM(int_ushr) {
-    const ProtoObject* x = widenChar(self);
+    const ProtoObject* x = widenChar(ctx, self);
     const int n = shiftAmount(ctx, args, ">>>");
     if (x->partialCompare(ctx, ctx->fromInteger(0)) < 0)
         throw ScalaError("UnsupportedOperationException",
@@ -482,7 +483,7 @@ PRIM(bool_not) { expectArgs(ctx, args, "unary_!", 0); return boolean(self != PRO
 // Char (predicates and case mapping are ASCII-only, Q11)
 // ---------------------------------------------------------------------------
 
-char32_t charSelf(const ProtoObject* self) { return charValueFast(self); }
+char32_t charSelf(ProtoContext* ctx, const ProtoObject* self) { return charValueFast(ctx, self); }
 bool asciiDigit(char32_t c) { return c >= '0' && c <= '9'; }
 bool asciiUpper(char32_t c) { return c >= 'A' && c <= 'Z'; }
 bool asciiLower(char32_t c) { return c >= 'a' && c <= 'z'; }
@@ -490,31 +491,31 @@ bool asciiLower(char32_t c) { return c >= 'a' && c <= 'z'; }
 const ProtoObject* codePoint(ProtoContext* ctx, const ProtoObject* self, const proto::ProtoArguments* args,
                              const char* method) {
     expectArgs(ctx, args, method, 0);
-    return widenChar(self);
+    return widenChar(ctx, self);
 }
 NAMED(char_toInt, codePoint, "toInt")
 NAMED(char_toLong, codePoint, "toLong")
-PRIM(char_isDigit) { expectArgs(ctx, args, "isDigit", 0); return boolean(asciiDigit(charSelf(self))); }
+PRIM(char_isDigit) { expectArgs(ctx, args, "isDigit", 0); return boolean(asciiDigit(charSelf(ctx, self))); }
 PRIM(char_isLetter) {
     expectArgs(ctx, args, "isLetter", 0);
-    const char32_t c = charSelf(self);
+    const char32_t c = charSelf(ctx, self);
     return boolean(asciiUpper(c) || asciiLower(c));
 }
 PRIM(char_isWhitespace) {
     expectArgs(ctx, args, "isWhitespace", 0);
-    const char32_t c = charSelf(self);  // Java: space, \t \n \v \f \r and U+001C..U+001F
+    const char32_t c = charSelf(ctx, self);  // Java: space, \t \n \v \f \r and U+001C..U+001F
     return boolean(c == ' ' || (c >= 0x09 && c <= 0x0D) || (c >= 0x1C && c <= 0x1F));
 }
-PRIM(char_isUpper) { expectArgs(ctx, args, "isUpper", 0); return boolean(asciiUpper(charSelf(self))); }
-PRIM(char_isLower) { expectArgs(ctx, args, "isLower", 0); return boolean(asciiLower(charSelf(self))); }
+PRIM(char_isUpper) { expectArgs(ctx, args, "isUpper", 0); return boolean(asciiUpper(charSelf(ctx, self))); }
+PRIM(char_isLower) { expectArgs(ctx, args, "isLower", 0); return boolean(asciiLower(charSelf(ctx, self))); }
 PRIM(char_toUpper) {
     expectArgs(ctx, args, "toUpper", 0);
-    const char32_t c = charSelf(self);
+    const char32_t c = charSelf(ctx, self);
     return asciiLower(c) ? ctx->fromUnicodeChar(static_cast<unsigned>(c - 'a' + 'A')) : self;
 }
 PRIM(char_toLower) {
     expectArgs(ctx, args, "toLower", 0);
-    const char32_t c = charSelf(self);
+    const char32_t c = charSelf(ctx, self);
     return asciiUpper(c) ? ctx->fromUnicodeChar(static_cast<unsigned>(c - 'A' + 'a')) : self;
 }
 
@@ -895,7 +896,7 @@ PRIM(string_map) {
     bool allText = true;
     for (long long i = 0; i < n; ++i) {
         const ProtoObject* r = callOne(ctx, f, asStr(self)->getAt(ctx, static_cast<int>(i)));
-        allText = allText && (isCharFast(r) || proto::ProtoObject::isStringTagFast(r));
+        allText = allText && (isCharFast(ctx, r) || proto::ProtoObject::isStringTagFast(r));
         b.add(r);
     }
     const ProtoObject* results = b.finish();

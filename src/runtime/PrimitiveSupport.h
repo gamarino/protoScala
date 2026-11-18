@@ -70,8 +70,8 @@ inline const ProtoObject* arg(ProtoContext* ctx, const proto::ProtoArguments* ar
 // An Int argument (a Char widens to its code point, as in Scala).
 inline long long intArg(ProtoContext* ctx, const ProtoObject* v, const char* method) {
     if (proto::isSmallInt(v)) return proto::asSmallInt(v);
-    if (isCharFast(v)) return static_cast<long long>(charValueFast(v));
-    if (isLargeIntFast(v)) return v->asLong(ctx);  // throws std::overflow_error beyond 64 bits
+    if (isCharFast(ctx, v)) return static_cast<long long>(charValueFast(ctx, v));
+    if (isLargeIntFast(ctx, v)) return v->asLong(ctx);  // throws std::overflow_error beyond 64 bits
     wrongType(ctx, method, "an Int", v);
 }
 

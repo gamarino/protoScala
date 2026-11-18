@@ -96,11 +96,13 @@ endif()
 # headers does not load with an older libprotoCore, nor the reverse.
 # 3.5.0 keeps SOVERSION 5; it changed ProtoSet and ProtoMultiset, which
 # protoScala does not use, so the floor stays 3.4.0.
-# 3.6.0 keeps SOVERSION 5; ProtoList became an RRB tree and ProtoObject gained
-# ProtoShape + 4x6^d attribute indirection and ProtoObject::newClone, which
+# 3.6.0 keeps SOVERSION 5; ProtoList became an RRB tree.
+# 3.6.1: the floor. It keeps SOVERSION 5 and first releases ProtoShape + 4x6^d
+# attribute indirection and ProtoObject::newClone, which
 # ExecutionEngine::makeClass / instantiate use to clone class instance templates.
-set(PROTOCORE_MIN_VERSION      "3.6.0")
-set(PROTOCORE_MIN_VERSION_FULL "3.6.0")
+# A 3.6.0 library fails to build (undeclared newClone).
+set(PROTOCORE_MIN_VERSION      "3.6.1")
+set(PROTOCORE_MIN_VERSION_FULL "3.6.1")
 set(PROTOCORE_NEXT_MAJOR       "4.0.0")
 set(PROTOCORE_ABI_SOVERSION    "5")
 # The protoCore release that introduced ProtoMPSCQueue. Kept separate from the
@@ -239,13 +241,13 @@ else()
     endif()
     unset(_protoCore_abi_file)
     # The developer tree has no version to check; probe for the newest API the
-    # sources use instead (ProtoObject::newClone, protoCore 3.6.0).
+    # sources use instead (ProtoObject::newClone, first released in protoCore 3.6.1).
     file(STRINGS "${PROTOCORE_DIR}/headers/protoCore.h" _protoCore_newClone
          REGEX "newClone\\(")
     if(NOT _protoCore_newClone)
         message(FATAL_ERROR
             "The protoCore tree in ${PROTOCORE_DIR} predates "
-            "ProtoObject::newClone (protoCore 3.6.0); protoScala needs "
+            "ProtoObject::newClone (protoCore 3.6.1); protoScala needs "
             "protoCore ${PROTOCORE_MIN_VERSION_FULL} or later. Update and rebuild it.")
     endif()
     unset(_protoCore_newClone)
@@ -287,7 +289,7 @@ else()
             "that floor (the comment above PROTOCORE_MIN_VERSION in "
             "CMakeLists.txt lists them); the binding one is "
             "PROTOCORE_ABI_SOVERSION ${PROTOCORE_ABI_SOVERSION}, which protoCore "
-            "first ships in 3.4.0.")
+            "first ships in 3.4.0; 3.6.1 added ProtoObject::newClone.")
     endif()
     message(STATUS "protoScala: sibling protoCore ${PROTOCORE_EFFECTIVE_VERSION} "
                    "from ${PROTOCORE_LIB_DIR}")
@@ -983,8 +985,8 @@ elseif(UNIX)
     endif()
     # protoscala links libprotoCore. protoCore's package is named "protocore"
     # for DEB and "protoCore" for RPM (both pinned in protoCore/CMakeLists.txt).
-    # The floor is PROTOCORE_MIN_VERSION_FULL (3.4.0, the first SOVERSION 5
-    # release; the reasons are listed where it is set); the ceiling is the next
+    # The floor is PROTOCORE_MIN_VERSION_FULL (3.6.1, the first release with
+    # ProtoObject::newClone; the reasons are listed where it is set); the ceiling is the next
     # major.
     set(CPACK_DEBIAN_PACKAGE_NAME "protoscala")
     set(CPACK_DEBIAN_PACKAGE_MAINTAINER "gamarino@gmail.com")

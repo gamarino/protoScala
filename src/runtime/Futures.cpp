@@ -73,8 +73,8 @@ const proto::ProtoObject* create(proto::ProtoContext* ctx, const RuntimeLayout& 
 }
 
 bool isFuture(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v) {
-    return v && v != PROTO_NONE && isObjectCellFast(v) &&
-           v->hasAttribute(ctx, L.fstateKey) == PROTO_TRUE;
+    // protoCore answers hasAttribute for every value through its prototype.
+    return v && v != PROTO_NONE && v->hasAttribute(ctx, L.fstateKey) == PROTO_TRUE;
 }
 
 long long state(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* f) {

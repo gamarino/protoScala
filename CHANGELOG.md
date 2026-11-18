@@ -8,6 +8,65 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **The protoCore floor is 3.6.1** (`find_package(protoCore 3.6.1)`, DEB
+  `Depends: protocore (>= 3.6.1)`, RPM `Requires: protoCore >= 3.6.1`), and CI pins
+  protoCore `v3.6.1` (`00a90df3`) in `ci.yml` and `cross-platform.yml`, the floor job
+  included. The class instance templates clone with `ProtoObject::newClone`, which
+  protoCore first releases in 3.6.1 (SOVERSION still 5); against 3.6.0 the build
+  fails on the undeclared member. The CMake minimum already said 3.6.0 and the docs
+  3.4.0; they now agree.
+- **protoCore's public API only: no hand-copied pointer tags.** The value-kind
+  tests of `src/runtime/Values.h` copied protoCore's internal tag values (`(p & 0x3F)
+  == 15` for a Double, `0x3FF == 0x081` for a Char, tags 2/25 for a list, tag 0 for
+  an object cell). They are now compositions of `headers/protoCore.h` alone:
+  `isDouble`, `isInteger` with `isSmallInt`, `getPrototype` against the ProtoSpace kind
+  prototypes (`listPrototype`, `unicodeCharPrototype`), `getFirstParent` and
+  `isCellPointer` for "a plain object cell", and `asLong` for a Char's code point. The
+  helpers now take the `ProtoContext`. protoCore aliases several kinds' ProtoSpace
+  prototypes to `objectPrototype` (LargeIntegers, doubles, methods, byte buffers,
+  threads, external pointers), so a parentless cell whose prototype is
+  `objectPrototype` is an object only when none of the public tag-only predicates
+  (`isDouble`, `isInteger`, `isMethod`, `isByteBuffer`, `asThread`, `asExternalPointer`,
+  `asExternalBuffer`) claims it; the unit test `Values.KindTestsUsePublicApiExactly`
+  pins this. No behaviour changes: the full suite gives the same result as before
+  (2527 of 2527, now 2529 with the two new tests). The new CTest case
+  `source/no-protocore-internals` (`tests/cli/no-protocore-internals.sh`) fails if
+  `src/` or `include/` includes `proto_internal.h`, names a `POINTER_TAG_*` /
+  `EMBEDDED_TYPE_*` constant or masks a pointer with `0x3F` / `0x3FF`.
+  **Measured cost** (interleaved A/B, `perf stat -r 3` cycles, medians of 7 rounds,
+  every run's printed result verified, protoCore master `eced46bd`, shared machine at
+  load average 6): `case_copy` +5.5 %, `map_build` +3.7 %, `attr_lookup` +3.5 %,
+  `object_tree` +1.3 %; the other nine `benchmarks/comparable` workloads (fib, fib30,
+  tak, sum_loop, int_sum_loop, range_iterate, list_ops, str_concat, factorial_100)
+  between -2.7 % and +1.4 %, within the run-to-run noise. The cost is the out-of-line
+  `getPrototype` / `getFirstParent` calls that replace a one-instruction tag test.
+  Exact reorderings keep it there: `scalaHash` and `valuesEqual` test the inline
+  string predicate before the out-of-line numeric ones, `widenChar` tests
+  `isSmallInt` before the Char test, and prototype-identity checks against
+  runtime-built prototypes (`isRangeFast`, `isVectorFast`, `isMapFast`, `isSetFast`,
+  lazy vals) no longer carry a redundant object-cell guard.
+
+- **No "is this an object cell?" question.** `isObjectCellFast` and its exclusion list
+  `isAliasedCellKind` are gone, with all 12 call sites. protoCore answers
+  `getAttribute`, `hasAttribute` and `isInstanceOf` for every value through its
+  prototype, and the Runtime rebinds the Int, Double, Boolean, Char, String, List and
+  function prototypes to Scala classes under `Any`, so every language question is a
+  class question: a Scala instance has a class name on its chain; a foreign object
+  (D134) is a value not under `Any`, no Scala instance, no function, not null; an
+  actor or a future is a value carrying its state; `__isInstanceOf` asks protoCore's
+  `isInstanceOf` for any type value; Smalltalk entries, case-class lookups and
+  `isInstanceOf[C]` read the class of any value. `seqViewOf` decides List, Vector and
+  Range with one prototype read. `isSmallInt` and `isStringTagFast` stay as inline
+  shortcuts where the answer for Int and String is fixed.
+  **Behaviour changes** (pinned by `Values.TypeQuestionsAcrossValueKinds` and the
+  fixtures `20-exceptions/throwability-across-value-kinds.scala` and
+  `13-actors/thread-start-refuses-values-without-apply.scala`): a module value that
+  protoCore does not hold as an object (a byte buffer, an external pointer, a thread) is
+  now a foreign object like a module's objects, so `Throwable` and `Exception` select it
+  and `throw` re-raises it; and `Thread.start`, `Future.apply` and `Actor.spawn` accept a
+  List or a String, whose classes answer `apply`, as they already accepted a Map, a Set
+  and a Vector. Every other value answers as before.
+
 - **Class and tuple prototype templates (`__template__`) with `ProtoObject::newClone`.**
   `MAKE_CLASS` (`ExecutionEngine::makeClass`) and `Runtime::Runtime` (`Tuple2`..`Tuple22`)
   now build an immutable template instance (`__template__`) per non-trait class whose

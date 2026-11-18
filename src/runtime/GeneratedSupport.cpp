@@ -580,7 +580,7 @@ const proto::ProtoObject* callSpread(proto::ProtoContext* ctx, const proto::Prot
                                      const proto::ProtoObject** args, unsigned argc,
                                      const proto::ProtoObject* rest) {
     const RuntimeLayout& L = layoutOf("callSpread");
-    if (!isListFast(rest))
+    if (!isListFast(ctx, rest))
         throw ScalaError("ClassCastException",
                          typeName(ctx, L, rest) + " cannot be spliced as arguments");
     const proto::ProtoList* list = rest->asList(ctx);
@@ -854,7 +854,7 @@ const proto::ProtoObject* constructSpread(proto::ProtoContext* ctx, const BlockR
                                           const proto::ProtoObject* rest) {
     const RuntimeLayout& L = layoutOf("constructSpread");
     const ConstRec& c = blk.consts[siteIdx];
-    if (!isListFast(rest))
+    if (!isListFast(ctx, rest))
         throw ScalaError("ClassCastException",
                          typeName(ctx, L, rest) + " cannot be spliced as arguments");
     const proto::ProtoList* list = rest->asList(ctx);
