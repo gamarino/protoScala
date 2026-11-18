@@ -90,3 +90,47 @@ TEST(Values, PrimitivePrototypesAreRebound) {
     EXPECT_EQ(ctx.fromDouble(1.5)->getPrototype(&ctx), rt.layout().doubleProto);
     EXPECT_EQ(PROTO_TRUE->getPrototype(&ctx), rt.layout().booleanProto);
 }
+
+// The value-kind tests of Values.h are built from protoCore's public API only.
+// protoCore aliases several kinds' prototypes to objectPrototype (doubles,
+// LargeIntegers, methods, byte buffers), so "a plain object cell" must not be
+// decided by getPrototype alone: these values are not object cells.
+namespace {
+const proto::ProtoObject* nopMethod(proto::ProtoContext*, const proto::ProtoObject*,
+                                    const proto::ParentLink*, const proto::ProtoArguments*,
+                                    const proto::ProtoKeywordArguments*) {
+    return PROTO_NONE;
+}
+}  // namespace
+
+TEST(Values, KindTestsUsePublicApiExactly) {
+    proto::ProtoSpace space;
+    Runtime rt(space);
+    proto::ProtoContext ctx(&space, rt.rootContext());
+    const proto::ProtoObject* parentless = ctx.newObject(false);
+    const proto::ProtoObject* child = parentless->newChild(&ctx, false);
+    const proto::ProtoObject* dbl = ctx.fromDouble(2.5);
+    const proto::ProtoObject* big = ctx.fromString("123456789012345678901234567890", 10);
+    const proto::ProtoObject* method = ctx.fromMethod(const_cast<proto::ProtoObject*>(parentless), nopMethod);
+    const proto::ProtoObject* buffer = ctx.newBuffer(8);
+    const proto::ProtoObject* list = ctx.newList()->asObject(&ctx);
+    const proto::ProtoObject* chr = ctx.fromUnicodeChar(U'x');
+
+    EXPECT_TRUE(isObjectCellFast(&ctx, parentless));
+    EXPECT_TRUE(isObjectCellFast(&ctx, child));
+    EXPECT_TRUE(isObjectCellFast(&ctx, space.objectPrototype));
+    for (const proto::ProtoObject* v : {dbl, big, method, buffer, list, chr, ctx.fromInteger(7),
+                                        ctx.fromUTF8String("s"), PROTO_NONE, PROTO_TRUE})
+        EXPECT_FALSE(isObjectCellFast(&ctx, v));
+
+    EXPECT_TRUE(isDoubleFast(&ctx, dbl));
+    EXPECT_TRUE(isLargeIntFast(&ctx, big));
+    EXPECT_FALSE(isLargeIntFast(&ctx, ctx.fromInteger(7)));
+    EXPECT_TRUE(isListFast(&ctx, list));
+    EXPECT_FALSE(isListFast(&ctx, ctx.fromUTF8String("ab")));
+    EXPECT_FALSE(isListFast(&ctx, space.listPrototype->newChild(&ctx, false)));
+    EXPECT_TRUE(isCharFast(&ctx, chr));
+    EXPECT_EQ(charValueFast(&ctx, chr), U'x');
+    EXPECT_FALSE(isCharFast(&ctx, ctx.fromInteger('x')));
+    EXPECT_EQ(widenChar(&ctx, chr), ctx.fromInteger('x'));
+}

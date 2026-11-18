@@ -25,8 +25,21 @@ class BytecodeModule;
 //    objectPrototype when it has none.
 //  - ProtoObject::getFirstParent answers PROTO_NONE for every non-object
 //    value and for a parentless object.
-// So "a plain object cell" is: a cell pointer whose first parent exists, or
-// whose prototype is objectPrototype (or none at all: objectPrototype itself).
+// So "a plain object cell" is: a value whose first parent exists, or a
+// parentless cell whose prototype is objectPrototype (or none at all:
+// objectPrototype itself) and that no public tag-only predicate claims
+// (isAliasedCellKind). Prototype identity is used only for kinds with a
+// ProtoSpace prototype of their own (lists, Unicode characters).
+
+// protoCore leaves the ProtoSpace prototype of several cell kinds aliased to
+// objectPrototype (LargeIntegers, doubles, methods, byte buffers, threads,
+// external pointers and buffers), so getPrototype cannot tell such a value
+// from a parentless object. The public tag-only predicates do.
+inline bool isAliasedCellKind(proto::ProtoContext* ctx, const proto::ProtoObject* v) {
+    return v->isDouble(ctx) || v->isInteger(ctx) || v->isMethod(ctx) || v->isByteBuffer(ctx) ||
+           v->asThread(ctx) != nullptr || v->asExternalPointer(ctx) != nullptr ||
+           v->asExternalBuffer(ctx) != nullptr;
+}
 
 // Is `v` a plain object cell (not a list, string, number, method, ...)?
 inline bool isObjectCellFast(proto::ProtoContext* ctx, const proto::ProtoObject* v) {
@@ -36,7 +49,8 @@ inline bool isObjectCellFast(proto::ProtoContext* ctx, const proto::ProtoObject*
     if (v->getFirstParent(ctx) != PROTO_NONE) return true;
     if (!proto::ProtoObject::isCellPointer(v)) return false;
     const proto::ProtoObject* p = v->getPrototype(ctx);
-    return p == nullptr || p == ctx->space->objectPrototype;
+    if (p != nullptr && p != ctx->space->objectPrototype) return false;
+    return !isAliasedCellKind(ctx, v);
 }
 // Is `v` a value of the primitive kind whose public prototype is `kindProto`
 // (and not an object that merely inherits from that prototype)?

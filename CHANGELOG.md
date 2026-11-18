@@ -15,20 +15,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `isDouble`, `isInteger` with `isSmallInt`, `getPrototype` against the ProtoSpace kind
   prototypes (`listPrototype`, `unicodeCharPrototype`), `getFirstParent` and
   `isCellPointer` for "a plain object cell", and `asLong` for a Char's code point. The
-  helpers now take the `ProtoContext`. No behaviour changes: the full suite gives the
-  same result as before (2527 of 2527 plus the new check). The new CTest case
+  helpers now take the `ProtoContext`. protoCore aliases several kinds' ProtoSpace
+  prototypes to `objectPrototype` (LargeIntegers, doubles, methods, byte buffers,
+  threads, external pointers), so a parentless cell whose prototype is
+  `objectPrototype` is an object only when none of the public tag-only predicates
+  (`isDouble`, `isInteger`, `isMethod`, `isByteBuffer`, `asThread`, `asExternalPointer`,
+  `asExternalBuffer`) claims it; the unit test `Values.KindTestsUsePublicApiExactly`
+  pins this. No behaviour changes: the full suite gives the same result as before
+  (2527 of 2527, now 2529 with the two new tests). The new CTest case
   `source/no-protocore-internals` (`tests/cli/no-protocore-internals.sh`) fails if
   `src/` or `include/` includes `proto_internal.h`, names a `POINTER_TAG_*` /
   `EMBEDDED_TYPE_*` constant or masks a pointer with `0x3F` / `0x3FF`.
-  **Measured cost** (interleaved A/B, `perf stat -r 3` cycles, medians of 7-9 rounds,
+  **Measured cost** (interleaved A/B, `perf stat -r 3` cycles, medians of 7 rounds,
   every run's printed result verified, protoCore master `eced46bd`, shared machine at
-  load 8-13): `case_copy`, `object_tree` and `map_build` +4.6 % to +5.4 %; the other ten
-  `benchmarks/comparable` workloads (fib, fib30, tak, sum_loop, int_sum_loop,
-  range_iterate, attr_lookup, list_ops, str_concat, factorial_100) within the run-to-run
-  noise (-10 % to +1 %). The cost is the out-of-line `getPrototype` / `getFirstParent`
-  calls that replace a one-instruction tag test. Two exact reorderings keep it there:
-  `scalaHash` and `valuesEqual` test the inline string predicate before the out-of-line
-  numeric ones, and `widenChar` tests `isSmallInt` before the Char test.
+  load average 6): `case_copy` +5.5 %, `map_build` +3.7 %, `attr_lookup` +3.5 %,
+  `object_tree` +1.3 %; the other nine `benchmarks/comparable` workloads (fib, fib30,
+  tak, sum_loop, int_sum_loop, range_iterate, list_ops, str_concat, factorial_100)
+  between -2.7 % and +1.4 %, within the run-to-run noise. The cost is the out-of-line
+  `getPrototype` / `getFirstParent` calls that replace a one-instruction tag test.
+  Exact reorderings keep it there: `scalaHash` and `valuesEqual` test the inline
+  string predicate before the out-of-line numeric ones, `widenChar` tests
+  `isSmallInt` before the Char test, and prototype-identity checks against
+  runtime-built prototypes (`isRangeFast`, `isVectorFast`, `isMapFast`, `isSetFast`,
+  lazy vals) no longer carry a redundant object-cell guard.
 
 - **Class and tuple prototype templates (`__template__`) with `ProtoObject::newClone`.**
   `MAKE_CLASS` (`ExecutionEngine::makeClass`) and `Runtime::Runtime` (`Tuple2`..`Tuple22`)
