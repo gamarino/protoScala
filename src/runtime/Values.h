@@ -25,33 +25,19 @@ class BytecodeModule;
 //    objectPrototype when it has none.
 //  - ProtoObject::getFirstParent answers PROTO_NONE for every non-object
 //    value and for a parentless object.
-// So "a plain object cell" is: a value whose first parent exists, or a
-// parentless cell whose prototype is objectPrototype (or none at all:
-// objectPrototype itself) and that no public tag-only predicate claims
-// (isAliasedCellKind). Prototype identity is used only for kinds with a
-// ProtoSpace prototype of their own (lists, Unicode characters).
+// Prototype identity is used only for kinds with a ProtoSpace prototype of
+// their own (lists, Unicode characters).
+//
+// There is deliberately no "is this an object cell?" test. protoCore answers
+// getAttribute, hasAttribute and isInstanceOf for every value through its
+// prototype -- and the Runtime rebinds the Int, Double, Boolean, Char, String,
+// List and function prototypes to Scala classes under Any -- so the runtime
+// looks up and dispatches directly, and a language question (is this a Scala
+// instance, a foreign object, an actor, a future?) is decided by the value's
+// class chain, never by how protoCore represents the value. The kind tests
+// below exist because Scala's Int, Double, Char, String and List are protoCore
+// values held bare, not objects of a Scala class.
 
-// protoCore leaves the ProtoSpace prototype of several cell kinds aliased to
-// objectPrototype (LargeIntegers, doubles, methods, byte buffers, threads,
-// external pointers and buffers), so getPrototype cannot tell such a value
-// from a parentless object. The public tag-only predicates do.
-inline bool isAliasedCellKind(proto::ProtoContext* ctx, const proto::ProtoObject* v) {
-    return v->isDouble(ctx) || v->isInteger(ctx) || v->isMethod(ctx) || v->isByteBuffer(ctx) ||
-           v->asThread(ctx) != nullptr || v->asExternalPointer(ctx) != nullptr ||
-           v->asExternalBuffer(ctx) != nullptr;
-}
-
-// Is `v` a plain object cell (not a list, string, number, method, ...)?
-inline bool isObjectCellFast(proto::ProtoContext* ctx, const proto::ProtoObject* v) {
-    // Inline rejects first; then the common case, an object with a parent,
-    // is decided by one call.
-    if (!v || proto::isSmallInt(v) || proto::ProtoObject::isStringTagFast(v)) return false;
-    if (v->getFirstParent(ctx) != PROTO_NONE) return true;
-    if (!proto::ProtoObject::isCellPointer(v)) return false;
-    const proto::ProtoObject* p = v->getPrototype(ctx);
-    if (p != nullptr && p != ctx->space->objectPrototype) return false;
-    return !isAliasedCellKind(ctx, v);
-}
 // Is `v` a value of the primitive kind whose public prototype is `kindProto`
 // (and not an object that merely inherits from that prototype)?
 inline bool isPrimitiveOfKind(proto::ProtoContext* ctx, const proto::ProtoObject* v,
@@ -138,12 +124,13 @@ const BytecodeModule* compiledModuleOf(proto::ProtoContext* ctx, const RuntimeLa
 std::string formatDouble(double d);
 
 // An instance of a Scala class (or a runtime object with a class name, e.g.
-// WithFilter): an object cell whose chain has a __name__. Function objects,
-// Cells and lazy holders have none.
+// WithFilter): a value whose chain has a __name__. Function objects, Cells,
+// lazy holders and the bare kinds (Int, String, List, ...) have none.
 bool isScalaInstance(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v);
 
-// A FOREIGN object: an object cell no Scala class built -- not on the chain of
-// Scala's `Any`, not a function, not a method. A module's error value is one.
+// A FOREIGN object: a value no Scala class built -- not on the chain of Scala's
+// `Any`, not a Scala instance, not a function, not a method, not null --
+// whatever protoCore kind holds it. A module's error value is one.
 // D134: `Throwable` and `Exception` select it; THROW re-raises it.
 bool isForeignObject(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v);
 

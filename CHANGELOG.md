@@ -46,6 +46,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   runtime-built prototypes (`isRangeFast`, `isVectorFast`, `isMapFast`, `isSetFast`,
   lazy vals) no longer carry a redundant object-cell guard.
 
+- **No "is this an object cell?" question.** `isObjectCellFast` and its exclusion list
+  `isAliasedCellKind` are gone, with all 12 call sites. protoCore answers
+  `getAttribute`, `hasAttribute` and `isInstanceOf` for every value through its
+  prototype, and the Runtime rebinds the Int, Double, Boolean, Char, String, List and
+  function prototypes to Scala classes under `Any`, so every language question is a
+  class question: a Scala instance has a class name on its chain; a foreign object
+  (D134) is a value not under `Any`, no Scala instance, no function, not null; an
+  actor or a future is a value carrying its state; `__isInstanceOf` asks protoCore's
+  `isInstanceOf` for any type value; Smalltalk entries, case-class lookups and
+  `isInstanceOf[C]` read the class of any value. `seqViewOf` decides List, Vector and
+  Range with one prototype read. `isSmallInt` and `isStringTagFast` stay as inline
+  shortcuts where the answer for Int and String is fixed.
+  **Behaviour changes** (pinned by `Values.TypeQuestionsAcrossValueKinds` and the
+  fixtures `20-exceptions/throwability-across-value-kinds.scala` and
+  `13-actors/thread-start-refuses-values-without-apply.scala`): a module value that
+  protoCore does not hold as an object (a byte buffer, an external pointer, a thread) is
+  now a foreign object like a module's objects, so `Throwable` and `Exception` select it
+  and `throw` re-raises it; and `Thread.start`, `Future.apply` and `Actor.spawn` accept a
+  List or a String, whose classes answer `apply`, as they already accepted a Map, a Set
+  and a Vector. Every other value answers as before.
+
 - **Class and tuple prototype templates (`__template__`) with `ProtoObject::newClone`.**
   `MAKE_CLASS` (`ExecutionEngine::makeClass`) and `Runtime::Runtime` (`Tuple2`..`Tuple22`)
   now build an immutable template instance (`__template__`) per non-trait class whose
