@@ -52,7 +52,8 @@ std::string prefixOf(ProtoContext* ctx, const ProtoObject* self) {
 // synthesised equals and canEqual belong to the case class, not the subclass.
 const ProtoObject* caseClassOf(ProtoContext* ctx, const ProtoObject* self) {
     const RuntimeLayout& L = layoutOf();
-    const ProtoObject* cls = isObjectCellFast(ctx, self) ? self->getPrototype(ctx) : nullptr;
+    if (!self || self == PROTO_NONE) return nullptr;
+    const ProtoObject* cls = self->getPrototype(ctx);  // a bare kind's class has no __prefix__
     if (!cls) return nullptr;
     if (cls->hasOwnAttribute(ctx, L.prefixKey) == PROTO_TRUE) return cls;
     // A class prototype's parents are its whole linearization (makeClass).
@@ -67,8 +68,8 @@ const ProtoObject* caseClassOf(ProtoContext* ctx, const ProtoObject* self) {
 // `v.isInstanceOf[cls]`: cls is v's class or one of its linearization (D29:
 // the class only, type arguments are erased).
 bool isInstanceOf(ProtoContext* ctx, const ProtoObject* v, const ProtoObject* cls) {
-    if (!isObjectCellFast(ctx, v) || v == PROTO_NONE) return false;
-    const ProtoObject* c = v->getPrototype(ctx);
+    if (!v || v == PROTO_NONE) return false;
+    const ProtoObject* c = v->getPrototype(ctx);  // a bare kind's class is never a case class
     if (!c) return false;
     if (c == cls) return true;
     const proto::ProtoList* chain = c->getParents(ctx);

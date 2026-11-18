@@ -129,7 +129,8 @@ unsigned ActorScheduler::suspendedCount() const {
 }
 
 bool ActorScheduler::isActor(proto::ProtoContext* ctx, const proto::ProtoObject* v) const {
-    if (!layout_ || !v || v == PROTO_NONE || !isObjectCellFast(ctx, v)) return false;
+    // Only an actor owns the state reference; no other value has it.
+    if (!layout_ || !v || v == PROTO_NONE) return false;
     return v->hasOwnAttribute(ctx, layout_->stateRefKey) == PROTO_TRUE;
 }
 
