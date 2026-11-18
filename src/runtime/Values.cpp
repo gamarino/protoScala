@@ -53,15 +53,20 @@ const BytecodeModule* compiledModuleOf(proto::ProtoContext* ctx, const RuntimeLa
 }
 
 bool isScalaInstance(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v) {
-    if (!isObjectCellFast(ctx, v) || v == PROTO_NONE) return false;
+    // Inline shortcuts: Int and String are no Scala class's instances.
+    if (!v || v == PROTO_NONE || proto::isSmallInt(v) || proto::ProtoObject::isStringTagFast(v))
+        return false;
     if (compiledModuleOf(ctx, L, v)) return false;  // function objects
     return v->hasAttribute(ctx, L.nameKey) == PROTO_TRUE;  // presence, never a PROTO_NONE compare
 }
 
 bool isForeignObject(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v) {
-    return isObjectCellFast(ctx, v) && v != PROTO_NONE && !isScalaInstance(ctx, L, v) &&
-           !compiledModuleOf(ctx, L, v) && !v->isMethod(ctx) &&
-           v->isInstanceOf(ctx, L.anyProto) != PROTO_TRUE;
+    // Inline shortcuts: an Int or a String is an instance of Any.
+    if (!v || v == PROTO_NONE || proto::isSmallInt(v) || proto::ProtoObject::isStringTagFast(v))
+        return false;
+    // The class question first: almost every value is an instance of Any.
+    return v->isInstanceOf(ctx, L.anyProto) != PROTO_TRUE && !v->isMethod(ctx) &&
+           !compiledModuleOf(ctx, L, v) && !isScalaInstance(ctx, L, v);
 }
 
 namespace {
@@ -187,20 +192,25 @@ bool isSetFast(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::Pr
 
 SeqView seqViewOf(proto::ProtoContext* ctx, const RuntimeLayout& L, const proto::ProtoObject* v) {
     SeqView out;
-    if (isListFast(ctx, v)) {
+    if (!v) return out;
+    // One prototype read decides the kind (see isRangeFast above). A List is
+    // the bare protoCore list, not an object inheriting from its prototype.
+    const proto::ProtoObject* p = v->getPrototype(ctx);
+    if (p == ctx->space->listPrototype &&
+        (!proto::ProtoObject::isCellPointer(v) || v->getFirstParent(ctx) == PROTO_NONE)) {
         out.list = v->asList(ctx);
         out.size = static_cast<long long>(out.list->getSize(ctx));
         out.valid = true;
         return out;
     }
-    if (!isObjectCellFast(ctx, v)) return out;            // cheap reject before two probes
-    if (isVectorFast(ctx, L, v)) {
+    if (p == nullptr) return out;
+    if (p == L.vectorProto) {
         out.list = v->getAttribute(ctx, L.vecDataKey)->asList(ctx);
         out.size = static_cast<long long>(out.list->getSize(ctx));
         out.valid = true;
         return out;
     }
-    if (isRangeFast(ctx, L, v)) {
+    if (p == L.rangeProto) {
         out.start = proto::asSmallInt(v->getAttribute(ctx, L.rangeStartKey));
         out.step = proto::asSmallInt(v->getAttribute(ctx, L.rangeStepKey));
         const long long end = proto::asSmallInt(v->getAttribute(ctx, L.rangeEndKey));

@@ -750,7 +750,8 @@ it throws, and the value's prototype chain its type (protoCore
    (**D134**): in a `catch`, `Throwable` matches every thrown value and `Exception`
    every one that is not a Scala `Error` (a Scala program throws only Throwables,
    so a thrown value without the Throwable marker is foreign by construction);
-   outside a `catch` both also accept a foreign object (`__isForeignObject`). More
+   outside a `catch` both also accept a foreign object (`__isForeignObject`: a value
+   of no Scala class, decided by its class chain whatever protoCore kind holds it). More
    specific classes and `Error` keep their own instances only. An exception no case selects
    is rethrown **unchanged** (protoCore rule E3): each frame — `runFrame`, and a
    generated frame — keeps the exceptions its handlers caught

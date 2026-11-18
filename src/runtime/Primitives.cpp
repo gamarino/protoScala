@@ -139,12 +139,13 @@ PRIM(prim_varargs) { return ctx->newList(args->count(), args->values())->asObjec
 // __isInstanceOf(v, type): a type pattern whose type is a VALUE (D133), such as
 // a foreign module's error prototype in `case e: g.NegativeRadius`. The test is
 // protoCore's prototype chain, the one every language on protoCore selects
-// exceptions by (protoCore docs/EXCEPTIONS.md). Scala's null is an instance of
-// nothing, and a type that is not an object has no instances.
+// exceptions by (protoCore docs/EXCEPTIONS.md), which answers every value and
+// every type: a value that is no prototype (a number, a string, ...) has no
+// instances. Scala's null is an instance of nothing.
 PRIM(prim_is_instance_of) {
     const ProtoObject* v = arg(ctx, args, 0, "__isInstanceOf", 2);
     const ProtoObject* type = args->getAt(ctx, 1);
-    if (v == PROTO_NONE || type == PROTO_NONE || !isObjectCellFast(ctx, type)) return PROTO_FALSE;
+    if (v == PROTO_NONE || type == PROTO_NONE) return PROTO_FALSE;
     return v->isInstanceOf(ctx, type) == PROTO_TRUE ? PROTO_TRUE : PROTO_FALSE;
 }
 

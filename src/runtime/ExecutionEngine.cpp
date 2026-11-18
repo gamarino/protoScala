@@ -125,7 +125,8 @@ proto::ProtoContext* ExecutionEngine::foreignReentryContext(const proto::ProtoSp
 
 const proto::ProtoObject* ExecutionEngine::smalltalkEntryOf(proto::ProtoContext* ctx,
                                                             const proto::ProtoObject* receiver) const {
-    if (receiver == PROTO_NONE || !isObjectCellFast(ctx, receiver)) return nullptr;
+    // protoCore answers the lookup for every value through its prototype.
+    if (receiver == PROTO_NONE) return nullptr;
     const proto::ProtoObject* e = receiver->getAttribute(ctx, layout_.stSendKey);
     if (!e || e == PROTO_NONE || !e->isMethod(ctx)) return nullptr;
     layout_.smalltalkSeen.store(true, std::memory_order_relaxed);
@@ -379,7 +380,7 @@ const proto::ProtoObject* ExecutionEngine::callMember(proto::ProtoContext* ctx,
     // session that never meets protoST skips them all.
     if (name &&
         (!select || (L.smalltalkSeen.load(std::memory_order_relaxed) &&
-                     isObjectCellFast(ctx, m) && isForeignObject(ctx, L, m))))
+                     isForeignObject(ctx, L, m))))
         if (const proto::ProtoObject* st = smalltalkEntryOf(ctx, base[0]))
             return sendSmalltalk(ctx, st, base, name, argc);
     if (select) return m;                            // a field

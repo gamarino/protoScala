@@ -1,3 +1,4 @@
+#include "runtime/Futures.h"
 #include "runtime/Runtime.h"
 #include "runtime/Values.h"
 #include "protoCore.h"
@@ -93,8 +94,9 @@ TEST(Values, PrimitivePrototypesAreRebound) {
 
 // The value-kind tests of Values.h are built from protoCore's public API only.
 // protoCore aliases several kinds' prototypes to objectPrototype (doubles,
-// LargeIntegers, methods, byte buffers), so "a plain object cell" must not be
-// decided by getPrototype alone: these values are not object cells.
+// LargeIntegers, methods, byte buffers), so no kind is decided by getPrototype
+// alone when its prototype is an alias, and a value inheriting from a kind
+// prototype is not of that kind.
 namespace {
 const proto::ProtoObject* nopMethod(proto::ProtoContext*, const proto::ProtoObject*,
                                     const proto::ParentLink*, const proto::ProtoArguments*,
@@ -116,12 +118,15 @@ TEST(Values, KindTestsUsePublicApiExactly) {
     const proto::ProtoObject* list = ctx.newList()->asObject(&ctx);
     const proto::ProtoObject* chr = ctx.fromUnicodeChar(U'x');
 
-    EXPECT_TRUE(isObjectCellFast(&ctx, parentless));
-    EXPECT_TRUE(isObjectCellFast(&ctx, child));
-    EXPECT_TRUE(isObjectCellFast(&ctx, space.objectPrototype));
-    for (const proto::ProtoObject* v : {dbl, big, method, buffer, list, chr, ctx.fromInteger(7),
-                                        ctx.fromUTF8String("s"), PROTO_NONE, PROTO_TRUE})
-        EXPECT_FALSE(isObjectCellFast(&ctx, v));
+    // No value but a bare value of the kind answers a kind test.
+    for (const proto::ProtoObject* v : {parentless, child, static_cast<const proto::ProtoObject*>(space.objectPrototype), dbl, big,
+                                        method, buffer, ctx.fromInteger(7),
+                                        ctx.fromUTF8String("s"), PROTO_NONE, PROTO_TRUE}) {
+        EXPECT_FALSE(isListFast(&ctx, v));
+        EXPECT_FALSE(isCharFast(&ctx, v));
+    }
+    EXPECT_FALSE(isDoubleFast(&ctx, parentless));
+    EXPECT_FALSE(isLargeIntFast(&ctx, parentless));
 
     EXPECT_TRUE(isDoubleFast(&ctx, dbl));
     EXPECT_TRUE(isLargeIntFast(&ctx, big));
@@ -133,4 +138,64 @@ TEST(Values, KindTestsUsePublicApiExactly) {
     EXPECT_EQ(charValueFast(&ctx, chr), U'x');
     EXPECT_FALSE(isCharFast(&ctx, ctx.fromInteger('x')));
     EXPECT_EQ(widenChar(&ctx, chr), ctx.fromInteger('x'));
+}
+
+// Language questions are decided by the value's class chain, never by its
+// protoCore representation: a Scala instance has a class name on its chain; a
+// foreign object is a value of no Scala class (not under Any, no function, not
+// null), whatever protoCore kind holds it; a future is a value carrying the
+// future state. Each is pinned across value kinds.
+TEST(Values, TypeQuestionsAcrossValueKinds) {
+    proto::ProtoSpace space;
+    Runtime rt(space);
+    proto::ProtoContext ctx(&space, rt.rootContext());
+    const RuntimeLayout& L = rt.layout();
+    const proto::ProtoObject* cls = L.anyRefProto->newChild(&ctx, false)
+                                        ->setAttribute(&ctx, L.nameKey, makeString(&ctx, "Box"));
+    const proto::ProtoObject* instance = cls->newChild(&ctx, false);
+    const proto::ProtoObject* items[] = {ctx.fromInteger(1), ctx.fromInteger(2)};
+    const proto::ProtoObject* list = ctx.newList(2, items)->asObject(&ctx);
+    const proto::ProtoObject* future = futures::create(&ctx, L);
+
+    // Scala values: no foreign object among them.
+    const proto::ProtoObject* scalaValues[] = {
+        ctx.fromInteger(7),
+        ctx.fromString("123456789012345678901234567890", 10),
+        ctx.fromDouble(2.5),
+        ctx.fromUnicodeChar(U'x'),
+        ctx.fromUTF8String("s"),
+        ctx.fromUTF8String("a string longer than the inline form"),
+        list,
+        PROTO_TRUE, PROTO_FALSE, L.unit,
+        ctx.fromMethod(nullptr, nopMethod),
+        L.cellProto->newChild(&ctx, true),
+        instance, future,
+    };
+    for (const proto::ProtoObject* v : scalaValues) {
+        EXPECT_FALSE(isForeignObject(&ctx, L, v)) << typeName(&ctx, L, v);
+        EXPECT_EQ(isScalaInstance(&ctx, L, v), v == instance || v == future)
+            << typeName(&ctx, L, v);
+        EXPECT_EQ(futures::isFuture(&ctx, L, v), v == future) << typeName(&ctx, L, v);
+        EXPECT_EQ(seqViewOf(&ctx, L, v).valid, v == list) << typeName(&ctx, L, v);
+    }
+    EXPECT_FALSE(isForeignObject(&ctx, L, PROTO_NONE));
+    EXPECT_FALSE(isScalaInstance(&ctx, L, PROTO_NONE));
+    EXPECT_FALSE(futures::isFuture(&ctx, L, PROTO_NONE));
+    EXPECT_FALSE(seqViewOf(&ctx, L, PROTO_NONE).valid);
+
+    // Values no Scala class built: objects, parentless or parented, and a
+    // module value protoCore does not hold as an object (a byte buffer).
+    const proto::ProtoObject* parentless = ctx.newObject(false);
+    const proto::ProtoObject* parented = space.objectPrototype->newChild(&ctx, false);
+    const proto::ProtoObject* buffer = ctx.newBuffer(8);
+    for (const proto::ProtoObject* v : {parentless, parented, parented->newChild(&ctx, false), buffer}) {
+        EXPECT_TRUE(isForeignObject(&ctx, L, v));
+        EXPECT_FALSE(isScalaInstance(&ctx, L, v));
+        EXPECT_FALSE(futures::isFuture(&ctx, L, v));
+        EXPECT_FALSE(seqViewOf(&ctx, L, v).valid);
+        EXPECT_TRUE(valuesEqual(&ctx, L, v, v));
+        EXPECT_FALSE(valuesEqual(&ctx, L, v, parentless == v ? parented : parentless));
+    }
+    // An object inheriting from the List class is no List.
+    EXPECT_FALSE(seqViewOf(&ctx, L, L.listProto->newChild(&ctx, false)).valid);
 }

@@ -150,9 +150,7 @@ std::string describeThrown(proto::ProtoContext* ctx, const proto::ProtoObject* v
     try {
         const ActiveCallContext* active = activeCallContext();
         const RuntimeLayout* L = active ? active->layout : nullptr;
-        const bool foreign = L && v && v != PROTO_NONE && isObjectCellFast(ctx, v) &&
-                             v->isInstanceOf(ctx, L->anyProto) != PROTO_TRUE &&
-                             !v->isMethod(ctx);
+        const bool foreign = L && isForeignObject(ctx, *L, v);
         if (foreign) {
             auto text = [&](const char* name) -> std::string {
                 const proto::ProtoObject* a = v->getAttribute(ctx, sym(ctx, name));
