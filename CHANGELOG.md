@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **The protoCore floor is 3.6.1** (`find_package(protoCore 3.6.1)`, DEB
+  `Depends: protocore (>= 3.6.1)`, RPM `Requires: protoCore >= 3.6.1`), and CI pins
+  protoCore `v3.6.1` (`00a90df3`) in `ci.yml` and `cross-platform.yml`, the floor job
+  included. The class instance templates clone with `ProtoObject::newClone`, which
+  protoCore first releases in 3.6.1 (SOVERSION still 5); against 3.6.0 the build
+  fails on the undeclared member. The CMake minimum already said 3.6.0 and the docs
+  3.4.0; they now agree.
 - **protoCore's public API only: no hand-copied pointer tags.** The value-kind
   tests of `src/runtime/Values.h` copied protoCore's internal tag values (`(p & 0x3F)
   == 15` for a Double, `0x3FF == 0x081` for a Char, tags 2/25 for a list, tag 0 for

@@ -9,9 +9,9 @@ name: Cross-platform
 # Windows, and it also exercises the package path, which ci.yml does not.
 # protoIO is the sibling source tree, compiled into protoScala's build.
 #
-# Refs are pinned like ci.yml's. protoCore 3.6.0 (tag v3.6.0,
-# 799d7615; SOVERSION 5, so its DLL is protoCore-5.dll), as ci.yml's
-# main job. The minimum, 3.4.0 on every platform, is built by ci.yml's floor job
+# Refs are pinned like ci.yml's. protoCore 3.6.1 (tag v3.6.1,
+# 00a90df3; SOVERSION 5, so its DLL is protoCore-5.dll), as ci.yml's
+# main job. The minimum, 3.6.1 on every platform, is built by ci.yml's floor job
 # (Linux) only. protoIO
 # 0.7.0 (tag v0.7.0, a4274c43): the floor everywhere, as in ci.yml (protoST
 # 0.12.0 requires 0.7.x and protoIO's package is SameMinorVersion compatible).
@@ -32,7 +32,7 @@ concurrency:
 
 env:
   PROTOCORE_REPO: numaes/protoCore
-  PROTOCORE_REF: 799d7615d0b4f8c3ab8bb708c282815d7f7cfb8b
+  PROTOCORE_REF: 00a90df39eb239ff75af1867590aadb136861079
   PROTOIO_REPO: gamarino/protoIO
   PROTOIO_REF: a4274c439483ce49f031c14bad8d9ba3cee58504
   # Clock-dependent, as in ci.yml: their verdict is a timeout.

@@ -19,17 +19,18 @@ executable sees no protoCore at all.)
   Fedora/RHEL, `brew install readline` on macOS). It is a hard requirement of
   the interactive REPL: configuration fails with a `FATAL_ERROR` without it
   (except on Windows, where the REPL uses the console's own line editing).
-- **protoCore 3.4.0 or newer within 3.x** (3.4.0 is SOVERSION 5: it removed
+- **protoCore 3.6.1 or newer within 3.x** (3.6.1 first releases
+  `ProtoObject::newClone`, which class instance templates use; 3.4.0 is SOVERSION 5: it removed
   `ProtoContext::pendingRoot`, which changed `ProtoContext`'s layout, so a
   protoScala built against 3.4.0 does not load with an older libprotoCore, nor
   the reverse; 3.0.0 brought the descriptor calling convention; the earlier
   floors -- 2.11.0 for `ProtoObject::setAttributes`, 2.7.0 for
   `proto::proto_long`, 2.9.0 on Windows for `ProtoSpace::setThreadStackBytes`,
   and the "Why 2.6.1" ones below -- still hold underneath it), installed, with
-  its CMake package configuration. CI builds and tests against **3.6.0 on
-  Linux, macOS and Windows** (SOVERSION 5 as well); the floor job builds 3.4.0.
-  The 0.6.6 `.deb` is built against protoCore 3.6.0 and so depends on
-  `protocore (>= 3.6.0)` through protoCore's shlibs file. The packaging sections below
+  its CMake package configuration. CI builds and tests against **3.6.1 on
+  Linux, macOS and Windows** (SOVERSION 5 as well); the floor job builds 3.6.1 too.
+  A `.deb` is built against protoCore 3.6.1 and so depends on
+  `protocore (>= 3.6.1)` through protoCore's shlibs file. The packaging sections below
   were verified against 2.5.0. See protoCore's `docs/INSTALLATION.md`.
 - **protoIO 0.7.0 or newer within 0.7** (the I/O layer the protoCore runtimes
   share; 0.2.2 brings `process::run` options, crash statuses as 128 + signal on
@@ -96,13 +97,13 @@ cmake --build build_release -j4
 ctest --test-dir build_release --output-on-failure
 ```
 
-The discovery is `find_package(protoCore 3.4.0 CONFIG)`, so the prefix must hold
+The discovery is `find_package(protoCore 3.6.1 CONFIG)`, so the prefix must hold
 `lib/cmake/protoCore/protoCoreConfig.cmake`. **A prefix holding only
 `libprotoCore` and `protoCore.h` is no longer accepted**: without the package
 configuration there is no way to tell protoCore 1.x from 2.x, nor 2.0 from 2.1.
 
 protoCore's version compatibility is `SameMajorVersion`, and the requested minor
-version is a floor, so `3.4.0` accepts any `3.x` from `3.4.0` up and refuses
+version is a floor, so `3.6.1` accepts any `3.x` from `3.6.1` up and refuses
 older `3.x`, `2.x` and `4.x`. protoScala additionally asserts that the package's
 `SOVERSION` is **`5`**.
 
@@ -134,7 +135,7 @@ to produce a distributable package. It still checks the ABI: it requires
 `PROTOCORE_ABI_SOVERSION`, so this check is what rejects a sibling tree of an
 older SOVERSION — and it reads the version out of `../protoCore/CMakeLists.txt`'s
 `project()` call and refuses anything older than `PROTOCORE_MIN_VERSION_FULL`
-(3.4.0).
+(3.6.1).
 
 Pass `-DPROTOCORE_REQUIRE_PACKAGE=ON` to turn the fallback into a hard error.
 **Every packaging build sets it.** Switching a build directory between the two
@@ -350,15 +351,15 @@ configure prints whether a generator was enabled or disabled, and why.
 
 Package names are pinned rather than left to each generator's default casing:
 `protoscala` for DEB, `protoScala` for RPM. Both declare a bounded dependency on
-protoCore's own package. The floor is **3.4.0**, the first protoCore with
-`PROTOCORE_ABI_SOVERSION 5` (§Prerequisites). It read 2.1.0 until 2026-09-27, which
+protoCore's own package. The floor is **3.6.1**, the first protoCore with
+`ProtoObject::newClone` (SOVERSION 5 since 3.4.0; §Prerequisites). It read 2.1.0 until 2026-09-27, which
 named a protoCore that cannot build this tree, 2.2.0 until the I/O track, then
 2.6.1, 2.11.0 and 3.0.0:
 
 | Format | Relation |
 |--------|----------|
-| DEB | `Depends: protocore (>= 3.4.0), protocore (<< 4.0.0)` |
-| RPM | `Requires: protoCore >= 3.4.0, protoCore < 4.0.0` |
+| DEB | `Depends: protocore (>= 3.6.1), protocore (<< 4.0.0)` |
+| RPM | `Requires: protoCore >= 3.6.1, protoCore < 4.0.0` |
 
 protoIO is a static library, so it is **not** a package dependency; what it
 brings at run time is OpenSSL (`libssl3`), which `dpkg-shlibdeps` adds from
