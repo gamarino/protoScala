@@ -74,15 +74,23 @@ TEST(Engine, AllocatingLoopsSurviveCollections) {
     // Every iteration allocates strings, a closure and a large integer. A
     // low heap ceiling forces collections; the loop's back-edge safepoints
     // let the collector run while the frame's slots keep the live values.
+    //
+    // The ceiling is below the heap the space already holds (one OS batch,
+    // 262144 cells), so the first collection comes only once the loop has
+    // used up that batch: the loop must allocate several batches' worth.
+    // 20000 iterations were barely one batch, and protoCore's shape
+    // transition table (after 3.6.1), which shares the shapes the
+    // per-iteration objects build, brought them under it. 100000 iterations
+    // collect at least four times with the table and five without it.
     EvalHarness h;
     h.space().setHeapLimits(0, 20000);
     const auto cyclesBefore = h.space().getGCCycleCount();
     EXPECT_EQ(h.eval("{ var i = 0; var s = \"\"; var big = 9007199254740991L; var n = 0\n"
-                     "  while i < 20000 do {\n"
+                     "  while i < 100000 do {\n"
                      "    val t = \"x\" + i; val f = (y: Int) => { s = t; y + 1 }\n"
                      "    n = f(n); big = big + 1; i += 1 }\n"
                      "  s + \" \" + n + \" \" + big }"),
-              "x19999 20000 9007199254760991");
+              "x99999 100000 9007199254840991");
     EXPECT_GT(h.space().getGCCycleCount(), cyclesBefore);
 }
 
